@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { open } from '@tauri-apps/plugin-dialog'
 import { openPath } from '@tauri-apps/plugin-opener'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
@@ -158,6 +158,24 @@ export function WorkspaceScreen() {
 
   useEffect(() => { setCollapsed(!settings.sidebarOpen); setSidebarWidth(clampSidebarWidth(settings.sidebarWidth)) }, [settings.sidebarOpen, settings.sidebarWidth])
 
+  // Run an optional startup command (from the setup wizard) once, in the first pane, after its
+  // session is live. Guarded by a sessionStorage flag so it only fires for a freshly-launched
+  // workspace and never re-runs on restore or workspace switches.
+  const startupRan = useRef(false)
+  useEffect(() => {
+    if (startupRan.current || !workspace) return
+    const key = `forgemind.startup.${workspace.id}`
+    let command: string | null = null
+    try { command = sessionStorage.getItem(key) } catch { command = null }
+    if (!command) return
+    const firstPane = workspace.panes[0]
+    const session = firstPane ? sessions.find((item) => item.paneId === firstPane.id && item.status === 'running') : undefined
+    if (!session) return
+    startupRan.current = true
+    try { sessionStorage.removeItem(key) } catch { /* ignore */ }
+    void native.writeTerminalInput(session.id, Array.from(new TextEncoder().encode(`${command}\r`))).catch(() => undefined)
+  }, [sessions, workspace])
+
   const persistSidebar = useCallback(async (patch: Partial<Pick<typeof settings, 'sidebarOpen' | 'sidebarWidth'>>) => {
     if (sidebarSaving) return
     setSidebarSaving(true)
@@ -283,6 +301,16 @@ export function WorkspaceScreen() {
     setDeferredPaneIds((current) => current.filter((id) => id !== paneId))
     await launchPane(assignment, workspace)
   }
+
+  // Budget-deferred Panes stay in the layout but idle. Resume one the moment it becomes active
+  // (click/focus/keyboard nav) so it comes alive on interaction instead of stranding the user on
+  // the "Deferred by restoration budget" card. restartPane drops the id from deferredPaneIds, so
+  // this fires once per Pane and never loops.
+  useEffect(() => {
+    if (activePaneId && deferredPaneIds.includes(activePaneId)) void restartPane(activePaneId)
+    // restartPane is redefined each render; the membership guard keeps this from re-running.
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
+  }, [activePaneId, deferredPaneIds])
 
   const closePane = async (paneId: string) => {
     if (!workspace || workspace.panes.length <= 1) { setPaneErrors((current) => ({ ...current, [paneId]: 'At least one terminal pane must remain.' })); return }
