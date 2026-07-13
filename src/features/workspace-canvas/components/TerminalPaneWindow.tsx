@@ -1,31 +1,26 @@
-import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react'
+import type { ReactNode } from 'react'
 import { CANVAS_CONSTANTS } from '../canvasConstants'
 import type { PaneView } from '../canvasSelectors'
-import type { PixelRect, ResizeEdge } from '../canvasTypes'
-
-const RESIZE_EDGES: ResizeEdge[] = ['top', 'right', 'bottom', 'left', 'top-left', 'top-right', 'bottom-left', 'bottom-right']
 
 interface TerminalPaneWindowProps {
   view: PaneView
   active: boolean
   dragging: boolean
   dragOffset?: { dx: number; dy: number }
-  /** While the pane is resizing its live rect overrides the placement rect. */
-  overrideRect?: PixelRect
   settling: boolean
   reducedMotion: boolean
-  onResizeStart: (edge: ResizeEdge, event: ReactPointerEvent) => void
   children: ReactNode
 }
 
 /**
  * A single pane placed on the canvas. It is an absolutely-positioned, stably-keyed sibling of
- * every other pane window — geometry, z-order and drag transform change here, but the child
- * terminal (and therefore its xterm instance and PTY) is never unmounted or re-keyed.
+ * every other pane window — geometry and drag transform change here, but the child terminal (and
+ * therefore its xterm instance and PTY) is never unmounted or re-keyed. In the strict-tiling model
+ * panes never overlap, so z-order is flat: the only pane lifted above the rest is the one actively
+ * being dragged (its translucent ghost) or a maximized pane.
  */
-export function TerminalPaneWindow({ view, active, dragging, dragOffset, overrideRect, settling, reducedMotion, onResizeStart, children }: TerminalPaneWindowProps) {
-  const rect = overrideRect ?? view.rect
-  const showResize = view.kind === 'floating' && !view.maximized && !dragging
+export function TerminalPaneWindow({ view, active, dragging, dragOffset, settling, reducedMotion, children }: TerminalPaneWindowProps) {
+  const rect = view.rect
 
   const style: React.CSSProperties = {
     position: 'absolute',
@@ -56,16 +51,6 @@ export function TerminalPaneWindow({ view, active, dragging, dragOffset, overrid
   return (
     <div className={className} style={style} data-pane-window={view.paneId}>
       {children}
-      {showResize &&
-        RESIZE_EDGES.map((edge) => (
-          <div
-            key={edge}
-            className={`pane-resize-handle ${edge}`}
-            onPointerDown={(event) => onResizeStart(edge, event)}
-            role="separator"
-            aria-label={`Resize ${edge}`}
-          />
-        ))}
     </div>
   )
 }

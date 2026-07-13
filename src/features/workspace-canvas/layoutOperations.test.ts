@@ -4,8 +4,11 @@ import {
   applyDrop,
   bringFloatingToFront,
   collapseRedundantSplits,
+  countSubMinPanes,
   dockFloatingPane,
+  dockPaneAtCanvasEdge,
   dockedPaneIds,
+  dropPreservesMinimumSizes,
   findDockPath,
   floatPane,
   insertPaneBesideTarget,
@@ -54,6 +57,16 @@ describe('insertPaneBesideTarget', () => {
     if (result.type === 'split') {
       expect(result.children.map((child) => (child.type === 'pane' ? child.paneId : '?'))).toEqual(['a', 'c', 'b'])
       expect(result.sizes.reduce((sum, size) => sum + size, 0)).toBeCloseTo(100)
+    }
+  })
+
+  it('keeps a same-direction row balanced (equal shares) when splicing in a pane', () => {
+    const tree: DockedLayoutNode = { type: 'split', direction: 'vertical', sizes: [50, 50], children: [pane('a'), pane('b')] }
+    const result = insertPaneBesideTarget(tree, 'a', 'c', 'right')
+    if (result.type === 'split') {
+      // Three equal columns rather than shrinking the drop target to a quarter.
+      expect(result.sizes).toHaveLength(3)
+      for (const size of result.sizes) expect(size).toBeCloseTo(100 / 3, 6)
     }
   })
 
@@ -198,24 +211,16 @@ describe('applyDrop', () => {
     return { paneId, sourcePlacement: placement, pointerId: 1, pointerOffsetX: 0, pointerOffsetY: 0, previewRect: { x: 0, y: 0, width: 360, height: 220 }, startedAt: 0, phase: 'dragging' }
   }
 
-  it('floats a docked pane on a float drop', () => {
-    const layout = baseLayout({ type: 'split', direction: 'vertical', sizes: [50, 50], children: [pane('a'), pane('b')] })
-    const result = applyDrop(layout, session('a', 'docked'), { kind: 'float', rect: { x: 100, y: 100, width: 400, height: 300 } }, bounds, NOW)
-    expect(result.floatingPanes.map((floating) => floating.paneId)).toEqual(['a'])
-    expect(dockedPaneIds(result.dockedRoot)).toEqual(['b'])
-  })
-
-  it('snaps to a canvas edge as a floating half', () => {
+  it('never floats: a canvas-edge snap docks the pane as a root column', () => {
     const layout = baseLayout({ type: 'split', direction: 'vertical', sizes: [50, 50], children: [pane('a'), pane('b')] })
     const result = applyDrop(layout, session('a', 'docked'), { kind: 'canvas-snap', zone: 'left-half', rect: { x: 0, y: 0, width: 500, height: 800 } }, bounds, NOW)
-    const floating = result.floatingPanes.find((f) => f.paneId === 'a')!
-    expect(floating.rect).toEqual({ x: 0, y: 0, width: 0.5, height: 1 })
+    expect(result.floatingPanes).toHaveLength(0)
+    expect(dockedPaneIds(result.dockedRoot)).toEqual(['a', 'b'])
   })
 
   it('docks beside a target pane', () => {
-    let layout = baseLayout({ type: 'split', direction: 'vertical', sizes: [50, 50], children: [pane('a'), pane('b')] })
-    layout = floatPane(layout, 'a', { x: 0.1, y: 0.1, width: 0.4, height: 0.4 }, NOW)
-    const result = applyDrop(layout, session('a', 'floating'), { kind: 'pane-dock', targetPaneId: 'b', zone: 'right', rect: { x: 0, y: 0, width: 10, height: 10 } }, bounds, NOW)
+    const layout = baseLayout({ type: 'split', direction: 'vertical', sizes: [50, 50], children: [pane('a'), pane('b')] })
+    const result = applyDrop(layout, session('a', 'docked'), { kind: 'pane-dock', targetPaneId: 'b', zone: 'bottom', rect: { x: 0, y: 0, width: 10, height: 10 } }, bounds, NOW)
     expect(result.floatingPanes).toHaveLength(0)
     expect(dockedPaneIds(result.dockedRoot).sort()).toEqual(['a', 'b'])
   })
@@ -226,9 +231,66 @@ describe('applyDrop', () => {
     expect(dockedPaneIds(result.dockedRoot)).toEqual(['b', 'a'])
   })
 
-  it('returns the layout unchanged on return-home / no target', () => {
+  it('returns the layout unchanged on invalid / return-home / no target', () => {
     const layout = baseLayout({ type: 'split', direction: 'vertical', sizes: [50, 50], children: [pane('a'), pane('b')] })
+    expect(applyDrop(layout, session('a', 'docked'), { kind: 'invalid', rect: { x: 0, y: 0, width: 10, height: 10 } }, bounds, NOW)).toEqual(layout)
     expect(applyDrop(layout, session('a', 'docked'), { kind: 'return-home' }, bounds, NOW)).toEqual(layout)
     expect(applyDrop(layout, session('a', 'docked'), undefined, bounds, NOW)).toEqual(layout)
+  })
+})
+
+describe('dockPaneAtCanvasEdge', () => {
+  it('wraps the root as a right-hand column, flattening a same-direction root', () => {
+    const layout = baseLayout({ type: 'split', direction: 'vertical', sizes: [50, 50], children: [pane('a'), pane('b')] })
+    const result = dockPaneAtCanvasEdge(layout, 'a', 'right-half')
+    // 'a' pulled out and re-docked to the right edge → order becomes b, a.
+    expect(dockedPaneIds(result.dockedRoot)).toEqual(['b', 'a'])
+    expect(result.floatingPanes).toHaveLength(0)
+  })
+
+  it('stacks the pane as a top row for a top-half snap', () => {
+    const layout = baseLayout({ type: 'split', direction: 'vertical', sizes: [50, 50], children: [pane('a'), pane('b')] })
+    const result = dockPaneAtCanvasEdge(layout, 'a', 'top-half')
+    const root = result.dockedRoot!
+    expect(root.type).toBe('split')
+    if (root.type === 'split') {
+      expect(root.direction).toBe('horizontal')
+      expect(root.children[0]).toEqual(pane('a'))
+      expect(dockedPaneIds(root.children[1])).toEqual(['b'])
+    }
+  })
+})
+
+describe('countSubMinPanes / dropPreservesMinimumSizes', () => {
+  const bounds = { width: 1000, height: 600 }
+  const minW = 280
+  const minH = 180
+
+  it('counts panes rendered below the minimum tile size', () => {
+    // Four equal columns of 1000px → 250px each, below the 280px minimum width.
+    const fourCols: DockedLayoutNode = {
+      type: 'split', direction: 'vertical', sizes: [25, 25, 25, 25],
+      children: [pane('a'), pane('b'), pane('c'), pane('d')],
+    }
+    expect(countSubMinPanes(fourCols, bounds, minW, minH)).toBe(4)
+    expect(countSubMinPanes({ type: 'split', direction: 'vertical', sizes: [50, 50], children: [pane('a'), pane('b')] }, bounds, minW, minH)).toBe(0)
+  })
+
+  it('rejects a drop that newly squeezes panes below the minimum', () => {
+    // Three columns already fit (≈333px each). Adding a fourth would drop them below 280px.
+    const threeCols: DockedLayoutNode = {
+      type: 'split', direction: 'vertical', sizes: [34, 33, 33], children: [pane('a'), pane('b'), pane('c')],
+    }
+    const fourCols: DockedLayoutNode = {
+      type: 'split', direction: 'vertical', sizes: [25, 25, 25, 25], children: [pane('a'), pane('b'), pane('c'), pane('d')],
+    }
+    expect(dropPreservesMinimumSizes(threeCols, fourCols, bounds)).toBe(false)
+  })
+
+  it('allows rearranging within an already-too-small canvas (never locks out)', () => {
+    const tiny = { width: 200, height: 200 }
+    const before: DockedLayoutNode = { type: 'split', direction: 'vertical', sizes: [50, 50], children: [pane('a'), pane('b')] }
+    const after: DockedLayoutNode = { type: 'split', direction: 'vertical', sizes: [50, 50], children: [pane('b'), pane('a')] }
+    expect(dropPreservesMinimumSizes(before, after, tiny)).toBe(true)
   })
 })

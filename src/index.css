@@ -758,7 +758,9 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 .docking-overlay-layer { position: absolute; inset: 0; pointer-events: none; z-index: 2100000; }
 .snap-preview { position: absolute; background: rgba(109, 139, 255, .18); border: 1.5px solid var(--accent); border-radius: 7px; box-shadow: inset 0 0 0 1px rgba(109, 139, 255, .25); animation: snap-preview-in 90ms var(--ease-out, ease-out); }
 .snap-preview.swap { background: rgba(157, 123, 255, .2); border-color: var(--accent-2); }
+.snap-preview.invalid { background: rgba(255, 96, 96, .16); border-color: #ff6060; border-style: dashed; box-shadow: inset 0 0 0 1px rgba(255, 96, 96, .25); }
 .snap-preview-label { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 12px; font-weight: 600; letter-spacing: .04em; color: var(--accent-strong); text-transform: uppercase; }
+.snap-preview.invalid .snap-preview-label { color: #ff8a8a; }
 .pane-source-placeholder { position: absolute; border: 1px dashed var(--border-strong); border-radius: 6px; background: rgba(255, 255, 255, .025); }
 .magnetic-guide { position: absolute; background: var(--accent); box-shadow: 0 0 6px var(--accent); }
 .magnetic-guide.vertical { top: 0; bottom: 0; width: 1px; }

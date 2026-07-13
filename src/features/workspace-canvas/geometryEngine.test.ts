@@ -107,14 +107,10 @@ describe('normalized <-> pixel round trip', () => {
 })
 
 describe('resolveCanvasSnapRect', () => {
-  it('resolves halves', () => {
+  it('resolves the four edge halves (full-length root columns / rows)', () => {
     expect(resolveCanvasSnapRect('left-half', bounds)).toEqual({ x: 0, y: 0, width: 500, height: 800 })
+    expect(resolveCanvasSnapRect('right-half', bounds)).toEqual({ x: 500, y: 0, width: 500, height: 800 })
+    expect(resolveCanvasSnapRect('top-half', bounds)).toEqual({ x: 0, y: 0, width: 1000, height: 400 })
     expect(resolveCanvasSnapRect('bottom-half', bounds)).toEqual({ x: 0, y: 400, width: 1000, height: 400 })
-  })
-  it('resolves all four corners', () => {
-    expect(resolveCanvasSnapRect('top-left', bounds)).toEqual({ x: 0, y: 0, width: 500, height: 400 })
-    expect(resolveCanvasSnapRect('top-right', bounds)).toEqual({ x: 500, y: 0, width: 500, height: 400 })
-    expect(resolveCanvasSnapRect('bottom-left', bounds)).toEqual({ x: 0, y: 400, width: 500, height: 400 })
-    expect(resolveCanvasSnapRect('bottom-right', bounds)).toEqual({ x: 500, y: 400, width: 500, height: 400 })
   })
 })

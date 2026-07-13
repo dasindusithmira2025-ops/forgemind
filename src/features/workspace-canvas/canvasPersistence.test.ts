@@ -46,33 +46,32 @@ describe('migrateWorkspaceToCanvas', () => {
 })
 
 describe('buildCanvasLayout with extras', () => {
-  it('re-attaches floating panes', () => {
+  it('migrates legacy floating panes into the docked tree', () => {
     const extras: CanvasExtras = {
       version: 2,
       floatingPanes: [{ paneId: 'a', rect: { x: 0.1, y: 0.1, width: 0.4, height: 0.4 }, zIndex: 1, createdAt: NOW, updatedAt: NOW }],
       nextFloatingZIndex: 2,
     }
-    // 'a' floats, so the docked tree must only contain 'b'.
+    // 'a' was floating in an older build; on load it must be docked so nothing overlaps.
     const ws = workspace({ type: 'pane', paneId: 'b' }, ['a', 'b'])
     const layout = buildCanvasLayout(ws, extras)
-    expect(layout.floatingPanes.map((floating) => floating.paneId)).toEqual(['a'])
-    expect(dockedPaneIds(layout.dockedRoot)).toEqual(['b'])
+    expect(layout.floatingPanes).toHaveLength(0)
+    expect(dockedPaneIds(layout.dockedRoot).sort()).toEqual(['a', 'b'])
     expect(allPaneIds(layout).sort()).toEqual(['a', 'b'])
   })
 })
 
 describe('normalizeRestoredLayout', () => {
-  it('clamps an off-canvas floating rectangle', () => {
+  it('docks a legacy floating pane into the tree (no floating layer survives)', () => {
     const layout: WorkspaceCanvasLayout = {
       version: 2, dockedRoot: { type: 'pane', paneId: 'b' },
       floatingPanes: [{ paneId: 'a', rect: { x: 5, y: 5, width: 3, height: 3 }, zIndex: 1, createdAt: NOW, updatedAt: NOW }],
       nextFloatingZIndex: 2,
     }
     const result = normalizeRestoredLayout(layout, ['a', 'b'])
-    const floating = result.floatingPanes[0]
-    expect(floating.rect.x).toBeLessThanOrEqual(1)
-    expect(floating.rect.width).toBeLessThanOrEqual(1)
-    expect(floating.rect.x + floating.rect.width).toBeLessThanOrEqual(1.0001)
+    expect(result.floatingPanes).toHaveLength(0)
+    expect(dockedPaneIds(result.dockedRoot).sort()).toEqual(['a', 'b'])
+    expect(allPaneIds(result).sort()).toEqual(['a', 'b'])
   })
 
   it('drops floating panes for unknown ids', () => {
@@ -83,6 +82,7 @@ describe('normalizeRestoredLayout', () => {
     }
     const result = normalizeRestoredLayout(layout, ['a'])
     expect(result.floatingPanes).toHaveLength(0)
+    expect(allPaneIds(result)).toEqual(['a'])
   })
 
   it('re-docks a pane that was stranded by a corrupt file', () => {

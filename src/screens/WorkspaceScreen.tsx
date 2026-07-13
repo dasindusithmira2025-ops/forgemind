@@ -230,7 +230,8 @@ export function WorkspaceScreen() {
   }, [syncWorkspaceLayout])
 
   // After a pane-config change re-persisted through save_workspace, fold the new docked tree back
-  // into the canvas (preserving the floating layer) so canvas_json stays authoritative on reload.
+  // into the canvas so canvas_json stays authoritative on reload. normalizeRestoredLayout tiles
+  // every pane (the canvas has no floating layer), so a new/removed pane lands in the tree.
   const resyncCanvas = useCallback((source: Workspace) => {
     const store = useCanvasStore.getState()
     const current = store.layout
@@ -293,8 +294,7 @@ export function WorkspaceScreen() {
       const canvas = useCanvasStore.getState().layout
       const panes = workspace.panes.filter((pane) => pane.id !== paneId).map((pane, index) => ({ ...pane, positionOrder: index }))
       const active = workspace.activePaneId === paneId ? panes[0]?.id : workspace.activePaneId
-      // Remove the pane from whichever placement it held; a floating pane leaves the docked tree
-      // untouched and is dropped from the floating layer during the canvas resync below.
+      // Remove the pane from the docked tree; the canvas resync below re-tiles the survivors.
       const newDocked = normalizeSplitTree(removePaneFromDockedTree(canvas?.dockedRoot ?? workspace.layout, paneId))
       const layout = newDocked ?? { type: 'pane' as const, paneId: panes[0]!.id }
       if (canvas && canvas.maximizedPaneId === paneId) useCanvasStore.getState().setLayout({ ...canvas, maximizedPaneId: undefined })

@@ -15,8 +15,9 @@ interface DockingOverlayLayerProps {
 export function DockingOverlayLayer({ dropTarget, sourceRect, guides, dragging }: DockingOverlayLayerProps) {
   if (!dragging) return null
 
-  const destination = dropTarget && dropTarget.kind !== 'float' && dropTarget.kind !== 'return-home' ? dropTarget.rect : undefined
+  const destination = dropTarget && dropTarget.kind !== 'return-home' ? dropTarget.rect : undefined
   const isSwap = dropTarget?.kind === 'pane-dock' && dropTarget.zone === 'center'
+  const isInvalid = dropTarget?.kind === 'invalid'
 
   return (
     <div className="docking-overlay-layer" aria-hidden>
@@ -24,8 +25,9 @@ export function DockingOverlayLayer({ dropTarget, sourceRect, guides, dragging }
         <div className="pane-source-placeholder" style={rectStyle(sourceRect)} />
       )}
       {destination && (
-        <div className={`snap-preview ${isSwap ? 'swap' : ''}`} style={rectStyle(destination)}>
+        <div className={`snap-preview ${isSwap ? 'swap' : ''} ${isInvalid ? 'invalid' : ''}`} style={rectStyle(destination)}>
           {isSwap && <span className="snap-preview-label">Swap</span>}
+          {isInvalid && <span className="snap-preview-label">No room</span>}
         </div>
       )}
       {guides.map((guide, index) =>

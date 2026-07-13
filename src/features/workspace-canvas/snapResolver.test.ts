@@ -18,9 +18,11 @@ describe('resolveCanvasSnapZone', () => {
     expect(resolveCanvasSnapZone(500, 795, bounds, false)).toBe('bottom-half')
   })
 
-  it('detects corners', () => {
-    expect(resolveCanvasSnapZone(3, 3, bounds, false)).toBe('top-left')
-    expect(resolveCanvasSnapZone(997, 797, bounds, false)).toBe('bottom-right')
+  it('resolves a corner to the nearer edge (no corner zones in strict tiling)', () => {
+    // Slightly closer to the left edge than the top → left wins.
+    expect(resolveCanvasSnapZone(2, 6, bounds, false)).toBe('left-half')
+    // Slightly closer to the bottom edge than the right → bottom wins.
+    expect(resolveCanvasSnapZone(994, 798, bounds, false)).toBe('bottom-half')
   })
 
   it('returns nothing away from any edge', () => {
@@ -74,15 +76,15 @@ describe('resolveDropTarget', () => {
     if (target.kind === 'pane-dock') expect(target.targetPaneId).toBe('b')
   })
 
-  it('floats over empty space with no panes', () => {
+  it('returns home over empty space (no floating fallback)', () => {
     const preview = { x: 300, y: 300, width: 360, height: 220 }
     const target = resolveDropTarget({ pointerX: 480, pointerY: 400, bounds, previewRect: preview, dockedRects: {}, floating: [], draggedPaneId: 'a' })
-    expect(target).toEqual({ kind: 'float', rect: preview })
+    expect(target).toEqual({ kind: 'return-home' })
   })
 
-  it('never targets the dragged pane itself', () => {
+  it('never targets the dragged pane itself: hovering only its own tile stays home', () => {
     const target = resolveDropTarget({ pointerX: 250, pointerY: 400, bounds, previewRect: dockedRects.a, dockedRects, floating: [], draggedPaneId: 'a' })
-    expect(target.kind).not.toBe('pane-dock')
+    expect(target.kind).toBe('return-home')
   })
 })
 

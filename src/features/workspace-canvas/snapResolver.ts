@@ -16,8 +16,10 @@ import type {
  */
 
 /**
- * Canvas edge / corner detection with hysteresis. When a canvas-snap zone is already active
- * the catch band widens by the release threshold so the zone does not flicker at its boundary.
+ * Canvas edge detection with hysteresis. When a canvas-snap zone is already active the catch band
+ * widens by the release threshold so the zone does not flicker at its boundary. Only the four
+ * edge halves are produced: a canvas snap docks the pane as a full-length root column / row, and
+ * whichever edge the pointer is closest to wins when two edges are both in range (a corner).
  */
 export function resolveCanvasSnapZone(
   px: number,
@@ -26,19 +28,13 @@ export function resolveCanvasSnapZone(
   sticky: boolean,
 ): CanvasSnapZone | undefined {
   const t = CANVAS_CONSTANTS.canvasEdgeSnapThreshold + (sticky ? CANVAS_CONSTANTS.snapReleaseThreshold : 0)
-  const left = px <= t
-  const right = px >= bounds.width - t
-  const top = py <= t
-  const bottom = py >= bounds.height - t
-  if (left && top) return 'top-left'
-  if (right && top) return 'top-right'
-  if (left && bottom) return 'bottom-left'
-  if (right && bottom) return 'bottom-right'
-  if (left) return 'left-half'
-  if (right) return 'right-half'
-  if (top) return 'top-half'
-  if (bottom) return 'bottom-half'
-  return undefined
+  const distances: Array<{ zone: CanvasSnapZone; dist: number }> = []
+  if (px <= t) distances.push({ zone: 'left-half', dist: px })
+  if (px >= bounds.width - t) distances.push({ zone: 'right-half', dist: bounds.width - px })
+  if (py <= t) distances.push({ zone: 'top-half', dist: py })
+  if (py >= bounds.height - t) distances.push({ zone: 'bottom-half', dist: bounds.height - py })
+  if (distances.length === 0) return undefined
+  return distances.reduce((best, entry) => (entry.dist < best.dist ? entry : best)).zone
 }
 
 /** Resolve which of the five dock zones a point falls into within a target pane rectangle. */
@@ -108,9 +104,12 @@ function paneUnderPointer(input: DropResolutionInput): { paneId: string; rect: P
 }
 
 /**
- * The full resolution pipeline. Canvas-edge snapping takes priority near the boundary (so a
- * pane can always be flung to an edge), then pane docking when hovering another pane, else the
- * pane simply floats at its preview rectangle.
+ * The full resolution pipeline for the strict-tiling canvas. Canvas-edge snapping takes priority
+ * near the boundary (so a pane can always be flung to a full-length root column / row), then pane
+ * docking when hovering another pane. There is deliberately no floating fallback: when the pointer
+ * is only over the dragged pane's own tile (e.g. a lone pane, or a jitter inside its own slot)
+ * the pane simply stays where it is. Minimum-size feasibility is checked by the caller, which
+ * downgrades an infeasible target to `invalid`.
  */
 export function resolveDropTarget(input: DropResolutionInput): DockDropTarget {
   const sticky = input.previous?.kind === 'canvas-snap'
@@ -123,7 +122,7 @@ export function resolveDropTarget(input: DropResolutionInput): DockDropTarget {
     const zone = resolveDockZone(input.pointerX, input.pointerY, pane.rect)
     return { kind: 'pane-dock', targetPaneId: pane.paneId, zone, rect: dockZoneRect(pane.rect, zone) }
   }
-  return { kind: 'float', rect: input.previewRect }
+  return { kind: 'return-home' }
 }
 
 export interface MagneticResult {

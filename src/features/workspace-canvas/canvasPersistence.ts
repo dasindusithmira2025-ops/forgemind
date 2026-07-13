@@ -3,14 +3,12 @@ import type { Workspace } from '../../native/types'
 import {
   CanvasError,
   type FloatingPanePlacement,
-  type NormalizedRect,
   type WorkspaceCanvasLayout,
 } from './canvasTypes'
 import {
   allPaneIds,
   dockedPaneIds,
   insertPaneBesideTarget,
-  normalizeFloatingZOrder,
   normalizeSplitTree,
 } from './layoutOperations'
 
@@ -63,75 +61,67 @@ export function toCanvasExtras(layout: WorkspaceCanvasLayout): CanvasExtras {
   }
 }
 
-function clampNormalizedRect(rect: NormalizedRect): NormalizedRect {
-  const finite = (value: number, fallback: number) => (Number.isFinite(value) ? value : fallback)
-  let width = Math.min(Math.max(finite(rect.width, 0.4), 0.1), 1)
-  let height = Math.min(Math.max(finite(rect.height, 0.4), 0.1), 1)
-  const x = Math.min(Math.max(finite(rect.x, 0), 0), Math.max(0, 1 - width))
-  const y = Math.min(Math.max(finite(rect.y, 0), 0), Math.max(0, 1 - Math.min(height, 0.9)))
-  if (x + width > 1) width = 1 - x
-  if (y + height > 1) height = 1 - y
-  return { x, y, width, height }
-}
-
 /**
- * Repair a restored layout deterministically: drop floating panes for unknown ids, clamp every
- * floating rect into the canvas, ensure every known pane is placed exactly once, and compact
- * z-order. Never deletes a pane's configuration; a stranded pane is docked back in.
+ * Repair a restored layout deterministically for the strict-tiling canvas: drop unknown ids,
+ * migrate any legacy floating panes into the docked tree, and ensure every known pane is docked
+ * exactly once. The floating layer is always emptied — panes only ever tile, so a workspace saved
+ * by an older, floating-capable build is folded back into the tree on load (making reload stable).
+ * A pane's configuration is never lost; a stranded or previously-floating pane is docked back in.
  */
 export function normalizeRestoredLayout(layout: WorkspaceCanvasLayout, knownPaneIds: string[]): WorkspaceCanvasLayout {
   const known = new Set(knownPaneIds)
 
-  // Keep only floating panes for known ids, de-duplicated, with clamped rectangles.
-  const seenFloating = new Set<string>()
-  const floatingPanes: FloatingPanePlacement[] = []
+  // Docked tree: prune unknown ids, then normalize/collapse.
+  let dockedRoot = normalizeSplitTree(pruneUnknownDocked(layout.dockedRoot, known))
+
+  // Everything not already docked gets docked: legacy floating panes first (in their stored order
+  // so the result is stable), then any known pane stranded by a corrupt file. No pane stays afloat.
+  const placed = new Set<string>(dockedPaneIds(dockedRoot))
+  const toDock: string[] = []
   for (const pane of layout.floatingPanes) {
-    if (!known.has(pane.paneId) || seenFloating.has(pane.paneId)) continue
-    seenFloating.add(pane.paneId)
-    floatingPanes.push({ ...pane, rect: clampNormalizedRect(pane.rect) })
+    if (known.has(pane.paneId) && !placed.has(pane.paneId)) {
+      placed.add(pane.paneId)
+      toDock.push(pane.paneId)
+    }
   }
-
-  // Docked tree: prune unknown ids via normalize (they simply won't be re-added below).
-  let dockedRoot = normalizeSplitTree(pruneUnknownDocked(layout.dockedRoot, known, seenFloating))
-
-  // Place any known pane that ended up nowhere (stranded by a corrupt file) back into the dock.
-  const placed = new Set<string>([...dockedPaneIds(dockedRoot), ...seenFloating])
   for (const id of knownPaneIds) {
-    if (placed.has(id)) continue
+    if (!placed.has(id)) {
+      placed.add(id)
+      toDock.push(id)
+    }
+  }
+  for (const id of toDock) {
     if (!dockedRoot) {
       dockedRoot = { type: 'pane', paneId: id }
     } else {
       const anchor = dockedPaneIds(dockedRoot)[0]
       dockedRoot = insertPaneBesideTarget(dockedRoot, anchor, id, 'right')
     }
-    placed.add(id)
   }
 
   const activePaneId = layout.activePaneId && placed.has(layout.activePaneId) ? layout.activePaneId : knownPaneIds[0]
   const maximizedPaneId = layout.maximizedPaneId && placed.has(layout.maximizedPaneId) ? layout.maximizedPaneId : undefined
-  const topZ = floatingPanes.reduce((max, pane) => Math.max(max, pane.zIndex), 0)
 
-  return normalizeFloatingZOrder({
+  return {
     version: WORKSPACE_CANVAS_LAYOUT_VERSION,
     dockedRoot,
-    floatingPanes,
+    floatingPanes: [],
     activePaneId,
     maximizedPaneId,
-    nextFloatingZIndex: Math.max(layout.nextFloatingZIndex, topZ + 1, 1),
-  })
+    nextFloatingZIndex: 1,
+  }
 }
 
-/** Drop docked panes whose ids are unknown or already claimed by the floating layer. */
+/** Drop docked panes whose ids are unknown. */
 function pruneUnknownDocked(
   node: WorkspaceCanvasLayout['dockedRoot'],
   known: Set<string>,
-  floating: Set<string>,
 ): WorkspaceCanvasLayout['dockedRoot'] {
   if (!node) return null
-  if (node.type === 'pane') return known.has(node.paneId) && !floating.has(node.paneId) ? node : null
+  if (node.type === 'pane') return known.has(node.paneId) ? node : null
   const kept: Array<{ child: NonNullable<WorkspaceCanvasLayout['dockedRoot']>; size: number }> = []
   node.children.forEach((child, index) => {
-    const result = pruneUnknownDocked(child, known, floating)
+    const result = pruneUnknownDocked(child, known)
     if (result) kept.push({ child: result, size: node.sizes[index] ?? 100 / node.children.length })
   })
   if (kept.length === 0) return null

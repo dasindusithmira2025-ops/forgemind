@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef } from 'react'
 import { CANVAS_CONSTANTS } from './canvasConstants'
-import { clamp, defaultFloatRectAt } from './geometryEngine'
+import { clamp } from './geometryEngine'
 import { computeCanvasView, floatingPixelRects } from './canvasSelectors'
-import { applyDrop } from './layoutOperations'
-import { computeMagneticAdjustment, resolveDropTarget } from './snapResolver'
+import { allPaneIds, applyDrop, dropPreservesMinimumSizes } from './layoutOperations'
+import { resolveDropTarget } from './snapResolver'
 import { useCanvasStore } from './canvasStore'
 import type { CanvasBounds, DockDropTarget, PaneDragSession, PanePlacementKind, PixelRect, WorkspaceCanvasLayout } from './canvasTypes'
 
@@ -64,7 +64,7 @@ export function usePaneDragController(options: DragControllerOptions) {
     if (!layout) return
 
     const point = clientToCanvas(pointerRef.current.x, pointerRef.current.y)
-    let previewRect: PixelRect = {
+    const previewRect: PixelRect = {
       x: point.x - pending.offsetX,
       y: point.y - pending.offsetY,
       width: pending.baseRect.width,
@@ -87,18 +87,16 @@ export function usePaneDragController(options: DragControllerOptions) {
       previous: store.drag?.activeDropTarget,
     })
 
-    let guides = store.guides
-    if (target.kind === 'float') {
-      const others = floating.filter((entry) => entry.paneId !== pending.paneId).map((entry) => entry.rect)
-      const magnetic = computeMagneticAdjustment(previewRect, bounds, others)
-      previewRect = { x: previewRect.x + magnetic.dx, y: previewRect.y + magnetic.dy, width: previewRect.width, height: previewRect.height }
-      target = { kind: 'float', rect: previewRect }
-      guides = magnetic.guides
-    } else {
-      guides = []
+    // Reject a placement that would squeeze a pane below the minimum tile size. The candidate is
+    // built purely (never touching the live layout) so the guard costs nothing but a tree clone.
+    if ((target.kind === 'canvas-snap' || target.kind === 'pane-dock') && store.drag) {
+      const candidate = applyDrop(layout, store.drag, target, bounds, new Date().toISOString())
+      if (!dropPreservesMinimumSizes(layout.dockedRoot, candidate.dockedRoot, bounds)) {
+        target = { kind: 'invalid', rect: target.rect }
+      }
     }
 
-    store.updateDrag({ previewRect, activeDropTarget: target, guides })
+    store.updateDrag({ previewRect, activeDropTarget: target, guides: [] })
   }, [clientToCanvas])
 
   const scheduleFrame = useCallback(() => {
@@ -125,20 +123,18 @@ export function usePaneDragController(options: DragControllerOptions) {
       }
       const layout = store.layout
       const bounds = optionsRef.current.getBounds()
-      const isReturnHome =
-        drag.activeDropTarget?.kind === 'float' &&
-        pending.placement === 'docked' &&
-        pointerInside(clientToCanvas(pointerRef.current.x, pointerRef.current.y), pending.baseRect)
-      const resolved: DockDropTarget | undefined = isReturnHome ? { kind: 'return-home' } : drag.activeDropTarget
-      const next = applyDrop(layout, drag, resolved, bounds, new Date().toISOString())
+      // `invalid` / `return-home` / undefined all resolve to no change inside applyDrop.
+      const next = applyDrop(layout, drag, drag.activeDropTarget, bounds, new Date().toISOString())
       store.clearDrag()
       if (next !== layout) {
-        store.markSettling([drag.paneId])
+        // Animate the whole layout, not just the moved pane: neighbours reflow into their new
+        // tiles so the rearrangement reads as one smooth settle rather than a jump.
+        store.markSettling(allPaneIds(next))
         optionsRef.current.persist(next)
         window.setTimeout(() => useCanvasStore.getState().clearSettling(), CANVAS_CONSTANTS.settleAnimationMs + 40)
       }
     },
-    [canvasRef, clientToCanvas],
+    [canvasRef],
   )
 
   const beginHeaderDrag = useCallback(
@@ -215,13 +211,4 @@ export function usePaneDragController(options: DragControllerOptions) {
   useEffect(() => () => finish(false), [finish])
 
   return { beginHeaderDrag }
-}
-
-/** Convenience for programmatic float (keyboard / context menu). */
-export function floatRectForKeyboard(bounds: CanvasBounds): PixelRect {
-  return defaultFloatRectAt(bounds.width / 2, bounds.height / 3, bounds)
-}
-
-function pointerInside(point: { x: number; y: number }, rect: PixelRect): boolean {
-  return point.x >= rect.x && point.x <= rect.x + rect.width && point.y >= rect.y && point.y <= rect.y + rect.height
 }

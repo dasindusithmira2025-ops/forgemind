@@ -59,22 +59,22 @@ export type PanePlacementKind = 'docked' | 'floating'
 /** How the pointer is resolved against a docked pane's five-zone overlay. */
 export type DockZone = 'left' | 'right' | 'top' | 'bottom' | 'center'
 
-/** How the pointer is resolved against the canvas boundary. */
-export type CanvasSnapZone =
-  | 'left-half'
-  | 'right-half'
-  | 'top-half'
-  | 'bottom-half'
-  | 'top-left'
-  | 'top-right'
-  | 'bottom-left'
-  | 'bottom-right'
+/**
+ * How the pointer is resolved against the canvas boundary. In the strict-tiling model a canvas
+ * snap docks the pane as a full-length column/row at the root, so only the four edge halves are
+ * meaningful (corners would require an ambiguous nested split).
+ */
+export type CanvasSnapZone = 'left-half' | 'right-half' | 'top-half' | 'bottom-half'
 
-/** A resolved drop target while dragging — exactly one variant is active at a time. */
+/**
+ * A resolved drop target while dragging — exactly one variant is active at a time. There is no
+ * free-floating variant: every valid drop tiles the pane into the docked tree so panes can never
+ * overlap. `invalid` marks a placement that would violate minimum sizes (the drop is rejected).
+ */
 export type DockDropTarget =
-  | { kind: 'float'; rect: PixelRect }
   | { kind: 'canvas-snap'; zone: CanvasSnapZone; rect: PixelRect }
   | { kind: 'pane-dock'; targetPaneId: string; zone: DockZone; rect: PixelRect }
+  | { kind: 'invalid'; rect: PixelRect }
   | { kind: 'return-home' }
 
 export type DragPhase = 'pending' | 'dragging' | 'settling' | 'cancelled'

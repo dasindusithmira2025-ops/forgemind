@@ -169,7 +169,7 @@ export function clampFloatingRect(rect: PixelRect, bounds: CanvasBounds): PixelR
   return { x, y, width, height }
 }
 
-/** Compute the destination rectangle for a canvas edge / corner snap. */
+/** Compute the destination rectangle for a canvas edge snap (a full-length root column / row). */
 export function resolveCanvasSnapRect(zone: CanvasSnapZone, bounds: CanvasBounds): PixelRect {
   const halfW = bounds.width / 2
   const halfH = bounds.height / 2
@@ -182,14 +182,6 @@ export function resolveCanvasSnapRect(zone: CanvasSnapZone, bounds: CanvasBounds
       return { x: 0, y: 0, width: bounds.width, height: halfH }
     case 'bottom-half':
       return { x: 0, y: halfH, width: bounds.width, height: halfH }
-    case 'top-left':
-      return { x: 0, y: 0, width: halfW, height: halfH }
-    case 'top-right':
-      return { x: halfW, y: 0, width: halfW, height: halfH }
-    case 'bottom-left':
-      return { x: 0, y: halfH, width: halfW, height: halfH }
-    case 'bottom-right':
-      return { x: halfW, y: halfH, width: halfW, height: halfH }
   }
 }
 

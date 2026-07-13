@@ -1,7 +1,9 @@
-import { normalizeSplitSizes, pixelToNormalized } from './geometryEngine'
+import { CANVAS_CONSTANTS } from './canvasConstants'
+import { calculateDockedRects, normalizeSplitSizes } from './geometryEngine'
 import {
   CanvasError,
   type CanvasBounds,
+  type CanvasSnapZone,
   type DockDropTarget,
   type DockZone,
   type DockedLayoutNode,
@@ -90,16 +92,19 @@ export function insertPaneBesideTarget(
       (child) => child.type === 'pane' && child.paneId === targetPaneId,
     )
     if (directIndex >= 0 && node.direction === direction) {
+      // Splice the new pane in beside its sibling and give it the row's average share, pushing the
+      // existing panes down proportionally (renormalised to 100). Starting from an equal row this
+      // yields an equal row of N+1, so a reorder within a same-direction split stays balanced
+      // instead of squeezing the drop target to half — which would otherwise trip the min-size
+      // rejection in a crowded row that a balanced layout still fits.
       const sizes = normalizeSplitSizes(node.sizes, node.children.length)
-      const share = sizes[directIndex]
-      const half = share / 2
+      const averageShare = 100 / node.children.length
       const children = [...node.children]
       const nextSizes = [...sizes]
       const insertAt = before ? directIndex : directIndex + 1
       children.splice(insertAt, 0, newPane)
-      nextSizes[directIndex] = half
-      nextSizes.splice(insertAt, 0, half)
-      return { type: 'split', direction: node.direction, sizes: nextSizes, children }
+      nextSizes.splice(insertAt, 0, averageShare)
+      return { type: 'split', direction: node.direction, sizes: normalizeSplitSizes(nextSizes, children.length), children }
     }
 
     for (let index = 0; index < node.children.length; index += 1) {
@@ -344,6 +349,73 @@ export function movePaneBeside(
   return { ...layout, dockedRoot: normalizeSplitTree(dockedRoot), floatingPanes, activePaneId: paneId }
 }
 
+const CANVAS_EDGE_TO_SPLIT: Record<CanvasSnapZone, { direction: SplitDirection; before: boolean }> = {
+  'left-half': { direction: 'vertical', before: true },
+  'right-half': { direction: 'vertical', before: false },
+  'top-half': { direction: 'horizontal', before: true },
+  'bottom-half': { direction: 'horizontal', before: false },
+}
+
+/**
+ * Dock a pane as a full-length column / row against a canvas edge, i.e. as a new child of the
+ * docked root. Left/right create a vertical (side-by-side) root split, top/bottom a horizontal
+ * (stacked) one; `normalizeSplitTree` then flattens it into an existing same-direction root so a
+ * fourth column lands beside the others rather than nesting.
+ */
+export function dockPaneAtCanvasEdge(
+  layout: WorkspaceCanvasLayout,
+  paneId: string,
+  zone: CanvasSnapZone,
+): WorkspaceCanvasLayout {
+  const { direction, before } = CANVAS_EDGE_TO_SPLIT[zone]
+  const withoutPane = normalizeSplitTree(removePaneFromDockedTree(layout.dockedRoot, paneId))
+  const newPane: DockedLayoutNode = { type: 'pane', paneId }
+  const dockedRoot: DockedLayoutNode = withoutPane
+    ? { type: 'split', direction, sizes: [50, 50], children: before ? [newPane, withoutPane] : [withoutPane, newPane] }
+    : newPane
+  return {
+    ...layout,
+    dockedRoot: normalizeSplitTree(dockedRoot),
+    floatingPanes: layout.floatingPanes.filter((pane) => pane.paneId !== paneId),
+    activePaneId: paneId,
+  }
+}
+
+/**
+ * Count docked panes that would render below the minimum tile size at the given bounds. Used to
+ * reject a drop that would squeeze a pane (its own or a neighbour) past the minimum — the guard
+ * that keeps strict tiling from ever producing an unusably thin terminal.
+ */
+export function countSubMinPanes(
+  root: DockedLayoutNode | null,
+  bounds: CanvasBounds,
+  minWidth: number = CANVAS_CONSTANTS.minDockedWidth,
+  minHeight: number = CANVAS_CONSTANTS.minDockedHeight,
+): number {
+  if (!root || bounds.width <= 0 || bounds.height <= 0) return 0
+  const epsilon = 0.5
+  const { rects } = calculateDockedRects(root, bounds)
+  let count = 0
+  for (const rect of Object.values(rects)) {
+    if (rect.width < minWidth - epsilon || rect.height < minHeight - epsilon) count += 1
+  }
+  return count
+}
+
+/**
+ * Whether applying `candidate` keeps every tile at least as large as `source` did. A drop is
+ * valid only when it does not increase the number of sub-minimum panes, so a genuinely crowded
+ * canvas rejects a new split while a canvas already too small to satisfy the minimum is never
+ * locked out of rearranging.
+ */
+export function dropPreservesMinimumSizes(
+  source: DockedLayoutNode | null,
+  candidate: DockedLayoutNode | null,
+  bounds: CanvasBounds,
+): boolean {
+  return countSubMinPanes(candidate, bounds) <= countSubMinPanes(source, bounds)
+}
+
 /** Move a pane to a floating rectangle (canvas-normalised). Docked sources leave the tree. */
 export function movePaneToFloat(
   layout: WorkspaceCanvasLayout,
@@ -364,20 +436,21 @@ export function movePaneToFloat(
 /**
  * Atomically resolve a completed drag into the next layout. Pure — the controller converts
  * pointer geometry into a {@link DockDropTarget} and this function applies it. Never mutates.
+ * Every valid drop tiles the pane into the docked tree (no floating layer), so panes can never
+ * overlap. `invalid` / `return-home` / no target all leave the layout untouched.
  */
 export function applyDrop(
   layout: WorkspaceCanvasLayout,
   session: PaneDragSession,
   target: DockDropTarget | undefined,
-  bounds: CanvasBounds,
+  _bounds: CanvasBounds,
   now: string,
 ): WorkspaceCanvasLayout {
   const paneId = session.paneId
-  if (!target || target.kind === 'return-home') return layout
+  if (!target || target.kind === 'return-home' || target.kind === 'invalid') return layout
   switch (target.kind) {
-    case 'float':
     case 'canvas-snap':
-      return movePaneToFloat(layout, paneId, pixelToNormalized(target.rect, bounds), now)
+      return dockPaneAtCanvasEdge(layout, paneId, target.zone)
     case 'pane-dock':
       return target.zone === 'center'
         ? swapPanePlacements(layout, paneId, target.targetPaneId, now)

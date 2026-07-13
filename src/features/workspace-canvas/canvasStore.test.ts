@@ -23,7 +23,7 @@ describe('useCanvasStore', () => {
     const store = useCanvasStore.getState()
     store.init('ws', layout(), 3)
     store.startDrag(drag())
-    store.updateDrag({ previewRect: { x: 10, y: 10, width: 100, height: 100 }, activeDropTarget: { kind: 'float', rect: { x: 10, y: 10, width: 100, height: 100 } } })
+    store.updateDrag({ previewRect: { x: 10, y: 10, width: 100, height: 100 }, activeDropTarget: { kind: 'invalid', rect: { x: 10, y: 10, width: 100, height: 100 } } })
 
     const state = useCanvasStore.getState()
     // The layout is untouched while dragging — only transient state changed.
