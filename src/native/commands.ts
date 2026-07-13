@@ -2,7 +2,8 @@ import { invoke } from '@tauri-apps/api/core'
 import type {
   AgentDetectionResult,
   AppSettings,
-  CreateTerminalRequest,
+  DiagnosticsSnapshot,
+  HealthReport,
   LayoutNode,
   Project,
   ProjectOverview,
@@ -10,6 +11,11 @@ import type {
   ShellProfile,
   SplitDirection,
   TerminalSession,
+  RestorationResult,
+  RepairSummary,
+  StartTerminalRequest,
+  AgentProfile,
+  AgentSession,
   Workspace,
   WorkspaceSaveRequest,
 } from './types'
@@ -38,8 +44,14 @@ export const native = {
   suggestWorkspaceName: (projectId: string) => invoke<string>('suggest_workspace_name', { projectId }),
   listRecentWorkspaces: () => invoke<RecentWorkspace[]>('list_recent_workspaces'),
   removeRecentWorkspace: (workspaceId: string) => invoke<void>('remove_recent_workspace', { workspaceId }),
+  deleteWorkspaceConfiguration: (workspaceId: string) => invoke<void>('delete_workspace_configuration', { workspaceId }),
   renameWorkspace: (workspaceId: string, name: string) => invoke<Workspace>('rename_workspace', { workspaceId, name }),
-  createTerminalSession: (request: CreateTerminalRequest) => invoke<TerminalSession>('create_terminal_session', { request }),
+  reorderWorkspaces: (projectId: string, orderedIds: string[]) => invoke<void>('reorder_workspaces', { projectId, orderedIds }),
+  duplicateWorkspace: (workspaceId: string) => invoke<Workspace>('duplicate_workspace', { workspaceId }),
+  setLastActiveWorkspace: (workspaceId: string) => invoke<void>('set_last_active_workspace', { workspaceId }),
+  createTerminalSession: (request: StartTerminalRequest) => invoke<TerminalSession>('create_terminal_session', { request }),
+  restoreWorkspaceSessions: (workspaceId: string, budget?: number, behavior?: AppSettings['restoreBehavior']) => invoke<RestorationResult>('restore_workspace_sessions', { workspaceId, budget, behavior }),
+  resetRestorationCircuit: (workspaceId: string, paneId: string) => invoke<void>('reset_restoration_circuit', { workspaceId, paneId }),
   writeTerminalInput: (sessionId: string, data: number[]) => invoke<void>('write_terminal_input', { sessionId, data }),
   resizeTerminalSession: (sessionId: string, cols: number, rows: number) => invoke<void>('resize_terminal_session', { sessionId, cols, rows }),
   terminateTerminalSession: (sessionId: string) => invoke<void>('terminate_terminal_session', { sessionId }),
@@ -48,12 +60,17 @@ export const native = {
   terminalSessionStatus: (sessionId: string) => invoke<TerminalSession>('terminal_session_status', { sessionId }),
   getSettings: () => invoke<AppSettings>('get_settings'),
   saveSettings: (settings: AppSettings) => invoke<AppSettings>('save_settings', { settings }),
+  listAgentProfiles: () => invoke<AgentProfile[]>('list_agent_profiles'),
+  listAgentSessions: (workspaceId: string) => invoke<AgentSession[]>('list_agent_sessions', { workspaceId }),
+  getDiagnostics: () => invoke<DiagnosticsSnapshot>('get_diagnostics'),
+  runHealthCheck: () => invoke<HealthReport>('run_health_check'),
+  repairDatabaseMetadata: () => invoke<RepairSummary>('repair_database_metadata'),
 }
 
-export function asNativeError(error: unknown): { code: string; message: string; affectedEntity?: string } {
+export function asNativeError(error: unknown): { code: string; message: string; affectedEntity?: string; recommendedAction?: string } {
   if (typeof error === 'object' && error !== null && 'message' in error) {
-    const value = error as { code?: string; message: string; affectedEntity?: string }
-    return { code: value.code ?? 'unknown_error', message: value.message, affectedEntity: value.affectedEntity }
+    const value = error as { code?: string; message: string; affectedEntity?: string; recommendedAction?: string }
+    return { code: value.code ?? 'unknown_error', message: value.message, affectedEntity: value.affectedEntity, recommendedAction: value.recommendedAction }
   }
   return { code: 'unknown_error', message: typeof error === 'string' ? error : 'An unexpected native error occurred.' }
 }

@@ -75,6 +75,138 @@ CREATE INDEX IF NOT EXISTS idx_workspaces_project ON workspaces(project_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_pane ON terminal_sessions(pane_id, started_at DESC);
 "#;
 
+const MIGRATION_4: &str = r#"
+BEGIN IMMEDIATE;
+
+ALTER TABLE workspaces ADD COLUMN normalized_name TEXT NOT NULL DEFAULT '';
+ALTER TABLE workspaces ADD COLUMN restore_behavior TEXT NOT NULL DEFAULT 'inherit';
+UPDATE workspaces SET normalized_name=lower(trim(name)) WHERE normalized_name='';
+
+ALTER TABLE workspace_panes ADD COLUMN profile_id TEXT;
+ALTER TABLE workspace_panes ADD COLUMN working_directory_mode TEXT NOT NULL DEFAULT 'project_relative';
+
+CREATE TABLE IF NOT EXISTS metadata_quarantine(
+  id TEXT PRIMARY KEY,
+  entity_type TEXT NOT NULL,
+  entity_id TEXT,
+  reason_code TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  quarantined_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS migration_repair_history(
+  id TEXT PRIMARY KEY,
+  repair_code TEXT NOT NULL,
+  affected_entity_type TEXT NOT NULL,
+  affected_entity_id TEXT,
+  detail_json TEXT NOT NULL,
+  applied_at TEXT NOT NULL,
+  UNIQUE(repair_code, affected_entity_type, affected_entity_id)
+);
+
+INSERT INTO metadata_quarantine(id,entity_type,entity_id,reason_code,payload_json,quarantined_at)
+SELECT lower(hex(randomblob(16))),'terminal_session',s.id,'orphaned_terminal_session',
+       '{"workspaceId":"' || replace(s.workspace_id,'"','') || '","paneId":"' || replace(s.pane_id,'"','') || '"}',
+       datetime('now')
+FROM terminal_sessions s
+LEFT JOIN workspaces w ON w.id=s.workspace_id
+LEFT JOIN workspace_panes p ON p.id=s.pane_id AND p.workspace_id=s.workspace_id
+WHERE w.id IS NULL OR p.id IS NULL;
+
+ALTER TABLE terminal_sessions RENAME TO terminal_sessions_legacy;
+CREATE TABLE terminal_sessions(
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  pane_id TEXT NOT NULL REFERENCES workspace_panes(id) ON DELETE CASCADE,
+  provider_type TEXT NOT NULL,
+  executable_path TEXT NOT NULL,
+  args_json TEXT NOT NULL DEFAULT '[]',
+  title TEXT NOT NULL,
+  working_directory TEXT NOT NULL,
+  status TEXT NOT NULL,
+  process_id INTEGER,
+  started_at TEXT NOT NULL,
+  ended_at TEXT,
+  exit_code INTEGER,
+  output_tail BLOB NOT NULL DEFAULT X'',
+  log_path TEXT,
+  restoration_state TEXT NOT NULL DEFAULT 'not_requested',
+  dropped_output_bytes INTEGER NOT NULL DEFAULT 0
+);
+INSERT INTO terminal_sessions(
+  id,project_id,workspace_id,pane_id,provider_type,executable_path,args_json,title,
+  working_directory,status,process_id,started_at,ended_at,exit_code,output_tail,log_path,
+  restoration_state,dropped_output_bytes
+)
+SELECT s.id,w.project_id,s.workspace_id,s.pane_id,s.provider_type,p.executable_path,p.args_json,
+       s.title,s.working_directory,
+       CASE WHEN s.status IN ('running','terminating') THEN 'disconnected' ELSE s.status END,
+       NULL,s.started_at,s.ended_at,s.exit_code,coalesce(s.output_tail,X''),s.log_path,
+       CASE WHEN s.status IN ('running','terminating') THEN 'stale' ELSE 'not_requested' END,0
+FROM terminal_sessions_legacy s
+JOIN workspaces w ON w.id=s.workspace_id
+JOIN workspace_panes p ON p.id=s.pane_id AND p.workspace_id=s.workspace_id;
+DROP TABLE terminal_sessions_legacy;
+
+CREATE TABLE agent_profiles(
+  id TEXT PRIMARY KEY,
+  provider_type TEXT NOT NULL,
+  name TEXT NOT NULL,
+  executable_path TEXT NOT NULL,
+  version TEXT,
+  available INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(provider_type, executable_path)
+);
+CREATE TABLE agent_sessions(
+  terminal_session_id TEXT PRIMARY KEY REFERENCES terminal_sessions(id) ON DELETE CASCADE,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  pane_id TEXT NOT NULL REFERENCES workspace_panes(id) ON DELETE CASCADE,
+  profile_id TEXT REFERENCES agent_profiles(id) ON DELETE SET NULL,
+  provider_type TEXT NOT NULL,
+  provider_session_id TEXT,
+  transcript_path TEXT,
+  status TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+DROP INDEX IF EXISTS idx_workspaces_unique_name;
+CREATE UNIQUE INDEX idx_workspaces_unique_normalized_name ON workspaces(project_id, normalized_name);
+CREATE INDEX IF NOT EXISTS idx_projects_recent ON projects(is_recent,last_opened_at DESC);
+CREATE INDEX IF NOT EXISTS idx_workspaces_project ON workspaces(project_id,last_opened_at DESC);
+CREATE INDEX IF NOT EXISTS idx_panes_workspace ON workspace_panes(workspace_id,position_order);
+CREATE INDEX IF NOT EXISTS idx_sessions_workspace ON terminal_sessions(workspace_id,started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_sessions_pane ON terminal_sessions(pane_id,started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_sessions_status ON terminal_sessions(status,started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_profiles_provider ON agent_profiles(provider_type,available);
+
+INSERT OR IGNORE INTO schema_migrations(version,applied_at) VALUES(4,datetime('now'));
+PRAGMA user_version=4;
+COMMIT;
+"#;
+
+// Sidebar reordering. Adds a durable, user-controlled Workspace order within a Project.
+// Existing Workspaces are backfilled deterministically (most-recently-opened first, id as a
+// stable tiebreak) so the first sidebar render matches the previous recency ordering.
+// Idempotent: the column add is guarded and the backfill only touches the default zeros.
+const MIGRATION_5: &str = r#"
+BEGIN IMMEDIATE;
+ALTER TABLE workspaces ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0;
+UPDATE workspaces SET sort_order = (
+  SELECT COUNT(*) FROM workspaces peer
+  WHERE peer.project_id = workspaces.project_id
+    AND (peer.last_opened_at > workspaces.last_opened_at
+         OR (peer.last_opened_at = workspaces.last_opened_at AND peer.id < workspaces.id))
+);
+CREATE INDEX IF NOT EXISTS idx_workspaces_sort ON workspaces(project_id,sort_order);
+INSERT OR IGNORE INTO schema_migrations(version,applied_at) VALUES(5,datetime('now'));
+PRAGMA user_version=5;
+COMMIT;
+"#;
+
 pub fn apply(connection: &Connection) -> AppResult<()> {
     let current: i64 = connection
         .query_row("PRAGMA user_version", [], |row| row.get(0))
@@ -87,6 +219,27 @@ pub fn apply(connection: &Connection) -> AppResult<()> {
     }
     if current < 3 {
         migrate_v3(connection)?;
+    }
+    if current < 4 {
+        run_migration_batch(connection, MIGRATION_4, 4)?;
+    }
+    if current < 5 {
+        run_migration_batch(connection, MIGRATION_5, 5)?;
+    }
+    Ok(())
+}
+
+fn run_migration_batch(connection: &Connection, sql: &str, version: i64) -> AppResult<()> {
+    if let Err(error) = connection.execute_batch(sql) {
+        let _ = connection.execute_batch("ROLLBACK;");
+        return Err(AppError::new(
+            "migration_error",
+            format!("ForgeMind could not apply database migration {version}."),
+            false,
+        )
+        .detail(error.to_string())
+        .action("Restore the diagnostic backup and open Diagnostics.")
+        .layer("migration"));
     }
     Ok(())
 }
@@ -316,7 +469,7 @@ mod tests {
     }
 
     #[test]
-    fn upgrade_from_v1_drops_the_session_workspace_foreign_key() {
+    fn upgrade_from_v1_restores_strict_session_ownership_in_v4() {
         let connection = Connection::open_in_memory().unwrap();
         connection
             .pragma_update(None, "foreign_keys", true)
@@ -329,13 +482,15 @@ mod tests {
             "FOREIGN KEY constraint failed"
         );
 
-        // Applying migrations upgrades the existing database to v2 and lifts the constraint.
+        // The final migration deliberately restores strict ownership after Pane metadata
+        // is durable, so renderer-created ephemeral sessions remain impossible.
         apply(&connection).unwrap();
         let version: i64 = connection
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 3);
-        assert_eq!(insert_session(&connection).unwrap(), 1);
+        assert_eq!(version, 5);
+        let error = insert_session(&connection).unwrap_err().to_string();
+        assert!(error.contains("project_id") || error.contains("FOREIGN KEY"));
     }
 
     #[test]
@@ -412,5 +567,83 @@ mod tests {
         assert_eq!(names, vec!["Frontend", "Main", "main 2"]);
         // Re-applying is idempotent.
         apply(&connection).unwrap();
+        let version: i64 = connection
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, 5);
+        let normalized: Vec<String> = {
+            let mut statement = connection
+                .prepare("SELECT normalized_name FROM workspaces ORDER BY normalized_name")
+                .unwrap();
+            statement
+                .query_map([], |row| row.get(0))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        };
+        assert_eq!(normalized, vec!["frontend", "main", "main 2"]);
+    }
+
+    #[test]
+    fn v5_backfills_deterministic_sidebar_sort_order() {
+        let connection = Connection::open_in_memory().unwrap();
+        // Reach v4 first (v5's ALTER depends on the v4 workspace columns existing).
+        run_migration(&connection, MIGRATION_1, 1).unwrap();
+        run_migration(&connection, MIGRATION_2, 2).unwrap();
+        migrate_v3(&connection).unwrap();
+        run_migration_batch(&connection, MIGRATION_4, 4).unwrap();
+        connection
+            .execute(
+                "INSERT INTO projects(id,name,root_path,canonical_root_path,major_languages_json,is_git_repository,has_package_json,has_lockfile,created_at,updated_at,last_opened_at) VALUES('p','Demo','/p','/p','[]',0,0,0,'t','t','t')",
+                [],
+            )
+            .unwrap();
+        // Three workspaces opened at distinct times; newest should sort first (0).
+        for (id, name, opened) in [
+            ("w-old", "Old", "2021-01-01T00:00:00Z"),
+            ("w-new", "New", "2021-03-01T00:00:00Z"),
+            ("w-mid", "Mid", "2021-02-01T00:00:00Z"),
+        ] {
+            connection.execute(
+                "INSERT INTO workspaces(id,project_id,name,normalized_name,layout_json,created_at,updated_at,last_opened_at) VALUES(?1,'p',?2,lower(?2),'{\"type\":\"pane\",\"paneId\":\"a\"}','t','t',?3)",
+                params![id, name, opened],
+            ).unwrap();
+        }
+
+        run_migration_batch(&connection, MIGRATION_5, 5).unwrap();
+
+        let ordered: Vec<(String, i64)> = {
+            let mut statement = connection
+                .prepare("SELECT id,sort_order FROM workspaces ORDER BY sort_order")
+                .unwrap();
+            statement
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        };
+        assert_eq!(
+            ordered,
+            vec![
+                ("w-new".to_owned(), 0),
+                ("w-mid".to_owned(), 1),
+                ("w-old".to_owned(), 2),
+            ],
+            "most-recently-opened workspace backfills to sort_order 0"
+        );
+
+        // Idempotent: a second apply must not disturb the assigned order.
+        apply(&connection).unwrap();
+        let unchanged: Vec<i64> = {
+            let mut statement = connection
+                .prepare("SELECT sort_order FROM workspaces ORDER BY id")
+                .unwrap();
+            statement
+                .query_map([], |row| row.get(0))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        };
+        assert_eq!(unchanged, vec![1, 0, 2]);
     }
 }

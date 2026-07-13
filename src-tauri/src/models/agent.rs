@@ -61,3 +61,32 @@ pub struct ShellProfile {
     pub available: bool,
     pub source: String,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentProfile {
+    pub id: String,
+    pub provider: AgentProvider,
+    pub name: String,
+    pub executable_path: String,
+    pub version: Option<String>,
+    pub available: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentSession {
+    pub terminal_session_id: String,
+    pub project_id: String,
+    pub workspace_id: String,
+    pub pane_id: String,
+    pub profile_id: Option<String>,
+    pub provider: AgentProvider,
+    pub provider_session_id: Option<String>,
+    pub transcript_path: Option<String>,
+    pub status: String,
+    pub created_at: String,
+    pub updated_at: String,
+}

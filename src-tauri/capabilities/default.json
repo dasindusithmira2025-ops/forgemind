@@ -2,18 +2,16 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "enables the default permissions",
-  "windows": [
-    "main",
-    "workspace-*"
-  ],
+  "windows": ["main"],
   "permissions": [
     "core:default",
-    "core:webview:allow-create-webview-window",
     "core:window:allow-close",
     "core:window:allow-set-focus",
     "core:window:allow-show",
     "core:window:allow-unminimize",
     "dialog:allow-open",
-    "opener:allow-reveal-item-in-dir"
+    "dialog:allow-confirm",
+    "opener:allow-reveal-item-in-dir",
+    "opener:allow-open-path"
   ]
 }

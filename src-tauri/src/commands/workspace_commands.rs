@@ -21,6 +21,8 @@ pub fn get_layout_preset(count: usize, variant: String) -> AppResult<LayoutNode>
             | (8, _)
             | (10, _)
             | (12, _)
+            | (14, _)
+            | (16, _)
     ) {
         return Err(AppError::new(
             "invalid_layout",
@@ -37,7 +39,7 @@ mod tests {
 
     #[test]
     fn every_layout_offered_by_the_setup_screen_is_accepted() {
-        for count in [1, 2, 4, 6, 8, 10, 12] {
+        for count in [1, 2, 3, 4, 6, 8, 10, 12, 14, 16] {
             let layout = get_layout_preset(count, String::new()).unwrap();
             assert_eq!(layout.pane_count(), count);
         }
@@ -129,10 +131,52 @@ pub fn remove_recent_workspace(workspace_id: String, state: State<'_, AppState>)
 }
 
 #[tauri::command]
+pub fn delete_workspace_configuration(
+    workspace_id: String,
+    state: State<'_, AppState>,
+) -> AppResult<()> {
+    state
+        .terminals
+        .terminate_workspace_sessions(&workspace_id)?;
+    state.database.delete_workspace_configuration(&workspace_id)
+}
+
+#[tauri::command]
 pub fn rename_workspace(
     workspace_id: String,
     name: String,
     state: State<'_, AppState>,
 ) -> AppResult<Workspace> {
     state.database.rename_workspace(&workspace_id, &name)
+}
+
+/// Persist a user-chosen sidebar order for one Project's Workspaces. `ordered_ids` must
+/// contain exactly that Project's visible Workspaces.
+#[tauri::command]
+pub fn reorder_workspaces(
+    project_id: String,
+    ordered_ids: Vec<String>,
+    state: State<'_, AppState>,
+) -> AppResult<()> {
+    state.database.reorder_workspaces(&project_id, &ordered_ids)
+}
+
+/// Copy a Workspace's saved layout and Pane configuration under a new id and unique name.
+/// No live Terminal Sessions are copied — the duplicate starts closed.
+#[tauri::command]
+pub fn duplicate_workspace(
+    workspace_id: String,
+    state: State<'_, AppState>,
+) -> AppResult<Workspace> {
+    state.database.duplicate_workspace(&workspace_id)
+}
+
+/// Record a Workspace as its Project's most recently active, so a later Project switch can
+/// restore it. Does not launch or stop any Terminal Sessions.
+#[tauri::command]
+pub fn set_last_active_workspace(
+    workspace_id: String,
+    state: State<'_, AppState>,
+) -> AppResult<()> {
+    state.database.set_last_active_workspace(&workspace_id)
 }

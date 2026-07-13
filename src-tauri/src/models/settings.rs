@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "camelCase", default)]
 pub struct AppSettings {
     pub sidebar_open: bool,
+    #[serde(default = "default_sidebar_width")]
+    pub sidebar_width: u16,
     pub ui_scale: f64,
     pub terminal_font_size: u16,
     pub terminal_font_family: String,
@@ -19,12 +21,20 @@ pub struct AppSettings {
     pub confirm_close_pane: bool,
     pub reopen_last_workspace: bool,
     pub restore_behavior: String,
+    pub output_log_retention: String,
+    pub restoration_launch_budget: u16,
+    pub default_layout: String,
+    pub default_pane_count: u16,
+    pub inactive_workspace_processes: String,
+    pub inactive_workspace_rendering: String,
+    pub settings_version: u16,
 }
 
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
             sidebar_open: true,
+            sidebar_width: default_sidebar_width(),
             ui_scale: 1.0,
             terminal_font_size: 13,
             terminal_font_family: "Cascadia Mono, Consolas, monospace".into(),
@@ -40,6 +50,19 @@ impl Default for AppSettings {
             confirm_close_pane: true,
             reopen_last_workspace: false,
             restore_behavior: "ask".into(),
+            output_log_retention: "tail_only".into(),
+            restoration_launch_budget: 4,
+            default_layout: "auto".into(),
+            default_pane_count: 4,
+            inactive_workspace_processes: "keep_running".into(),
+            inactive_workspace_rendering: "hibernate".into(),
+            settings_version: 2,
         }
     }
+}
+
+/// The sidebar's expanded default. Kept in sync with the min/max clamp enforced in
+/// `save_settings` and the `SidebarResizeHandle` bounds on the renderer side.
+fn default_sidebar_width() -> u16 {
+    300
 }

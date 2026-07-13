@@ -72,29 +72,42 @@ impl AgentDetector {
                 )
             }
         };
-        let executable = match custom_path {
-            Some(path) => {
-                let path = PathBuf::from(path);
-                if !path.is_file() {
-                    return unavailable(
+        let executable =
+            match custom_path {
+                Some(path) => {
+                    let path = PathBuf::from(path);
+                    if !path.is_file() {
+                        return unavailable(
+                            provider,
+                            "path_invalid",
+                            "The custom executable path is not a file.",
+                        );
+                    }
+                    if is_blocked_windows_alias(&path) {
+                        return unavailable(
                         provider,
-                        "path_invalid",
-                        "The custom executable path is not a file.",
+                        "windows_alias_blocked",
+                        "The selected WindowsApps execution alias is not a launchable executable.",
                     );
+                    }
+                    path
                 }
-                path
-            }
-            None => match which::which(executable_name) {
-                Ok(path) => path,
-                Err(_) => {
-                    return unavailable(
+                None => match which::which(executable_name) {
+                    Ok(path) if !is_blocked_windows_alias(&path) => path,
+                    Ok(_) => return unavailable(
                         provider,
-                        "executable_not_found",
-                        "The executable was not found on PATH.",
-                    )
-                }
-            },
-        };
+                        "windows_alias_blocked",
+                        "Only a WindowsApps execution alias was found; locate the real executable.",
+                    ),
+                    Err(_) => {
+                        return unavailable(
+                            provider,
+                            "executable_not_found",
+                            "The executable was not found on PATH.",
+                        )
+                    }
+                },
+            };
         let result = run_version(provider.clone(), &executable, DETECTION_TIMEOUT);
         if custom_path.is_none() {
             self.cache
@@ -107,7 +120,9 @@ impl AgentDetector {
     pub fn detect_shells(&self) -> Vec<ShellProfile> {
         let mut profiles = Vec::new();
         if let Ok(path) = which::which("pwsh") {
-            profiles.push(profile("PowerShell", path, vec!["-NoLogo".into()]));
+            if !is_blocked_windows_alias(&path) {
+                profiles.push(profile("PowerShell", path, vec!["-NoLogo".into()]));
+            }
         }
         #[cfg(windows)]
         {
@@ -170,6 +185,15 @@ impl AgentDetector {
             )
             .entity(path.display().to_string()));
         }
+        if is_blocked_windows_alias(path) {
+            return Err(AppError::new(
+                "windows_alias_blocked",
+                "The selected WindowsApps execution alias cannot be used as a terminal executable.",
+                true,
+            )
+            .action("Locate the real installed executable instead.")
+            .layer("provider"));
+        }
         let canonical = std::fs::canonicalize(path).map_err(|error| {
             AppError::new(
                 "executable_not_launchable",
@@ -179,6 +203,23 @@ impl AgentDetector {
             .detail(error.to_string())
         })?;
         Ok(canonical.to_string_lossy().to_string())
+    }
+}
+
+fn is_blocked_windows_alias(path: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        let normalized = path.to_string_lossy().replace('/', "\\").to_lowercase();
+        normalized.contains("\\microsoft\\windowsapps\\")
+            || path
+                .metadata()
+                .map(|metadata| metadata.len() == 0)
+                .unwrap_or(true)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = path;
+        false
     }
 }
 

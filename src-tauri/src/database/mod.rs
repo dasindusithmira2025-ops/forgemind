@@ -1,19 +1,23 @@
 pub mod migrations;
+mod repair;
 
 use crate::errors::{AppError, AppResult};
 use crate::models::{
-    AgentProvider, AppSettings, LayoutNode, PaneAssignment, Project, ProjectOverview,
-    RecentWorkspace, ShellProfile, Workspace, WorkspaceSaveRequest,
+    AgentDetectionResult, AgentProfile, AgentProvider, AgentSession, AppSettings,
+    CreateTerminalRequest, LayoutNode, PaneAssignment, Project, ProjectOverview, RecentWorkspace,
+    ShellProfile, StartTerminalRequest, Workspace, WorkspaceSaveRequest,
 };
 use chrono::Utc;
 use parking_lot::Mutex;
 use rusqlite::{params, Connection, OptionalExtension, Row};
 use std::collections::HashSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
 pub struct DatabaseService {
     connection: Mutex<Connection>,
+    path: Option<PathBuf>,
+    migration_backup: Option<PathBuf>,
 }
 
 impl DatabaseService {
@@ -32,9 +36,31 @@ impl DatabaseService {
         connection
             .pragma_update(None, "foreign_keys", true)
             .map_err(AppError::database)?;
-        connection
-            .pragma_update(None, "journal_mode", "WAL")
+        let schema_version: i64 = connection
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
             .map_err(AppError::database)?;
+        let migration_backup = if schema_version > 0 && schema_version < 5 {
+            let backup = path.with_extension(format!(
+                "pre-migration-{}.sqlite3",
+                Utc::now().format("%Y%m%d%H%M%S")
+            ));
+            let escaped = backup.to_string_lossy().replace('\'', "''");
+            connection
+                .execute_batch(&format!("VACUUM INTO '{escaped}'"))
+                .map_err(|error| {
+                    AppError::new(
+                        "migration_backup_failed",
+                        "ForgeMind could not create the required migration backup.",
+                        false,
+                    )
+                    .detail(error.to_string())
+                    .action("Check free disk space and application-data permissions.")
+                    .layer("migration")
+                })?;
+            Some(backup)
+        } else {
+            None
+        };
         // WAL + NORMAL is durable across app crashes (only risks the last commit on OS
         // crash / power loss) and avoids an fsync per write. The busy timeout lets the
         // reader/exit-watcher threads wait for a writer instead of failing with
@@ -46,8 +72,22 @@ impl DatabaseService {
             .busy_timeout(std::time::Duration::from_secs(5))
             .map_err(AppError::database)?;
         migrations::apply(&connection)?;
+        let journal_mode: String = connection
+            .query_row("PRAGMA journal_mode=WAL", [], |row| row.get(0))
+            .map_err(AppError::database)?;
+        if !journal_mode.eq_ignore_ascii_case("wal") {
+            return Err(AppError::new(
+                "database_journal_error",
+                "ForgeMind could not enable its validated SQLite journal mode.",
+                false,
+            )
+            .detail(format!("SQLite selected {journal_mode}."))
+            .layer("persistence"));
+        }
         Ok(Self {
             connection: Mutex::new(connection),
+            path: Some(path.to_path_buf()),
+            migration_backup,
         })
     }
 
@@ -60,6 +100,57 @@ impl DatabaseService {
         migrations::apply(&connection)?;
         Ok(Self {
             connection: Mutex::new(connection),
+            path: None,
+            migration_backup: None,
+        })
+    }
+
+    pub fn path(&self) -> Option<&Path> {
+        self.path.as_deref()
+    }
+
+    pub fn migration_backup(&self) -> Option<&Path> {
+        self.migration_backup.as_deref()
+    }
+
+    pub fn health_report(&self) -> AppResult<crate::models::HealthReport> {
+        let connection = self.connection.lock();
+        let schema_version = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+        let foreign_key_violations = {
+            let mut statement = connection.prepare("PRAGMA foreign_key_check")?;
+            let count = statement.query_map([], |_| Ok(()))?.count() as u64;
+            count
+        };
+        let stale_live_sessions = connection.query_row(
+            "SELECT count(*) FROM terminal_sessions WHERE status IN ('running','terminating') AND process_id IS NOT NULL",
+            [],
+            |row| row.get::<_, i64>(0),
+        )? as u64;
+        let quarantined_records =
+            connection.query_row("SELECT count(*) FROM metadata_quarantine", [], |row| {
+                row.get::<_, i64>(0)
+            })? as u64;
+        let mut messages = Vec::new();
+        if foreign_key_violations > 0 {
+            messages.push(format!(
+                "{foreign_key_violations} foreign-key violations require repair."
+            ));
+        }
+        if stale_live_sessions > 0 {
+            messages.push(format!(
+                "{stale_live_sessions} stale live-session records require normalization."
+            ));
+        }
+        if messages.is_empty() {
+            messages.push("Database metadata and relationships are healthy.".into());
+        }
+        Ok(crate::models::HealthReport {
+            healthy: schema_version == 5 && foreign_key_violations == 0 && stale_live_sessions == 0,
+            schema_version,
+            foreign_key_violations,
+            stale_live_sessions,
+            quarantined_records,
+            messages,
         })
     }
 
@@ -307,15 +398,24 @@ impl DatabaseService {
             .entity(&id));
         }
         let transaction = connection.transaction()?;
+        let normalized_name = name.to_lowercase();
+        // A brand-new Workspace lands at the end of its Project's sidebar order. The
+        // ON CONFLICT branch deliberately omits sort_order so reconfiguring an existing
+        // Workspace never moves it in the sidebar.
+        let next_order: i64 = transaction.query_row(
+            "SELECT COALESCE(MAX(sort_order)+1,0) FROM workspaces WHERE project_id=?1",
+            [&request.project_id],
+            |row| row.get(0),
+        )?;
         transaction.execute(
-            "INSERT INTO workspaces(id,project_id,name,layout_json,active_pane_id,created_at,updated_at,last_opened_at,removed_from_recent) VALUES(?1,?2,?3,?4,?5,?6,?6,?6,0) ON CONFLICT(id) DO UPDATE SET name=excluded.name,layout_json=excluded.layout_json,active_pane_id=excluded.active_pane_id,updated_at=excluded.updated_at,last_opened_at=excluded.last_opened_at,removed_from_recent=0",
-            params![id, request.project_id, name, layout_json, request.active_pane_id, now],
+            "INSERT INTO workspaces(id,project_id,name,normalized_name,layout_json,active_pane_id,restore_behavior,sort_order,created_at,updated_at,last_opened_at,removed_from_recent) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?9,?9,0) ON CONFLICT(id) DO UPDATE SET name=excluded.name,normalized_name=excluded.normalized_name,layout_json=excluded.layout_json,active_pane_id=excluded.active_pane_id,restore_behavior=excluded.restore_behavior,updated_at=excluded.updated_at,last_opened_at=excluded.last_opened_at,removed_from_recent=0",
+            params![id, request.project_id, name, normalized_name, layout_json, request.active_pane_id, request.restore_behavior, next_order, now],
         )?;
         transaction.execute("DELETE FROM workspace_panes WHERE workspace_id=?1", [&id])?;
         for pane in &request.panes {
             transaction.execute(
-                "INSERT INTO workspace_panes(id,workspace_id,title,provider_type,executable_path,args_json,shell_profile_id,working_directory,position_order,created_at,updated_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?10)",
-                params![pane.id, id, pane.title, pane.provider.as_str(), pane.executable_path, serde_json::to_string(&pane.args).unwrap_or_else(|_| "[]".into()), pane.shell_profile_id, pane.working_directory, pane.position_order, now],
+                "INSERT INTO workspace_panes(id,workspace_id,title,provider_type,executable_path,args_json,shell_profile_id,profile_id,working_directory,working_directory_mode,position_order,created_at,updated_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?12)",
+                params![pane.id, id, pane.title, pane.provider.as_str(), pane.executable_path, serde_json::to_string(&pane.args).unwrap_or_else(|_| "[]".into()), pane.shell_profile_id, pane.profile_id, pane.working_directory, pane.working_directory_mode, pane.position_order, now],
             )?;
         }
         transaction.execute(
@@ -331,7 +431,7 @@ impl DatabaseService {
         let connection = self.connection.lock();
         let mut workspace = connection
             .query_row(
-                "SELECT id,project_id,name,layout_json,active_pane_id,created_at,updated_at,last_opened_at FROM workspaces WHERE id=?1",
+                "SELECT id,project_id,name,normalized_name,layout_json,active_pane_id,restore_behavior,created_at,updated_at,last_opened_at FROM workspaces WHERE id=?1",
                 [id],
                 row_to_workspace,
             )
@@ -341,33 +441,93 @@ impl DatabaseService {
         Ok(workspace)
     }
 
+    /// Resolve a renderer request through durable Project, Workspace, and Pane ownership.
+    /// The renderer cannot substitute an executable, working directory, provider, or args.
+    pub fn resolve_terminal_request(
+        &self,
+        request: &StartTerminalRequest,
+    ) -> AppResult<CreateTerminalRequest> {
+        let connection = self.connection.lock();
+        let resolved = connection
+            .query_row(
+                "SELECT w.project_id,wp.provider_type,wp.title,wp.executable_path,wp.args_json,wp.working_directory FROM workspace_panes wp JOIN workspaces w ON w.id=wp.workspace_id JOIN projects p ON p.id=w.project_id WHERE w.id=?1 AND wp.id=?2",
+                params![request.workspace_id, request.pane_id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, String>(5)?,
+                    ))
+                },
+            )
+            .optional()?
+            .ok_or_else(|| {
+                AppError::new(
+                    "pane_not_found",
+                    "This Pane Configuration no longer belongs to the selected Workspace.",
+                    true,
+                )
+                .entity(&request.pane_id)
+                .action("Reconfigure the Workspace or restore its saved Pane Configuration.")
+                .layer("persistence")
+            })?;
+        let provider = AgentProvider::from_db(&resolved.1).ok_or_else(|| {
+            AppError::new(
+                "provider_unavailable",
+                "The assigned provider is not recognized.",
+                true,
+            )
+            .entity(&request.pane_id)
+            .action("Replace the provider in Workspace Setup.")
+            .layer("provider")
+        })?;
+        Ok(CreateTerminalRequest {
+            project_id: resolved.0,
+            workspace_id: request.workspace_id.clone(),
+            pane_id: request.pane_id.clone(),
+            provider,
+            title: resolved.2,
+            executable_path: resolved.3,
+            args: serde_json::from_str(&resolved.4).unwrap_or_default(),
+            working_directory: resolved.5,
+            cols: request.cols,
+            rows: request.rows,
+            restoration_attempt: request.restoration_attempt,
+        })
+    }
+
     pub fn list_recent_workspaces(&self) -> AppResult<Vec<RecentWorkspace>> {
         let connection = self.connection.lock();
-        let mut statement = connection.prepare("SELECT w.id,w.project_id,w.name,w.layout_json,w.active_pane_id,w.created_at,w.updated_at,w.last_opened_at,p.name,p.root_path FROM workspaces w JOIN projects p ON p.id=w.project_id WHERE w.removed_from_recent=0 ORDER BY w.last_opened_at DESC LIMIT 100")?;
+        let mut statement = connection.prepare("SELECT w.id,w.project_id,w.name,w.normalized_name,w.layout_json,w.active_pane_id,w.restore_behavior,w.created_at,w.updated_at,w.last_opened_at,p.name,p.root_path FROM workspaces w JOIN projects p ON p.id=w.project_id WHERE w.removed_from_recent=0 ORDER BY w.last_opened_at DESC LIMIT 100")?;
         let rows = statement.query_map([], |row| {
             let workspace = Workspace {
                 id: row.get(0)?,
                 project_id: row.get(1)?,
                 name: row.get(2)?,
-                layout: serde_json::from_str::<LayoutNode>(&row.get::<_, String>(3)?).map_err(
+                normalized_name: row.get(3)?,
+                layout: serde_json::from_str::<LayoutNode>(&row.get::<_, String>(4)?).map_err(
                     |error| {
                         rusqlite::Error::FromSqlConversionFailure(
-                            3,
+                            4,
                             rusqlite::types::Type::Text,
                             Box::new(error),
                         )
                     },
                 )?,
-                active_pane_id: row.get(4)?,
-                created_at: row.get(5)?,
-                updated_at: row.get(6)?,
-                last_opened_at: row.get(7)?,
+                active_pane_id: row.get(5)?,
+                restore_behavior: row.get(6)?,
+                created_at: row.get(7)?,
+                updated_at: row.get(8)?,
+                last_opened_at: row.get(9)?,
                 panes: Vec::new(),
             };
             Ok((
                 workspace,
-                row.get::<_, String>(8)?,
-                row.get::<_, String>(9)?,
+                row.get::<_, String>(10)?,
+                row.get::<_, String>(11)?,
             ))
         })?;
         let mut recent = Vec::new();
@@ -399,6 +559,21 @@ impl DatabaseService {
         Ok(())
     }
 
+    pub fn delete_workspace_configuration(&self, id: &str) -> AppResult<()> {
+        let affected = self
+            .connection
+            .lock()
+            .execute("DELETE FROM workspaces WHERE id=?1", [id])?;
+        if affected == 0 {
+            return Err(AppError::new(
+                "workspace_not_found",
+                "The Workspace configuration no longer exists.",
+                true,
+            ));
+        }
+        Ok(())
+    }
+
     pub fn rename_workspace(&self, id: &str, name: &str) -> AppResult<Workspace> {
         let trimmed = name.trim();
         if trimmed.is_empty() {
@@ -410,7 +585,7 @@ impl DatabaseService {
         }
         let now = Utc::now().to_rfc3339();
         let affected = self.connection.lock().execute(
-            "UPDATE workspaces SET name=?2,updated_at=?3 WHERE id=?1",
+            "UPDATE workspaces SET name=?2,normalized_name=lower(?2),updated_at=?3 WHERE id=?1",
             params![id, trimmed, now],
         )?;
         if affected == 0 {
@@ -421,6 +596,109 @@ impl DatabaseService {
             ));
         }
         self.get_workspace(id)
+    }
+
+    /// Persist a user-chosen Workspace order for one Project. `ordered_ids` must be exactly
+    /// the Project's visible Workspaces; the whole reassignment runs in one transaction so a
+    /// failed reorder rolls back cleanly and the sidebar can restore its previous order.
+    pub fn reorder_workspaces(&self, project_id: &str, ordered_ids: &[String]) -> AppResult<()> {
+        let mut connection = self.connection.lock();
+        let existing: HashSet<String> = {
+            let mut statement = connection.prepare(
+                "SELECT id FROM workspaces WHERE project_id=?1 AND removed_from_recent=0",
+            )?;
+            let collected = statement
+                .query_map([project_id], |row| row.get::<_, String>(0))?
+                .collect::<Result<_, _>>()?;
+            collected
+        };
+        let requested: HashSet<String> = ordered_ids.iter().cloned().collect();
+        if requested != existing {
+            return Err(AppError::new(
+                "invalid_workspace_order",
+                "The requested order does not match this project's workspaces.",
+                true,
+            )
+            .entity(project_id));
+        }
+        let now = Utc::now().to_rfc3339();
+        let transaction = connection.transaction()?;
+        for (index, workspace_id) in ordered_ids.iter().enumerate() {
+            transaction.execute(
+                "UPDATE workspaces SET sort_order=?2,updated_at=?3 WHERE id=?1 AND project_id=?4",
+                params![workspace_id, index as i64, now, project_id],
+            )?;
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
+    /// Copy a Workspace's layout and Pane configuration under a new id and unique name. Live
+    /// processes are never copied — a duplicate starts closed. The copy lands at the end of
+    /// the sidebar order.
+    pub fn duplicate_workspace(&self, id: &str) -> AppResult<Workspace> {
+        let source = self.get_workspace(id)?;
+        let base = format!("{} copy", source.name.trim());
+        let name = {
+            let connection = self.connection.lock();
+            let mut statement =
+                connection.prepare("SELECT lower(name) FROM workspaces WHERE project_id=?1")?;
+            let taken: HashSet<String> = statement
+                .query_map([&source.project_id], |row| row.get::<_, String>(0))?
+                .collect::<Result<_, _>>()?;
+            let mut candidate = base.clone();
+            let mut suffix = 2;
+            while taken.contains(&candidate.to_lowercase()) {
+                candidate = format!("{base} {suffix}");
+                suffix += 1;
+            }
+            candidate
+        };
+        // Remap every pane id so the copy is fully independent, rewriting the layout tree and
+        // the active-pane pointer to match.
+        let mut remap = std::collections::HashMap::new();
+        let mut panes = Vec::with_capacity(source.panes.len());
+        for pane in &source.panes {
+            let new_id = Uuid::new_v4().to_string();
+            remap.insert(pane.id.clone(), new_id.clone());
+            let mut copy = pane.clone();
+            copy.id = new_id;
+            copy.workspace_id = None;
+            panes.push(copy);
+        }
+        let layout = source.layout.with_remapped_panes(&remap);
+        let active_pane_id = source
+            .active_pane_id
+            .as_ref()
+            .and_then(|old| remap.get(old).cloned());
+        self.save_workspace(&WorkspaceSaveRequest {
+            id: None,
+            project_id: source.project_id,
+            name,
+            layout,
+            active_pane_id,
+            restore_behavior: source.restore_behavior,
+            panes,
+        })
+    }
+
+    /// Record that a Workspace is the Project's most recently used, so the sidebar can restore
+    /// it on the next Project switch. Bumps last_opened_at without disturbing sidebar order.
+    pub fn set_last_active_workspace(&self, id: &str) -> AppResult<()> {
+        let now = Utc::now().to_rfc3339();
+        let affected = self.connection.lock().execute(
+            "UPDATE workspaces SET last_opened_at=?2 WHERE id=?1",
+            params![id, now],
+        )?;
+        if affected == 0 {
+            return Err(AppError::new(
+                "workspace_not_found",
+                "The workspace no longer exists.",
+                true,
+            )
+            .entity(id));
+        }
+        Ok(())
     }
 
     pub fn get_settings(&self) -> AppResult<AppSettings> {
@@ -444,6 +722,7 @@ impl DatabaseService {
 
     pub fn save_settings(&self, settings: &AppSettings) -> AppResult<AppSettings> {
         if !(0.8..=1.5).contains(&settings.ui_scale)
+            || !(260..=360).contains(&settings.sidebar_width)
             || !(9..=30).contains(&settings.terminal_font_size)
             || !(0.9..=2.0).contains(&settings.terminal_line_height)
             || !(1_000..=1_000_000).contains(&settings.scrollback_size)
@@ -455,6 +734,17 @@ impl DatabaseService {
                 settings.restore_behavior.as_str(),
                 "ask" | "restart_agents" | "fresh_shells"
             )
+            || !matches!(
+                settings.output_log_retention.as_str(),
+                "tail_only" | "rotating_log"
+            )
+            || !(1..=8).contains(&settings.restoration_launch_budget)
+            || !(1..=16).contains(&settings.default_pane_count)
+            || !matches!(
+                settings.inactive_workspace_processes.as_str(),
+                "keep_running" | "ask" | "stop"
+            )
+            || settings.inactive_workspace_rendering != "hibernate"
         {
             return Err(AppError::new(
                 "invalid_settings",
@@ -513,11 +803,99 @@ impl DatabaseService {
         Ok(profiles)
     }
 
+    pub fn sync_agent_profiles(
+        &self,
+        detections: &[AgentDetectionResult],
+    ) -> AppResult<Vec<AgentProfile>> {
+        let mut connection = self.connection.lock();
+        let transaction = connection.transaction()?;
+        let now = Utc::now().to_rfc3339();
+        for detection in detections {
+            let Some(path) = detection.executable_path.as_deref() else {
+                continue;
+            };
+            transaction.execute(
+                "INSERT INTO agent_profiles(id,provider_type,name,executable_path,version,available,created_at,updated_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?7) ON CONFLICT(provider_type,executable_path) DO UPDATE SET version=excluded.version,available=excluded.available,updated_at=excluded.updated_at",
+                params![Uuid::new_v4().to_string(),detection.provider.as_str(),provider_display_name(&detection.provider),path,detection.version,detection.available,now],
+            )?;
+        }
+        transaction.commit()?;
+        drop(connection);
+        self.list_agent_profiles()
+    }
+
+    pub fn list_agent_profiles(&self) -> AppResult<Vec<AgentProfile>> {
+        let connection = self.connection.lock();
+        let mut statement = connection.prepare("SELECT id,provider_type,name,executable_path,version,available,created_at,updated_at FROM agent_profiles ORDER BY provider_type,name")?;
+        let profiles = statement
+            .query_map([], |row| {
+                let provider: String = row.get(1)?;
+                Ok(AgentProfile {
+                    id: row.get(0)?,
+                    provider: AgentProvider::from_db(&provider)
+                        .ok_or_else(|| rusqlite::Error::InvalidQuery)?,
+                    name: row.get(2)?,
+                    executable_path: row.get(3)?,
+                    version: row.get(4)?,
+                    available: row.get(5)?,
+                    created_at: row.get(6)?,
+                    updated_at: row.get(7)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(profiles)
+    }
+
+    pub fn list_agent_sessions(&self, workspace_id: &str) -> AppResult<Vec<AgentSession>> {
+        let connection = self.connection.lock();
+        let mut statement = connection.prepare("SELECT terminal_session_id,project_id,workspace_id,pane_id,profile_id,provider_type,provider_session_id,transcript_path,status,created_at,updated_at FROM agent_sessions WHERE workspace_id=?1 ORDER BY created_at DESC")?;
+        let sessions = statement
+            .query_map([workspace_id], |row| {
+                let provider: String = row.get(5)?;
+                Ok(AgentSession {
+                    terminal_session_id: row.get(0)?,
+                    project_id: row.get(1)?,
+                    workspace_id: row.get(2)?,
+                    pane_id: row.get(3)?,
+                    profile_id: row.get(4)?,
+                    provider: AgentProvider::from_db(&provider)
+                        .ok_or_else(|| rusqlite::Error::InvalidQuery)?,
+                    provider_session_id: row.get(6)?,
+                    transcript_path: row.get(7)?,
+                    status: row.get(8)?,
+                    created_at: row.get(9)?,
+                    updated_at: row.get(10)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(sessions)
+    }
+
     pub fn record_session(&self, session: &crate::models::TerminalSession) -> AppResult<()> {
-        self.connection.lock().execute(
-            "INSERT INTO terminal_sessions(id,workspace_id,pane_id,provider_type,title,working_directory,status,process_id,started_at,ended_at,exit_code,output_tail) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12) ON CONFLICT(id) DO UPDATE SET status=excluded.status,process_id=excluded.process_id,ended_at=excluded.ended_at,exit_code=excluded.exit_code,output_tail=excluded.output_tail",
-            params![session.id, session.workspace_id, session.pane_id, session.provider.as_str(), session.title, session.working_directory, session.status, session.process_id, session.started_at, session.ended_at, session.exit_code, session.output_tail],
+        let mut connection = self.connection.lock();
+        let transaction = connection.transaction()?;
+        transaction.execute(
+            "INSERT INTO terminal_sessions(id,project_id,workspace_id,pane_id,provider_type,executable_path,args_json,title,working_directory,status,process_id,started_at,ended_at,exit_code,output_tail,log_path,restoration_state,dropped_output_bytes) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18) ON CONFLICT(id) DO UPDATE SET status=excluded.status,process_id=excluded.process_id,ended_at=excluded.ended_at,exit_code=excluded.exit_code,output_tail=excluded.output_tail,restoration_state=excluded.restoration_state,dropped_output_bytes=excluded.dropped_output_bytes",
+            params![session.id, session.project_id, session.workspace_id, session.pane_id, session.provider.as_str(), session.executable, serde_json::to_string(&session.arguments).unwrap_or_else(|_| "[]".into()), session.title, session.working_directory, session.status, session.process_id, session.started_at, session.ended_at, session.exit_code, session.output_tail, session.log_path, session.restoration_state, session.dropped_output_bytes.min(i64::MAX as u64) as i64],
         )?;
+        if matches!(
+            session.provider,
+            AgentProvider::Claude | AgentProvider::Codex | AgentProvider::Opencode
+        ) {
+            let profile_id: Option<String> = transaction
+                .query_row(
+                    "SELECT profile_id FROM workspace_panes WHERE id=?1 AND workspace_id=?2",
+                    params![session.pane_id, session.workspace_id],
+                    |row| row.get(0),
+                )
+                .optional()?
+                .flatten();
+            transaction.execute(
+                "INSERT INTO agent_sessions(terminal_session_id,project_id,workspace_id,pane_id,profile_id,provider_type,provider_session_id,transcript_path,status,created_at,updated_at) VALUES(?1,?2,?3,?4,?5,?6,NULL,NULL,?7,?8,?8) ON CONFLICT(terminal_session_id) DO UPDATE SET status=excluded.status,updated_at=excluded.updated_at",
+                params![session.id,session.project_id,session.workspace_id,session.pane_id,profile_id,session.provider.as_str(),session.status,Utc::now().to_rfc3339()],
+            )?;
+        }
+        transaction.commit()?;
         Ok(())
     }
 
@@ -529,7 +907,23 @@ impl DatabaseService {
         output_tail: &[u8],
     ) -> AppResult<()> {
         self.connection.lock().execute("UPDATE terminal_sessions SET status=?2,ended_at=?3,exit_code=?4,output_tail=?5,process_id=NULL WHERE id=?1", params![id, status, Utc::now().to_rfc3339(), exit_code, output_tail])?;
+        self.connection.lock().execute(
+            "UPDATE agent_sessions SET status=?2,updated_at=?3 WHERE terminal_session_id=?1",
+            params![id, status, Utc::now().to_rfc3339()],
+        )?;
         Ok(())
+    }
+}
+
+fn provider_display_name(provider: &AgentProvider) -> &'static str {
+    match provider {
+        AgentProvider::Claude => "Claude Code",
+        AgentProvider::Codex => "Codex CLI",
+        AgentProvider::Opencode => "OpenCode",
+        AgentProvider::Powershell => "PowerShell",
+        AgentProvider::CommandPrompt => "Command Prompt",
+        AgentProvider::Wsl => "WSL",
+        AgentProvider::CustomShell => "Custom Shell",
     }
 }
 
@@ -554,26 +948,30 @@ fn row_to_project(row: &Row<'_>) -> rusqlite::Result<Project> {
 }
 
 fn row_to_workspace(row: &Row<'_>) -> rusqlite::Result<Workspace> {
-    let layout_json: String = row.get(3)?;
+    let layout_json: String = row.get(4)?;
     let layout = serde_json::from_str(&layout_json).map_err(|error| {
-        rusqlite::Error::FromSqlConversionFailure(3, rusqlite::types::Type::Text, Box::new(error))
+        rusqlite::Error::FromSqlConversionFailure(4, rusqlite::types::Type::Text, Box::new(error))
     })?;
     Ok(Workspace {
         id: row.get(0)?,
         project_id: row.get(1)?,
         name: row.get(2)?,
+        normalized_name: row.get(3)?,
         layout,
-        active_pane_id: row.get(4)?,
-        created_at: row.get(5)?,
-        updated_at: row.get(6)?,
-        last_opened_at: row.get(7)?,
+        active_pane_id: row.get(5)?,
+        restore_behavior: row.get(6)?,
+        created_at: row.get(7)?,
+        updated_at: row.get(8)?,
+        last_opened_at: row.get(9)?,
         panes: Vec::new(),
     })
 }
 
 fn load_project_workspaces(connection: &Connection, project_id: &str) -> AppResult<Vec<Workspace>> {
+    // Sidebar order is user-controlled (sort_order); last_opened_at is the deterministic
+    // tiebreak so freshly migrated or newly created rows land predictably.
     let mut statement = connection.prepare(
-        "SELECT id,project_id,name,layout_json,active_pane_id,created_at,updated_at,last_opened_at FROM workspaces WHERE project_id=?1 AND removed_from_recent=0 ORDER BY last_opened_at DESC",
+        "SELECT id,project_id,name,normalized_name,layout_json,active_pane_id,restore_behavior,created_at,updated_at,last_opened_at FROM workspaces WHERE project_id=?1 AND removed_from_recent=0 ORDER BY sort_order ASC, last_opened_at DESC, id ASC",
     )?;
     let mut workspaces = statement
         .query_map([project_id], row_to_workspace)?
@@ -629,7 +1027,7 @@ fn join_root(root: &str, rest: &str) -> String {
 }
 
 fn load_panes(connection: &Connection, workspace_id: &str) -> AppResult<Vec<PaneAssignment>> {
-    let mut statement = connection.prepare("SELECT id,title,provider_type,executable_path,args_json,shell_profile_id,working_directory,position_order FROM workspace_panes WHERE workspace_id=?1 ORDER BY position_order")?;
+    let mut statement = connection.prepare("SELECT id,title,provider_type,executable_path,args_json,shell_profile_id,profile_id,working_directory,working_directory_mode,position_order FROM workspace_panes WHERE workspace_id=?1 ORDER BY position_order")?;
     let panes = statement
         .query_map([workspace_id], |row| {
             let provider_string: String = row.get(2)?;
@@ -649,8 +1047,10 @@ fn load_panes(connection: &Connection, workspace_id: &str) -> AppResult<Vec<Pane
                 executable_path: row.get(3)?,
                 args: serde_json::from_str(&args_json).unwrap_or_default(),
                 shell_profile_id: row.get(5)?,
-                working_directory: row.get(6)?,
-                position_order: row.get(7)?,
+                profile_id: row.get(6)?,
+                working_directory: row.get(7)?,
+                working_directory_mode: row.get(8)?,
+                position_order: row.get(9)?,
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
@@ -685,15 +1085,26 @@ mod tests {
     }
 
     #[test]
-    fn sessions_record_against_in_memory_workspaces() {
-        // Session bookkeeping must remain robust if a process starts before its workspace
-        // transaction commits. This previously regressed as a foreign-key failure.
+    fn sessions_require_durable_workspace_and_pane_ownership() {
         let database = DatabaseService::in_memory().unwrap();
+        let root = std::env::temp_dir().join(format!("forgemind-session-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let project = database.upsert_project(&project(&root)).unwrap();
+        let workspace = database
+            .save_workspace(&workspace_request(&project.id, "Session fixture", &root))
+            .unwrap();
+        let pane_id = workspace.panes[0].id.clone();
         let mut session = crate::models::TerminalSession {
             id: Uuid::new_v4().to_string(),
-            workspace_id: "ephemeral-not-in-db".into(),
-            pane_id: "pane-1".into(),
+            project_id: project.id,
+            workspace_id: workspace.id,
+            pane_id,
             provider: crate::models::AgentProvider::Claude,
+            executable: std::env::current_exe()
+                .unwrap()
+                .to_string_lossy()
+                .to_string(),
+            arguments: Vec::new(),
             title: "Claude".into(),
             working_directory: std::env::temp_dir().to_string_lossy().to_string(),
             status: "running".into(),
@@ -703,6 +1114,9 @@ mod tests {
             exit_code: None,
             output_tail: Vec::new(),
             next_sequence: 0,
+            log_path: None,
+            restoration_state: "not_requested".into(),
+            dropped_output_bytes: 0,
         };
         database.record_session(&session).unwrap();
         // The ON CONFLICT upsert path must work too.
@@ -711,6 +1125,7 @@ mod tests {
         database
             .mark_session_ended(&session.id, "exited", Some(0), b"bye")
             .unwrap();
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -728,6 +1143,7 @@ mod tests {
                 name: "Focused workspace".into(),
                 layout,
                 active_pane_id: Some(pane_id.clone()),
+                restore_behavior: "inherit".into(),
                 panes: vec![PaneAssignment {
                     id: pane_id,
                     workspace_id: None,
@@ -739,7 +1155,9 @@ mod tests {
                         .to_string(),
                     args: Vec::new(),
                     shell_profile_id: None,
+                    profile_id: None,
                     working_directory: root.to_string_lossy().to_string(),
+                    working_directory_mode: "project_relative".into(),
                     position_order: 0,
                 }],
             })
@@ -800,6 +1218,7 @@ mod tests {
             name: name.to_owned(),
             layout,
             active_pane_id: Some(pane_id.clone()),
+            restore_behavior: "inherit".into(),
             panes: vec![PaneAssignment {
                 id: pane_id,
                 workspace_id: None,
@@ -811,7 +1230,9 @@ mod tests {
                     .to_string(),
                 args: Vec::new(),
                 shell_profile_id: None,
+                profile_id: None,
                 working_directory: root.to_string_lossy().to_string(),
+                working_directory_mode: "project_relative".into(),
                 position_order: 0,
             }],
         }
@@ -926,5 +1347,82 @@ mod tests {
 
         fs::remove_dir_all(&old_root).ok();
         fs::remove_dir_all(&new_root).ok();
+    }
+
+    #[test]
+    fn workspaces_reorder_and_duplicate_for_the_sidebar() {
+        let database = DatabaseService::in_memory().unwrap();
+        let root = std::env::temp_dir().join(format!("forgemind-order-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let project = database.upsert_project(&project(&root)).unwrap();
+        let first = database
+            .save_workspace(&workspace_request(&project.id, "Alpha", &root))
+            .unwrap();
+        let second = database
+            .save_workspace(&workspace_request(&project.id, "Beta", &root))
+            .unwrap();
+        let third = database
+            .save_workspace(&workspace_request(&project.id, "Gamma", &root))
+            .unwrap();
+
+        // New Workspaces preserve insertion order in the sidebar (sort_order ascending).
+        let ordered: Vec<String> = database
+            .list_workspaces_for_project(&project.id)
+            .unwrap()
+            .into_iter()
+            .map(|workspace| workspace.name)
+            .collect();
+        assert_eq!(ordered, vec!["Alpha", "Beta", "Gamma"]);
+
+        // Reorder puts Gamma first; the change is durable.
+        database
+            .reorder_workspaces(
+                &project.id,
+                &[third.id.clone(), first.id.clone(), second.id.clone()],
+            )
+            .unwrap();
+        let reordered: Vec<String> = database
+            .list_workspaces_for_project(&project.id)
+            .unwrap()
+            .into_iter()
+            .map(|workspace| workspace.name)
+            .collect();
+        assert_eq!(reordered, vec!["Gamma", "Alpha", "Beta"]);
+
+        // A partial or foreign id set is rejected without mutating order.
+        assert_eq!(
+            database
+                .reorder_workspaces(&project.id, std::slice::from_ref(&third.id))
+                .unwrap_err()
+                .code,
+            "invalid_workspace_order"
+        );
+
+        // Duplicating copies layout and panes under fresh ids and a unique name.
+        let copy = database.duplicate_workspace(&first.id).unwrap();
+        assert_eq!(copy.name, "Alpha copy");
+        assert_ne!(copy.id, first.id);
+        assert_eq!(copy.panes.len(), first.panes.len());
+        assert_ne!(copy.panes[0].id, first.panes[0].id);
+        // The duplicate lands at the end of the order.
+        let with_copy: Vec<String> = database
+            .list_workspaces_for_project(&project.id)
+            .unwrap()
+            .into_iter()
+            .map(|workspace| workspace.name)
+            .collect();
+        assert_eq!(with_copy.last().unwrap(), "Alpha copy");
+
+        // Marking a Workspace active bumps recency without disturbing sidebar order.
+        database.set_last_active_workspace(&second.id).unwrap();
+        let after: Vec<String> = database
+            .list_workspaces_for_project(&project.id)
+            .unwrap()
+            .into_iter()
+            .map(|workspace| workspace.name)
+            .collect();
+        assert_eq!(after, with_copy);
+
+        fs::remove_dir_all(root).ok();
     }
 }

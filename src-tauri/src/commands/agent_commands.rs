@@ -1,5 +1,7 @@
 use crate::errors::AppResult;
-use crate::models::{AgentDetectionResult, AgentProvider, ShellProfile};
+use crate::models::{
+    AgentDetectionResult, AgentProfile, AgentProvider, AgentSession, ShellProfile,
+};
 use crate::AppState;
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -22,7 +24,24 @@ pub fn detect_agents(
         .into_iter()
         .map(|entry| (entry.provider, entry.path))
         .collect();
-    state.detector.detect_all(force, &paths)
+    let detections = state.detector.detect_all(force, &paths);
+    if let Err(error) = state.database.sync_agent_profiles(&detections) {
+        log::warn!("agent profile persistence failed: {}", error.code);
+    }
+    detections
+}
+
+#[tauri::command]
+pub fn list_agent_profiles(state: State<'_, AppState>) -> AppResult<Vec<AgentProfile>> {
+    state.database.list_agent_profiles()
+}
+
+#[tauri::command]
+pub fn list_agent_sessions(
+    workspace_id: String,
+    state: State<'_, AppState>,
+) -> AppResult<Vec<AgentSession>> {
+    state.database.list_agent_sessions(&workspace_id)
 }
 
 #[tauri::command]

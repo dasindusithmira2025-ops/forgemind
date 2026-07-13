@@ -3,17 +3,18 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { SearchAddon } from '@xterm/addon-search'
 import { WebLinksAddon } from '@xterm/addon-web-links'
-import { ChevronDown, Maximize2, Minimize2, MoreHorizontal, RotateCw, Search, Square, X } from 'lucide-react'
+import { ChevronDown, Maximize2, Minimize2, MoreHorizontal, RotateCw, Search, X } from 'lucide-react'
 import { Button } from '../ui/Button'
 import { native } from '../../native/commands'
-import { onTerminalOutput } from '../../native/events'
 import type { AppSettings, PaneAssignment, TerminalSession } from '../../native/types'
 import { providerLabel } from '../../shared/layout'
 import type { TerminalAction } from './terminalActions'
+import { terminalRuntime, useTerminalRuntime } from '../../features/terminals/runtimeStore'
 
 interface TerminalPaneProps {
   assignment: PaneAssignment
   session?: TerminalSession
+  deferred?: boolean
   active: boolean
   maximized: boolean
   settings: AppSettings
@@ -25,7 +26,7 @@ interface TerminalPaneProps {
   onMenu: (anchor: HTMLElement) => void
 }
 
-export function TerminalPane({ assignment, session, active, maximized, settings, onFocus, onMaximize, onClose, onRestart, onStop, onMenu }: TerminalPaneProps) {
+export function TerminalPane({ assignment, session, deferred = false, active, maximized, settings, onFocus, onMaximize, onClose, onRestart, onMenu }: TerminalPaneProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const terminalRef = useRef<Terminal | undefined>(undefined)
   const fitRef = useRef<FitAddon | undefined>(undefined)
@@ -35,11 +36,22 @@ export function TerminalPane({ assignment, session, active, maximized, settings,
   const [searchTerm, setSearchTerm] = useState('')
   const [caseSensitive, setCaseSensitive] = useState(false)
   const [bell, setBell] = useState(false)
-  const [elapsed, setElapsed] = useState('0:00')
   const encoder = useRef(new TextEncoder())
   const sessionId = session?.id
-  const sessionProvider = session?.provider
-  const sessionStartedAt = session?.startedAt
+  const runtime = useTerminalRuntime(sessionId)
+  const currentSession = runtime.session ?? session
+  const nextSequence = useRef(0)
+  const historyReady = useRef(false)
+  const writeChain = useRef(Promise.resolve())
+
+  const serialWrite = (data: Uint8Array) => {
+    const terminal = terminalRef.current
+    if (!terminal) return
+    writeChain.current = writeChain.current.then(() => new Promise<void>((resolve) => {
+      if (!terminalRef.current) return resolve()
+      terminal.write(data, resolve)
+    }))
+  }
 
   useEffect(() => {
     if (!containerRef.current || terminalRef.current) return
@@ -88,34 +100,33 @@ export function TerminalPane({ assignment, session, active, maximized, settings,
   useEffect(() => {
     sessionRef.current = sessionId
     const terminal = terminalRef.current
-    if (!terminal || !sessionId || !sessionProvider) return
+    if (!terminal || !sessionId) return
     terminal.reset()
-    terminal.writeln(`\x1b[38;2;127;136;151mForgeMind connected to ${providerLabel(sessionProvider)}\x1b[0m`)
     let cancelled = false
-    let unsubscribe: (() => void) | undefined
-    let nextSequence = 0
-    const pending = new Map<number, Uint8Array>()
-    const flush = () => {
-      while (pending.has(nextSequence)) {
-        terminal.write(pending.get(nextSequence)!)
-        pending.delete(nextSequence++)
-      }
-    }
-    void onTerminalOutput((event) => {
-      if (event.sessionId !== sessionId || event.sequence < nextSequence) return
-      pending.set(event.sequence, new Uint8Array(event.data)); flush()
-    }).then((unlisten) => {
-      if (cancelled) unlisten(); else unsubscribe = unlisten
-      return native.terminalSessionStatus(sessionId)
-    }).then((current) => {
+    historyReady.current = false
+    nextSequence.current = 0
+    void native.terminalSessionStatus(sessionId).then((current) => {
       if (cancelled) return
-      if (current.outputTail.length > 0) terminal.write(new Uint8Array(current.outputTail))
-      nextSequence = current.nextSequence
-      for (const sequence of pending.keys()) if (sequence < nextSequence) pending.delete(sequence)
-      flush()
+      if (current.outputTail.length > 0) serialWrite(new Uint8Array(current.outputTail))
+      nextSequence.current = current.nextSequence
+      historyReady.current = true
+      terminalRuntime.acknowledge(sessionId, current.nextSequence - 1)
     }).catch(() => undefined)
-    return () => { cancelled = true; unsubscribe?.() }
-  }, [sessionId, sessionProvider])
+    return () => { cancelled = true; historyReady.current = false }
+  }, [sessionId])
+
+  useEffect(() => {
+    if (!sessionId || !historyReady.current) return
+    const ordered = runtime.chunks
+      .filter((chunk) => chunk.sequence >= nextSequence.current)
+      .sort((a, b) => a.sequence - b.sequence)
+    for (const chunk of ordered) {
+      if (chunk.sequence !== nextSequence.current) break
+      serialWrite(new Uint8Array(chunk.data))
+      nextSequence.current += 1
+      terminalRuntime.acknowledge(sessionId, chunk.sequence)
+    }
+  }, [runtime.outputVersion, runtime.chunks, sessionId])
 
   useEffect(() => {
     const target = containerRef.current
@@ -153,19 +164,9 @@ export function TerminalPane({ assignment, session, active, maximized, settings,
     return () => window.removeEventListener('forgemind:terminal-action', handle)
   }, [assignment.id, settings.confirmMultilinePaste])
 
-  useEffect(() => {
-    if (!sessionStartedAt) return
-    const update = () => {
-      const seconds = Math.max(0, Math.floor((Date.now() - new Date(sessionStartedAt).getTime()) / 1000))
-      setElapsed(`${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`)
-    }
-    update(); const timer = window.setInterval(update, 1000)
-    return () => window.clearInterval(timer)
-  }, [sessionId, sessionStartedAt])
-
   return <article className={`terminal-pane ${active ? 'active' : ''} ${maximized ? 'maximized' : ''} ${bell ? 'bell' : ''}`} onMouseDown={onFocus} data-pane-id={assignment.id}>
     <header className="terminal-header">
-      <span className={`terminal-status status-${session?.status ?? 'loading'}`} aria-label={session?.status ?? 'starting'} />
+      <span className={`terminal-status status-${currentSession?.status ?? 'loading'}`} aria-label={currentSession?.status ?? 'starting'} />
       <div className="terminal-title"><strong>{assignment.title}</strong><span>{providerLabel(assignment.provider)}</span></div>
       <span className="terminal-path" title={assignment.workingDirectory}>{assignment.workingDirectory}</span>
       <div className="terminal-controls">
@@ -177,7 +178,9 @@ export function TerminalPane({ assignment, session, active, maximized, settings,
     </header>
     {searchOpen && <div className="terminal-search"><input autoFocus aria-label="Search terminal scrollback" value={searchTerm} onChange={(event) => { setSearchTerm(event.target.value); searchRef.current?.findNext(event.target.value, { caseSensitive }) }} onKeyDown={(event) => { if (event.key === 'Enter') searchRef.current?.findNext(searchTerm, { caseSensitive }); if (event.key === 'Escape') setSearchOpen(false) }} placeholder="Find in terminal" /><button className={caseSensitive ? 'enabled' : ''} title="Case sensitive" onClick={() => setCaseSensitive((value) => !value)}>Aa</button><Button variant="ghost" icon={<ChevronDown className="rotate-180" size={14} />} aria-label="Previous match" onClick={() => searchRef.current?.findPrevious(searchTerm, { caseSensitive })} /><Button variant="ghost" icon={<ChevronDown size={14} />} aria-label="Next match" onClick={() => searchRef.current?.findNext(searchTerm, { caseSensitive })} /><Button variant="ghost" icon={<X size={14} />} aria-label="Close search" onClick={() => setSearchOpen(false)} /></div>}
     <div className="xterm-host" ref={containerRef} />
-    <footer className="terminal-footer"><span>{session?.status === 'running' ? `Running ${elapsed}` : session ? `Exited${session.exitCode !== undefined ? ` with code ${session.exitCode}` : ''}` : 'Starting terminal...'}</span><div>{session?.status === 'running' ? <><button onClick={onRestart}><RotateCw size={12} />Restart</button><button onClick={onStop}><Square size={11} />Stop</button></> : <button onClick={onRestart}><RotateCw size={12} />Open fresh session</button>}</div></footer>
+    {!currentSession && !deferred && <div className="terminal-recovery compact"><span>Starting terminal…</span></div>}
+    {!currentSession && deferred && <div className="terminal-recovery"><strong>Deferred by restoration budget</strong><span>The Pane remains in the saved layout and can be resumed when needed.</span><button onClick={onRestart}><RotateCw size={12} />Resume Pane</button></div>}
+    {currentSession && currentSession.status !== 'running' && <div className="terminal-recovery"><strong>{terminalStateTitle(currentSession)}</strong><span>{terminalStateDetail(currentSession)}</span><button onClick={onRestart}><RotateCw size={12} />Open fresh session</button></div>}
   </article>
 }
 
@@ -194,4 +197,16 @@ function bufferText(terminal: Terminal): string {
   const lines: string[] = []
   for (let index = 0; index < buffer.length; index += 1) lines.push(buffer.getLine(index)?.translateToString(true) ?? '')
   return lines.join('\n')
+}
+
+function terminalStateTitle(session: TerminalSession) {
+  if (session.status === 'disconnected') return 'Previous process is not running'
+  if (session.status === 'failed') return 'Terminal failed to start'
+  return session.exitCode === undefined ? 'Terminal exited' : `Terminal exited with code ${session.exitCode}`
+}
+
+function terminalStateDetail(session: TerminalSession) {
+  if (session.droppedOutputBytes > 0) return `${session.droppedOutputBytes.toLocaleString()} output bytes were dropped under backpressure.`
+  if (session.status === 'disconnected') return 'Historical output is preserved. Restart the assigned provider or open a fresh shell.'
+  return 'Output remains available above.'
 }

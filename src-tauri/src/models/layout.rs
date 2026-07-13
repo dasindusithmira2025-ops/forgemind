@@ -83,6 +83,35 @@ impl LayoutNode {
         Ok(())
     }
 
+    /// Return a copy of this layout with every pane id replaced through `remap`. Ids absent
+    /// from the map are kept as-is. Used when duplicating a Workspace so the copy's layout
+    /// tree points at the new, independent pane ids.
+    pub fn with_remapped_panes(
+        &self,
+        remap: &std::collections::HashMap<String, String>,
+    ) -> LayoutNode {
+        match self {
+            Self::Pane { pane_id } => Self::Pane {
+                pane_id: remap
+                    .get(pane_id)
+                    .cloned()
+                    .unwrap_or_else(|| pane_id.clone()),
+            },
+            Self::Split {
+                direction,
+                sizes,
+                children,
+            } => Self::Split {
+                direction: *direction,
+                sizes: sizes.clone(),
+                children: children
+                    .iter()
+                    .map(|child| child.with_remapped_panes(remap))
+                    .collect(),
+            },
+        }
+    }
+
     pub fn pane_count(&self) -> usize {
         match self {
             Self::Pane { .. } => 1,
@@ -205,6 +234,8 @@ pub fn preset_layout(count: usize, variant: &str) -> LayoutNode {
         (8, _) => grid_layout(2, 4, &pane),
         (10, _) => grid_layout(2, 5, &pane),
         (12, _) => grid_layout(3, 4, &pane),
+        (14, _) => grid_layout(2, 7, &pane),
+        (16, _) => grid_layout(4, 4, &pane),
         _ => pane(),
     }
 }
@@ -240,6 +271,8 @@ mod tests {
             (8, ""),
             (10, ""),
             (12, ""),
+            (14, ""),
+            (16, ""),
         ] {
             let layout = preset_layout(count, variant);
             assert_eq!(layout.validate().unwrap().len(), count);

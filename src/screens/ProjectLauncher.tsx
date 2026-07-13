@@ -72,12 +72,19 @@ export function ProjectLauncher() {
   }
 
   const createWorkspace = (project: Project) => { setProject(project); navigate(`/setup/${project.id}`) }
-  const reconfigure = (project: Project, workspace: Workspace) => { setProject(project); navigate(`/setup/${project.id}?workspaceId=${workspace.id}`) }
+  const reconfigure = (project: Project, workspace: Workspace) => { setProject(project); navigate(`/workspace/${workspace.id}/configure`) }
   const duplicate = (project: Project, workspace: Workspace) => { setProject(project); navigate(`/setup/${project.id}?duplicate=${workspace.id}`) }
 
   const removeWorkspace = async (workspace: Workspace) => {
     setWorkspaceMenu(undefined)
     try { await native.removeRecentWorkspace(workspace.id); await refresh() }
+    catch (caught) { setError(asNativeError(caught).message) }
+  }
+
+  const deleteWorkspace = async (workspace: Workspace) => {
+    setWorkspaceMenu(undefined)
+    if (!window.confirm(`Delete the saved configuration for “${workspace.name}”? Project files are never deleted.`)) return
+    try { await native.deleteWorkspaceConfiguration(workspace.id); await refresh() }
     catch (caught) { setError(asNativeError(caught).message) }
   }
 
@@ -112,10 +119,10 @@ export function ProjectLauncher() {
       <div className="launcher-heading">
         <div>
           <p className="section-label">Terminal workspaces</p>
-          <h1>Open a project. Choose a workspace.</h1>
-          <p>A <strong>project</strong> is a local folder. A <strong>workspace</strong> is a saved terminal layout inside it. Open a folder to create or reopen its workspaces.</p>
+          <h1>Open a project.<br />Build your workspace.</h1>
+          <p>Launch coding agents and shells inside one focused terminal environment.</p>
         </div>
-        <Button variant="primary" icon={<FolderOpen size={17} />} onClick={chooseFolder} disabled={busy}>{busy ? 'Opening…' : 'Open project folder'}</Button>
+        <div className="launcher-primary-actions"><Button variant="primary" icon={<FolderOpen size={17} />} onClick={chooseFolder} disabled={busy}>{busy ? 'Opening…' : 'Open Project Folder'}</Button><Button variant="secondary" icon={<Play size={15} />} disabled={!overviews.some((item) => !item.folderMissing && item.workspaces.length)} onClick={() => { const candidate = overviews.flatMap((item) => item.workspaces.map((workspace) => ({ project: item.project, workspace, missing: item.folderMissing }))).filter((item) => !item.missing).sort((a, b) => b.workspace.lastOpenedAt.localeCompare(a.workspace.lastOpenedAt))[0]; if (candidate) openWorkspace(candidate.project, candidate.workspace) }}>Reopen Last Workspace</Button></div>
       </div>
       {error && <ErrorNotice message={error} onRetry={chooseFolder} />}
       {!loading && overviews.length > 0 && <div className="recent-toolbar">
@@ -146,7 +153,7 @@ export function ProjectLauncher() {
                   <div className="menu-wrap">
                     <Button variant="ghost" icon={<MoreHorizontal size={16} />} aria-label={`More actions for project ${project.name}`} onClick={() => setProjectMenu(projectMenu === project.id ? undefined : project.id)} />
                     {projectMenu === project.id && <><button className="context-scrim" aria-label="Close project actions" onClick={() => setProjectMenu(undefined)} /><div className="context-popover" role="menu">
-                      <button role="menuitem" disabled={folderMissing} onClick={() => { setProjectMenu(undefined); void openProjectFolder(overview) }}>Open project…</button>
+                      <button role="menuitem" disabled={folderMissing} onClick={() => { setProjectMenu(undefined); void openProjectFolder(overview) }}>Refresh metadata</button>
                       <button role="menuitem" onClick={() => { setProjectMenu(undefined); createWorkspace(project) }}>Create new workspace</button>
                       <button role="menuitem" disabled={folderMissing} onClick={() => { setProjectMenu(undefined); void revealItemInDir(project.rootPath) }}>Reveal project folder</button>
                       <button role="menuitem" onClick={() => void locateFolder(project)}>Locate moved folder…</button>
@@ -176,7 +183,8 @@ export function ProjectLauncher() {
                         <button role="menuitem" disabled={folderMissing} onClick={() => { setWorkspaceMenu(undefined); reconfigure(project, workspace) }}>Reconfigure workspace</button>
                         <button role="menuitem" disabled={folderMissing} onClick={() => { setWorkspaceMenu(undefined); duplicate(project, workspace) }}>Duplicate workspace</button>
                         <span className="menu-separator" />
-                        <button role="menuitem" className="danger-item" onClick={() => void removeWorkspace(workspace)}>Remove workspace from recents</button>
+                        <button role="menuitem" onClick={() => void removeWorkspace(workspace)}>Remove workspace from recents</button>
+                        <button role="menuitem" className="danger-item" onClick={() => void deleteWorkspace(workspace)}>Delete workspace configuration…</button>
                       </div></>}
                     </div>
                   </div>

@@ -1,14 +1,19 @@
 use crate::errors::AppResult;
-use crate::models::{CreateTerminalRequest, TerminalSession};
+use crate::models::{RestorationResult, StartTerminalRequest, TerminalSession};
 use crate::AppState;
 use tauri::State;
 
 #[tauri::command]
 pub fn create_terminal_session(
-    request: CreateTerminalRequest,
+    request: StartTerminalRequest,
     state: State<'_, AppState>,
 ) -> AppResult<TerminalSession> {
-    state.terminals.create_session(request)
+    let launch = state.database.resolve_terminal_request(&request)?;
+    let mut session = state.terminals.create_session(launch)?;
+    if request.restoration_attempt {
+        session.restoration_state = "restored".into();
+    }
+    Ok(session)
 }
 
 #[tauri::command]
@@ -57,4 +62,29 @@ pub fn terminal_session_status(
     state: State<'_, AppState>,
 ) -> AppResult<TerminalSession> {
     state.terminals.session_status(&session_id)
+}
+
+#[tauri::command]
+pub fn restore_workspace_sessions(
+    workspace_id: String,
+    budget: Option<u16>,
+    behavior: Option<String>,
+    state: State<'_, AppState>,
+) -> AppResult<RestorationResult> {
+    let settings = state.database.get_settings()?;
+    let configured = settings.restoration_launch_budget;
+    state.restoration.restore(
+        &workspace_id,
+        budget.unwrap_or(configured),
+        behavior.as_deref().unwrap_or(&settings.restore_behavior),
+    )
+}
+
+#[tauri::command]
+pub fn reset_restoration_circuit(
+    workspace_id: String,
+    pane_id: String,
+    state: State<'_, AppState>,
+) -> AppResult<()> {
+    state.restoration.reset_pane(&workspace_id, &pane_id)
 }

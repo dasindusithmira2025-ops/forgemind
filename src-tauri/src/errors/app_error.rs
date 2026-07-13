@@ -9,8 +9,10 @@ pub struct AppError {
     pub code: String,
     pub message: String,
     pub recoverable: bool,
-    pub detail: Option<String>,
-    pub affected_entity: Option<String>,
+    pub detail: Option<Box<str>>,
+    pub affected_entity: Option<Box<str>>,
+    pub recommended_action: Option<Box<str>>,
+    pub source_layer: Box<str>,
 }
 
 impl AppError {
@@ -21,16 +23,28 @@ impl AppError {
             recoverable,
             detail: None,
             affected_entity: None,
+            recommended_action: None,
+            source_layer: "application".into(),
         }
     }
 
     pub fn detail(mut self, detail: impl Into<String>) -> Self {
-        self.detail = Some(detail.into());
+        self.detail = Some(detail.into().into_boxed_str());
         self
     }
 
     pub fn entity(mut self, entity: impl Into<String>) -> Self {
-        self.affected_entity = Some(entity.into());
+        self.affected_entity = Some(entity.into().into_boxed_str());
+        self
+    }
+
+    pub fn action(mut self, action: impl Into<String>) -> Self {
+        self.recommended_action = Some(action.into().into_boxed_str());
+        self
+    }
+
+    pub fn layer(mut self, layer: impl Into<String>) -> Self {
+        self.source_layer = layer.into().into_boxed_str();
         self
     }
 
@@ -41,6 +55,8 @@ impl AppError {
             true,
         )
         .detail(error.to_string())
+        .action("Retry the operation or run Diagnostics health check.")
+        .layer("persistence")
     }
 }
 

@@ -1,20 +1,25 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { open } from '@tauri-apps/plugin-dialog'
+import { openPath } from '@tauri-apps/plugin-opener'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { Group, Panel, Separator, type Layout as PanelLayout } from 'react-resizable-panels'
-import { ChevronDown, CircleStop, Copy, FolderOpen, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw, RotateCcw, Search, SplitSquareHorizontal, SplitSquareVertical, TerminalSquare, Trash2 } from 'lucide-react'
+import { ChevronDown, CircleStop, Copy, FolderOpen, RefreshCw, RotateCcw, Search, SplitSquareHorizontal, SplitSquareVertical, TerminalSquare, Trash2 } from 'lucide-react'
 import { TerminalPane } from '../components/terminal/TerminalPane'
 import { dispatchTerminalAction } from '../components/terminal/terminalActions'
-import { Brand } from '../components/ui/Brand'
 import { Button } from '../components/ui/Button'
 import { ErrorNotice } from '../components/ui/ErrorNotice'
 import { Modal } from '../components/ui/Modal'
 import { TextPromptDialog } from '../components/ui/TextPromptDialog'
 import { asNativeError, native } from '../native/commands'
-import { onTerminalExit } from '../native/events'
 import type { AgentProvider, LayoutNode, PaneAssignment, Project, ShellProfile, SplitDirection, TerminalSession, Workspace } from '../native/types'
 import { newId, paneIds, providerLabel } from '../shared/layout'
 import { useAppStore } from '../stores/appStore'
+import { terminalRuntime, useWorkspaceSessions } from '../features/terminals/runtimeStore'
+import { AppShell } from '../components/shell/AppShell'
+import { ForgeSpaceSidebar } from '../features/sidebar/components/ForgeSpaceSidebar'
+import { deriveProviderSummary, deriveWorkspaceRuntimeSummary, groupSessionsByWorkspace } from '../features/sidebar/sidebarSelectors'
+import type { SidebarActions, SidebarWorkspace } from '../features/sidebar/sidebarTypes'
+import { clampSidebarWidth } from '../features/sidebar/sidebarPreferences'
 
 type ProviderChoice = { provider: AgentProvider; name: string; executablePath: string; args: string[]; shellProfileId?: string }
 type PendingInsert = { targetPaneId: string; direction: SplitDirection; replace?: boolean; duplicate?: PaneAssignment }
@@ -27,16 +32,12 @@ export function WorkspaceScreen() {
   const navigate = useNavigate()
   const storedWorkspace = useAppStore((state) => state.workspace)
   const storedProject = useAppStore((state) => state.project)
-  const sessions = useAppStore((state) => state.sessions)
+  const sessions = useWorkspaceSessions(workspaceId)
   const settings = useAppStore((state) => state.settings)
   const setWorkspace = useAppStore((state) => state.setWorkspace)
   const setProject = useAppStore((state) => state.setProject)
   const setDetections = useAppStore((state) => state.setDetections)
   const setShells = useAppStore((state) => state.setShells)
-  const upsertSession = useAppStore((state) => state.upsertSession)
-  const markSessionExited = useAppStore((state) => state.markSessionExited)
-  const removeSession = useAppStore((state) => state.removeSession)
-  const clearSessions = useAppStore((state) => state.clearSessions)
   const activePaneId = useAppStore((state) => state.activePaneId)
   const setActivePane = useAppStore((state) => state.setActivePane)
   const setSettings = useAppStore((state) => state.setSettings)
@@ -47,20 +48,20 @@ export function WorkspaceScreen() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [paneErrors, setPaneErrors] = useState<Record<string, string>>({})
-  const [sidebarOpen, setSidebarOpen] = useState(settings.sidebarOpen)
+  const [collapsed, setCollapsed] = useState(!settings.sidebarOpen)
+  const [sidebarWidth, setSidebarWidth] = useState(clampSidebarWidth(settings.sidebarWidth))
   const [sidebarSaving, setSidebarSaving] = useState(false)
   const [maximizedPaneId, setMaximizedPaneId] = useState<string>()
   const [workspaceMenu, setWorkspaceMenu] = useState(false)
   const [paneMenu, setPaneMenu] = useState<{ paneId: string; x: number; y: number }>()
   const [pendingInsert, setPendingInsert] = useState<PendingInsert>()
-  const [renameTarget, setRenameTarget] = useState<{ kind: 'workspace' | 'pane'; paneId?: string; initialValue: string }>()
+  const [renameTarget, setRenameTarget] = useState<{ kind: 'workspace' | 'pane'; workspaceId?: string; paneId?: string; initialValue: string }>()
   const [choices, setChoices] = useState<ProviderChoice[]>([])
-  const [workspaceRunning, setWorkspaceRunning] = useState<Record<string, number>>({})
+  const [projectWorkspaces, setProjectWorkspaces] = useState<Workspace[]>([])
+  const [liveSessionsSnapshot, setLiveSessionsSnapshot] = useState<TerminalSession[]>([])
   const [switchingWorkspaceId, setSwitchingWorkspaceId] = useState<string>()
-  const [refreshingWorkspaces, setRefreshingWorkspaces] = useState(false)
-  const launchGeneration = useRef(0)
-
-  const paneSession = useCallback((paneId: string) => Object.values(sessions).find((session) => session.paneId === paneId), [sessions])
+  const [deferredPaneIds, setDeferredPaneIds] = useState<string[]>([])
+  const paneSession = useCallback((paneId: string) => sessions.find((session) => session.paneId === paneId), [sessions])
 
   const scanProviders = useCallback(async () => {
     const customPaths = [
@@ -81,22 +82,37 @@ export function WorkspaceScreen() {
   const launchPane = useCallback(async (assignment: PaneAssignment, currentWorkspace: Workspace) => {
     setPaneErrors((current) => ({ ...current, [assignment.id]: '' }))
     try {
-      const session = await native.createTerminalSession({ workspaceId: currentWorkspace.id, paneId: assignment.id, provider: assignment.provider, title: assignment.title, executablePath: assignment.executablePath, args: assignment.args, workingDirectory: assignment.workingDirectory, cols: 80, rows: 24 })
-      upsertSession(session)
+      const session = await native.createTerminalSession({ workspaceId: currentWorkspace.id, paneId: assignment.id, cols: 80, rows: 24 })
+      terminalRuntime.upsert(session)
       return session
     } catch (caught) {
       setPaneErrors((current) => ({ ...current, [assignment.id]: asNativeError(caught).message }))
       return undefined
     }
-  }, [upsertSession])
+  }, [])
 
-  const launchAll = useCallback(async (currentWorkspace: Workspace) => {
-    const generation = ++launchGeneration.current
-    clearSessions()
-    const results = await Promise.all(currentWorkspace.panes.map((pane) => launchPane(pane, currentWorkspace)))
-    if (generation === launchGeneration.current && results.every((result) => !result)) setError('No terminal session could be started. Reconfigure unavailable executables and try again.')
+  const launchAll = useCallback(async (currentWorkspace: Workspace, freshOverride = false) => {
+    const fresh = forceFresh || freshOverride
+    terminalRuntime.clearWorkspace(currentWorkspace.id)
+    const configuredBehavior = currentWorkspace.restoreBehavior === 'inherit' ? settings.restoreBehavior : currentWorkspace.restoreBehavior
+    if (configuredBehavior === 'ask' && !fresh) {
+      const restore = window.confirm('Restore the saved Pane assignments now? Choose Cancel to keep every Pane deferred until you resume it.')
+      if (!restore) {
+        setDeferredPaneIds(currentWorkspace.panes.map((pane) => pane.id))
+        setActivePane(currentWorkspace.activePaneId ?? currentWorkspace.panes[0]?.id)
+        return
+      }
+    }
+    // "Open with fresh terminals" means new processes for the saved assignments; the
+    // distinct fresh-shells restoration policy intentionally replaces agents with shells.
+    const behavior = fresh ? 'restart_agents' : configuredBehavior === 'ask' ? 'restart_agents' : configuredBehavior
+    const result = await native.restoreWorkspaceSessions(currentWorkspace.id, settings.restorationLaunchBudget, behavior)
+    terminalRuntime.hydrate(result.sessions)
+    setDeferredPaneIds(result.deferredPaneIds)
+    setPaneErrors(Object.fromEntries(result.failures.map((failure) => [failure.paneId, failure.message])))
+    if (result.sessions.length === 0 && result.failures.length > 0) setError('No terminal session could be started. Resolve the affected Pane assignments and retry.')
     setActivePane(currentWorkspace.activePaneId ?? currentWorkspace.panes[0]?.id)
-  }, [clearSessions, launchPane, setActivePane])
+  }, [forceFresh, setActivePane, settings.restorationLaunchBudget, settings.restoreBehavior])
 
   useEffect(() => {
     let live = true
@@ -107,6 +123,9 @@ export function WorkspaceScreen() {
         if (!live) return
         setLocalWorkspace(loadedWorkspace); setWorkspace(loadedWorkspace)
         setLocalProject(loadedProject); setProject(loadedProject)
+        // Record this Workspace as the Project's most recently active so a later switch can
+        // restore it. Best-effort — it must never block hydration.
+        void native.setLastActiveWorkspace(loadedWorkspace.id).catch(() => undefined)
         await scanProviders()
         if (!live) return
         if (forceFresh) {
@@ -114,12 +133,7 @@ export function WorkspaceScreen() {
           await native.terminateWorkspaceSessions(loadedWorkspace.id).catch(() => undefined)
         } else {
           const liveSessions = await native.listLiveSessions(loadedWorkspace.id)
-          if (liveSessions.length > 0) {
-            clearSessions()
-            for (const session of liveSessions) upsertSession(session)
-            setActivePane(loadedWorkspace.activePaneId ?? loadedWorkspace.panes[0]?.id)
-            return
-          }
+          if (liveSessions.length > 0) terminalRuntime.hydrate(liveSessions)
         }
         await launchAll(loadedWorkspace)
       } catch (caught) { if (live) setError(asNativeError(caught).message) }
@@ -130,54 +144,53 @@ export function WorkspaceScreen() {
     // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceId])
 
-  useEffect(() => {
-    let cancelled = false
-    let unsubscribe: (() => void) | undefined
-    void onTerminalExit((event) => markSessionExited(event.sessionId, event.exitCode)).then((fn) => {
-      if (cancelled) fn()
-      else unsubscribe = fn
-    })
-    return () => { cancelled = true; unsubscribe?.() }
-  }, [markSessionExited])
+  useEffect(() => { setCollapsed(!settings.sidebarOpen); setSidebarWidth(clampSidebarWidth(settings.sidebarWidth)) }, [settings.sidebarOpen, settings.sidebarWidth])
 
-  useEffect(() => { setSidebarOpen(settings.sidebarOpen) }, [settings.sidebarOpen])
-
-  const toggleSidebar = async () => {
+  const persistSidebar = useCallback(async (patch: Partial<Pick<typeof settings, 'sidebarOpen' | 'sidebarWidth'>>) => {
     if (sidebarSaving) return
     setSidebarSaving(true)
-    const previous = sidebarOpen
-    const nextSettings = { ...settings, sidebarOpen: !previous }
-    setSidebarOpen(!previous)
+    const previous = settings
+    const nextSettings = { ...settings, ...patch }
     setSettings(nextSettings)
     try {
       setSettings(await native.saveSettings(nextSettings))
-      setSidebarSaving(false)
     } catch (caught) {
-      setSidebarOpen(previous)
-      setSettings(settings)
-      setSidebarSaving(false)
-      setError(asNativeError(caught).message)
-    }
-  }
-
-  const refreshWorkspaces = useCallback(async () => {
-    setRefreshingWorkspaces(true)
-    try {
-      const [recent, liveSessions] = await Promise.all([
-        native.listRecentWorkspaces(),
-        native.listLiveSessions(),
-      ])
-      setRecentWorkspaces(recent)
-      setWorkspaceRunning(liveSessions.reduce<Record<string, number>>((counts, session) => {
-        if (session.status === 'running') counts[session.workspaceId] = (counts[session.workspaceId] ?? 0) + 1
-        return counts
-      }, {}))
-    } catch (caught) {
+      setSettings(previous)
+      setCollapsed(!previous.sidebarOpen)
+      setSidebarWidth(clampSidebarWidth(previous.sidebarWidth))
       setError(asNativeError(caught).message)
     } finally {
-      setRefreshingWorkspaces(false)
+      setSidebarSaving(false)
     }
-  }, [setRecentWorkspaces])
+  }, [settings, setSettings, sidebarSaving])
+
+  const toggleCollapse = useCallback(() => {
+    const next = !collapsed
+    setCollapsed(next)
+    void persistSidebar({ sidebarOpen: !next })
+  }, [collapsed, persistSidebar])
+
+  const commitSidebarWidth = useCallback((width: number) => {
+    const clamped = clampSidebarWidth(width)
+    setSidebarWidth(clamped)
+    void persistSidebar({ sidebarWidth: clamped })
+  }, [persistSidebar])
+
+  const refreshWorkspaces = useCallback(async (currentProjectId?: string) => {
+    const projectId = currentProjectId ?? project?.id
+    try {
+      const [recent, live, list] = await Promise.all([
+        native.listRecentWorkspaces(),
+        native.listLiveSessions(),
+        projectId ? native.listWorkspacesForProject(projectId) : Promise.resolve([] as Workspace[]),
+      ])
+      setRecentWorkspaces(recent)
+      setLiveSessionsSnapshot(live)
+      setProjectWorkspaces(list)
+    } catch (caught) {
+      setError(asNativeError(caught).message)
+    }
+  }, [project?.id, setRecentWorkspaces])
 
   useEffect(() => { void refreshWorkspaces() }, [refreshWorkspaces, workspaceId])
 
@@ -188,6 +201,7 @@ export function WorkspaceScreen() {
       name: next.name,
       layout: next.layout,
       activePaneId: next.activePaneId,
+      restoreBehavior: next.restoreBehavior,
       panes: next.panes,
     })
     setLocalWorkspace(saved); setWorkspace(saved)
@@ -214,7 +228,8 @@ export function WorkspaceScreen() {
     if (!assignment) return
     const session = paneSession(paneId)
     if (session?.status === 'running') await native.terminateTerminalSession(session.id).catch(() => undefined)
-    if (session) removeSession(session.id)
+    if (session) terminalRuntime.remove(session.id)
+    setDeferredPaneIds((current) => current.filter((id) => id !== paneId))
     await launchPane(assignment, workspace)
   }
 
@@ -223,7 +238,7 @@ export function WorkspaceScreen() {
     const session = paneSession(paneId)
     if (session?.status === 'running' && settings.confirmClosePane && !window.confirm('Stop the running process and close this pane?')) return
     if (session?.status === 'running') await native.terminateTerminalSession(session.id)
-    if (session) removeSession(session.id)
+    if (session) terminalRuntime.remove(session.id)
     try {
       const layout = await native.removeLayoutPane(workspace.layout, paneId)
       const panes = workspace.panes.filter((pane) => pane.id !== paneId).map((pane, index) => ({ ...pane, positionOrder: index }))
@@ -239,17 +254,22 @@ export function WorkspaceScreen() {
     if (pane) setRenameTarget({ kind: 'pane', paneId, initialValue: pane.title })
   }
 
-  const renameWorkspace = async () => {
-    if (!workspace) return
-    setRenameTarget({ kind: 'workspace', initialValue: workspace.name })
-  }
-
   const confirmRename = async (value: string) => {
     const target = renameTarget
     setRenameTarget(undefined)
-    if (!workspace || !target || value === target.initialValue) return
-    if (target.kind === 'workspace') await persist({ ...workspace, name: value })
-    else await persist({ ...workspace, panes: workspace.panes.map((item) => item.id === target.paneId ? { ...item, title: value } : item) })
+    if (!target || value === target.initialValue) return
+    try {
+      if (target.kind === 'workspace') {
+        if (target.workspaceId && target.workspaceId !== workspace?.id) {
+          await native.renameWorkspace(target.workspaceId, value)
+          void refreshWorkspaces()
+        } else if (workspace) {
+          await persist({ ...workspace, name: value })
+        }
+      } else if (workspace) {
+        await persist({ ...workspace, panes: workspace.panes.map((item) => item.id === target.paneId ? { ...item, title: value } : item) })
+      }
+    } catch (caught) { setError(asNativeError(caught).message) }
   }
 
   const changeDirectory = async (paneId: string) => {
@@ -266,7 +286,7 @@ export function WorkspaceScreen() {
   const restartPaneFromWorkspace = async (paneId: string, source: Workspace) => {
     const session = paneSession(paneId)
     if (session?.status === 'running') await native.terminateTerminalSession(session.id).catch(() => undefined)
-    if (session) removeSession(session.id)
+    if (session) terminalRuntime.remove(session.id)
     const pane = source.panes.find((item) => item.id === paneId)
     if (pane) await launchPane(pane, source)
   }
@@ -279,7 +299,7 @@ export function WorkspaceScreen() {
       const session = paneSession(target.id)
       if (session?.status === 'running' && !window.confirm('Replace this terminal? The current process will stop.')) return
       if (session?.status === 'running') await native.terminateTerminalSession(session.id)
-      if (session) removeSession(session.id)
+      if (session) terminalRuntime.remove(session.id)
       const pane = { ...target, provider: choice.provider, title: choice.name, executablePath: choice.executablePath, args: choice.args, shellProfileId: choice.shellProfileId }
       const next = await persist({ ...workspace, panes: workspace.panes.map((item) => item.id === pane.id ? pane : item) })
       setPendingInsert(undefined); await launchPane(pane, next); return
@@ -287,13 +307,13 @@ export function WorkspaceScreen() {
     const newPaneId = newId()
     const layout = await native.splitLayoutPane(workspace.layout, target.id, pendingInsert.direction, newPaneId)
     const source = pendingInsert.duplicate
-    const pane: PaneAssignment = source ? { ...source, id: newPaneId, workspaceId: workspace.id, title: `${source.title} copy`, positionOrder: workspace.panes.length } : { id: newPaneId, workspaceId: workspace.id, title: choice.name, provider: choice.provider, executablePath: choice.executablePath, args: choice.args, shellProfileId: choice.shellProfileId, workingDirectory: target.workingDirectory || project.rootPath, positionOrder: workspace.panes.length }
+    const pane: PaneAssignment = source ? { ...source, id: newPaneId, workspaceId: workspace.id, title: `${source.title} copy`, positionOrder: workspace.panes.length } : { id: newPaneId, workspaceId: workspace.id, title: choice.name, provider: choice.provider, executablePath: choice.executablePath, args: choice.args, shellProfileId: choice.shellProfileId, workingDirectory: target.workingDirectory || project.rootPath, workingDirectoryMode: 'project_relative', positionOrder: workspace.panes.length }
     const next = await persist({ ...workspace, layout, panes: [...workspace.panes, pane], activePaneId: newPaneId })
     setPendingInsert(undefined); setActivePane(newPaneId); await launchPane(pane, next)
   }
 
-  const stopAll = async () => { if (workspace) await native.terminateWorkspaceSessions(workspace.id); clearSessions() }
-  const restartAll = async () => { if (!workspace) return; await native.terminateWorkspaceSessions(workspace.id).catch(() => undefined); await launchAll(workspace) }
+  const stopAll = useCallback(async () => { if (workspace) { await native.terminateWorkspaceSessions(workspace.id); terminalRuntime.clearWorkspace(workspace.id) } }, [workspace])
+  const restartAll = useCallback(async () => { if (!workspace) return; await native.terminateWorkspaceSessions(workspace.id).catch(() => undefined); await launchAll(workspace, true) }, [launchAll, workspace])
   const openLauncher = () => { navigate('/'); setWorkspaceMenu(false) }
   const closeWorkspace = async () => {
     await stopAll(); setWorkspace(undefined); setProject(undefined); navigate('/')
@@ -303,24 +323,186 @@ export function WorkspaceScreen() {
   // them first rather than silently mutating pane configuration under running processes.
   const reconfigureWorkspace = () => {
     if (!workspace || !project) return
-    const anyRunning = Object.values(sessions).some((session) => session.status === 'running')
+    const anyRunning = sessions.some((session) => session.status === 'running')
     if (anyRunning && !window.confirm('This workspace has running terminals. Stop them and reconfigure?')) return
     setWorkspaceMenu(false)
     if (anyRunning) void stopAll()
-    navigate(`/setup/${project.id}?workspaceId=${workspace.id}`)
+    navigate(`/workspace/${workspace.id}/configure`)
   }
 
-  const switchWorkspace = (nextWorkspaceId: string) => {
+  const switchWorkspace = useCallback(async (nextWorkspaceId: string) => {
     if (nextWorkspaceId === workspace?.id || switchingWorkspaceId) return
+    const hasRunningProcesses = sessions.some((session) => session.status === 'running')
+    if (hasRunningProcesses && settings.inactiveWorkspaceProcesses === 'ask') {
+      const keepRunning = window.confirm('Keep this Workspace\'s terminals running in the background? Choose Cancel to stop them before switching.')
+      if (!keepRunning) await stopAll()
+    } else if (hasRunningProcesses && settings.inactiveWorkspaceProcesses === 'stop') {
+      await stopAll()
+    }
     setSwitchingWorkspaceId(nextWorkspaceId)
     setError('')
     setWorkspaceMenu(false)
     navigate(`/workspace/${nextWorkspaceId}`)
-  }
+  }, [navigate, sessions, settings.inactiveWorkspaceProcesses, stopAll, switchingWorkspaceId, workspace?.id])
+
+  // ---- Sidebar-driven Workspace actions ---------------------------------------------------
+  const newWorkspace = useCallback(() => { if (project) navigate(`/setup/${project.id}`) }, [navigate, project])
+
+  const openFresh = useCallback(async (id: string) => {
+    if (id === workspace?.id) { await restartAll(); return }
+    setSwitchingWorkspaceId(id)
+    navigate(`/workspace/${id}?fresh=1`)
+  }, [navigate, restartAll, workspace?.id])
+
+  const duplicateWorkspace = useCallback(async (id: string) => {
+    try { await native.duplicateWorkspace(id); await refreshWorkspaces() }
+    catch (caught) { setError(asNativeError(caught).message) }
+  }, [refreshWorkspaces])
+
+  const renameWorkspaceById = useCallback((id: string) => {
+    const target = id === workspace?.id ? workspace : projectWorkspaces.find((item) => item.id === id)
+    if (target) setRenameTarget({ kind: 'workspace', workspaceId: id, initialValue: target.name })
+  }, [projectWorkspaces, workspace])
+
+  const reconfigureWorkspaceById = useCallback((id: string) => {
+    if (id === workspace?.id) { reconfigureWorkspace(); return }
+    navigate(`/workspace/${id}/configure`)
+    // reconfigureWorkspace closes over current workspace; safe to omit from deps.
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
+  }, [navigate, workspace?.id])
+
+  const restartWorkspaceById = useCallback(async (id: string) => {
+    if (id === workspace?.id) { await restartAll(); return }
+    await switchWorkspace(id)
+  }, [restartAll, switchWorkspace, workspace?.id])
+
+  const stopWorkspaceById = useCallback(async (id: string) => {
+    try { await native.terminateWorkspaceSessions(id); terminalRuntime.clearWorkspace(id); await refreshWorkspaces() }
+    catch (caught) { setError(asNativeError(caught).message) }
+  }, [refreshWorkspaces])
+
+  const reorderWorkspaces = useCallback(async (orderedIds: string[]) => {
+    if (!project) return
+    const previous = projectWorkspaces
+    const byId = new Map(previous.map((item) => [item.id, item]))
+    const next = orderedIds.map((id) => byId.get(id)).filter((item): item is Workspace => Boolean(item))
+    setProjectWorkspaces(next) // optimistic
+    try {
+      await native.reorderWorkspaces(project.id, orderedIds)
+    } catch (caught) {
+      setProjectWorkspaces(previous) // rollback
+      setError(asNativeError(caught).message)
+    }
+  }, [project, projectWorkspaces])
+
+  const moveWorkspace = useCallback((id: string, direction: -1 | 1) => {
+    const ids = projectWorkspaces.map((item) => item.id)
+    const index = ids.indexOf(id)
+    const target = index + direction
+    if (index < 0 || target < 0 || target >= ids.length) return
+    const next = [...ids]
+    ;[next[index], next[target]] = [next[target], next[index]]
+    void reorderWorkspaces(next)
+  }, [projectWorkspaces, reorderWorkspaces])
+
+  const removeFromRecents = useCallback(async (id: string) => {
+    try {
+      await native.removeRecentWorkspace(id)
+      await refreshWorkspaces()
+      if (id === workspace?.id) navigate('/')
+    } catch (caught) { setError(asNativeError(caught).message) }
+  }, [navigate, refreshWorkspaces, workspace?.id])
+
+  const deleteWorkspaceById = useCallback(async (id: string) => {
+    const target = id === workspace?.id ? workspace : projectWorkspaces.find((item) => item.id === id)
+    if (!window.confirm(`Delete the workspace configuration "${target?.name ?? 'this workspace'}"? Its terminals will stop. Project files are never touched.`)) return
+    try {
+      await native.deleteWorkspaceConfiguration(id)
+      if (id === workspace?.id) {
+        const fallback = projectWorkspaces.find((item) => item.id !== id)
+        if (fallback) { setSwitchingWorkspaceId(fallback.id); navigate(`/workspace/${fallback.id}`) }
+        else navigate('/')
+      } else {
+        await refreshWorkspaces()
+      }
+    } catch (caught) { setError(asNativeError(caught).message) }
+  }, [navigate, projectWorkspaces, refreshWorkspaces, workspace])
+
+  const openProjectFolder = useCallback(() => { if (project) void openPath(project.rootPath).catch(() => undefined) }, [project])
+
+  const locateFolder = useCallback(async () => {
+    if (!project) return
+    const selected = await open({ directory: true, multiple: false, title: 'Locate project folder' })
+    if (!selected || Array.isArray(selected)) return
+    try {
+      const relocated = await native.relocateProject(project.id, selected)
+      setLocalProject(relocated); setProject(relocated)
+      await refreshWorkspaces(relocated.id)
+    } catch (caught) { setError(asNativeError(caught).message) }
+  }, [project, refreshWorkspaces, setProject])
+
+  const refreshProject = useCallback(async () => {
+    if (!project) return
+    try {
+      const refreshed = await native.openProject(project.rootPath)
+      setLocalProject(refreshed); setProject(refreshed)
+    } catch { /* folder may be missing; refreshWorkspaces still runs */ }
+    await refreshWorkspaces(project.id)
+  }, [project, refreshWorkspaces, setProject])
+
+  const sidebarActions: SidebarActions = useMemo(() => ({
+    onSelectWorkspace: (id) => void switchWorkspace(id),
+    onOpenFresh: (id) => void openFresh(id),
+    onNewWorkspace: newWorkspace,
+    onRenameWorkspace: renameWorkspaceById,
+    onReconfigureWorkspace: reconfigureWorkspaceById,
+    onDuplicateWorkspace: (id) => void duplicateWorkspace(id),
+    onRestartWorkspace: (id) => void restartWorkspaceById(id),
+    onStopWorkspace: (id) => void stopWorkspaceById(id),
+    onMoveWorkspace: moveWorkspace,
+    onReorder: (ids) => void reorderWorkspaces(ids),
+    onRemoveRecent: (id) => void removeFromRecents(id),
+    onDeleteWorkspace: (id) => void deleteWorkspaceById(id),
+    onOpenProjectFolder: openProjectFolder,
+    onLocateFolder: () => void locateFolder(),
+    onRefreshProject: () => void refreshProject(),
+    onOpenLauncher: () => navigate('/'),
+    onOpenSettings: () => navigate('/settings'),
+    onToggleCollapse: toggleCollapse,
+    onResizeCommit: commitSidebarWidth,
+  }), [switchWorkspace, openFresh, newWorkspace, renameWorkspaceById, reconfigureWorkspaceById, duplicateWorkspace, restartWorkspaceById, stopWorkspaceById, moveWorkspace, reorderWorkspaces, removeFromRecents, deleteWorkspaceById, openProjectFolder, locateFolder, refreshProject, navigate, toggleCollapse, commitSidebarWidth])
+
+  const sidebarWorkspaces: SidebarWorkspace[] = useMemo(() => {
+    const grouped = groupSessionsByWorkspace(liveSessionsSnapshot)
+    return projectWorkspaces.map((item) => {
+      const isActive = item.id === workspaceId
+      const workspaceSessions = isActive ? sessions : (grouped.get(item.id) ?? [])
+      const runtime = deriveWorkspaceRuntimeSummary({
+        workspaceId: item.id,
+        configuredPaneCount: item.panes.length,
+        sessions: workspaceSessions,
+        deferredPaneIds: isActive ? deferredPaneIds : [],
+      })
+      return { workspace: item, runtime, providers: deriveProviderSummary(item) }
+    })
+  }, [projectWorkspaces, liveSessionsSnapshot, sessions, workspaceId, deferredPaneIds])
+
+  const projectFolderMissing = useMemo(() => {
+    if (!project) return false
+    const record = recentWorkspaces.find((item) => item.workspace.projectId === project.id)
+    return record?.projectMissing ?? false
+  }, [project, recentWorkspaces])
 
   useEffect(() => {
     const handle = (event: KeyboardEvent) => {
-      if (!workspace || !activePaneId) return
+      if (!workspace) return
+      if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'b') { event.preventDefault(); toggleCollapse(); return }
+      if (event.ctrlKey && event.key.toLowerCase() === 'b' && !event.shiftKey) { event.preventDefault(); toggleCollapse(); return }
+      if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'p') { event.preventDefault(); return }
+      if (event.ctrlKey && event.altKey && /^[1-9]$/.test(event.key)) {
+        event.preventDefault(); const target = projectWorkspaces[Number(event.key) - 1]; if (target && target.id !== workspace.id) void switchWorkspace(target.id); return
+      }
+      if (!activePaneId) return
       if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'f') { event.preventDefault(); dispatchTerminalAction(activePaneId, 'search') }
       if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 't') { event.preventDefault(); setPendingInsert({ targetPaneId: activePaneId, direction: 'vertical' }) }
       if (event.ctrlKey && event.shiftKey && event.code === 'Backslash') { event.preventDefault(); setPendingInsert({ targetPaneId: activePaneId, direction: 'vertical' }) }
@@ -328,6 +510,7 @@ export function WorkspaceScreen() {
       if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'w') { event.preventDefault(); void closePane(activePaneId) }
       if (event.ctrlKey && event.shiftKey && event.key === 'Enter') { event.preventDefault(); setMaximizedPaneId((value) => value === activePaneId ? undefined : activePaneId) }
       if (event.ctrlKey && event.key === ',') { event.preventDefault(); navigate('/settings') }
+      if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'o') { event.preventDefault(); navigate('/') }
       if (event.ctrlKey && (event.key === 'PageDown' || event.key === 'PageUp')) {
         event.preventDefault(); const ids = paneIds(workspace.layout); const index = ids.indexOf(activePaneId); const delta = event.key === 'PageDown' ? 1 : -1; setActivePane(ids[(index + delta + ids.length) % ids.length]);
       }
@@ -336,46 +519,34 @@ export function WorkspaceScreen() {
     return () => window.removeEventListener('keydown', handle)
   // closePane reads current state and is intentionally rebound with the other workspace values.
   // oxlint-disable-next-line react-hooks/exhaustive-deps
-  }, [activePaneId, navigate, setActivePane, workspace])
+  }, [activePaneId, navigate, setActivePane, workspace, projectWorkspaces, switchWorkspace, toggleCollapse])
 
   if (loading) return <div className="workspace-loading"><div className="workspace-loading-header" /><div className="workspace-loading-sidebar" /><div className="workspace-loading-grid" /></div>
   if (!workspace || !project) return <main className="centered-error"><ErrorNotice message={error || 'The workspace could not be loaded.'} /><Button onClick={() => navigate('/')}>Return to launcher</Button></main>
-  const running = Object.values(sessions).filter((session) => session.status === 'running').length
-  const agentRunning = Object.values(sessions).filter((session) => session.status === 'running' && ['claude', 'codex', 'opencode'].includes(session.provider)).length
+  const running = sessions.filter((session) => session.status === 'running').length
+  const activePane = workspace.panes.find((pane) => pane.id === activePaneId)
 
-  return <main className={`workspace-shell ${sidebarOpen ? '' : 'sidebar-collapsed'} ${switchingWorkspaceId ? 'workspace-switching' : ''}`}>
-    <header className="workspace-header"><Button variant="ghost" icon={sidebarOpen ? <PanelLeftClose size={16} /> : <PanelLeftOpen size={16} />} aria-label="Toggle sidebar" disabled={sidebarSaving} onClick={() => void toggleSidebar()} /><Brand compact /><div className="workspace-heading"><strong>{project.name}</strong><span>/</span><span>{workspace.name}</span></div>{project.gitBranch && <span className="branch-label">{project.gitBranch}</span>}<div className="workspace-header-stats"><span>{workspace.panes.length} terminals</span><span>{agentRunning} agents running</span></div><div className="workspace-menu-wrap"><Button variant="ghost" icon={<ChevronDown size={14} />} aria-expanded={workspaceMenu} aria-haspopup="menu" onClick={() => setWorkspaceMenu((value) => !value)}>Workspace</Button>{workspaceMenu && <><button className="context-scrim" aria-label="Close workspace menu" onClick={() => setWorkspaceMenu(false)} /><div className="context-popover workspace-popover" role="menu"><button role="menuitem" onClick={() => { setWorkspaceMenu(false); void renameWorkspace() }}>Rename workspace</button><button role="menuitem" onClick={reconfigureWorkspace}>Reconfigure workspace</button><button role="menuitem" onClick={() => navigate(`/setup/${project.id}`)}>New workspace for this project</button><button role="menuitem" onClick={() => void restartAll()}><RotateCcw size={14} />Restart all terminals</button><button role="menuitem" onClick={() => void stopAll()}><CircleStop size={14} />Stop all terminals</button><button role="menuitem" onClick={openLauncher}><FolderOpen size={14} />Back to projects</button><button role="menuitem" className="danger-item" onClick={() => void closeWorkspace()}>Close workspace</button></div></>}</div></header>
-    {error && <div className="workspace-error"><ErrorNotice message={error} onRetry={() => void restartAll()} /></div>}
-    <div className="workspace-body">
-      {sidebarOpen && <aside className="workspace-sidebar"><div className="sidebar-content"><div className="ws-switcher"><div className="ws-switcher-head"><span className="section-label">Workspaces</span><button aria-label="Refresh workspaces" title="Refresh workspaces" disabled={refreshingWorkspaces} onClick={() => void refreshWorkspaces()}><RefreshCw className={refreshingWorkspaces ? 'is-spinning' : ''} size={13} /></button></div><div className="ws-list">{recentWorkspaces.map((item) => {
-        const current = item.workspace.id === workspace.id
-        const liveCount = current ? running : (workspaceRunning[item.workspace.id] ?? 0)
-        return <div className={`ws-item ${current ? 'current' : ''} ${item.projectMissing ? 'missing' : ''}`} key={item.workspace.id}>
-          <button className="ws-item-main" aria-current={current ? 'page' : undefined} aria-label={current ? `${item.workspace.name}, current workspace` : `Open ${item.workspace.name}`} disabled={current || item.projectMissing || Boolean(switchingWorkspaceId)} title={item.projectMissing ? `${item.projectPath} is unavailable` : `Open ${item.workspace.name}`} onClick={() => switchWorkspace(item.workspace.id)}>
-            <span className={`ws-dot ${liveCount > 0 ? 'live' : ''}`} />
-            <span className="ws-item-copy"><span className="ws-name">{item.workspace.name}</span><span className="ws-project-name">{item.projectName}</span></span>
-          </button>
-          {liveCount > 0 && <span className={`ws-badge ${current ? 'accent' : ''}`} title={`${liveCount} running`}>{liveCount}</span>}
-        </div>
-      })}</div>{recentWorkspaces.length === 0 && <p className="ws-empty">Your created workspaces will appear here.</p>}</div></div><Button className="new-workspace-button" variant="primary" icon={<Plus size={15} />} onClick={() => navigate(`/setup/${project.id}`)}>New workspace</Button></aside>}
-      <section className="terminal-canvas"><RecursiveLayout node={workspace.layout} path={[]} workspace={workspace} sessions={sessions} activePaneId={activePaneId} maximizedPaneId={maximizedPaneId} settings={settings} paneErrors={paneErrors} onFocus={(paneId) => { setActivePane(paneId); if (workspace.activePaneId !== paneId) { const next = { ...workspace, activePaneId: paneId }; setLocalWorkspace(next); setWorkspace(next); void persist(next).catch(() => undefined) } }} onMaximize={(paneId) => setMaximizedPaneId((value) => value === paneId ? undefined : paneId)} onClose={closePane} onRestart={restartPane} onStop={stopPane} onMenu={(paneId, anchor) => { const rect = anchor.getBoundingClientRect(); setPaneMenu({ paneId, x: Math.min(rect.left, window.innerWidth - 230), y: rect.bottom + 4 }) }} onSizes={updateLayoutSizes} /></section>
-    </div>
-    <footer className="status-bar"><span>{project.gitBranch || 'No branch'}</span><span className="status-path" title={project.rootPath}>{project.rootPath}</span><span>{running}/{workspace.panes.length} running</span><span>{activePaneId ? workspace.panes.find((pane) => pane.id === activePaneId)?.title : 'No active pane'}</span></footer>
-    {pendingInsert && <Modal title={pendingInsert.replace ? 'Replace terminal' : 'Choose terminal'} onClose={() => setPendingInsert(undefined)}><div className="provider-picker">{choices.length === 0 ? <ErrorNotice message="No available agents or shells were detected." onRetry={() => void scanProviders()} /> : choices.map((choice) => <button key={`${choice.provider}:${choice.name}`} onClick={() => void insertOrReplace(choice)}><TerminalSquare size={18} /><div><strong>{choice.name}</strong><span>{choice.executablePath}</span></div></button>)}</div></Modal>}
+  return <AppShell className={`workspace-shell ${switchingWorkspaceId ? 'workspace-switching' : ''}`} sidebarOpen={!maximizedPaneId}
+    titleBar={<><div className="workspace-heading"><strong>{activePane?.title || workspace.name}</strong>{project.gitBranch && <span className="branch-label">{project.gitBranch}</span>}</div><div className="titlebar-spacer" /><span className="compact-count">{running}/{workspace.panes.length} running</span><div className="workspace-menu-wrap"><Button variant="ghost" icon={<ChevronDown size={14} />} aria-expanded={workspaceMenu} aria-haspopup="menu" onClick={() => setWorkspaceMenu((value) => !value)}>Workspace</Button>{workspaceMenu && <><button className="context-scrim" aria-label="Close workspace menu" onClick={() => setWorkspaceMenu(false)} /><div className="context-popover workspace-popover" role="menu"><button role="menuitem" onClick={() => { setWorkspaceMenu(false); renameWorkspaceById(workspace.id) }}>Rename workspace</button><button role="menuitem" onClick={reconfigureWorkspace}>Reconfigure workspace</button><button role="menuitem" onClick={() => navigate(`/setup/${project.id}`)}>New workspace for this project</button><span className="menu-separator" /><button role="menuitem" onClick={() => void restartAll()}><RotateCcw size={14} />Restart all terminals</button><button role="menuitem" onClick={() => void stopAll()}><CircleStop size={14} />Stop all terminals</button><button role="menuitem" onClick={openLauncher}><FolderOpen size={14} />Project launcher</button><button role="menuitem" className="danger-item" onClick={() => void closeWorkspace()}>Close workspace</button></div></>}</div></>}
+    sidebar={<ForgeSpaceSidebar project={project} activeWorkspaceId={workspace.id} workspaces={sidebarWorkspaces} recents={recentWorkspaces} collapsed={collapsed} width={sidebarWidth} switchingWorkspaceId={switchingWorkspaceId} projectFolderMissing={projectFolderMissing} loadingWorkspaces={projectWorkspaces.length === 0 && loading} actions={sidebarActions} />}
+    canvas={<>{error && <div className="workspace-error"><ErrorNotice message={error} onRetry={() => void restartAll()} /></div>}<section className="terminal-canvas"><RecursiveLayout node={workspace.layout} path={[]} workspace={workspace} sessions={sessions} deferredPaneIds={deferredPaneIds} activePaneId={activePaneId} maximizedPaneId={maximizedPaneId} settings={settings} paneErrors={paneErrors} onFocus={(paneId) => { setActivePane(paneId); if (workspace.activePaneId !== paneId) { const next = { ...workspace, activePaneId: paneId }; setLocalWorkspace(next); setWorkspace(next); void persist(next).catch(() => undefined) } }} onMaximize={(paneId) => setMaximizedPaneId((value) => value === paneId ? undefined : paneId)} onClose={closePane} onRestart={restartPane} onStop={stopPane} onMenu={(paneId, anchor) => { const rect = anchor.getBoundingClientRect(); setPaneMenu({ paneId, x: Math.min(rect.left, window.innerWidth - 230), y: rect.bottom + 4 }) }} onSizes={updateLayoutSizes} /></section></>}
+    statusBar={<><span>{project.gitBranch || 'No branch'}</span><span className="status-path" title={project.rootPath}>{project.name}</span><span>{running}/{workspace.panes.length} running</span><span>{activePane?.title || 'No active pane'}</span>{Object.keys(paneErrors).some((id) => paneErrors[id]) && <span className="status-alert">Needs attention</span>}</>}
+  >
+    {pendingInsert && <Modal title={pendingInsert.replace ? 'Replace terminal' : 'Choose terminal'} onClose={() => setPendingInsert(undefined)}><div className="provider-picker">{choices.length === 0 ? <ErrorNotice message="No available agents or shells were detected." onRetry={() => void scanProviders()} /> : choices.map((choice) => <button key={`${choice.provider}:${choice.name}`} onClick={() => void insertOrReplace(choice)}><TerminalSquare size={18} /><div><strong>{choice.name}</strong><span>Available · {providerLabel(choice.provider)}</span></div></button>)}</div></Modal>}
     {renameTarget && <TextPromptDialog title={renameTarget.kind === 'workspace' ? 'Rename workspace' : 'Rename terminal'} label={renameTarget.kind === 'workspace' ? 'Workspace name' : 'Terminal title'} initialValue={renameTarget.initialValue} confirmLabel="Rename" onClose={() => setRenameTarget(undefined)} onConfirm={(value) => void confirmRename(value)} />}
     {paneMenu && <PaneMenu menu={paneMenu} onClose={() => setPaneMenu(undefined)} onAction={(action) => { const paneId = paneMenu.paneId; setPaneMenu(undefined); if (action === 'rename') void renamePane(paneId); if (action === 'split_right') setPendingInsert({ targetPaneId: paneId, direction: 'vertical' }); if (action === 'split_down') setPendingInsert({ targetPaneId: paneId, direction: 'horizontal' }); if (action === 'duplicate') { const pane = workspace.panes.find((item) => item.id === paneId); if (pane) setPendingInsert({ targetPaneId: paneId, direction: 'vertical', duplicate: pane }) } if (action === 'replace') setPendingInsert({ targetPaneId: paneId, direction: 'vertical', replace: true }); if (action === 'directory') void changeDirectory(paneId); if (action === 'restart') void restartPane(paneId); if (action === 'stop') void stopPane(paneId); if (action === 'close') void closePane(paneId); if (['search','copy','paste','select_all','clear','focus'].includes(action)) dispatchTerminalAction(paneId, action as Parameters<typeof dispatchTerminalAction>[1]) }} />}
-  </main>
+  </AppShell>
 }
 
-interface RecursiveProps { node: LayoutNode; path: number[]; workspace: Workspace; sessions: Record<string, TerminalSession>; activePaneId?: string; maximizedPaneId?: string; settings: ReturnType<typeof useAppStore.getState>['settings']; paneErrors: Record<string, string>; onFocus: (paneId: string) => void; onMaximize: (paneId: string) => void; onClose: (paneId: string) => void; onRestart: (paneId: string) => void; onStop: (paneId: string) => void; onMenu: (paneId: string, anchor: HTMLElement) => void; onSizes: (path: number[], layout: PanelLayout) => void }
+interface RecursiveProps { node: LayoutNode; path: number[]; workspace: Workspace; sessions: TerminalSession[]; deferredPaneIds: string[]; activePaneId?: string; maximizedPaneId?: string; settings: ReturnType<typeof useAppStore.getState>['settings']; paneErrors: Record<string, string>; onFocus: (paneId: string) => void; onMaximize: (paneId: string) => void; onClose: (paneId: string) => void; onRestart: (paneId: string) => void; onStop: (paneId: string) => void; onMenu: (paneId: string, anchor: HTMLElement) => void; onSizes: (path: number[], layout: PanelLayout) => void }
 
 function RecursiveLayout(props: RecursiveProps) {
   const { node } = props
   if (node.type === 'pane') {
     const assignment = props.workspace.panes.find((pane) => pane.id === node.paneId)
     if (!assignment) return <div className="terminal-failure"><ErrorNotice message="This layout pane has no saved assignment." /></div>
-    const session = Object.values(props.sessions).find((item) => item.paneId === node.paneId)
-    return <div className="pane-slot"><TerminalPane assignment={assignment} session={session} active={props.activePaneId === node.paneId} maximized={props.maximizedPaneId === node.paneId} settings={props.settings} onFocus={() => props.onFocus(node.paneId)} onMaximize={() => props.onMaximize(node.paneId)} onClose={() => props.onClose(node.paneId)} onRestart={() => props.onRestart(node.paneId)} onStop={() => props.onStop(node.paneId)} onMenu={(anchor) => props.onMenu(node.paneId, anchor)} />{props.paneErrors[node.paneId] && <div className="pane-native-error"><ErrorNotice message={props.paneErrors[node.paneId]} onRetry={() => props.onRestart(node.paneId)} /></div>}</div>
+    const session = props.sessions.find((item) => item.paneId === node.paneId)
+    return <div className="pane-slot"><TerminalPane assignment={assignment} session={session} deferred={props.deferredPaneIds.includes(node.paneId)} active={props.activePaneId === node.paneId} maximized={props.maximizedPaneId === node.paneId} settings={props.settings} onFocus={() => props.onFocus(node.paneId)} onMaximize={() => props.onMaximize(node.paneId)} onClose={() => props.onClose(node.paneId)} onRestart={() => props.onRestart(node.paneId)} onStop={() => props.onStop(node.paneId)} onMenu={(anchor) => props.onMenu(node.paneId, anchor)} />{props.paneErrors[node.paneId] && <div className="pane-native-error"><ErrorNotice message={props.paneErrors[node.paneId]} onRetry={() => props.onRestart(node.paneId)} /></div>}</div>
   }
   const ids = node.children.map((child) => paneIds(child)[0])
   const defaultLayout = Object.fromEntries(ids.map((id, index) => [id, node.sizes[index] ?? 100 / ids.length]))

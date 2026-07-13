@@ -3,15 +3,18 @@ use crate::database::DatabaseService;
 use crate::errors::{AppError, AppResult};
 use crate::models::{
     CreateTerminalRequest, TerminalExitEvent, TerminalOutputEvent, TerminalSession,
+    TerminalStatusEvent,
 };
 use chrono::Utc;
 use parking_lot::{Mutex, RwLock};
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use std::collections::HashMap;
+use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::mpsc::{sync_channel, RecvTimeoutError, TrySendError};
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -20,6 +23,37 @@ use uuid::Uuid;
 
 const OUTPUT_TAIL_LIMIT: usize = 64 * 1024;
 const OUTPUT_BUFFER_SIZE: usize = 16 * 1024;
+const OUTPUT_QUEUE_DEPTH: usize = 128;
+const OUTPUT_BATCH_LIMIT: usize = 64 * 1024;
+const OUTPUT_BATCH_WINDOW: Duration = Duration::from_millis(12);
+const OUTPUT_LOG_ROTATE_BYTES: u64 = 5 * 1024 * 1024;
+
+struct TerminalLog {
+    path: PathBuf,
+    file: File,
+}
+
+impl TerminalLog {
+    fn append(&mut self, data: &[u8]) {
+        if self.file.metadata().is_ok_and(|metadata| {
+            metadata.len().saturating_add(data.len() as u64) > OUTPUT_LOG_ROTATE_BYTES
+        }) {
+            let backup = self.path.with_extension("log.1");
+            let _ = self.file.flush();
+            let _ = fs::remove_file(&backup);
+            let _ = fs::rename(&self.path, backup);
+            if let Ok(file) = OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&self.path)
+            {
+                self.file = file;
+            }
+        }
+        let _ = self.file.write_all(data);
+        let _ = self.file.flush();
+    }
+}
 
 struct TerminalHandle {
     metadata: RwLock<TerminalSession>,
@@ -29,6 +63,8 @@ struct TerminalHandle {
     cancelled: AtomicBool,
     sequence: AtomicU64,
     output_tail: Mutex<Vec<u8>>,
+    output_log: Option<Mutex<TerminalLog>>,
+    started_at: Instant,
 }
 
 #[derive(Clone)]
@@ -77,6 +113,11 @@ impl TerminalManager {
             Path::new(&request.working_directory),
             &request.args,
         )?;
+        let session_id = Uuid::new_v4().to_string();
+        let output_log = self.create_output_log(&session_id)?;
+        let log_path = output_log
+            .as_ref()
+            .map(|log| log.path.to_string_lossy().into_owned());
         let pty_system = native_pty_system();
         let pair = pty_system
             .openpty(PtySize {
@@ -94,9 +135,12 @@ impl TerminalManager {
                 .detail(error.to_string())
                 .entity(&request.pane_id)
             })?;
-        let mut command = CommandBuilder::new(spec.executable);
-        command.args(spec.arguments);
-        command.cwd(spec.working_directory);
+        let executable = spec.executable.to_string_lossy().to_string();
+        let arguments = spec.arguments.clone();
+        let working_directory = spec.working_directory.to_string_lossy().to_string();
+        let mut command = CommandBuilder::new(&spec.executable);
+        command.args(spec.arguments.clone());
+        command.cwd(&spec.working_directory);
         command.env("TERM", "xterm-256color");
         command.env("COLORTERM", "truecolor");
         for (key, value) in spec.environment_overrides {
@@ -129,12 +173,15 @@ impl TerminalManager {
             .detail(error.to_string())
         })?;
         let session = TerminalSession {
-            id: Uuid::new_v4().to_string(),
+            id: session_id,
+            project_id: request.project_id,
             workspace_id: request.workspace_id,
             pane_id: request.pane_id,
             provider: request.provider,
+            executable,
+            arguments,
             title: request.title,
-            working_directory: request.working_directory,
+            working_directory,
             status: "running".into(),
             process_id,
             started_at: Utc::now().to_rfc3339(),
@@ -142,6 +189,13 @@ impl TerminalManager {
             exit_code: None,
             output_tail: Vec::new(),
             next_sequence: 0,
+            log_path,
+            restoration_state: if request.restoration_attempt {
+                "restored".into()
+            } else {
+                "not_requested".into()
+            },
+            dropped_output_bytes: 0,
         };
         let handle = Arc::new(TerminalHandle {
             metadata: RwLock::new(session.clone()),
@@ -151,6 +205,8 @@ impl TerminalManager {
             cancelled: AtomicBool::new(false),
             sequence: AtomicU64::new(0),
             output_tail: Mutex::new(Vec::new()),
+            output_log: output_log.map(Mutex::new),
+            started_at: Instant::now(),
         });
         if let Some(database) = &self.database {
             // The child is already spawned, so a failed record would otherwise orphan a live
@@ -163,6 +219,23 @@ impl TerminalManager {
         self.sessions
             .write()
             .insert(session.id.clone(), handle.clone());
+        log::info!(
+            "terminal lifecycle workspace_id={} pane_id={} session_id={} provider={} event=started pid={:?}",
+            session.workspace_id,
+            session.pane_id,
+            session.id,
+            session.provider.as_str(),
+            session.process_id
+        );
+        if let Some(app) = &self.app_handle {
+            let _ = app.emit(
+                "terminal-status",
+                TerminalStatusEvent {
+                    session: session.clone(),
+                    lifecycle_event: "started".into(),
+                },
+            );
+        }
         // If either worker thread cannot be created the session would be a zombie: a live
         // child with no output pump and no exit reaping. Tear it down and surface the
         // failure instead of leaving it stuck.
@@ -183,12 +256,83 @@ impl TerminalManager {
         Ok(session)
     }
 
+    fn create_output_log(&self, session_id: &str) -> AppResult<Option<TerminalLog>> {
+        let Some(database) = &self.database else {
+            return Ok(None);
+        };
+        if database.get_settings()?.output_log_retention != "rotating_log" {
+            return Ok(None);
+        }
+        let base = database.path().and_then(Path::parent).ok_or_else(|| {
+            AppError::new(
+                "terminal_log_unavailable",
+                "The terminal log directory is unavailable.",
+                true,
+            )
+        })?;
+        let directory = base.join("logs").join("terminals");
+        fs::create_dir_all(&directory).map_err(|error| {
+            AppError::new(
+                "terminal_log_unavailable",
+                "ForgeMind could not create the terminal log directory.",
+                true,
+            )
+            .detail(error.to_string())
+        })?;
+        let path = directory.join(format!("{session_id}.log"));
+        let file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+            .map_err(|error| {
+                AppError::new(
+                    "terminal_log_unavailable",
+                    "ForgeMind could not open the terminal output log.",
+                    true,
+                )
+                .detail(error.to_string())
+            })?;
+        Ok(Some(TerminalLog { path, file }))
+    }
+
     fn spawn_output_reader(
         &self,
         handle: Arc<TerminalHandle>,
         mut reader: Box<dyn Read + Send>,
     ) -> std::io::Result<()> {
         let app = self.app_handle.clone();
+        let emitter_handle = handle.clone();
+        let (sender, receiver) = sync_channel::<Vec<u8>>(OUTPUT_QUEUE_DEPTH);
+        thread::Builder::new()
+            .name(format!(
+                "forgemind-output-pipeline-{}",
+                handle.metadata.read().id
+            ))
+            .spawn(move || loop {
+                let mut data = match receiver.recv_timeout(OUTPUT_BATCH_WINDOW) {
+                    Ok(data) => data,
+                    Err(RecvTimeoutError::Timeout) => continue,
+                    Err(RecvTimeoutError::Disconnected) => break,
+                };
+                while data.len() < OUTPUT_BATCH_LIMIT {
+                    match receiver.try_recv() {
+                        Ok(next) if data.len() + next.len() <= OUTPUT_BATCH_LIMIT => {
+                            data.extend_from_slice(&next)
+                        }
+                        Ok(next) => {
+                            // A PTY read is at most OUTPUT_BUFFER_SIZE, so this branch only
+                            // occurs after an already full batch. Deliver the remainder as a
+                            // distinct ordered event rather than merging beyond the bound.
+                            let sequence = append_and_sequence(&emitter_handle, &data);
+                            emit_output(&app, &emitter_handle, sequence, std::mem::take(&mut data));
+                            data = next;
+                        }
+                        Err(_) => break,
+                    }
+                }
+                let sequence = append_and_sequence(&emitter_handle, &data);
+                emit_output(&app, &emitter_handle, sequence, data);
+            })?;
         thread::Builder::new()
             .name(format!(
                 "forgemind-pty-output-{}",
@@ -201,31 +345,15 @@ impl TerminalManager {
                         Ok(0) => break,
                         Ok(read) => {
                             let data = buffer[..read].to_vec();
-                            // Append to the tail and advance the sequence under the same lock so a
-                            // concurrent session_status/list_live snapshot always observes the tail
-                            // bytes and the next_sequence advance together. Otherwise a reconnect can
-                            // replay the tail *and* the matching event, duplicating output (or, with
-                            // the opposite interleaving, drop it).
-                            let sequence = {
-                                let mut tail = handle.output_tail.lock();
-                                tail.extend_from_slice(&data);
-                                if tail.len() > OUTPUT_TAIL_LIMIT {
-                                    let drain = tail.len() - OUTPUT_TAIL_LIMIT;
-                                    tail.drain(..drain);
-                                }
-                                handle.sequence.fetch_add(1, Ordering::AcqRel)
-                            };
-                            let metadata = handle.metadata.read();
-                            let event = TerminalOutputEvent {
-                                session_id: metadata.id.clone(),
-                                pane_id: metadata.pane_id.clone(),
-                                sequence,
-                                timestamp: Utc::now().to_rfc3339(),
-                                data,
-                            };
-                            drop(metadata);
-                            if let Some(app) = &app {
-                                let _ = app.emit("terminal-output", event);
+                            if let Err(error) = sender.try_send(data) {
+                                let dropped = match error {
+                                    TrySendError::Full(data) | TrySendError::Disconnected(data) => {
+                                        data.len() as u64
+                                    }
+                                };
+                                let mut metadata = handle.metadata.write();
+                                metadata.dropped_output_bytes =
+                                    metadata.dropped_output_bytes.saturating_add(dropped);
                             }
                         }
                         Err(_) if handle.cancelled.load(Ordering::Acquire) => break,
@@ -251,7 +379,7 @@ impl TerminalManager {
                         Err(_) => break None,
                     }
                 };
-                let (session_id, pane_id, status) = {
+                let (session_id, pane_id, status, final_session) = {
                     let mut metadata = handle.metadata.write();
                     metadata.status = if handle.cancelled.load(Ordering::Acquire) {
                         "terminated".into()
@@ -265,13 +393,33 @@ impl TerminalManager {
                         metadata.id.clone(),
                         metadata.pane_id.clone(),
                         metadata.status.clone(),
+                        metadata.clone(),
                     )
                 };
                 let tail = handle.output_tail.lock().clone();
                 if let Some(database) = &database {
                     let _ = database.mark_session_ended(&session_id, &status, exit_code, &tail);
                 }
+                let metadata = handle.metadata.read();
+                log::info!(
+                    "terminal lifecycle workspace_id={} pane_id={} session_id={} provider={} event={} duration_ms={} exit_code={:?}",
+                    metadata.workspace_id,
+                    metadata.pane_id,
+                    metadata.id,
+                    metadata.provider.as_str(),
+                    status,
+                    handle.started_at.elapsed().as_millis(),
+                    exit_code
+                );
+                drop(metadata);
                 if let Some(app) = &app {
+                    let _ = app.emit(
+                        "terminal-status",
+                        TerminalStatusEvent {
+                            session: final_session,
+                            lifecycle_event: status.clone(),
+                        },
+                    );
                     let _ = app.emit(
                         "terminal-exit",
                         TerminalExitEvent {
@@ -333,6 +481,17 @@ impl TerminalManager {
 
     pub fn terminate_session(&self, session_id: &str) -> AppResult<()> {
         let handle = self.owned(session_id)?;
+        {
+            let metadata = handle.metadata.read();
+            log::info!(
+                "terminal lifecycle workspace_id={} pane_id={} session_id={} provider={} event=terminate_requested duration_ms={}",
+                metadata.workspace_id,
+                metadata.pane_id,
+                metadata.id,
+                metadata.provider.as_str(),
+                handle.started_at.elapsed().as_millis()
+            );
+        }
         handle.cancelled.store(true, Ordering::Release);
         handle.metadata.write().status = "terminating".into();
         let process_id = handle.metadata.read().process_id;
@@ -450,6 +609,35 @@ impl TerminalManager {
     }
 }
 
+fn append_and_sequence(handle: &TerminalHandle, data: &[u8]) -> u64 {
+    // Tail and sequence advance atomically from a reconnecting renderer's perspective.
+    let mut tail = handle.output_tail.lock();
+    tail.extend_from_slice(data);
+    if tail.len() > OUTPUT_TAIL_LIMIT {
+        let drain = tail.len() - OUTPUT_TAIL_LIMIT;
+        tail.drain(..drain);
+    }
+    if let Some(log) = &handle.output_log {
+        log.lock().append(data);
+    }
+    handle.sequence.fetch_add(1, Ordering::AcqRel)
+}
+
+fn emit_output(app: &Option<AppHandle>, handle: &TerminalHandle, sequence: u64, data: Vec<u8>) {
+    let metadata = handle.metadata.read();
+    let event = TerminalOutputEvent {
+        session_id: metadata.id.clone(),
+        pane_id: metadata.pane_id.clone(),
+        sequence,
+        timestamp: Utc::now().to_rfc3339(),
+        data,
+    };
+    drop(metadata);
+    if let Some(app) = app {
+        let _ = app.emit("terminal-output", event);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -468,6 +656,7 @@ mod tests {
         #[cfg(not(windows))]
         let args = vec![];
         CreateTerminalRequest {
+            project_id: "project".into(),
             workspace_id: workspace_id.into(),
             pane_id: pane_id.into(),
             provider: AgentProvider::CommandPrompt,
@@ -477,6 +666,7 @@ mod tests {
             working_directory: std::env::temp_dir().to_string_lossy().to_string(),
             cols: 80,
             rows: 24,
+            restoration_attempt: false,
         }
     }
 
@@ -548,6 +738,49 @@ mod tests {
             .unwrap();
         manager.terminate_workspace_sessions("one").unwrap();
         assert!(manager.session_status(&other.id).is_ok());
+        manager.terminate_all_sessions().unwrap();
+    }
+
+    #[test]
+    fn rapid_output_remains_ordered_and_tail_is_bounded() {
+        let manager = TerminalManager::for_test();
+        let session = manager
+            .create_session(shell_request("stress", "noisy-pane"))
+            .unwrap();
+        #[cfg(windows)]
+        {
+            thread::sleep(Duration::from_millis(100));
+            manager.write_input(&session.id, b"\x1b[1;1R").unwrap();
+            manager
+                .write_input(
+                    &session.id,
+                    b"for /L %i in (1,1,2200) do @echo %i-01234567890123456789012345678901234567890123456789\r\n",
+                )
+                .unwrap();
+        }
+        #[cfg(not(windows))]
+        manager
+            .write_input(
+                &session.id,
+                b"i=1; while [ $i -le 2200 ]; do echo $i-01234567890123456789012345678901234567890123456789; i=$((i+1)); done\n",
+            )
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(8);
+        let mut status = manager.session_status(&session.id).unwrap();
+        while Instant::now() < deadline {
+            status = manager.session_status(&session.id).unwrap();
+            if String::from_utf8_lossy(&status.output_tail).contains("2200-") {
+                break;
+            }
+            thread::sleep(Duration::from_millis(30));
+        }
+        let tail = String::from_utf8_lossy(&status.output_tail);
+        assert!(
+            tail.contains("2200-"),
+            "last ordered marker was not retained"
+        );
+        assert!(status.output_tail.len() <= OUTPUT_TAIL_LIMIT);
+        assert!(status.next_sequence > 1);
         manager.terminate_all_sessions().unwrap();
     }
 }

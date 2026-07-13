@@ -62,7 +62,9 @@ export interface PaneAssignment {
   executablePath: string
   args: string[]
   shellProfileId?: string
+  profileId?: string
   workingDirectory: string
+  workingDirectoryMode: 'project_relative' | 'custom'
   positionOrder: number
 }
 
@@ -70,8 +72,10 @@ export interface Workspace {
   id: string
   projectId: string
   name: string
+  normalizedName: string
   layout: LayoutNode
   activePaneId?: string
+  restoreBehavior: 'inherit' | 'ask' | 'restart_agents' | 'fresh_shells'
   panes: PaneAssignment[]
   createdAt: string
   updatedAt: string
@@ -84,6 +88,7 @@ export interface WorkspaceSaveRequest {
   name: string
   layout: LayoutNode
   activePaneId?: string
+  restoreBehavior: Workspace['restoreBehavior']
   panes: PaneAssignment[]
 }
 
@@ -102,9 +107,12 @@ export interface ProjectOverview {
 
 export interface TerminalSession {
   id: string
+  projectId: string
   workspaceId: string
   paneId: string
   provider: AgentProvider
+  executable: string
+  arguments: string[]
   title: string
   workingDirectory: string
   status: 'running' | 'exited' | 'terminated' | 'disconnected' | 'failed'
@@ -114,18 +122,17 @@ export interface TerminalSession {
   exitCode?: number
   outputTail: number[]
   nextSequence: number
+  logPath?: string
+  restorationState: 'not_requested' | 'stale' | 'restored' | 'deferred' | 'failed'
+  droppedOutputBytes: number
 }
 
-export interface CreateTerminalRequest {
+export interface StartTerminalRequest {
   workspaceId: string
   paneId: string
-  provider: AgentProvider
-  title: string
-  executablePath: string
-  args: string[]
-  workingDirectory: string
   cols: number
   rows: number
+  restorationAttempt?: boolean
 }
 
 export interface TerminalOutputEvent {
@@ -143,8 +150,88 @@ export interface TerminalExitEvent {
   timestamp: string
 }
 
+export interface TerminalStatusEvent {
+  session: TerminalSession
+  lifecycleEvent: string
+}
+
+export interface RestorationProgress {
+  workspaceId: string
+  paneId: string
+  state: 'starting' | 'running' | 'failed' | 'deferred'
+  completed: number
+  total: number
+}
+
+export interface RestorationFailure {
+  paneId: string
+  code: string
+  message: string
+  attempts: number
+}
+
+export interface RestorationResult {
+  workspaceId: string
+  sessions: TerminalSession[]
+  deferredPaneIds: string[]
+  failures: RestorationFailure[]
+  budget: number
+}
+
+export interface AgentProfile {
+  id: string
+  provider: AgentProvider
+  name: string
+  executablePath: string
+  version?: string
+  available: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export interface AgentSession {
+  terminalSessionId: string
+  projectId: string
+  workspaceId: string
+  paneId: string
+  profileId?: string
+  provider: AgentProvider
+  providerSessionId?: string
+  transcriptPath?: string
+  status: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface HealthReport {
+  healthy: boolean
+  schemaVersion: number
+  foreignKeyViolations: number
+  staleLiveSessions: number
+  quarantinedRecords: number
+  messages: string[]
+}
+
+export interface RepairSummary {
+  inspected: number
+  repaired: number
+  quarantined: number
+  entries: Array<{ code: string; entityType: string; entityId?: string; detail: string }>
+}
+
+export interface DiagnosticsSnapshot {
+  applicationVersion: string
+  databasePath: string
+  logDirectory: string
+  schemaVersion: number
+  backupPath?: string
+  liveTerminalCount: number
+  health: HealthReport
+}
+
 export interface AppSettings {
   sidebarOpen: boolean
+  sidebarWidth: number
   uiScale: number
   terminalFontSize: number
   terminalFontFamily: string
@@ -160,6 +247,13 @@ export interface AppSettings {
   confirmClosePane: boolean
   reopenLastWorkspace: boolean
   restoreBehavior: 'ask' | 'restart_agents' | 'fresh_shells'
+  outputLogRetention: 'tail_only' | 'rotating_log'
+  restorationLaunchBudget: number
+  defaultLayout: string
+  defaultPaneCount: number
+  inactiveWorkspaceProcesses: 'keep_running' | 'ask' | 'stop'
+  inactiveWorkspaceRendering: 'hibernate'
+  settingsVersion: number
 }
 
 export interface NativeError {
@@ -168,4 +262,6 @@ export interface NativeError {
   recoverable: boolean
   detail?: string
   affectedEntity?: string
+  recommendedAction?: string
+  sourceLayer: string
 }

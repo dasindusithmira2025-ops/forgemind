@@ -6,15 +6,18 @@ mod models;
 mod services;
 
 use database::DatabaseService;
-use services::{AgentDetector, TerminalManager};
+use services::{AgentDetector, RestorationScheduler, TerminalManager};
+use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::{AppHandle, Manager, RunEvent};
 use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
 
 pub struct AppState {
     database: Arc<DatabaseService>,
-    detector: AgentDetector,
+    detector: Arc<AgentDetector>,
     terminals: TerminalManager,
+    restoration: RestorationScheduler,
+    log_directory: PathBuf,
 }
 
 /// Persistent diagnostics for released builds. Logs always go to a rotating file in
@@ -88,11 +91,37 @@ pub fn run() {
                     error.detail.as_deref().unwrap_or_default(),
                 ),
             };
+            match database.repair_metadata() {
+                Ok(summary) => log::info!(
+                    "metadata repair inspected={} repaired={} quarantined={}",
+                    summary.inspected,
+                    summary.repaired,
+                    summary.quarantined
+                ),
+                Err(error) => fatal_startup(
+                    app.handle(),
+                    "ForgeMind could not validate its saved workspace metadata.",
+                    error.detail.as_deref().unwrap_or(&error.message),
+                ),
+            }
+            let detector = Arc::new(AgentDetector::default());
             let terminals = TerminalManager::new(database.clone(), app.handle().clone());
+            let restoration = RestorationScheduler::new(
+                database.clone(),
+                terminals.clone(),
+                detector.clone(),
+                app.handle().clone(),
+            );
+            let log_directory = app
+                .path()
+                .app_log_dir()
+                .unwrap_or_else(|_| data_dir.join("logs"));
             app.manage(AppState {
                 database,
-                detector: AgentDetector::default(),
+                detector,
                 terminals,
+                restoration,
+                log_directory,
             });
             log::info!("ForgeMind initialized (data dir: {})", data_dir.display());
             Ok(())
@@ -107,6 +136,8 @@ pub fn run() {
             commands::validate_working_directory,
             commands::detect_agents,
             commands::detect_shells,
+            commands::list_agent_profiles,
+            commands::list_agent_sessions,
             commands::save_custom_shell,
             commands::validate_custom_executable,
             commands::get_layout_preset,
@@ -118,7 +149,11 @@ pub fn run() {
             commands::suggest_workspace_name,
             commands::list_recent_workspaces,
             commands::remove_recent_workspace,
+            commands::delete_workspace_configuration,
             commands::rename_workspace,
+            commands::reorder_workspaces,
+            commands::duplicate_workspace,
+            commands::set_last_active_workspace,
             commands::create_terminal_session,
             commands::write_terminal_input,
             commands::resize_terminal_session,
@@ -126,8 +161,13 @@ pub fn run() {
             commands::terminate_workspace_sessions,
             commands::list_live_sessions,
             commands::terminal_session_status,
+            commands::restore_workspace_sessions,
+            commands::reset_restoration_circuit,
             commands::get_settings,
             commands::save_settings,
+            commands::get_diagnostics,
+            commands::run_health_check,
+            commands::repair_database_metadata,
         ])
         .build(tauri::generate_context!());
 

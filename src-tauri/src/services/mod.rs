@@ -1,7 +1,9 @@
 pub mod agent_detector;
 pub mod project_service;
+pub mod restoration_scheduler;
 pub mod terminal_manager;
 
 pub use agent_detector::AgentDetector;
 pub use project_service::ProjectService;
+pub use restoration_scheduler::RestorationScheduler;
 pub use terminal_manager::TerminalManager;

@@ -20,7 +20,7 @@ vi.mock('../native/commands', () => ({
     listProjectsOverview: (...args: unknown[]) => listProjectsOverviewMock(...args),
     listWorkspacesForProject: (...args: unknown[]) => listWorkspacesForProjectMock(...args),
     removeRecentProject: (...args: unknown[]) => removeRecentProjectMock(...args),
-    removeRecentWorkspace: vi.fn(), relocateProject: vi.fn(), renameWorkspace: vi.fn(),
+    removeRecentWorkspace: vi.fn(), deleteWorkspaceConfiguration: vi.fn(), relocateProject: vi.fn(), renameWorkspace: vi.fn(),
   },
 }))
 
@@ -30,8 +30,8 @@ const project = (overrides: Partial<Project> = {}): Project => ({
   isGitRepository: true, hasPackageJson: true, hasLockfile: true, createdAt: '', updatedAt: '', lastOpenedAt: new Date().toISOString(), ...overrides,
 })
 const workspace = (id: string, name: string): Workspace => ({
-  id, projectId: 'project', name, layout: { type: 'pane', paneId: `${id}-pane` }, activePaneId: `${id}-pane`,
-  panes: [{ id: `${id}-pane`, title: 'Claude', provider: 'claude', executablePath: 'c', args: [], workingDirectory: 'C:\\code\\demo', positionOrder: 0 }],
+  id, projectId: 'project', name, normalizedName: name.toLowerCase(), restoreBehavior: 'inherit', layout: { type: 'pane', paneId: `${id}-pane` }, activePaneId: `${id}-pane`,
+  panes: [{ id: `${id}-pane`, title: 'Claude', provider: 'claude', executablePath: 'c', args: [], workingDirectory: 'C:\\code\\demo', workingDirectoryMode: 'project_relative', positionOrder: 0 }],
   createdAt: '', updatedAt: '', lastOpenedAt: new Date().toISOString(),
 })
 const overview = (workspaces: Workspace[], folderMissing = false): ProjectOverview => ({ project: project(), workspaces, folderMissing })
@@ -57,7 +57,7 @@ describe('Project Launcher', () => {
     openMock.mockResolvedValue(null)
     renderLauncher()
     expect(await screen.findByText('No recent projects yet.')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Open a project folder' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Open Project Folder' }))
     await waitFor(() => expect(openMock).toHaveBeenCalled())
   })
 
@@ -86,7 +86,7 @@ describe('Project Launcher', () => {
     renderLauncher()
     await screen.findByText('Demo Project')
     fireEvent.click(screen.getByRole('button', { name: /More actions for project Demo Project/i }))
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Open project…' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Refresh metadata' }))
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/setup/project'))
   })
 
@@ -97,7 +97,7 @@ describe('Project Launcher', () => {
     renderLauncher()
     await screen.findByText('Demo Project')
     fireEvent.click(screen.getByRole('button', { name: /More actions for project Demo Project/i }))
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Open project…' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Refresh metadata' }))
     expect(await screen.findByText('Open a workspace in Demo Project')).toBeInTheDocument()
   })
 

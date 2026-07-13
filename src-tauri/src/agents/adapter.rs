@@ -21,9 +21,11 @@ pub trait AgentAdapter: Send + Sync {
     ) -> AppResult<AgentLaunchSpec>;
 }
 
-/// Wrap Windows script shims so a ConPTY can launch them. `.ps1` scripts run through
-/// PowerShell and `.cmd`/`.bat` scripts through the command interpreter; everything else
-/// (real `.exe` binaries, POSIX executables) is passed through unchanged.
+/// Wrap Windows script shims so a ConPTY can launch them. PowerShell is used for
+/// `.cmd`/`.bat` shims too: passing an embedded quoted command through Rust's normal
+/// `Command` argument encoder makes `cmd.exe` treat the quotes as literal characters when
+/// the shim lives below a path containing spaces. A single PowerShell command string keeps
+/// the script path and every argument unambiguous without involving a second command parser.
 fn wrap_script_shim(executable: PathBuf, arguments: Vec<String>) -> (PathBuf, Vec<String>) {
     #[cfg(windows)]
     {
@@ -47,21 +49,36 @@ fn wrap_script_shim(executable: PathBuf, arguments: Vec<String>) -> (PathBuf, Ve
                 return (shell, wrapped);
             }
             Some("cmd") | Some("bat") => {
-                let comspec = std::env::var("COMSPEC")
-                    .unwrap_or_else(|_| "C:\\Windows\\System32\\cmd.exe".to_string());
-                let mut wrapped = vec![
-                    "/d".to_string(),
-                    "/s".to_string(),
-                    "/c".to_string(),
-                    executable.to_string_lossy().into_owned(),
+                let shell = which::which("pwsh")
+                    .or_else(|_| which::which("powershell"))
+                    .unwrap_or_else(|_| PathBuf::from("powershell.exe"));
+                let mut command = format!(
+                    "& {}",
+                    quote_powershell_literal(&executable.to_string_lossy())
+                );
+                for argument in arguments {
+                    command.push(' ');
+                    command.push_str(&quote_powershell_literal(&argument));
+                }
+                let wrapped = vec![
+                    "-NoLogo".to_string(),
+                    "-NoProfile".to_string(),
+                    "-ExecutionPolicy".to_string(),
+                    "Bypass".to_string(),
+                    "-Command".to_string(),
+                    command,
                 ];
-                wrapped.extend(arguments);
-                return (PathBuf::from(comspec), wrapped);
+                return (shell, wrapped);
             }
             _ => {}
         }
     }
     (executable, arguments)
+}
+
+#[cfg(windows)]
+fn quote_powershell_literal(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "''"))
 }
 
 pub struct ProviderAdapter(pub AgentProvider);
@@ -142,7 +159,7 @@ mod tests {
     }
 
     #[test]
-    fn cmd_shim_is_launched_through_the_command_interpreter() {
+    fn cmd_shim_is_launched_through_a_quote_safe_shell() {
         let (executable, arguments) = wrap_script_shim(
             PathBuf::from("C:\\Users\\dev\\AppData\\Roaming\\npm\\claude.cmd"),
             vec![],
@@ -150,9 +167,33 @@ mod tests {
         assert!(executable
             .file_stem()
             .and_then(|value| value.to_str())
-            .is_some_and(|stem| stem.eq_ignore_ascii_case("cmd")));
-        assert_eq!(arguments.iter().position(|arg| arg == "/c"), Some(2));
-        assert!(arguments.iter().any(|arg| arg.ends_with("claude.cmd")));
+            .is_some_and(
+                |stem| stem.eq_ignore_ascii_case("pwsh") || stem.eq_ignore_ascii_case("powershell")
+            ));
+        assert!(arguments.iter().any(|arg| arg == "-Command"));
+        assert!(arguments.iter().any(|arg| arg.contains("claude.cmd")));
+    }
+
+    #[test]
+    fn cmd_shim_path_with_spaces_is_quoted_as_one_command() {
+        let directory =
+            std::env::temp_dir().join(format!("forgemind shim {}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let shim = directory.join("fixture.cmd");
+        std::fs::write(&shim, "@echo FORGEMIND_SHIM_OK\r\n").unwrap();
+        let (executable, arguments) = wrap_script_shim(shim, Vec::new());
+        let output = std::process::Command::new(executable)
+            .args(arguments)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "stdout={:?} stderr={:?}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(String::from_utf8_lossy(&output.stdout).contains("FORGEMIND_SHIM_OK"));
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]

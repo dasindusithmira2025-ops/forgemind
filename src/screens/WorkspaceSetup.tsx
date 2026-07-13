@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type CSSProperties, type FormEvent } from 'react'
 import { open } from '@tauri-apps/plugin-dialog'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { ArrowRight, Check, ChevronLeft, ChevronRight, FolderGit2, FolderOpen, GripVertical, Plus, RefreshCw, ScanSearch, Search, Sparkles, TerminalSquare, X } from 'lucide-react'
+import { ArrowLeft, Check, FolderGit2, FolderOpen, GripVertical, Plus, RefreshCw, ScanSearch, Search, Sparkles, TerminalSquare, X } from 'lucide-react'
 import { Brand } from '../components/ui/Brand'
 import { Button } from '../components/ui/Button'
 import { ErrorNotice } from '../components/ui/ErrorNotice'
@@ -12,12 +12,10 @@ import { newId, paneIds, preferredShell, providerLabel } from '../shared/layout'
 import { useAppStore } from '../stores/appStore'
 
 type Choice = { provider: AgentProvider; name: string; executablePath: string; args: string[]; available: boolean; detail?: string; shellProfileId?: string }
-type WizardStep = 'layout' | 'agents'
 type LayoutPreset = { id: string; name: string; count: number }
 
 const CODING_PROVIDERS = ['claude', 'codex', 'opencode']
-const countOptions = [1, 2, 4, 6, 8, 10, 12]
-const gridColumns: Record<number, number> = { 1: 1, 2: 2, 4: 2, 6: 3, 8: 4, 10: 5, 12: 4 }
+const gridColumns: Record<number, number> = { 1: 1, 2: 2, 3: 2, 4: 2, 6: 3, 8: 4, 10: 5, 12: 4, 14: 7, 16: 4 }
 const PRESET_STORAGE_KEY = 'forgemind.layout-presets'
 const defaultPresets: LayoutPreset[] = [
   { id: 'solo', name: 'Solo', count: 1 },
@@ -36,12 +34,11 @@ function loadPresets(): LayoutPreset[] {
   return defaultPresets
 }
 
-const gridLabel = (count: number) => (gridColumns[count] ? `${count / gridColumns[count]}×${gridColumns[count]} grid` : `${count} panes`)
 
 export function WorkspaceSetup() {
-  const { projectId = '' } = useParams()
+  const { projectId: routeProjectId = '', workspaceId: routeWorkspaceId } = useParams()
   const [searchParams] = useSearchParams()
-  const editWorkspaceId = searchParams.get('workspaceId') || undefined
+  const editWorkspaceId = routeWorkspaceId || searchParams.get('workspaceId') || undefined
   const duplicateWorkspaceId = searchParams.get('duplicate') || undefined
   // CREATE mints a new workspace; EDIT reconfigures an existing one in place (same id);
   // DUPLICATE copies a layout into a brand-new workspace.
@@ -53,6 +50,7 @@ export function WorkspaceSetup() {
   const setDetections = useAppStore((state) => state.setDetections)
   const setShells = useAppStore((state) => state.setShells)
   const settings = useAppStore((state) => state.settings)
+  const [projectId, setProjectId] = useState(routeProjectId)
   const [project, setLocalProject] = useState<Project | undefined>(storedProject?.id === projectId ? storedProject : undefined)
   const [detections, setLocalDetections] = useState<AgentDetectionResult[]>([])
   const [shells, setLocalShells] = useState<ShellProfile[]>([])
@@ -60,8 +58,8 @@ export function WorkspaceSetup() {
   const [assignments, setAssignments] = useState<Record<string, PaneAssignment | undefined>>({})
   const [name, setName] = useState('')
   const [existingId, setExistingId] = useState<string>()
+  const [editingWorkspace, setEditingWorkspace] = useState<Workspace>()
   const [runningWarning, setRunningWarning] = useState(false)
-  const [step, setStep] = useState<WizardStep>('layout')
   const [workingFolder, setWorkingFolder] = useState('')
   const [folderDraft, setFolderDraft] = useState('')
   const [presets, setPresets] = useState<LayoutPreset[]>(loadPresets)
@@ -100,17 +98,20 @@ export function WorkspaceSetup() {
     let live = true
     void (async () => {
       try {
-        const loadedProject = project?.id === projectId ? project : await native.getProject(projectId)
+        const sourceId = editWorkspaceId ?? duplicateWorkspaceId
+        const source = sourceId ? await native.getWorkspace(sourceId) : undefined
+        const targetProjectId = routeProjectId || source?.projectId || ''
+        const loadedProject = project?.id === targetProjectId ? project : await native.getProject(targetProjectId)
         const scanned = await scan()
         if (!live) return
+        setProjectId(targetProjectId)
         setLocalProject(loadedProject); setProject(loadedProject)
         setWorkingFolder(loadedProject.rootPath)
 
         // EDIT / DUPLICATE start from an existing workspace's saved layout and panes.
-        const sourceId = editWorkspaceId ?? duplicateWorkspaceId
-        if (sourceId) {
-          const source = await native.getWorkspace(sourceId)
+        if (source) {
           if (!live) return
+          setEditingWorkspace(source)
           setLayout(source.layout)
           setAssignments(assignmentsFromWorkspace(source))
           if (mode === 'edit') {
@@ -122,18 +123,20 @@ export function WorkspaceSetup() {
             if (live && live_sessions.some((session) => session.status === 'running')) setRunningWarning(true)
           } else {
             setExistingId(undefined)
-            setName(await native.suggestWorkspaceName(projectId).catch(() => `${source.name} copy`))
+            setName(await native.suggestWorkspaceName(targetProjectId).catch(() => `${source.name} copy`))
           }
           return
         }
 
         // CREATE: default layout sized to installed agents, with a unique proposed name.
         const installedAgents = scanned.agentResults.filter((result) => result.available).length
-        const count = installedAgents >= 2 ? 4 : 2
-        const preset = await native.getLayoutPreset(count, '')
+        const automaticCount = installedAgents >= 2 ? 4 : 2
+        const count = settings.defaultLayout === 'auto' ? settings.defaultPaneCount || automaticCount : Number.parseInt(settings.defaultLayout, 10) || settings.defaultPaneCount || automaticCount
+        const variant = settings.defaultLayout === '2-horizontal' ? 'horizontal' : settings.defaultLayout === '2-vertical' ? 'vertical' : ''
+        const preset = await native.getLayoutPreset(count, variant)
         if (!live) return
         setExistingId(undefined)
-        setName(await native.suggestWorkspaceName(projectId).catch(() => 'Main Workspace'))
+        setName(await native.suggestWorkspaceName(targetProjectId).catch(() => 'Main Workspace'))
         setLayout(preset)
         seedAssignments(preset, loadedProject, scanned.agentResults, scanned.shellResults, loadedProject.rootPath)
       } catch (caught) { if (live) setError(asNativeError(caught).message) }
@@ -142,7 +145,7 @@ export function WorkspaceSetup() {
     return () => { live = false }
     // Re-hydrate when the project or the edit/duplicate target changes.
     // oxlint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId, editWorkspaceId, duplicateWorkspaceId])
+  }, [routeProjectId, editWorkspaceId, duplicateWorkspaceId])
 
   const seedAssignments = (nextLayout: LayoutNode, currentProject: Project, agents = detections, currentShells = shells, baseDir?: string) => {
     const base = baseDir ?? (workingFolder || currentProject.rootPath)
@@ -160,9 +163,9 @@ export function WorkspaceSetup() {
     setAssignments(next)
   }
 
-  const chooseCount = async (count: number) => {
+  const chooseCount = async (count: number, variant = '') => {
     if (!project) return
-    const next = await native.getLayoutPreset(count, '')
+    const next = await native.getLayoutPreset(count, variant)
     setLayout(next); seedAssignments(next, project, detections, shells, workingFolder || project.rootPath)
   }
 
@@ -213,7 +216,6 @@ export function WorkspaceSetup() {
 
   const savePreset = () => setPrompt({ kind: 'preset' })
 
-  const removePreset = (id: string) => setPresets((current) => current.filter((preset) => preset.id !== id))
 
   const changeWorkingDirectory = async (paneId: string) => {
     if (!project) return
@@ -267,7 +269,7 @@ export function WorkspaceSetup() {
     const ids = paneIds(layout)
     const missing = Object.fromEntries(ids.filter((id) => !source[id]).map((id) => [id, 'Assign an available agent or shell before launch.']))
     setPaneErrors(missing)
-    if (Object.keys(missing).length) { setError('Every terminal needs an agent or shell. Add one on the Agents step.'); setStep('agents'); return }
+    if (Object.keys(missing).length) { setError('Every Pane needs an available agent or shell before launch.'); return }
     setLaunching(true); setError('')
     try {
       const now = new Date().toISOString()
@@ -276,8 +278,10 @@ export function WorkspaceSetup() {
         id: existingId ?? newId(),
         projectId: project.id,
         name: name.trim() || 'Main Workspace',
+        normalizedName: (name.trim() || 'Main Workspace').toLowerCase(),
         layout,
         activePaneId: ids[0],
+        restoreBehavior: editingWorkspace?.restoreBehavior ?? 'inherit',
         panes: ids.map((id, index) => ({ ...source[id]!, positionOrder: index })),
         createdAt: now,
         updatedAt: now,
@@ -289,6 +293,7 @@ export function WorkspaceSetup() {
         name: workspace.name,
         layout: workspace.layout,
         activePaneId: workspace.activePaneId,
+        restoreBehavior: workspace.restoreBehavior,
         panes: workspace.panes,
       })
       setWorkspace(saved)
@@ -315,121 +320,29 @@ export function WorkspaceSetup() {
 
   const modeLabel = mode === 'edit' ? `Editing “${name || 'workspace'}”` : mode === 'duplicate' ? 'Duplicating workspace' : 'Creating workspace'
 
-  return <main className="wizard-shell">
-    <div className="wizard-topbar">
-      <div className="wizard-topbar-left">
-        <Brand />
-        <button className="wizard-project" onClick={() => navigate('/')} title="Change project"><FolderGit2 size={14} /><span>{project.name}</span>{project.gitBranch && <em>{project.gitBranch}</em>}</button>
-        <span className="wizard-mode" data-mode={mode}>{modeLabel}</span>
-      </div>
-      <label className="wizard-name"><span>Workspace</span><input aria-label="Workspace name" value={name} onChange={(event) => setName(event.target.value)} /></label>
-    </div>
-
-    {runningWarning && <div className="wizard-running-banner" role="alert">
-      <span>This workspace has running terminals. Saving changes updates its configuration; reopen it to apply the new layout to fresh terminals.</span>
-      <Button variant="ghost" onClick={() => setRunningWarning(false)}>Dismiss</Button>
-    </div>}
-
-    <div className="wizard-canvas">
-      <nav className="wizard-stepper" aria-label="Setup progress">
-        <StepDot index={1} label="Start" state="done" />
-        <span className="step-bar done" />
-        <StepDot index={2} label="Layout" state={step === 'layout' ? 'active' : 'done'} />
-        <span className={`step-bar ${step === 'agents' ? 'done' : ''}`} />
-        <StepDot index={3} label="Agents" state={step === 'agents' ? 'active' : 'todo'} />
-      </nav>
-
-      {error && <div className="wizard-error"><ErrorNotice message={error} /></div>}
-
-      {step === 'layout' ? <section className="wizard-card" key="layout">
-        <header className="wizard-head">
-          <h1>Set up your workspace</h1>
-          <p>Pick a folder to work in and choose how many terminals you want.</p>
-        </header>
-
-        <div className="wizard-field">
-          <div className="field-label">Working folder<span className="field-hint">Where your terminals will start</span></div>
-          <div className="folder-field">
-            <span className="folder-ic"><FolderOpen size={16} /></span>
-            <span className="folder-path" title={workingFolder}>{workingFolder}</span>
-            <button className="folder-browse" onClick={() => void browseWorkingFolder()} aria-label="Browse for folder"><Search size={15} /></button>
-          </div>
-          <form className="folder-entry" onSubmit={(event) => void applyFolderDraft(event)}>
-            <input value={folderDraft} onChange={(event) => setFolderDraft(event.target.value)} aria-label="Enter a folder path" placeholder="Paste a folder path and press Enter" spellCheck={false} />
-            <button type="submit" className="folder-go" aria-label="Set folder"><ArrowRight size={15} /></button>
-          </form>
-        </div>
-
-        <div className="wizard-field">
-          <div className="field-label">How many terminals?<span className="field-hint">Tap a tile to choose a layout</span>
-            <span className="count-badges"><span className="count-badge accent">{paneCount} terminal{paneCount === 1 ? '' : 's'}</span><span className="count-badge">{gridLabel(paneCount)}</span></span>
-          </div>
-          <div className="count-tiles">
-            {countOptions.map((count) => <button key={count} className={`count-tile ${paneCount === count ? 'selected' : ''}`} aria-label={`${count} pane${count === 1 ? '' : 's'}`} aria-pressed={paneCount === count} onClick={() => void chooseCount(count)}>
-              <span className="tile-grid" style={{ gridTemplateColumns: `repeat(${gridColumns[count]}, 1fr)` } as CSSProperties}>{Array.from({ length: count }, (_, index) => <i key={index} />)}</span>
-              <span className="tile-num">{count}</span>
-            </button>)}
-          </div>
-        </div>
-
-        <div className="wizard-field">
-          <div className="field-label"><Sparkles size={13} /> Presets<span className="field-hint">One-click layouts</span></div>
-          <div className="preset-chips">
-            {presets.map((preset) => <span className={`preset-chip ${preset.count === paneCount ? 'active' : ''}`} key={preset.id}>
-              <button className="preset-apply" onClick={() => applyPreset(preset)}><span className="chip-grid" style={{ gridTemplateColumns: `repeat(${gridColumns[preset.count] ?? 2}, 1fr)` } as CSSProperties}>{Array.from({ length: Math.min(preset.count, 12) }, (_, index) => <i key={index} />)}</span>{preset.name}</button>
-              <button className="preset-remove" aria-label={`Remove ${preset.name} preset`} onClick={() => removePreset(preset.id)}><X size={12} /></button>
-            </span>)}
-            <button className="preset-chip add" onClick={savePreset}><Plus size={14} />New</button>
-          </div>
-        </div>
-
-        <footer className="wizard-footer">
-          <Button variant="ghost" icon={<ChevronLeft size={16} />} onClick={() => navigate('/')}>Back</Button>
-          <div className="footer-right">
-            <Button variant="ghost" onClick={() => void openWithoutAgents()} disabled={launching}>Open without AI</Button>
-            <button className="button button-primary wizard-next" onClick={() => setStep('agents')}>Next: Add AI agents <ArrowRight size={16} /></button>
-          </div>
-        </footer>
-      </section> : <section className="wizard-card wide" key="agents">
-        <header className="wizard-head">
-          <h1>Add your AI agents</h1>
-          <p>Drop a ready agent onto a terminal, or pick one from each pane below.</p>
-        </header>
-
-        <div className="agents-layout">
-          <aside className="agents-palette">
-            <div className="palette-head"><span className="section-label">Agents &amp; shells</span><Button variant="ghost" icon={<RefreshCw className={scanning ? 'is-spinning' : ''} size={13} />} onClick={() => void rescan()} disabled={scanning}>{scanning ? 'Scanning' : 'Re-scan'}</Button></div>
-            <div className="agent-list">{choices.length === 0 ? <div className="agent-empty"><TerminalSquare size={18} /><strong>No terminals available</strong><span>Re-scan or add a custom shell to continue.</span></div> : choices.map((choice) => <div className={`agent-row ${choice.available ? '' : 'unavailable'}`} draggable={choice.available} onDragStart={(event) => event.dataTransfer.setData('application/forgemind-choice', JSON.stringify(choice))} key={`${choice.provider}:${choice.name}`}><span className="drag-handle"><GripVertical size={14} /></span><span className="agent-icon"><TerminalSquare size={15} /></span><div><strong>{choice.name}</strong><span title={choice.detail}>{choice.detail || (choice.available ? 'Ready' : 'Not installed')}</span></div><span className={`availability ${choice.available ? 'ready' : ''}`}>{choice.available ? 'Ready' : 'Unavailable'}</span>{!choice.available && CODING_PROVIDERS.includes(choice.provider) && <Button variant="ghost" icon={<ScanSearch size={14} />} onClick={() => void locateAgent(choice.provider)}>Locate</Button>}</div>)}</div>
-            <Button className="add-custom-shell" variant="ghost" icon={<TerminalSquare size={13} />} onClick={() => void addCustomShell()}>Add custom shell</Button>
-          </aside>
-
-          <div className="agents-stage">
-            <div className="assignment-heading"><div><h2>Assign terminals</h2><p>Every terminal needs an agent or shell before launch.</p></div><span className="assign-progress">{assignedCount}/{paneCount} assigned</span></div>
-            <AssignmentPreview layout={layout} allPaneIds={paneIds(layout)} assignments={assignments} choices={choices} errors={paneErrors} onAssign={assign} onMove={moveAssignment} onChangeDirectory={changeWorkingDirectory} onChangeTitle={(paneId, title) => setAssignments((current) => ({ ...current, [paneId]: current[paneId] ? { ...current[paneId]!, title } : undefined }))} />
-          </div>
-        </div>
-
-        <footer className="wizard-footer">
-          <Button variant="ghost" icon={<ChevronLeft size={16} />} onClick={() => setStep('layout')}>Back to layout</Button>
-          <div className="footer-right">
-            <button className="button button-primary wizard-next" onClick={() => void launch()} disabled={launching}>{launching ? (mode === 'edit' ? 'Saving…' : 'Launching…') : mode === 'edit' ? 'Save changes' : 'Launch workspace'}<ChevronRight size={16} /></button>
-          </div>
-        </footer>
-      </section>}
+  return <main className="setup-shell">
+    <header className="setup-titlebar"><Button variant="ghost" icon={<ArrowLeft size={15} />} onClick={() => navigate(mode === 'edit' && existingId ? `/workspace/${existingId}` : '/')}>Back</Button><Brand compact /><span className="setup-mode" data-mode={mode}>{modeLabel}</span><label className="setup-name"><span>Workspace</span><input aria-label="Workspace name" value={name} onChange={(event) => setName(event.target.value)} /></label><div className="titlebar-spacer" /><button className="button button-primary setup-launch" onClick={() => void launch()} disabled={launching}>{launching ? 'Saving…' : mode === 'edit' ? 'Save and launch' : 'Launch workspace'}</button></header>
+    {runningWarning && <div className="setup-banner" role="alert"><span>Running terminals keep their current configuration until reopened.</span><Button variant="ghost" onClick={() => setRunningWarning(false)}>Dismiss</Button></div>}
+    {error && <div className="setup-error"><ErrorNotice message={error} /></div>}
+    <div className="setup-zones">
+      <aside className="configuration-rail">
+        <section><span className="section-label">Project</span><strong><FolderGit2 size={14} />{project.name}</strong><small title={project.rootPath}>{project.rootPath}</small><div className="project-facts"><span>{project.gitBranch || 'No branch'}</span><span>{project.detectedFramework || project.majorLanguages[0] || 'Local folder'}</span></div><Button variant="ghost" onClick={() => navigate('/')}>Change project</Button></section>
+        <section><div className="field-label">Working directory</div><button className="compact-path-field" onClick={() => void browseWorkingFolder()} title={workingFolder}><FolderOpen size={14} /><span>{workingFolder}</span><Search size={13} /></button><form className="folder-entry" onSubmit={(event) => void applyFolderDraft(event)}><input value={folderDraft} onChange={(event) => setFolderDraft(event.target.value)} aria-label="Enter a folder path" placeholder="Enter folder path" spellCheck={false} /></form></section>
+        <section><div className="field-label">Layout presets <span>{paneCount} Panes</span></div><div className="layout-preset-grid"><LayoutButton count={1} selected={paneCount === 1} onClick={() => void chooseCount(1)} /><LayoutButton count={2} label="2V" selected={paneCount === 2 && layout.type === 'split' && layout.direction === 'vertical'} onClick={() => void chooseCount(2, 'vertical')} /><LayoutButton count={2} label="2H" selected={paneCount === 2 && layout.type === 'split' && layout.direction === 'horizontal'} onClick={() => void chooseCount(2, 'horizontal')} />{[3, 4, 6, 8].map((count) => <LayoutButton key={count} count={count} selected={paneCount === count} onClick={() => void chooseCount(count)} />)}</div><details className="advanced-layouts"><summary>Advanced layouts</summary><div>{[10, 12, 14, 16].map((count) => <button key={count} onClick={() => void chooseCount(count)}>{count}</button>)}</div></details></section>
+        <section><div className="field-label"><Sparkles size={13} />Workflow presets</div><div className="preset-list">{presets.map((preset) => <button className={preset.count === paneCount ? 'active' : ''} key={preset.id} onClick={() => applyPreset(preset)}>{preset.name}<span>{preset.count}</span></button>)}<button onClick={savePreset}><Plus size={13} />Save current</button></div></section>
+        <Button variant="secondary" onClick={() => void openWithoutAgents()} disabled={launching}>Assign shells only</Button>
+      </aside>
+      <section className="assignment-canvas"><header><div><span className="section-label">Pane configuration</span><h1>Assign your workspace</h1></div><span className={`assign-progress ${assignedCount === paneCount ? 'complete' : ''}`}>{assignedCount}/{paneCount} assigned</span></header><div className="assignment-stage"><AssignmentPreview layout={layout} allPaneIds={paneIds(layout)} assignments={assignments} choices={choices} errors={paneErrors} onAssign={assign} onMove={moveAssignment} onChangeDirectory={changeWorkingDirectory} onChangeTitle={(paneId, title) => setAssignments((current) => ({ ...current, [paneId]: current[paneId] ? { ...current[paneId]!, title } : undefined }))} /></div></section>
+      <aside className="agent-library"><header><div><span className="section-label">Agent library</span><strong>Agents and shells</strong></div><Button variant="ghost" icon={<RefreshCw className={scanning ? 'is-spinning' : ''} size={13} />} aria-label="Rescan providers" onClick={() => void rescan()} disabled={scanning} /></header><div className="agent-list">{choices.map((choice) => <div className={`agent-row ${choice.available ? '' : 'unavailable'}`} draggable={choice.available} onDragStart={(event) => event.dataTransfer.setData('application/forgemind-choice', JSON.stringify(choice))} key={`${choice.provider}:${choice.name}`}><GripVertical size={13} /><span className="agent-icon"><TerminalSquare size={15} /></span><div><strong>{choice.name}</strong><span>{choice.available ? choice.detail && !choice.detail.includes('\\') ? choice.detail : 'Available' : 'Not installed'}</span></div><span className={`availability ${choice.available ? 'ready' : ''}`}>{choice.available ? 'Ready' : 'Unavailable'}</span>{!choice.available && CODING_PROVIDERS.includes(choice.provider) && <Button variant="ghost" icon={<ScanSearch size={13} />} aria-label={`Locate ${choice.name}`} onClick={() => void locateAgent(choice.provider)} />}</div>)}</div><Button variant="ghost" icon={<TerminalSquare size={13} />} onClick={() => void addCustomShell()}>Add custom shell</Button><Button variant="ghost" onClick={() => navigate('/settings')}>Open Agent settings</Button></aside>
     </div>
     {prompt && <TextPromptDialog title={prompt.kind === 'preset' ? 'Save layout preset' : 'Add custom shell'} label={prompt.kind === 'preset' ? 'Preset name' : 'Shell name'} initialValue={prompt.kind === 'preset' ? `Layout ${paneCount}` : 'Custom shell'} confirmLabel={prompt.kind === 'preset' ? 'Save preset' : 'Add shell'} onClose={() => setPrompt(undefined)} onConfirm={(value) => void confirmPrompt(value)} />}
   </main>
 }
 
-function StepDot({ index, label, state }: { index: number; label: string; state: 'done' | 'active' | 'todo' }) {
-  return <span className={`step ${state}`}>
-    <span className="step-dot">{state === 'done' ? <Check size={13} strokeWidth={3} /> : index}</span>
-    <span className="step-label">{label}</span>
-  </span>
-}
+function LayoutButton({ count, label, selected, onClick }: { count: number; label?: string; selected: boolean; onClick: () => void }) { return <button className={selected ? 'selected' : ''} aria-pressed={selected} aria-label={`${label || count} Pane layout`} onClick={onClick}><span className="tile-grid" style={{ gridTemplateColumns: `repeat(${gridColumns[count]}, 1fr)` } as CSSProperties}>{Array.from({ length: count }, (_, index) => <i key={index} />)}</span><strong>{label || count}</strong></button> }
 
 function assignmentFrom(choice: Choice, paneId: string, workingDirectory: string, positionOrder: number, title?: string): PaneAssignment {
-  return { id: paneId, title: title || choice.name, provider: choice.provider, executablePath: choice.executablePath, args: choice.args, shellProfileId: choice.shellProfileId, workingDirectory, positionOrder }
+  return { id: paneId, title: title || choice.name, provider: choice.provider, executablePath: choice.executablePath, args: choice.args, shellProfileId: choice.shellProfileId, workingDirectory, workingDirectoryMode: 'project_relative', positionOrder }
 }
 
 function assignmentsFromWorkspace(workspace: Workspace): Record<string, PaneAssignment> {
