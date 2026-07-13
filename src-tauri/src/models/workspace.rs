@@ -50,6 +50,35 @@ pub struct WorkspaceSaveRequest {
     pub panes: Vec<PaneAssignment>,
 }
 
+/// Persist request for the docking canvas. The docked split tree is sent typed (so
+/// `layout_json` stays valid for legacy readers and restoration); the floating layer + canvas
+/// metadata travel in the opaque `canvas_json` blob. `expected_revision` drives optimistic
+/// concurrency.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveWorkspaceCanvasLayoutRequest {
+    pub workspace_id: String,
+    pub expected_revision: i64,
+    pub docked_root: Option<LayoutNode>,
+    pub canvas_json: String,
+    pub active_pane_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveWorkspaceCanvasLayoutResult {
+    pub workspace_id: String,
+    pub revision: i64,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceCanvasLayoutRecord {
+    pub revision: i64,
+    pub canvas_json: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RecentWorkspace {

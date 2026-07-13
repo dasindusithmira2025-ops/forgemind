@@ -145,6 +145,8 @@ pub fn run() {
             commands::remove_layout_pane,
             commands::save_workspace,
             commands::get_workspace,
+            commands::get_workspace_canvas_layout,
+            commands::save_workspace_canvas_layout,
             commands::list_workspaces_for_project,
             commands::suggest_workspace_name,
             commands::list_recent_workspaces,

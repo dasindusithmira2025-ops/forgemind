@@ -725,6 +725,47 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 .launcher-content { padding-top: 34px; }.launcher-heading { align-items: center; padding-bottom: 22px; }.launcher-heading h1 { font-size: clamp(25px, 2.4vw, 34px); }.launcher-primary-actions { display: flex; gap: 8px; }.project-list { gap: 8px; }.project-card { border-radius: 6px; }
 .brand-mark::after { display: none; }
 
+/* ---- Docking canvas ------------------------------------------------------------------------ */
+.workspace-canvas { position: absolute; inset: 0; width: 100%; height: 100%; overflow: hidden; }
+.pane-window-layer { position: absolute; inset: 0; }
+.pane-window { position: absolute; overflow: hidden; box-sizing: border-box; will-change: transform; }
+.pane-window-focus { width: 100%; height: 100%; }
+/* Neutralise the legacy fixed-position maximize; the canvas owns geometry now. */
+.pane-window .terminal-pane { position: relative; inset: auto; width: 100%; height: 100%; }
+.pane-window.floating { border-radius: 8px; box-shadow: 0 10px 30px rgba(0, 0, 0, .45), 0 0 0 1px var(--border-strong); }
+.pane-window.floating.active { box-shadow: 0 12px 34px rgba(0, 0, 0, .5), 0 0 0 1px var(--accent); }
+.pane-window.dragging { pointer-events: none; opacity: .94; border-radius: 8px; box-shadow: 0 18px 46px rgba(0, 0, 0, .55), 0 0 0 1px var(--accent); }
+.pane-window.maximized { box-shadow: none; border-radius: 0; }
+.terminal-header.draggable { cursor: grab; }
+.pane-window.dragging .terminal-header.draggable { cursor: grabbing; }
+
+.pane-resize-handle { position: absolute; z-index: 6; touch-action: none; }
+.pane-resize-handle.top { top: -3px; left: 10px; right: 10px; height: 7px; cursor: ns-resize; }
+.pane-resize-handle.bottom { bottom: -3px; left: 10px; right: 10px; height: 7px; cursor: ns-resize; }
+.pane-resize-handle.left { left: -3px; top: 10px; bottom: 10px; width: 7px; cursor: ew-resize; }
+.pane-resize-handle.right { right: -3px; top: 10px; bottom: 10px; width: 7px; cursor: ew-resize; }
+.pane-resize-handle.top-left { top: -3px; left: -3px; width: 14px; height: 14px; cursor: nwse-resize; z-index: 7; }
+.pane-resize-handle.top-right { top: -3px; right: -3px; width: 14px; height: 14px; cursor: nesw-resize; z-index: 7; }
+.pane-resize-handle.bottom-left { bottom: -3px; left: -3px; width: 14px; height: 14px; cursor: nesw-resize; z-index: 7; }
+.pane-resize-handle.bottom-right { bottom: -3px; right: -3px; width: 14px; height: 14px; cursor: nwse-resize; z-index: 7; }
+
+.split-handle-layer { position: absolute; inset: 0; pointer-events: none; z-index: 3; }
+.split-resize-handle { pointer-events: auto; touch-action: none; background: transparent; transition: background 140ms var(--ease-out, ease-out); }
+.split-resize-handle:hover { background: var(--accent); }
+.split-resize-handle.vertical { cursor: col-resize; }
+.split-resize-handle.horizontal { cursor: row-resize; }
+
+.docking-overlay-layer { position: absolute; inset: 0; pointer-events: none; z-index: 2100000; }
+.snap-preview { position: absolute; background: rgba(109, 139, 255, .18); border: 1.5px solid var(--accent); border-radius: 7px; box-shadow: inset 0 0 0 1px rgba(109, 139, 255, .25); animation: snap-preview-in 90ms var(--ease-out, ease-out); }
+.snap-preview.swap { background: rgba(157, 123, 255, .2); border-color: var(--accent-2); }
+.snap-preview-label { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 12px; font-weight: 600; letter-spacing: .04em; color: var(--accent-strong); text-transform: uppercase; }
+.pane-source-placeholder { position: absolute; border: 1px dashed var(--border-strong); border-radius: 6px; background: rgba(255, 255, 255, .025); }
+.magnetic-guide { position: absolute; background: var(--accent); box-shadow: 0 0 6px var(--accent); }
+.magnetic-guide.vertical { top: 0; bottom: 0; width: 1px; }
+.magnetic-guide.horizontal { left: 0; right: 0; height: 1px; }
+@keyframes snap-preview-in { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .snap-preview { animation: none; } }
+
 @media (max-width: 1000px) {
   .setup-zones { grid-template-columns: 210px minmax(390px, 1fr) 225px; }
   .setup-name span, .compact-count { display: none; }

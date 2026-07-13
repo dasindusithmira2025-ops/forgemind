@@ -327,19 +327,21 @@ impl DatabaseService {
     pub fn save_workspace(&self, request: &WorkspaceSaveRequest) -> AppResult<Workspace> {
         let pane_ids = request.layout.validate()?;
         let assigned_ids: HashSet<_> = request.panes.iter().map(|pane| pane.id.as_str()).collect();
-        if pane_ids.len() != request.panes.len()
-            || assigned_ids.len() != request.panes.len()
+        // Every docked layout pane must have exactly one assignment, assignments must be unique,
+        // and the active pane must exist. Assignments MAY exceed the docked panes — the surplus
+        // are floating panes on the docking canvas, whose placement lives in `canvas_json`.
+        if assigned_ids.len() != request.panes.len()
             || pane_ids
                 .iter()
                 .any(|id| !assigned_ids.contains(id.as_str()))
             || request
                 .active_pane_id
                 .as_ref()
-                .is_some_and(|id| !pane_ids.contains(id))
+                .is_some_and(|id| !assigned_ids.contains(id.as_str()))
         {
             return Err(AppError::new(
                 "invalid_layout",
-                "Every layout pane must have exactly one assignment and the active pane must exist.",
+                "Every docked layout pane must have exactly one assignment and the active pane must exist.",
                 true,
             ));
         }
@@ -439,6 +441,105 @@ impl DatabaseService {
             .ok_or_else(|| AppError::new("workspace_not_found", "The selected workspace could not be found.", true).entity(id))?;
         workspace.panes = load_panes(&connection, id)?;
         Ok(workspace)
+    }
+
+    /// Read the persisted docking-canvas blob and its revision for one Workspace. A pre-canvas
+    /// Workspace returns revision 0 and a null blob, which the renderer migrates on load.
+    pub fn get_workspace_canvas_layout(
+        &self,
+        id: &str,
+    ) -> AppResult<crate::models::WorkspaceCanvasLayoutRecord> {
+        let connection = self.connection.lock();
+        connection
+            .query_row(
+                "SELECT layout_revision, canvas_json FROM workspaces WHERE id=?1",
+                [id],
+                |row| {
+                    Ok(crate::models::WorkspaceCanvasLayoutRecord {
+                        revision: row.get::<_, i64>(0)?,
+                        canvas_json: row.get::<_, Option<String>>(1)?,
+                    })
+                },
+            )
+            .optional()?
+            .ok_or_else(|| {
+                AppError::new(
+                    "workspace_not_found",
+                    "The selected workspace could not be found.",
+                    true,
+                )
+                .entity(id)
+            })
+    }
+
+    /// Persist the docking-canvas layout as one atomic change under optimistic concurrency. The
+    /// docked tree updates `layout_json` (kept valid for legacy readers); when every pane is
+    /// floating the previous tree is retained as a harmless fallback. `layout_revision` is bumped.
+    pub fn save_workspace_canvas_layout(
+        &self,
+        request: &crate::models::SaveWorkspaceCanvasLayoutRequest,
+    ) -> AppResult<crate::models::SaveWorkspaceCanvasLayoutResult> {
+        let connection = self.connection.lock();
+        let (current_revision, existing_layout): (i64, String) = connection
+            .query_row(
+                "SELECT layout_revision, layout_json FROM workspaces WHERE id=?1",
+                [&request.workspace_id],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()?
+            .ok_or_else(|| {
+                AppError::new(
+                    "workspace_not_found",
+                    "The selected workspace could not be found.",
+                    true,
+                )
+                .entity(&request.workspace_id)
+            })?;
+
+        if current_revision != request.expected_revision {
+            return Err(AppError::new(
+                "stale_layout_revision",
+                "This workspace layout was changed elsewhere. Reload the layout and retry.",
+                true,
+            )
+            .entity(&request.workspace_id)
+            .action("Reload the workspace layout, then retry the move."));
+        }
+
+        let layout_json = match &request.docked_root {
+            Some(node) => {
+                node.validate()?;
+                serde_json::to_string(node).map_err(|error| {
+                    AppError::new(
+                        "invalid_layout",
+                        "The docked layout could not be serialized.",
+                        true,
+                    )
+                    .detail(error.to_string())
+                })?
+            }
+            None => existing_layout,
+        };
+
+        let now = Utc::now().to_rfc3339();
+        let new_revision = current_revision + 1;
+        connection.execute(
+            "UPDATE workspaces SET layout_json=?2, canvas_json=?3, active_pane_id=?4, layout_revision=?5, updated_at=?6 WHERE id=?1",
+            params![
+                request.workspace_id,
+                layout_json,
+                request.canvas_json,
+                request.active_pane_id,
+                new_revision,
+                now
+            ],
+        )?;
+
+        Ok(crate::models::SaveWorkspaceCanvasLayoutResult {
+            workspace_id: request.workspace_id.clone(),
+            revision: new_revision,
+            updated_at: now,
+        })
     }
 
     /// Resolve a renderer request through durable Project, Workspace, and Pane ownership.
@@ -1126,6 +1227,76 @@ mod tests {
             .mark_session_ended(&session.id, "exited", Some(0), b"bye")
             .unwrap();
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn canvas_layout_round_trips_and_enforces_revision() {
+        let database = DatabaseService::in_memory().unwrap();
+        let root = std::env::temp_dir().join(format!("forgemind-db-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let project = database.upsert_project(&project(&root)).unwrap();
+        let layout = preset_layout(1, "");
+        let pane_id = layout.clone().validate().unwrap().remove(0);
+        let workspace = database
+            .save_workspace(&WorkspaceSaveRequest {
+                id: None,
+                project_id: project.id.clone(),
+                name: "Canvas workspace".into(),
+                layout: layout.clone(),
+                active_pane_id: Some(pane_id.clone()),
+                restore_behavior: "inherit".into(),
+                panes: vec![PaneAssignment {
+                    id: pane_id.clone(),
+                    workspace_id: None,
+                    title: "Shell".into(),
+                    provider: AgentProvider::CustomShell,
+                    executable_path: std::env::current_exe()
+                        .unwrap()
+                        .to_string_lossy()
+                        .to_string(),
+                    args: Vec::new(),
+                    shell_profile_id: None,
+                    profile_id: None,
+                    working_directory: root.to_string_lossy().to_string(),
+                    working_directory_mode: "project_relative".into(),
+                    position_order: 0,
+                }],
+            })
+            .unwrap();
+
+        // A freshly saved workspace has no canvas blob and sits at revision 0.
+        let initial = database.get_workspace_canvas_layout(&workspace.id).unwrap();
+        assert_eq!(initial.revision, 0);
+        assert!(initial.canvas_json.is_none());
+
+        // Saving at the expected revision succeeds and bumps the revision.
+        let saved = database
+            .save_workspace_canvas_layout(&crate::models::SaveWorkspaceCanvasLayoutRequest {
+                workspace_id: workspace.id.clone(),
+                expected_revision: 0,
+                docked_root: Some(layout.clone()),
+                canvas_json: "{\"version\":2,\"floatingPanes\":[]}".into(),
+                active_pane_id: Some(pane_id.clone()),
+            })
+            .unwrap();
+        assert_eq!(saved.revision, 1);
+        let stored = database.get_workspace_canvas_layout(&workspace.id).unwrap();
+        assert_eq!(stored.revision, 1);
+        assert!(stored.canvas_json.unwrap().contains("floatingPanes"));
+
+        // Re-saving with the now-stale expected revision is rejected.
+        let stale = database
+            .save_workspace_canvas_layout(&crate::models::SaveWorkspaceCanvasLayoutRequest {
+                workspace_id: workspace.id.clone(),
+                expected_revision: 0,
+                docked_root: Some(layout),
+                canvas_json: "{}".into(),
+                active_pane_id: Some(pane_id),
+            })
+            .unwrap_err();
+        assert_eq!(stale.code, "stale_layout_revision");
+
+        fs::remove_dir_all(root).ok();
     }
 
     #[test]

@@ -207,6 +207,19 @@ PRAGMA user_version=5;
 COMMIT;
 "#;
 
+// Docking canvas. Adds an additive, nullable `canvas_json` blob that stores the floating pane
+// layer + canvas metadata alongside the existing docked `layout_json`, plus a monotonic
+// `layout_revision` used for optimistic-concurrency on canvas saves. Purely additive: pre-canvas
+// Workspaces get NULL / 0 and continue to render from `layout_json` via a migration on load.
+const MIGRATION_6: &str = r#"
+BEGIN IMMEDIATE;
+ALTER TABLE workspaces ADD COLUMN canvas_json TEXT;
+ALTER TABLE workspaces ADD COLUMN layout_revision INTEGER NOT NULL DEFAULT 0;
+INSERT OR IGNORE INTO schema_migrations(version,applied_at) VALUES(6,datetime('now'));
+PRAGMA user_version=6;
+COMMIT;
+"#;
+
 pub fn apply(connection: &Connection) -> AppResult<()> {
     let current: i64 = connection
         .query_row("PRAGMA user_version", [], |row| row.get(0))
@@ -225,6 +238,9 @@ pub fn apply(connection: &Connection) -> AppResult<()> {
     }
     if current < 5 {
         run_migration_batch(connection, MIGRATION_5, 5)?;
+    }
+    if current < 6 {
+        run_migration_batch(connection, MIGRATION_6, 6)?;
     }
     Ok(())
 }
@@ -488,7 +504,7 @@ mod tests {
         let version: i64 = connection
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 5);
+        assert_eq!(version, 6);
         let error = insert_session(&connection).unwrap_err().to_string();
         assert!(error.contains("project_id") || error.contains("FOREIGN KEY"));
     }
@@ -570,7 +586,7 @@ mod tests {
         let version: i64 = connection
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 5);
+        assert_eq!(version, 6);
         let normalized: Vec<String> = {
             let mut statement = connection
                 .prepare("SELECT normalized_name FROM workspaces ORDER BY normalized_name")

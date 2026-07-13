@@ -1,6 +1,8 @@
 use crate::errors::{AppError, AppResult};
 use crate::models::{
-    preset_layout, LayoutNode, RecentWorkspace, SplitDirection, Workspace, WorkspaceSaveRequest,
+    preset_layout, LayoutNode, RecentWorkspace, SaveWorkspaceCanvasLayoutRequest,
+    SaveWorkspaceCanvasLayoutResult, SplitDirection, Workspace, WorkspaceCanvasLayoutRecord,
+    WorkspaceSaveRequest,
 };
 use crate::services::ProjectService;
 use crate::AppState;
@@ -105,6 +107,25 @@ pub fn save_workspace(
 #[tauri::command]
 pub fn get_workspace(workspace_id: String, state: State<'_, AppState>) -> AppResult<Workspace> {
     state.database.get_workspace(&workspace_id)
+}
+
+/// Read the persisted docking-canvas layout (floating panes + metadata) and its revision.
+#[tauri::command]
+pub fn get_workspace_canvas_layout(
+    workspace_id: String,
+    state: State<'_, AppState>,
+) -> AppResult<WorkspaceCanvasLayoutRecord> {
+    state.database.get_workspace_canvas_layout(&workspace_id)
+}
+
+/// Persist a committed docking-canvas layout as one atomic, revision-checked operation. This is
+/// the only mutation the renderer uses for pane movement; pointer motion is never sent here.
+#[tauri::command]
+pub fn save_workspace_canvas_layout(
+    request: SaveWorkspaceCanvasLayoutRequest,
+    state: State<'_, AppState>,
+) -> AppResult<SaveWorkspaceCanvasLayoutResult> {
+    state.database.save_workspace_canvas_layout(&request)
 }
 
 #[tauri::command]

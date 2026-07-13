@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { SearchAddon } from '@xterm/addon-search'
@@ -24,9 +24,11 @@ interface TerminalPaneProps {
   onRestart: () => void
   onStop: () => void
   onMenu: (anchor: HTMLElement) => void
+  /** Pointer-down on the header, used by the docking canvas to start a pane drag. */
+  onHeaderPointerDown?: (event: ReactPointerEvent) => void
 }
 
-export function TerminalPane({ assignment, session, deferred = false, active, maximized, settings, onFocus, onMaximize, onClose, onRestart, onMenu }: TerminalPaneProps) {
+export function TerminalPane({ assignment, session, deferred = false, active, maximized, settings, onFocus, onMaximize, onClose, onRestart, onMenu, onHeaderPointerDown }: TerminalPaneProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const terminalRef = useRef<Terminal | undefined>(undefined)
   const fitRef = useRef<FitAddon | undefined>(undefined)
@@ -165,7 +167,7 @@ export function TerminalPane({ assignment, session, deferred = false, active, ma
   }, [assignment.id, settings.confirmMultilinePaste])
 
   return <article className={`terminal-pane ${active ? 'active' : ''} ${maximized ? 'maximized' : ''} ${bell ? 'bell' : ''}`} onMouseDown={onFocus} data-pane-id={assignment.id}>
-    <header className="terminal-header">
+    <header className={`terminal-header ${onHeaderPointerDown ? 'draggable' : ''}`} onPointerDown={onHeaderPointerDown}>
       <span className={`terminal-status status-${currentSession?.status ?? 'loading'}`} aria-label={currentSession?.status ?? 'starting'} />
       <div className="terminal-title"><strong>{assignment.title}</strong><span>{providerLabel(assignment.provider)}</span></div>
       <span className="terminal-path" title={assignment.workingDirectory}>{assignment.workingDirectory}</span>

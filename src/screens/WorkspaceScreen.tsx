@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { open } from '@tauri-apps/plugin-dialog'
 import { openPath } from '@tauri-apps/plugin-opener'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { Group, Panel, Separator, type Layout as PanelLayout } from 'react-resizable-panels'
 import { ChevronDown, CircleStop, Copy, FolderOpen, RefreshCw, RotateCcw, Search, SplitSquareHorizontal, SplitSquareVertical, TerminalSquare, Trash2 } from 'lucide-react'
 import { TerminalPane } from '../components/terminal/TerminalPane'
 import { dispatchTerminalAction } from '../components/terminal/terminalActions'
@@ -11,7 +10,7 @@ import { ErrorNotice } from '../components/ui/ErrorNotice'
 import { Modal } from '../components/ui/Modal'
 import { TextPromptDialog } from '../components/ui/TextPromptDialog'
 import { asNativeError, native } from '../native/commands'
-import type { AgentProvider, LayoutNode, PaneAssignment, Project, ShellProfile, SplitDirection, TerminalSession, Workspace } from '../native/types'
+import type { AgentProvider, PaneAssignment, Project, ShellProfile, SplitDirection, TerminalSession, Workspace } from '../native/types'
 import { newId, paneIds, providerLabel } from '../shared/layout'
 import { useAppStore } from '../stores/appStore'
 import { terminalRuntime, useWorkspaceSessions } from '../features/terminals/runtimeStore'
@@ -20,6 +19,13 @@ import { ForgeSpaceSidebar } from '../features/sidebar/components/ForgeSpaceSide
 import { deriveProviderSummary, deriveWorkspaceRuntimeSummary, groupSessionsByWorkspace } from '../features/sidebar/sidebarSelectors'
 import type { SidebarActions, SidebarWorkspace } from '../features/sidebar/sidebarTypes'
 import { clampSidebarWidth } from '../features/sidebar/sidebarPreferences'
+import { WorkspaceCanvas, type RenderPaneContext } from '../features/workspace-canvas/components/WorkspaceCanvas'
+import { useCanvasStore } from '../features/workspace-canvas/canvasStore'
+import { buildFromPersisted, normalizeRestoredLayout } from '../features/workspace-canvas/canvasPersistence'
+import { WORKSPACE_CANVAS_LAYOUT_VERSION } from '../features/workspace-canvas/canvasConstants'
+import type { WorkspaceCanvasLayout } from '../features/workspace-canvas/canvasTypes'
+import { normalizeSplitTree, removePaneFromDockedTree } from '../features/workspace-canvas/layoutOperations'
+import { workspaceLayoutCommands, toSaveRequest } from '../native/workspaceLayoutCommands'
 
 type ProviderChoice = { provider: AgentProvider; name: string; executablePath: string; args: string[]; shellProfileId?: string }
 type PendingInsert = { targetPaneId: string; direction: SplitDirection; replace?: boolean; duplicate?: PaneAssignment }
@@ -51,7 +57,8 @@ export function WorkspaceScreen() {
   const [collapsed, setCollapsed] = useState(!settings.sidebarOpen)
   const [sidebarWidth, setSidebarWidth] = useState(clampSidebarWidth(settings.sidebarWidth))
   const [sidebarSaving, setSidebarSaving] = useState(false)
-  const [maximizedPaneId, setMaximizedPaneId] = useState<string>()
+  const maximizedPaneId = useCanvasStore((state) => state.layout?.maximizedPaneId)
+  const [reducedMotion] = useState(() => typeof window !== 'undefined' && Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches))
   const [workspaceMenu, setWorkspaceMenu] = useState(false)
   const [paneMenu, setPaneMenu] = useState<{ paneId: string; x: number; y: number }>()
   const [pendingInsert, setPendingInsert] = useState<PendingInsert>()
@@ -123,6 +130,11 @@ export function WorkspaceScreen() {
         if (!live) return
         setLocalWorkspace(loadedWorkspace); setWorkspace(loadedWorkspace)
         setLocalProject(loadedProject); setProject(loadedProject)
+        // Hydrate the docking canvas: read the persisted floating layer (migrating a pre-canvas
+        // workspace) and seed the store before terminals render, so placement is correct first paint.
+        const canvasRecord = await workspaceLayoutCommands.getCanvasLayout(loadedWorkspace.id).catch(() => ({ revision: 0, canvasJson: null }))
+        if (!live) return
+        useCanvasStore.getState().init(loadedWorkspace.id, buildFromPersisted(loadedWorkspace, canvasRecord.canvasJson), canvasRecord.revision)
         // Record this Workspace as the Project's most recently active so a later switch can
         // restore it. Best-effort — it must never block hydration.
         void native.setLastActiveWorkspace(loadedWorkspace.id).catch(() => undefined)
@@ -194,6 +206,50 @@ export function WorkspaceScreen() {
 
   useEffect(() => { void refreshWorkspaces() }, [refreshWorkspaces, workspaceId])
 
+  // Mirror the canvas store's docked tree + active pane into WorkspaceScreen's workspace state so
+  // pane-config operations (split, close, replace…) keep operating on a consistent docked tree.
+  const syncWorkspaceLayout = useCallback((layout: WorkspaceCanvasLayout) => {
+    setLocalWorkspace((current) => (current ? { ...current, layout: layout.dockedRoot ?? current.layout, activePaneId: layout.activePaneId } : current))
+    setActivePane(layout.activePaneId)
+  }, [setActivePane])
+
+  // Persist a committed canvas layout through the typed, revision-checked Tauri command. Rolls
+  // back the optimistic store + workspace state on failure, always keeping terminals alive.
+  const persistCanvas = useCallback((next: WorkspaceCanvasLayout, previous: WorkspaceCanvasLayout) => {
+    const store = useCanvasStore.getState()
+    if (!store.workspaceId) return
+    syncWorkspaceLayout(next)
+    void workspaceLayoutCommands
+      .saveCanvasLayout(toSaveRequest(store.workspaceId, store.revision, next))
+      .then((result) => useCanvasStore.getState().setRevision(result.revision))
+      .catch((caught) => {
+        useCanvasStore.getState().setLayout(previous)
+        syncWorkspaceLayout(previous)
+        setError(asNativeError(caught).message)
+      })
+  }, [syncWorkspaceLayout])
+
+  // After a pane-config change re-persisted through save_workspace, fold the new docked tree back
+  // into the canvas (preserving the floating layer) so canvas_json stays authoritative on reload.
+  const resyncCanvas = useCallback((source: Workspace) => {
+    const store = useCanvasStore.getState()
+    const current = store.layout
+    if (!current) return
+    const merged = normalizeRestoredLayout(
+      {
+        version: WORKSPACE_CANVAS_LAYOUT_VERSION,
+        dockedRoot: source.layout,
+        floatingPanes: current.floatingPanes,
+        activePaneId: source.activePaneId ?? current.activePaneId,
+        maximizedPaneId: current.maximizedPaneId,
+        nextFloatingZIndex: current.nextFloatingZIndex,
+      },
+      source.panes.map((pane) => pane.id),
+    )
+    store.setLayout(merged)
+    persistCanvas(merged, current)
+  }, [persistCanvas])
+
   const persist = useCallback(async (next: Workspace) => {
     const saved = await native.saveWorkspace({
       id: next.id,
@@ -205,16 +261,10 @@ export function WorkspaceScreen() {
       panes: next.panes,
     })
     setLocalWorkspace(saved); setWorkspace(saved)
+    resyncCanvas(saved)
     void refreshWorkspaces()
     return saved
-  }, [refreshWorkspaces, setWorkspace])
-
-  const updateLayoutSizes = (path: number[], panelLayout: PanelLayout) => {
-    if (!workspace) return
-    const next = { ...workspace, layout: setSizesAtPath(workspace.layout, path, Object.values(panelLayout)), updatedAt: new Date().toISOString() }
-    setLocalWorkspace(next); setWorkspace(next)
-    void persist(next).catch((caught) => setError(asNativeError(caught).message))
-  }
+  }, [refreshWorkspaces, resyncCanvas, setWorkspace])
 
   const stopPane = async (paneId: string) => {
     const session = paneSession(paneId)
@@ -240,11 +290,16 @@ export function WorkspaceScreen() {
     if (session?.status === 'running') await native.terminateTerminalSession(session.id)
     if (session) terminalRuntime.remove(session.id)
     try {
-      const layout = await native.removeLayoutPane(workspace.layout, paneId)
+      const canvas = useCanvasStore.getState().layout
       const panes = workspace.panes.filter((pane) => pane.id !== paneId).map((pane, index) => ({ ...pane, positionOrder: index }))
       const active = workspace.activePaneId === paneId ? panes[0]?.id : workspace.activePaneId
+      // Remove the pane from whichever placement it held; a floating pane leaves the docked tree
+      // untouched and is dropped from the floating layer during the canvas resync below.
+      const newDocked = normalizeSplitTree(removePaneFromDockedTree(canvas?.dockedRoot ?? workspace.layout, paneId))
+      const layout = newDocked ?? { type: 'pane' as const, paneId: panes[0]!.id }
+      if (canvas && canvas.maximizedPaneId === paneId) useCanvasStore.getState().setLayout({ ...canvas, maximizedPaneId: undefined })
       await persist({ ...workspace, layout, panes, activePaneId: active })
-      setActivePane(active); if (maximizedPaneId === paneId) setMaximizedPaneId(undefined)
+      setActivePane(active)
     } catch (caught) { setPaneErrors((current) => ({ ...current, [paneId]: asNativeError(caught).message })) }
   }
 
@@ -508,7 +563,7 @@ export function WorkspaceScreen() {
       if (event.ctrlKey && event.shiftKey && event.code === 'Backslash') { event.preventDefault(); setPendingInsert({ targetPaneId: activePaneId, direction: 'vertical' }) }
       if (event.ctrlKey && event.shiftKey && event.code === 'Minus') { event.preventDefault(); setPendingInsert({ targetPaneId: activePaneId, direction: 'horizontal' }) }
       if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'w') { event.preventDefault(); void closePane(activePaneId) }
-      if (event.ctrlKey && event.shiftKey && event.key === 'Enter') { event.preventDefault(); setMaximizedPaneId((value) => value === activePaneId ? undefined : activePaneId) }
+      if (event.ctrlKey && event.shiftKey && event.key === 'Enter') { event.preventDefault(); useCanvasStore.getState().toggleMaximize(activePaneId) }
       if (event.ctrlKey && event.key === ',') { event.preventDefault(); navigate('/settings') }
       if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'o') { event.preventDefault(); navigate('/') }
       if (event.ctrlKey && (event.key === 'PageDown' || event.key === 'PageUp')) {
@@ -521,6 +576,24 @@ export function WorkspaceScreen() {
   // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [activePaneId, navigate, setActivePane, workspace, projectWorkspaces, switchWorkspace, toggleCollapse])
 
+  // Render one terminal for a pane inside its canvas window. The docking canvas owns geometry,
+  // placement and the header drag handle; this only wires the terminal + its pane actions. The
+  // TerminalPane keeps a stable React key (its paneId) so its xterm/PTY never remount on moves.
+  const renderPane = (paneId: string, ctx: RenderPaneContext) => {
+    const assignment = workspace?.panes.find((pane) => pane.id === paneId)
+    if (!assignment) return <div className="terminal-failure"><ErrorNotice message="This layout pane has no saved assignment." /></div>
+    const session = sessions.find((item) => item.paneId === paneId)
+    return <>
+      <TerminalPane assignment={assignment} session={session} deferred={deferredPaneIds.includes(paneId)} active={ctx.active} maximized={ctx.maximized} settings={settings}
+        onFocus={() => setActivePane(paneId)}
+        onMaximize={() => useCanvasStore.getState().toggleMaximize(paneId)}
+        onClose={() => void closePane(paneId)} onRestart={() => void restartPane(paneId)} onStop={() => void stopPane(paneId)}
+        onMenu={(anchor) => { const rect = anchor.getBoundingClientRect(); setPaneMenu({ paneId, x: Math.min(rect.left, window.innerWidth - 230), y: rect.bottom + 4 }) }}
+        onHeaderPointerDown={ctx.onHeaderPointerDown} />
+      {paneErrors[paneId] && <div className="pane-native-error"><ErrorNotice message={paneErrors[paneId]} onRetry={() => void restartPane(paneId)} /></div>}
+    </>
+  }
+
   if (loading) return <div className="workspace-loading"><div className="workspace-loading-header" /><div className="workspace-loading-sidebar" /><div className="workspace-loading-grid" /></div>
   if (!workspace || !project) return <main className="centered-error"><ErrorNotice message={error || 'The workspace could not be loaded.'} /><Button onClick={() => navigate('/')}>Return to launcher</Button></main>
   const running = sessions.filter((session) => session.status === 'running').length
@@ -529,33 +602,13 @@ export function WorkspaceScreen() {
   return <AppShell className={`workspace-shell ${switchingWorkspaceId ? 'workspace-switching' : ''}`} sidebarOpen={!maximizedPaneId}
     titleBar={<><div className="workspace-heading"><strong>{activePane?.title || workspace.name}</strong>{project.gitBranch && <span className="branch-label">{project.gitBranch}</span>}</div><div className="titlebar-spacer" /><span className="compact-count">{running}/{workspace.panes.length} running</span><div className="workspace-menu-wrap"><Button variant="ghost" icon={<ChevronDown size={14} />} aria-expanded={workspaceMenu} aria-haspopup="menu" onClick={() => setWorkspaceMenu((value) => !value)}>Workspace</Button>{workspaceMenu && <><button className="context-scrim" aria-label="Close workspace menu" onClick={() => setWorkspaceMenu(false)} /><div className="context-popover workspace-popover" role="menu"><button role="menuitem" onClick={() => { setWorkspaceMenu(false); renameWorkspaceById(workspace.id) }}>Rename workspace</button><button role="menuitem" onClick={reconfigureWorkspace}>Reconfigure workspace</button><button role="menuitem" onClick={() => navigate(`/setup/${project.id}`)}>New workspace for this project</button><span className="menu-separator" /><button role="menuitem" onClick={() => void restartAll()}><RotateCcw size={14} />Restart all terminals</button><button role="menuitem" onClick={() => void stopAll()}><CircleStop size={14} />Stop all terminals</button><button role="menuitem" onClick={openLauncher}><FolderOpen size={14} />Project launcher</button><button role="menuitem" className="danger-item" onClick={() => void closeWorkspace()}>Close workspace</button></div></>}</div></>}
     sidebar={<ForgeSpaceSidebar project={project} activeWorkspaceId={workspace.id} workspaces={sidebarWorkspaces} recents={recentWorkspaces} collapsed={collapsed} width={sidebarWidth} switchingWorkspaceId={switchingWorkspaceId} projectFolderMissing={projectFolderMissing} loadingWorkspaces={projectWorkspaces.length === 0 && loading} actions={sidebarActions} />}
-    canvas={<>{error && <div className="workspace-error"><ErrorNotice message={error} onRetry={() => void restartAll()} /></div>}<section className="terminal-canvas"><RecursiveLayout node={workspace.layout} path={[]} workspace={workspace} sessions={sessions} deferredPaneIds={deferredPaneIds} activePaneId={activePaneId} maximizedPaneId={maximizedPaneId} settings={settings} paneErrors={paneErrors} onFocus={(paneId) => { setActivePane(paneId); if (workspace.activePaneId !== paneId) { const next = { ...workspace, activePaneId: paneId }; setLocalWorkspace(next); setWorkspace(next); void persist(next).catch(() => undefined) } }} onMaximize={(paneId) => setMaximizedPaneId((value) => value === paneId ? undefined : paneId)} onClose={closePane} onRestart={restartPane} onStop={stopPane} onMenu={(paneId, anchor) => { const rect = anchor.getBoundingClientRect(); setPaneMenu({ paneId, x: Math.min(rect.left, window.innerWidth - 230), y: rect.bottom + 4 }) }} onSizes={updateLayoutSizes} /></section></>}
+    canvas={<>{error && <div className="workspace-error"><ErrorNotice message={error} onRetry={() => void restartAll()} /></div>}<section className="terminal-canvas"><WorkspaceCanvas reducedMotion={reducedMotion} persist={persistCanvas} onFocusPane={setActivePane} renderPane={renderPane} /></section></>}
     statusBar={<><span>{project.gitBranch || 'No branch'}</span><span className="status-path" title={project.rootPath}>{project.name}</span><span>{running}/{workspace.panes.length} running</span><span>{activePane?.title || 'No active pane'}</span>{Object.keys(paneErrors).some((id) => paneErrors[id]) && <span className="status-alert">Needs attention</span>}</>}
   >
     {pendingInsert && <Modal title={pendingInsert.replace ? 'Replace terminal' : 'Choose terminal'} onClose={() => setPendingInsert(undefined)}><div className="provider-picker">{choices.length === 0 ? <ErrorNotice message="No available agents or shells were detected." onRetry={() => void scanProviders()} /> : choices.map((choice) => <button key={`${choice.provider}:${choice.name}`} onClick={() => void insertOrReplace(choice)}><TerminalSquare size={18} /><div><strong>{choice.name}</strong><span>Available · {providerLabel(choice.provider)}</span></div></button>)}</div></Modal>}
     {renameTarget && <TextPromptDialog title={renameTarget.kind === 'workspace' ? 'Rename workspace' : 'Rename terminal'} label={renameTarget.kind === 'workspace' ? 'Workspace name' : 'Terminal title'} initialValue={renameTarget.initialValue} confirmLabel="Rename" onClose={() => setRenameTarget(undefined)} onConfirm={(value) => void confirmRename(value)} />}
     {paneMenu && <PaneMenu menu={paneMenu} onClose={() => setPaneMenu(undefined)} onAction={(action) => { const paneId = paneMenu.paneId; setPaneMenu(undefined); if (action === 'rename') void renamePane(paneId); if (action === 'split_right') setPendingInsert({ targetPaneId: paneId, direction: 'vertical' }); if (action === 'split_down') setPendingInsert({ targetPaneId: paneId, direction: 'horizontal' }); if (action === 'duplicate') { const pane = workspace.panes.find((item) => item.id === paneId); if (pane) setPendingInsert({ targetPaneId: paneId, direction: 'vertical', duplicate: pane }) } if (action === 'replace') setPendingInsert({ targetPaneId: paneId, direction: 'vertical', replace: true }); if (action === 'directory') void changeDirectory(paneId); if (action === 'restart') void restartPane(paneId); if (action === 'stop') void stopPane(paneId); if (action === 'close') void closePane(paneId); if (['search','copy','paste','select_all','clear','focus'].includes(action)) dispatchTerminalAction(paneId, action as Parameters<typeof dispatchTerminalAction>[1]) }} />}
   </AppShell>
-}
-
-interface RecursiveProps { node: LayoutNode; path: number[]; workspace: Workspace; sessions: TerminalSession[]; deferredPaneIds: string[]; activePaneId?: string; maximizedPaneId?: string; settings: ReturnType<typeof useAppStore.getState>['settings']; paneErrors: Record<string, string>; onFocus: (paneId: string) => void; onMaximize: (paneId: string) => void; onClose: (paneId: string) => void; onRestart: (paneId: string) => void; onStop: (paneId: string) => void; onMenu: (paneId: string, anchor: HTMLElement) => void; onSizes: (path: number[], layout: PanelLayout) => void }
-
-function RecursiveLayout(props: RecursiveProps) {
-  const { node } = props
-  if (node.type === 'pane') {
-    const assignment = props.workspace.panes.find((pane) => pane.id === node.paneId)
-    if (!assignment) return <div className="terminal-failure"><ErrorNotice message="This layout pane has no saved assignment." /></div>
-    const session = props.sessions.find((item) => item.paneId === node.paneId)
-    return <div className="pane-slot"><TerminalPane assignment={assignment} session={session} deferred={props.deferredPaneIds.includes(node.paneId)} active={props.activePaneId === node.paneId} maximized={props.maximizedPaneId === node.paneId} settings={props.settings} onFocus={() => props.onFocus(node.paneId)} onMaximize={() => props.onMaximize(node.paneId)} onClose={() => props.onClose(node.paneId)} onRestart={() => props.onRestart(node.paneId)} onStop={() => props.onStop(node.paneId)} onMenu={(anchor) => props.onMenu(node.paneId, anchor)} />{props.paneErrors[node.paneId] && <div className="pane-native-error"><ErrorNotice message={props.paneErrors[node.paneId]} onRetry={() => props.onRestart(node.paneId)} /></div>}</div>
-  }
-  const ids = node.children.map((child) => paneIds(child)[0])
-  const defaultLayout = Object.fromEntries(ids.map((id, index) => [id, node.sizes[index] ?? 100 / ids.length]))
-  return <Group id={`split-${props.path.join('-') || 'root'}`} orientation={node.direction} defaultLayout={defaultLayout} onLayoutChanged={(layout, meta) => meta.isUserInteraction && props.onSizes(props.path, layout)}>{node.children.flatMap((child, index) => {
-    const id = ids[index]
-    const items = [<Panel id={id} key={`panel-${id}`} minSize="12%"><RecursiveLayout {...props} node={child} path={[...props.path, index]} /></Panel>]
-    if (index < node.children.length - 1) items.push(<Separator id={`separator-${props.path.join('-')}-${index}`} key={`separator-${id}`} className={`resize-handle ${node.direction}`} />)
-    return items
-  })}</Group>
 }
 
 function PaneMenu({ menu, onClose, onAction }: { menu: { x: number; y: number }; onClose: () => void; onAction: (action: string) => void }) {
@@ -567,9 +620,3 @@ function shellChoice(shell: ShellProfile): ProviderChoice {
   return { provider, name: shell.name, executablePath: shell.executablePath, args: shell.args, shellProfileId: shell.id }
 }
 
-function setSizesAtPath(node: LayoutNode, path: number[], sizes: number[]): LayoutNode {
-  if (node.type === 'pane') return node
-  if (path.length === 0) return { ...node, sizes }
-  const [head, ...tail] = path
-  return { ...node, children: node.children.map((child, index) => index === head ? setSizesAtPath(child, tail, sizes) : child) }
-}
