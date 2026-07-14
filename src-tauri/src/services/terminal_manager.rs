@@ -228,12 +228,19 @@ impl TerminalManager {
             session.process_id
         );
         if let Some(app) = &self.app_handle {
-            let _ = app.emit(
+            let event = TerminalStatusEvent {
+                session: session.clone(),
+                lifecycle_event: "started".into(),
+            };
+            let _ = app.emit_to(
+                crate::services::MAIN_WINDOW_LABEL,
                 "terminal-status",
-                TerminalStatusEvent {
-                    session: session.clone(),
-                    lifecycle_event: "started".into(),
-                },
+                event.clone(),
+            );
+            let _ = app.emit_to(
+                crate::services::detached_label(&session.workspace_id),
+                "terminal-status",
+                event,
             );
         }
         // If either worker thread cannot be created the session would be a zombie: a live
@@ -413,22 +420,14 @@ impl TerminalManager {
                 );
                 drop(metadata);
                 if let Some(app) = &app {
-                    let _ = app.emit(
-                        "terminal-status",
-                        TerminalStatusEvent {
-                            session: final_session,
-                            lifecycle_event: status.clone(),
-                        },
-                    );
-                    let _ = app.emit(
-                        "terminal-exit",
-                        TerminalExitEvent {
-                            session_id: session_id.clone(),
-                            pane_id,
-                            exit_code,
-                            timestamp: Utc::now().to_rfc3339(),
-                        },
-                    );
+                    let workspace_id=final_session.workspace_id.clone();
+                    let status_event=TerminalStatusEvent {session:final_session,lifecycle_event:status.clone()};
+                    let exit_event=TerminalExitEvent {session_id:session_id.clone(),pane_id,exit_code,timestamp:Utc::now().to_rfc3339()};
+                    let detached=crate::services::detached_label(&workspace_id);
+                    let _=app.emit_to(crate::services::MAIN_WINDOW_LABEL,"terminal-status",status_event.clone());
+                    let _=app.emit_to(&detached,"terminal-status",status_event);
+                    let _=app.emit_to(crate::services::MAIN_WINDOW_LABEL,"terminal-exit",exit_event.clone());
+                    let _=app.emit_to(&detached,"terminal-exit",exit_event);
                 }
                 sessions.write().remove(&session_id);
             })
@@ -565,6 +564,16 @@ impl TerminalManager {
         first_error.map_or(Ok(()), Err)
     }
 
+    /// The Workspace a live session belongs to, if it is still owned. Used by the input-lease
+    /// guard to map a session write back to the Workspace whose exclusive interactive lease
+    /// determines which window may type into it.
+    pub fn workspace_for_session(&self, session_id: &str) -> Option<String> {
+        self.sessions
+            .read()
+            .get(session_id)
+            .map(|handle| handle.metadata.read().workspace_id.clone())
+    }
+
     pub fn list_live_sessions(&self, workspace_id: Option<&str>) -> Vec<TerminalSession> {
         self.sessions
             .read()
@@ -625,6 +634,7 @@ fn append_and_sequence(handle: &TerminalHandle, data: &[u8]) -> u64 {
 
 fn emit_output(app: &Option<AppHandle>, handle: &TerminalHandle, sequence: u64, data: Vec<u8>) {
     let metadata = handle.metadata.read();
+    let workspace_id = metadata.workspace_id.clone();
     let event = TerminalOutputEvent {
         session_id: metadata.id.clone(),
         pane_id: metadata.pane_id.clone(),
@@ -634,7 +644,16 @@ fn emit_output(app: &Option<AppHandle>, handle: &TerminalHandle, sequence: u64, 
     };
     drop(metadata);
     if let Some(app) = app {
-        let _ = app.emit("terminal-output", event);
+        let _ = app.emit_to(
+            crate::services::MAIN_WINDOW_LABEL,
+            "terminal-output",
+            event.clone(),
+        );
+        let _ = app.emit_to(
+            crate::services::detached_label(&workspace_id),
+            "terminal-output",
+            event,
+        );
     }
 }
 

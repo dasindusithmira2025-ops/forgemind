@@ -265,3 +265,93 @@ export interface NativeError {
   recommendedAction?: string
   sourceLayer: string
 }
+
+// ---- Multi-Project + multi-monitor Workspace package -------------------------------------
+
+export type PlacementMode = 'attached' | 'detached'
+
+export interface WindowGeometry {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+export interface MonitorRect {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+/** Which Projects are open in the main session, plus each one's last-active Workspace/Pane. */
+export interface OpenProjectSession {
+  projectId: string
+  isActive: boolean
+  lastWorkspaceId?: string
+  lastPaneId?: string
+  expanded: boolean
+  openedAt: string
+  updatedAt: string
+}
+
+/** Where a Workspace is displayed. Authoritative in Rust; renderers cache it. */
+export interface WorkspacePlacement {
+  workspaceId: string
+  mode: PlacementMode
+  windowLabel?: string
+  monitorId?: string
+  preferredMonitorId?: string
+  monitorAlias?: string
+  geometry?: WindowGeometry
+  maximized: boolean
+  fullscreen: boolean
+  placementRevision: number
+  lastFocusAt?: string
+  /** Window label currently holding the exclusive interactive lease, if any. */
+  leaseOwnerLabel?: string
+  leaseId?: string
+}
+
+export interface HandoffTicket {
+  operationId: string
+  workspaceId: string
+  fromWindowLabel?: string
+  toWindowLabel: string
+  targetMode: PlacementMode
+  expectedRevision: number
+  leaseId: string
+}
+
+export interface MonitorInfo {
+  id: string
+  name: string
+  alias?: string
+  bounds: MonitorRect
+  workArea: MonitorRect
+  scaleFactor: number
+  isPrimary: boolean
+  windowCount: number
+}
+
+/** A detached Workspace window rescued onto the primary work area after its monitor vanished. */
+export interface RecoveredWindow {
+  workspaceId: string
+  windowLabel: string
+  geometry: WindowGeometry
+  preferredMonitorId?: string
+  preferredMonitorAlias?: string
+}
+
+/** A displaced Workspace whose preferred monitor is connected again (offer to move it back). */
+export interface ReconnectOffer {
+  workspaceId: string
+  monitorId: string
+  monitorAlias?: string
+}
+
+/** Result of a monitor-recovery sweep: rescued windows + reconnect offers. */
+export interface MonitorRecoveryReport {
+  recovered: RecoveredWindow[]
+  reconnectable: ReconnectOffer[]
+}

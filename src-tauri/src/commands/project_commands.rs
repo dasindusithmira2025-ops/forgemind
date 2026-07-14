@@ -2,31 +2,79 @@ use crate::errors::AppResult;
 use crate::models::{Project, ProjectOverview};
 use crate::services::ProjectService;
 use crate::AppState;
-use tauri::State;
+use tauri::{State, Window};
+
+fn require_project_scope(window: &Window, state: &AppState, project_id: &str) -> AppResult<()> {
+    if window.label() == crate::services::MAIN_WINDOW_LABEL {
+        return Ok(());
+    }
+    let workspace_id = window.label().strip_prefix("ws-").ok_or_else(|| {
+        crate::errors::AppError::new(
+            "project_scope_denied",
+            "This window has no Project scope.",
+            true,
+        )
+        .layer("window_security")
+    })?;
+    let workspace = state.database.get_workspace(workspace_id)?;
+    if workspace.project_id == project_id {
+        state
+            .windows
+            .validate_workspace_caller(workspace_id, window.label(), true)
+    } else {
+        Err(crate::errors::AppError::new(
+            "project_scope_denied",
+            "This window cannot access another Project.",
+            true,
+        )
+        .entity(project_id)
+        .layer("window_security"))
+    }
+}
 
 #[tauri::command]
-pub fn open_project(path: String, state: State<'_, AppState>) -> AppResult<Project> {
+pub fn open_project(
+    path: String,
+    window: Window,
+    state: State<'_, AppState>,
+) -> AppResult<Project> {
+    crate::require_main_window(&window)?;
     let project = ProjectService::inspect(&path)?;
     state.database.upsert_project(&project)
 }
 
 #[tauri::command]
-pub fn get_project(project_id: String, state: State<'_, AppState>) -> AppResult<Project> {
+pub fn get_project(
+    project_id: String,
+    window: Window,
+    state: State<'_, AppState>,
+) -> AppResult<Project> {
+    require_project_scope(&window, &state, &project_id)?;
     state.database.get_project(&project_id)
 }
 
 #[tauri::command]
-pub fn list_recent_projects(state: State<'_, AppState>) -> AppResult<Vec<Project>> {
+pub fn list_recent_projects(window: Window, state: State<'_, AppState>) -> AppResult<Vec<Project>> {
+    crate::require_main_window(&window)?;
     state.database.list_recent_projects()
 }
 
 #[tauri::command]
-pub fn list_projects_overview(state: State<'_, AppState>) -> AppResult<Vec<ProjectOverview>> {
+pub fn list_projects_overview(
+    window: Window,
+    state: State<'_, AppState>,
+) -> AppResult<Vec<ProjectOverview>> {
+    crate::require_main_window(&window)?;
     state.database.list_projects_overview()
 }
 
 #[tauri::command]
-pub fn remove_project_from_recent(project_id: String, state: State<'_, AppState>) -> AppResult<()> {
+pub fn remove_project_from_recent(
+    project_id: String,
+    window: Window,
+    state: State<'_, AppState>,
+) -> AppResult<()> {
+    crate::require_main_window(&window)?;
     state.database.remove_project_from_recent(&project_id)
 }
 
@@ -35,8 +83,10 @@ pub fn remove_project_from_recent(project_id: String, state: State<'_, AppState>
 pub fn relocate_project(
     project_id: String,
     path: String,
+    window: Window,
     state: State<'_, AppState>,
 ) -> AppResult<Project> {
+    crate::require_main_window(&window)?;
     let inspected = ProjectService::inspect(&path)?;
     state.database.relocate_project(&project_id, &inspected)
 }
@@ -46,6 +96,8 @@ pub fn validate_working_directory(
     project_root: String,
     working_directory: String,
     allow_external: bool,
+    window: Window,
 ) -> AppResult<String> {
+    crate::require_main_window(&window)?;
     ProjectService::validate_working_directory(&project_root, &working_directory, allow_external)
 }

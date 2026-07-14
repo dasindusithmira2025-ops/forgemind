@@ -7,7 +7,7 @@ use crate::models::{
 use crate::services::ProjectService;
 use crate::AppState;
 use std::path::Path;
-use tauri::State;
+use tauri::{State, Window};
 
 #[tauri::command]
 pub fn get_layout_preset(count: usize, variant: String) -> AppResult<LayoutNode> {
@@ -77,8 +77,10 @@ pub fn remove_layout_pane(layout: LayoutNode, pane_id: String) -> AppResult<Layo
 #[tauri::command]
 pub fn save_workspace(
     request: WorkspaceSaveRequest,
+    window: Window,
     state: State<'_, AppState>,
 ) -> AppResult<Workspace> {
+    crate::require_main_window(&window)?;
     let project = state.database.get_project(&request.project_id)?;
     ProjectService::inspect(&project.root_path)?;
     request.layout.validate()?;
@@ -105,7 +107,14 @@ pub fn save_workspace(
 }
 
 #[tauri::command]
-pub fn get_workspace(workspace_id: String, state: State<'_, AppState>) -> AppResult<Workspace> {
+pub fn get_workspace(
+    workspace_id: String,
+    window: Window,
+    state: State<'_, AppState>,
+) -> AppResult<Workspace> {
+    state
+        .windows
+        .validate_workspace_caller(&workspace_id, window.label(), true)?;
     state.database.get_workspace(&workspace_id)
 }
 
@@ -113,8 +122,12 @@ pub fn get_workspace(workspace_id: String, state: State<'_, AppState>) -> AppRes
 #[tauri::command]
 pub fn get_workspace_canvas_layout(
     workspace_id: String,
+    window: Window,
     state: State<'_, AppState>,
 ) -> AppResult<WorkspaceCanvasLayoutRecord> {
+    state
+        .windows
+        .validate_workspace_caller(&workspace_id, window.label(), true)?;
     state.database.get_workspace_canvas_layout(&workspace_id)
 }
 
@@ -123,39 +136,61 @@ pub fn get_workspace_canvas_layout(
 #[tauri::command]
 pub fn save_workspace_canvas_layout(
     request: SaveWorkspaceCanvasLayoutRequest,
+    window: Window,
     state: State<'_, AppState>,
 ) -> AppResult<SaveWorkspaceCanvasLayoutResult> {
+    state
+        .windows
+        .validate_workspace_caller(&request.workspace_id, window.label(), false)?;
     state.database.save_workspace_canvas_layout(&request)
 }
 
 #[tauri::command]
 pub fn list_workspaces_for_project(
     project_id: String,
+    window: Window,
     state: State<'_, AppState>,
 ) -> AppResult<Vec<Workspace>> {
+    crate::require_main_window(&window)?;
     state.database.list_workspaces_for_project(&project_id)
 }
 
 #[tauri::command]
-pub fn suggest_workspace_name(project_id: String, state: State<'_, AppState>) -> AppResult<String> {
+pub fn suggest_workspace_name(
+    project_id: String,
+    window: Window,
+    state: State<'_, AppState>,
+) -> AppResult<String> {
+    crate::require_main_window(&window)?;
     state.database.suggest_workspace_name(&project_id)
 }
 
 #[tauri::command]
-pub fn list_recent_workspaces(state: State<'_, AppState>) -> AppResult<Vec<RecentWorkspace>> {
+pub fn list_recent_workspaces(
+    window: Window,
+    state: State<'_, AppState>,
+) -> AppResult<Vec<RecentWorkspace>> {
+    crate::require_main_window(&window)?;
     state.database.list_recent_workspaces()
 }
 
 #[tauri::command]
-pub fn remove_recent_workspace(workspace_id: String, state: State<'_, AppState>) -> AppResult<()> {
+pub fn remove_recent_workspace(
+    workspace_id: String,
+    window: Window,
+    state: State<'_, AppState>,
+) -> AppResult<()> {
+    crate::require_main_window(&window)?;
     state.database.remove_from_recent(&workspace_id)
 }
 
 #[tauri::command]
 pub fn delete_workspace_configuration(
     workspace_id: String,
+    window: Window,
     state: State<'_, AppState>,
 ) -> AppResult<()> {
+    crate::require_main_window(&window)?;
     state
         .terminals
         .terminate_workspace_sessions(&workspace_id)?;
@@ -166,8 +201,10 @@ pub fn delete_workspace_configuration(
 pub fn rename_workspace(
     workspace_id: String,
     name: String,
+    window: Window,
     state: State<'_, AppState>,
 ) -> AppResult<Workspace> {
+    crate::require_main_window(&window)?;
     state.database.rename_workspace(&workspace_id, &name)
 }
 
@@ -177,8 +214,10 @@ pub fn rename_workspace(
 pub fn reorder_workspaces(
     project_id: String,
     ordered_ids: Vec<String>,
+    window: Window,
     state: State<'_, AppState>,
 ) -> AppResult<()> {
+    crate::require_main_window(&window)?;
     state.database.reorder_workspaces(&project_id, &ordered_ids)
 }
 
@@ -187,8 +226,10 @@ pub fn reorder_workspaces(
 #[tauri::command]
 pub fn duplicate_workspace(
     workspace_id: String,
+    window: Window,
     state: State<'_, AppState>,
 ) -> AppResult<Workspace> {
+    crate::require_main_window(&window)?;
     state.database.duplicate_workspace(&workspace_id)
 }
 
@@ -197,7 +238,9 @@ pub fn duplicate_workspace(
 #[tauri::command]
 pub fn set_last_active_workspace(
     workspace_id: String,
+    window: Window,
     state: State<'_, AppState>,
 ) -> AppResult<()> {
+    crate::require_main_window(&window)?;
     state.database.set_last_active_workspace(&workspace_id)
 }

@@ -220,6 +220,417 @@ PRAGMA user_version=6;
 COMMIT;
 "#;
 
+// Mission Control. The migration is additive and preserves every existing Project,
+// Workspace, Pane, and Terminal Session row. Mission task workspaces are explicitly marked
+// as system-owned so ordinary workspace lists remain unchanged.
+const MIGRATION_7: &str = r#"
+BEGIN IMMEDIATE;
+ALTER TABLE workspaces ADD COLUMN system_kind TEXT NOT NULL DEFAULT 'user';
+ALTER TABLE workspaces ADD COLUMN mission_id TEXT;
+
+CREATE TABLE IF NOT EXISTS missions (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+  title TEXT NOT NULL,
+  objective TEXT NOT NULL,
+  constraints_json TEXT NOT NULL DEFAULT '[]',
+  reference_paths_json TEXT NOT NULL DEFAULT '[]',
+  preferred_agent_ids_json TEXT NOT NULL DEFAULT '[]',
+  status TEXT NOT NULL,
+  execution_mode TEXT NOT NULL,
+  risk_level TEXT NOT NULL,
+  permission_profile TEXT NOT NULL,
+  verification_profile_id TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS acceptance_criteria (
+  id TEXT PRIMARY KEY,
+  mission_id TEXT NOT NULL REFERENCES missions(id) ON DELETE CASCADE,
+  description TEXT NOT NULL,
+  required INTEGER NOT NULL DEFAULT 1,
+  status TEXT NOT NULL DEFAULT 'pending',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS mission_tasks (
+  id TEXT PRIMARY KEY,
+  mission_id TEXT NOT NULL REFERENCES missions(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  description TEXT NOT NULL,
+  agent_id TEXT REFERENCES agent_profiles(id) ON DELETE SET NULL,
+  role TEXT,
+  status TEXT NOT NULL,
+  working_directory TEXT,
+  worktree_id TEXT,
+  session_id TEXT,
+  verification_profile_id TEXT,
+  priority INTEGER NOT NULL DEFAULT 0,
+  attempt INTEGER NOT NULL DEFAULT 0,
+  execution_lock TEXT,
+  started_at TEXT,
+  completed_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS task_dependencies (
+  task_id TEXT NOT NULL REFERENCES mission_tasks(id) ON DELETE CASCADE,
+  dependency_task_id TEXT NOT NULL REFERENCES mission_tasks(id) ON DELETE RESTRICT,
+  PRIMARY KEY(task_id,dependency_task_id),
+  CHECK(task_id <> dependency_task_id)
+);
+CREATE TABLE IF NOT EXISTS task_acceptance_criteria (
+  task_id TEXT NOT NULL REFERENCES mission_tasks(id) ON DELETE CASCADE,
+  criterion_id TEXT NOT NULL REFERENCES acceptance_criteria(id) ON DELETE RESTRICT,
+  PRIMARY KEY(task_id,criterion_id)
+);
+CREATE TABLE IF NOT EXISTS worktrees (
+  id TEXT PRIMARY KEY,
+  mission_id TEXT NOT NULL REFERENCES missions(id) ON DELETE RESTRICT,
+  task_id TEXT NOT NULL REFERENCES mission_tasks(id) ON DELETE RESTRICT,
+  repository_path TEXT NOT NULL,
+  worktree_path TEXT NOT NULL UNIQUE,
+  branch_name TEXT NOT NULL,
+  base_ref TEXT NOT NULL,
+  base_branch TEXT,
+  status TEXT NOT NULL,
+  owner_marker_path TEXT NOT NULL,
+  restore_ref TEXT,
+  merge_commit TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS mission_sessions (
+  id TEXT PRIMARY KEY,
+  mission_id TEXT NOT NULL REFERENCES missions(id) ON DELETE RESTRICT,
+  task_id TEXT NOT NULL REFERENCES mission_tasks(id) ON DELETE RESTRICT,
+  agent_id TEXT NOT NULL,
+  terminal_session_id TEXT REFERENCES terminal_sessions(id) ON DELETE SET NULL,
+  workspace_id TEXT REFERENCES workspaces(id) ON DELETE SET NULL,
+  pane_id TEXT REFERENCES workspace_panes(id) ON DELETE SET NULL,
+  worktree_id TEXT REFERENCES worktrees(id) ON DELETE SET NULL,
+  working_directory TEXT NOT NULL,
+  command TEXT NOT NULL,
+  process_id INTEGER,
+  external_session_id TEXT,
+  transcript_path TEXT,
+  status TEXT NOT NULL,
+  started_at TEXT NOT NULL,
+  last_heartbeat_at TEXT,
+  recovery_metadata_json TEXT NOT NULL DEFAULT '{}'
+);
+CREATE TABLE IF NOT EXISTS task_events (
+  id TEXT PRIMARY KEY,
+  mission_id TEXT NOT NULL REFERENCES missions(id) ON DELETE CASCADE,
+  task_id TEXT REFERENCES mission_tasks(id) ON DELETE CASCADE,
+  event_type TEXT NOT NULL,
+  title TEXT NOT NULL,
+  detail TEXT NOT NULL,
+  status TEXT NOT NULL,
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS verification_profiles (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  approved INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS verification_checks (
+  id TEXT PRIMARY KEY,
+  profile_id TEXT NOT NULL REFERENCES verification_profiles(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  command TEXT NOT NULL,
+  required INTEGER NOT NULL,
+  timeout_ms INTEGER NOT NULL,
+  working_directory TEXT,
+  continue_on_failure INTEGER NOT NULL DEFAULT 0,
+  position_order INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS verification_results (
+  id TEXT PRIMARY KEY,
+  task_id TEXT NOT NULL REFERENCES mission_tasks(id) ON DELETE CASCADE,
+  check_id TEXT NOT NULL REFERENCES verification_checks(id) ON DELETE RESTRICT,
+  status TEXT NOT NULL,
+  exit_code INTEGER,
+  started_at TEXT,
+  completed_at TEXT,
+  duration_ms INTEGER,
+  output_excerpt TEXT,
+  artifact_ids_json TEXT NOT NULL DEFAULT '[]'
+);
+CREATE TABLE IF NOT EXISTS evidence_records (
+  id TEXT PRIMARY KEY,
+  mission_id TEXT NOT NULL REFERENCES missions(id) ON DELETE CASCADE,
+  task_id TEXT REFERENCES mission_tasks(id) ON DELETE CASCADE,
+  acceptance_criterion_id TEXT REFERENCES acceptance_criteria(id) ON DELETE SET NULL,
+  evidence_type TEXT NOT NULL,
+  title TEXT NOT NULL,
+  summary TEXT NOT NULL,
+  status TEXT NOT NULL,
+  source_path TEXT,
+  command TEXT,
+  artifact_path TEXT,
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS audit_events (
+  id TEXT PRIMARY KEY,
+  mission_id TEXT REFERENCES missions(id) ON DELETE SET NULL,
+  task_id TEXT REFERENCES mission_tasks(id) ON DELETE SET NULL,
+  action TEXT NOT NULL,
+  status TEXT NOT NULL,
+  detail TEXT NOT NULL,
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS recovery_states (
+  id TEXT PRIMARY KEY,
+  mission_id TEXT NOT NULL REFERENCES missions(id) ON DELETE CASCADE,
+  task_id TEXT REFERENCES mission_tasks(id) ON DELETE CASCADE,
+  session_id TEXT REFERENCES mission_sessions(id) ON DELETE SET NULL,
+  status TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  available_actions_json TEXT NOT NULL DEFAULT '[]',
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS project_contexts (
+  project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+  architecture_summary TEXT,
+  technology_stack_json TEXT NOT NULL DEFAULT '[]',
+  important_paths_json TEXT NOT NULL DEFAULT '[]',
+  conventions_json TEXT NOT NULL DEFAULT '[]',
+  build_commands_json TEXT NOT NULL DEFAULT '[]',
+  test_commands_json TEXT NOT NULL DEFAULT '[]',
+  user_instructions_json TEXT NOT NULL DEFAULT '[]',
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS project_context_suggestions (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  category TEXT NOT NULL,
+  value TEXT NOT NULL,
+  source_path TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_missions_project ON missions(project_id,updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_tasks_mission ON mission_tasks(mission_id,priority,created_at);
+CREATE INDEX IF NOT EXISTS idx_task_events ON task_events(mission_id,created_at);
+CREATE INDEX IF NOT EXISTS idx_evidence_task ON evidence_records(task_id,created_at);
+CREATE INDEX IF NOT EXISTS idx_verification_results_task ON verification_results(task_id,started_at);
+CREATE INDEX IF NOT EXISTS idx_recovery_mission ON recovery_states(mission_id,status);
+CREATE INDEX IF NOT EXISTS idx_worktrees_task_attempt ON worktrees(task_id,created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_workspaces_kind ON workspaces(project_id,system_kind);
+INSERT OR IGNORE INTO schema_migrations(version,applied_at) VALUES(7,datetime('now'));
+PRAGMA user_version=7;
+COMMIT;
+"#;
+
+// Project-scoped durable Memory. Raw terminal output is deliberately excluded: captures are
+// explicit, secret-filtered events and immutable revisions, with FTS over bounded chunks.
+const MIGRATION_8: &str = r#"
+BEGIN IMMEDIATE;
+CREATE TABLE IF NOT EXISTS memory_settings(
+  key TEXT PRIMARY KEY,
+  value_json TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS memory_events(
+  id TEXT PRIMARY KEY,
+  sequence INTEGER NOT NULL,
+  event_type TEXT NOT NULL,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  workspace_id TEXT,
+  branch_name TEXT,
+  worktree_id TEXT,
+  pane_id TEXT,
+  terminal_session_id TEXT,
+  agent_session_id TEXT,
+  actor_type TEXT NOT NULL,
+  actor_id TEXT,
+  payload_json TEXT NOT NULL,
+  content_hash TEXT NOT NULL,
+  occurred_at TEXT NOT NULL,
+  captured_at TEXT NOT NULL,
+  processing_status TEXT NOT NULL DEFAULT 'processed',
+  schema_version INTEGER NOT NULL DEFAULT 1,
+  sensitivity TEXT NOT NULL DEFAULT 'normal',
+  correlation_id TEXT,
+  causation_id TEXT,
+  UNIQUE(project_id, content_hash)
+);
+CREATE TABLE IF NOT EXISTS memory_items(
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  memory_type TEXT NOT NULL,
+  dedup_key TEXT NOT NULL,
+  title TEXT NOT NULL,
+  state TEXT NOT NULL DEFAULT 'active',
+  visibility TEXT NOT NULL DEFAULT 'project_shared',
+  workspace_id TEXT,
+  branch_name TEXT,
+  pinned INTEGER NOT NULL DEFAULT 0,
+  current_revision_id TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(project_id, dedup_key)
+);
+CREATE TABLE IF NOT EXISTS memory_revisions(
+  id TEXT PRIMARY KEY,
+  item_id TEXT NOT NULL REFERENCES memory_items(id) ON DELETE CASCADE,
+  revision_number INTEGER NOT NULL,
+  title TEXT NOT NULL,
+  body TEXT NOT NULL,
+  summary TEXT NOT NULL DEFAULT '',
+  confidence REAL NOT NULL DEFAULT 0.5,
+  observed_at TEXT NOT NULL,
+  valid_from TEXT,
+  valid_until TEXT,
+  superseded_at TEXT,
+  content_hash TEXT NOT NULL,
+  extraction_method TEXT NOT NULL DEFAULT 'deterministic',
+  model_id TEXT,
+  created_at TEXT NOT NULL,
+  UNIQUE(item_id, revision_number)
+);
+CREATE TABLE IF NOT EXISTS memory_sources(
+  id TEXT PRIMARY KEY,
+  source_type TEXT NOT NULL,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  uri TEXT NOT NULL,
+  file_path TEXT,
+  line_start INTEGER,
+  line_end INTEGER,
+  branch_name TEXT,
+  git_commit TEXT,
+  worktree_id TEXT,
+  workspace_id TEXT,
+  pane_id TEXT,
+  terminal_session_id TEXT,
+  agent_session_id TEXT,
+  event_id TEXT REFERENCES memory_events(id) ON DELETE SET NULL,
+  content_hash TEXT NOT NULL,
+  captured_at TEXT NOT NULL,
+  excerpt TEXT,
+  mime_type TEXT,
+  sensitivity TEXT NOT NULL DEFAULT 'normal',
+  UNIQUE(project_id, content_hash)
+);
+CREATE TABLE IF NOT EXISTS memory_revision_sources(
+  revision_id TEXT NOT NULL REFERENCES memory_revisions(id) ON DELETE CASCADE,
+  source_id TEXT NOT NULL REFERENCES memory_sources(id) ON DELETE CASCADE,
+  PRIMARY KEY(revision_id, source_id)
+);
+CREATE TABLE IF NOT EXISTS memory_chunks(
+  id TEXT PRIMARY KEY,
+  revision_id TEXT NOT NULL REFERENCES memory_revisions(id) ON DELETE CASCADE,
+  item_id TEXT NOT NULL REFERENCES memory_items(id) ON DELETE CASCADE,
+  project_id TEXT NOT NULL,
+  ordinal INTEGER NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'text',
+  content TEXT NOT NULL,
+  symbol_name TEXT,
+  file_path TEXT,
+  line_start INTEGER,
+  line_end INTEGER,
+  language TEXT,
+  content_hash TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE(revision_id, ordinal)
+);
+CREATE VIRTUAL TABLE IF NOT EXISTS memory_chunks_fts USING fts5(
+  chunk_id UNINDEXED,
+  item_id UNINDEXED,
+  project_id UNINDEXED,
+  title,
+  body,
+  symbol_name,
+  file_path,
+  tokenize = 'unicode61'
+);
+CREATE INDEX IF NOT EXISTS idx_memory_events_project ON memory_events(project_id, sequence);
+CREATE INDEX IF NOT EXISTS idx_memory_items_project ON memory_items(project_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_memory_revisions_item ON memory_revisions(item_id, revision_number DESC);
+CREATE INDEX IF NOT EXISTS idx_memory_sources_project ON memory_sources(project_id, captured_at DESC);
+CREATE INDEX IF NOT EXISTS idx_memory_chunks_item ON memory_chunks(item_id);
+CREATE TRIGGER IF NOT EXISTS memory_revisions_immutable
+BEFORE UPDATE ON memory_revisions
+FOR EACH ROW
+WHEN OLD.title <> NEW.title
+  OR OLD.body <> NEW.body
+  OR OLD.content_hash <> NEW.content_hash
+  OR OLD.revision_number <> NEW.revision_number
+  OR OLD.item_id <> NEW.item_id
+BEGIN
+  SELECT RAISE(ABORT, 'memory_revisions are immutable');
+END;
+INSERT OR IGNORE INTO schema_migrations(version,applied_at) VALUES(8,datetime('now'));
+PRAGMA user_version=8;
+COMMIT;
+"#;
+
+// Mission ownership remains Project-rooted. The optional Workspace is context only.
+const MIGRATION_9: &str = r#"
+BEGIN IMMEDIATE;
+ALTER TABLE missions ADD COLUMN origin_workspace_id TEXT REFERENCES workspaces(id) ON DELETE SET NULL;
+INSERT OR IGNORE INTO schema_migrations(version,applied_at) VALUES(9,datetime('now'));
+PRAGMA user_version=9;
+COMMIT;
+"#;
+
+// Multi-Project session and multi-monitor Workspace placement. This is v10 because the live
+// product already shipped Mission Control v7, Memory v8, and Mission origin context v9.
+const MIGRATION_10: &str = r#"
+BEGIN IMMEDIATE;
+CREATE TABLE IF NOT EXISTS open_project_sessions(
+  project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+  is_active INTEGER NOT NULL DEFAULT 0,
+  last_workspace_id TEXT REFERENCES workspaces(id) ON DELETE SET NULL,
+  last_pane_id TEXT REFERENCES workspace_panes(id) ON DELETE SET NULL,
+  expanded INTEGER NOT NULL DEFAULT 1,
+  opened_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS workspace_placements(
+  workspace_id TEXT PRIMARY KEY REFERENCES workspaces(id) ON DELETE CASCADE,
+  mode TEXT NOT NULL DEFAULT 'attached' CHECK(mode IN ('attached','detached','background')),
+  window_label TEXT,
+  monitor_id TEXT,
+  monitor_alias TEXT,
+  pos_x INTEGER,
+  pos_y INTEGER,
+  width INTEGER,
+  height INTEGER,
+  maximized INTEGER NOT NULL DEFAULT 0,
+  fullscreen INTEGER NOT NULL DEFAULT 0,
+  placement_revision INTEGER NOT NULL DEFAULT 0,
+  last_focus_at TEXT,
+  preferred_monitor_id TEXT,
+  CHECK((mode='detached' AND window_label IS NOT NULL) OR mode<>'detached')
+);
+CREATE TABLE IF NOT EXISTS monitor_aliases(
+  monitor_key TEXT PRIMARY KEY,
+  alias TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_open_project_sessions_active ON open_project_sessions(is_active);
+UPDATE open_project_sessions
+SET is_active=0
+WHERE is_active=1
+  AND project_id<>(SELECT project_id FROM open_project_sessions WHERE is_active=1 ORDER BY updated_at DESC, project_id LIMIT 1);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_single_active_project ON open_project_sessions(is_active) WHERE is_active=1;
+CREATE INDEX IF NOT EXISTS idx_workspace_placements_mode ON workspace_placements(mode);
+INSERT OR IGNORE INTO schema_migrations(version,applied_at) VALUES(10,datetime('now'));
+PRAGMA user_version=10;
+COMMIT;
+"#;
+
 pub fn apply(connection: &Connection) -> AppResult<()> {
     let current: i64 = connection
         .query_row("PRAGMA user_version", [], |row| row.get(0))
@@ -242,7 +653,213 @@ pub fn apply(connection: &Connection) -> AppResult<()> {
     if current < 6 {
         run_migration_batch(connection, MIGRATION_6, 6)?;
     }
+    // Schema feature checks are intentional. An unsafe partial build used version 7 for the
+    // placement tables; a version-only ladder would therefore skip Mission Control forever.
+    if current < 7
+        || !table_exists(connection, "missions")?
+        || !column_exists(connection, "workspaces", "system_kind")?
+    {
+        migrate_v7(connection)?;
+    }
+    if current < 8 || !table_exists(connection, "memory_items")? {
+        migrate_v8(connection)?;
+    }
+    if current < 9 || !column_exists(connection, "missions", "origin_workspace_id")? {
+        migrate_v9(connection)?;
+    }
+    if current < 10
+        || !table_exists(connection, "open_project_sessions")?
+        || !table_exists(connection, "workspace_placements")?
+    {
+        migrate_v10(connection)?;
+    } else if !column_exists(connection, "workspace_placements", "preferred_monitor_id")? {
+        add_column_if_missing(
+            connection,
+            "workspace_placements",
+            "preferred_monitor_id",
+            "TEXT",
+        )?;
+        connection.execute("UPDATE workspace_placements SET preferred_monitor_id=monitor_id WHERE preferred_monitor_id IS NULL", []).map_err(AppError::database)?;
+    }
     Ok(())
+}
+
+fn table_exists(connection: &Connection, table: &str) -> AppResult<bool> {
+    connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1)",
+            [table],
+            |row| row.get(0),
+        )
+        .map_err(AppError::database)
+}
+
+fn column_exists(connection: &Connection, table: &str, column: &str) -> AppResult<bool> {
+    let mut statement = connection
+        .prepare(&format!("PRAGMA table_info({table})"))
+        .map_err(AppError::database)?;
+    let names = statement
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(AppError::database)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(AppError::database)?;
+    Ok(names.iter().any(|name| name == column))
+}
+
+fn add_column_if_missing(
+    connection: &Connection,
+    table: &str,
+    column: &str,
+    definition: &str,
+) -> AppResult<()> {
+    if column_exists(connection, table, column)? {
+        return Ok(());
+    }
+    connection
+        .execute_batch(&format!(
+            "ALTER TABLE {table} ADD COLUMN {column} {definition};"
+        ))
+        .map_err(AppError::database)
+}
+
+/// Apply Mission Control even when a stale partial build already claimed version 7 for
+/// unrelated placement tables. The DDL is derived from the canonical migration while the two
+/// column additions are performed conditionally.
+fn migrate_v7(connection: &Connection) -> AppResult<()> {
+    connection
+        .execute_batch("BEGIN IMMEDIATE;")
+        .map_err(AppError::database)?;
+    let result = (|| {
+        add_column_if_missing(
+            connection,
+            "workspaces",
+            "system_kind",
+            "TEXT NOT NULL DEFAULT 'user'",
+        )?;
+        add_column_if_missing(connection, "workspaces", "mission_id", "TEXT")?;
+        let body = MIGRATION_7
+            .replace("BEGIN IMMEDIATE;", "")
+            .replace(
+                "ALTER TABLE workspaces ADD COLUMN system_kind TEXT NOT NULL DEFAULT 'user';",
+                "",
+            )
+            .replace("ALTER TABLE workspaces ADD COLUMN mission_id TEXT;", "")
+            .replace(
+                "INSERT OR IGNORE INTO schema_migrations(version,applied_at) VALUES(7,datetime('now'));",
+                "",
+            )
+            .replace("PRAGMA user_version=7;", "")
+            .replace("COMMIT;", "");
+        connection
+            .execute_batch(&body)
+            .map_err(AppError::database)?;
+        record_migration(connection, 7)
+    })();
+    finish_migration_transaction(connection, result, 7)
+}
+
+fn migrate_v9(connection: &Connection) -> AppResult<()> {
+    debug_assert!(MIGRATION_9.contains("origin_workspace_id"));
+    connection
+        .execute_batch("BEGIN IMMEDIATE;")
+        .map_err(AppError::database)?;
+    let result = (|| {
+        add_column_if_missing(
+            connection,
+            "missions",
+            "origin_workspace_id",
+            "TEXT REFERENCES workspaces(id) ON DELETE SET NULL",
+        )?;
+        record_migration(connection, 9)
+    })();
+    finish_migration_transaction(connection, result, 9)
+}
+
+fn migrate_v8(connection: &Connection) -> AppResult<()> {
+    connection
+        .execute_batch("BEGIN IMMEDIATE;")
+        .map_err(AppError::database)?;
+    let result = (|| {
+        let body = MIGRATION_8
+            .replace("BEGIN IMMEDIATE;", "")
+            .replace(
+                "INSERT OR IGNORE INTO schema_migrations(version,applied_at) VALUES(8,datetime('now'));",
+                "",
+            )
+            .replace("PRAGMA user_version=8;", "")
+            .replace("COMMIT;", "");
+        connection
+            .execute_batch(&body)
+            .map_err(AppError::database)?;
+        record_migration(connection, 8)
+    })();
+    finish_migration_transaction(connection, result, 8)
+}
+
+fn migrate_v10(connection: &Connection) -> AppResult<()> {
+    connection
+        .execute_batch("BEGIN IMMEDIATE;")
+        .map_err(AppError::database)?;
+    let result = (|| {
+        let body = MIGRATION_10
+            .replace("BEGIN IMMEDIATE;", "")
+            .replace(
+                "INSERT OR IGNORE INTO schema_migrations(version,applied_at) VALUES(10,datetime('now'));",
+                "",
+            )
+            .replace("PRAGMA user_version=10;", "")
+            .replace("COMMIT;", "");
+        connection
+            .execute_batch(&body)
+            .map_err(AppError::database)?;
+        add_column_if_missing(
+            connection,
+            "workspace_placements",
+            "preferred_monitor_id",
+            "TEXT",
+        )?;
+        connection.execute("UPDATE workspace_placements SET preferred_monitor_id=monitor_id WHERE preferred_monitor_id IS NULL", []).map_err(AppError::database)?;
+        record_migration(connection, 10)
+    })();
+    finish_migration_transaction(connection, result, 10)
+}
+
+fn record_migration(connection: &Connection, version: i64) -> AppResult<()> {
+    connection
+        .execute(
+            "INSERT OR IGNORE INTO schema_migrations(version,applied_at) VALUES(?1,datetime('now'))",
+            [version],
+        )
+        .map_err(AppError::database)?;
+    let current: i64 = connection
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .map_err(AppError::database)?;
+    connection
+        .pragma_update(None, "user_version", current.max(version))
+        .map_err(AppError::database)
+}
+
+fn finish_migration_transaction(
+    connection: &Connection,
+    result: AppResult<()>,
+    version: i64,
+) -> AppResult<()> {
+    match result {
+        Ok(()) => connection
+            .execute_batch("COMMIT;")
+            .map_err(AppError::database),
+        Err(error) => {
+            let _ = connection.execute_batch("ROLLBACK;");
+            Err(AppError::new(
+                "migration_error",
+                format!("ForgeMind could not reconcile database migration {version}."),
+                false,
+            )
+            .detail(error.to_string())
+            .action("Restore the diagnostic backup and open Diagnostics.")
+            .layer("migration"))
+        }
+    }
 }
 
 fn run_migration_batch(connection: &Connection, sql: &str, version: i64) -> AppResult<()> {
@@ -504,7 +1121,7 @@ mod tests {
         let version: i64 = connection
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 6);
+        assert_eq!(version, 10);
         let error = insert_session(&connection).unwrap_err().to_string();
         assert!(error.contains("project_id") || error.contains("FOREIGN KEY"));
     }
@@ -586,7 +1203,7 @@ mod tests {
         let version: i64 = connection
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 6);
+        assert_eq!(version, 10);
         let normalized: Vec<String> = {
             let mut statement = connection
                 .prepare("SELECT normalized_name FROM workspaces ORDER BY normalized_name")
@@ -661,5 +1278,101 @@ mod tests {
                 .unwrap()
         };
         assert_eq!(unchanged, vec![1, 0, 2]);
+    }
+
+    fn schema_through_v6(connection: &Connection) {
+        run_migration(connection, MIGRATION_1, 1).unwrap();
+        run_migration(connection, MIGRATION_2, 2).unwrap();
+        migrate_v3(connection).unwrap();
+        run_migration_batch(connection, MIGRATION_4, 4).unwrap();
+        run_migration_batch(connection, MIGRATION_5, 5).unwrap();
+        run_migration_batch(connection, MIGRATION_6, 6).unwrap();
+    }
+
+    #[test]
+    fn upgrades_each_shipped_mission_memory_schema_to_v10_without_loss() {
+        for starting_version in [7_i64, 8, 9] {
+            let connection = Connection::open_in_memory().unwrap();
+            connection
+                .pragma_update(None, "foreign_keys", true)
+                .unwrap();
+            schema_through_v6(&connection);
+            migrate_v7(&connection).unwrap();
+            connection.execute("INSERT INTO projects(id,name,root_path,canonical_root_path,major_languages_json,is_git_repository,has_package_json,has_lockfile,created_at,updated_at,last_opened_at) VALUES('p','Preserved','/p','/p','[]',0,0,0,'t','t','t')",[]).unwrap();
+            connection.execute("INSERT INTO missions(id,project_id,title,objective,constraints_json,reference_paths_json,preferred_agent_ids_json,status,execution_mode,risk_level,permission_profile,created_at,updated_at) VALUES('m','p','Keep','Keep data','[]','[]','[]','draft','manual-plan','low','observe','t','t')",[]).unwrap();
+            if starting_version >= 8 {
+                migrate_v8(&connection).unwrap();
+                connection.execute("INSERT INTO memory_items(id,project_id,memory_type,dedup_key,title,state,visibility,pinned,created_at,updated_at) VALUES('mem','p','note','keep-memory','Keep memory','active','project_shared',0,'t','t')",[]).unwrap();
+            }
+            if starting_version >= 9 {
+                migrate_v9(&connection).unwrap();
+            }
+            connection
+                .pragma_update(None, "user_version", starting_version)
+                .unwrap();
+            apply(&connection).unwrap();
+            let version: i64 = connection
+                .query_row("PRAGMA user_version", [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(version, 10);
+            assert_eq!(
+                connection
+                    .query_row("SELECT title FROM missions WHERE id='m'", [], |row| row
+                        .get::<_, String>(
+                        0
+                    ))
+                    .unwrap(),
+                "Keep"
+            );
+            if starting_version >= 8 {
+                assert_eq!(
+                    connection
+                        .query_row("SELECT title FROM memory_items WHERE id='mem'", [], |row| {
+                            row.get::<_, String>(0)
+                        })
+                        .unwrap(),
+                    "Keep memory"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn repairs_unsafe_partial_v7_placement_schema_and_preserves_rows() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", true)
+            .unwrap();
+        schema_through_v6(&connection);
+        connection.execute("INSERT INTO projects(id,name,root_path,canonical_root_path,major_languages_json,is_git_repository,has_package_json,has_lockfile,created_at,updated_at,last_opened_at) VALUES('p','Partial','/p','/p','[]',0,0,0,'t','t','t')",[]).unwrap();
+        connection.execute("INSERT INTO workspaces(id,project_id,name,normalized_name,layout_json,created_at,updated_at,last_opened_at) VALUES('w','p','Main','main','{\"type\":\"pane\",\"paneId\":\"a\"}','t','t','t')",[]).unwrap();
+        connection.execute_batch("CREATE TABLE open_project_sessions(project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,is_active INTEGER NOT NULL DEFAULT 0,last_workspace_id TEXT,last_pane_id TEXT,expanded INTEGER NOT NULL DEFAULT 1,opened_at TEXT NOT NULL,updated_at TEXT NOT NULL);CREATE TABLE workspace_placements(workspace_id TEXT PRIMARY KEY REFERENCES workspaces(id) ON DELETE CASCADE,mode TEXT NOT NULL DEFAULT 'attached',window_label TEXT,monitor_id TEXT,monitor_alias TEXT,pos_x INTEGER,pos_y INTEGER,width INTEGER,height INTEGER,maximized INTEGER NOT NULL DEFAULT 0,fullscreen INTEGER NOT NULL DEFAULT 0,placement_revision INTEGER NOT NULL DEFAULT 0,last_focus_at TEXT);CREATE TABLE monitor_aliases(monitor_key TEXT PRIMARY KEY,alias TEXT NOT NULL,updated_at TEXT NOT NULL);").unwrap();
+        connection.execute("INSERT INTO open_project_sessions(project_id,is_active,last_workspace_id,expanded,opened_at,updated_at) VALUES('p',1,'w',1,'t','t')",[]).unwrap();
+        connection.execute("INSERT INTO workspace_placements(workspace_id,mode,window_label,monitor_id,monitor_alias,pos_x,pos_y,width,height,placement_revision) VALUES('w','detached','ws-w','Display@1920,0','Right',1920,0,1200,800,4)",[]).unwrap();
+        connection.execute("INSERT INTO monitor_aliases(monitor_key,alias,updated_at) VALUES('Display@1920,0','Right','t')",[]).unwrap();
+        record_migration(&connection, 7).unwrap();
+        apply(&connection).unwrap();
+        assert!(table_exists(&connection, "missions").unwrap());
+        assert!(table_exists(&connection, "memory_items").unwrap());
+        let row:(String,String,Option<String>,i64)=connection.query_row("SELECT mode,monitor_alias,preferred_monitor_id,placement_revision FROM workspace_placements WHERE workspace_id='w'",[],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?))).unwrap();
+        assert_eq!(
+            row,
+            (
+                "detached".into(),
+                "Right".into(),
+                Some("Display@1920,0".into()),
+                4
+            )
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT COUNT(*) FROM open_project_sessions WHERE project_id='p'",
+                    [],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+            1
+        );
     }
 }

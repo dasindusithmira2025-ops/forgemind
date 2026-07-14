@@ -1,14 +1,20 @@
 use crate::errors::AppResult;
 use crate::models::AppSettings;
 use crate::AppState;
-use tauri::State;
+use tauri::{State, Window};
 
 #[tauri::command]
-pub fn get_settings(state: State<'_, AppState>) -> AppResult<AppSettings> {
+pub fn get_settings(window: Window, state: State<'_, AppState>) -> AppResult<AppSettings> {
+    crate::require_main_window(&window)?;
     state.database.get_settings()
 }
 
 #[tauri::command]
-pub fn save_settings(settings: AppSettings, state: State<'_, AppState>) -> AppResult<AppSettings> {
+pub fn save_settings(
+    settings: AppSettings,
+    window: Window,
+    state: State<'_, AppState>,
+) -> AppResult<AppSettings> {
+    crate::require_main_window(&window)?;
     state.database.save_settings(&settings)
 }

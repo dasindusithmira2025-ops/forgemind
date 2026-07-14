@@ -32,4 +32,14 @@ describe('terminal runtime external store', () => {
     expect(oneBytes).toBeLessThanOrEqual(256 * 1024)
     expect(store.getSessionSnapshot('two').chunks).toHaveLength(0)
   })
+
+  it('deduplicates replay overlap and restores sequence order after reconnect',()=>{
+    const store=new TerminalRuntimeStore()
+    store.hydrate([{...session('one','p1'),outputTail:[65,66],nextSequence:5}])
+    store.ingestOutput({sessionId:'one',paneId:'p1',sequence:7,timestamp:'',data:[72]})
+    store.ingestOutput({sessionId:'one',paneId:'p1',sequence:5,timestamp:'',data:[70]})
+    store.ingestOutput({sessionId:'one',paneId:'p1',sequence:5,timestamp:'',data:[70]})
+    store.ingestOutput({sessionId:'one',paneId:'p1',sequence:6,timestamp:'',data:[71]})
+    expect(store.getSessionSnapshot('one').chunks.map((chunk)=>chunk.sequence)).toEqual([5,6,7])
+  })
 })

@@ -193,7 +193,8 @@ impl RestorationScheduler {
         completed: usize,
         total: usize,
     ) {
-        let _ = self.app.emit(
+        let _ = self.app.emit_to(
+            crate::services::MAIN_WINDOW_LABEL,
             "restoration-progress",
             RestorationProgress {
                 workspace_id: workspace_id.into(),

@@ -50,9 +50,9 @@ export function WorkspacesSection({
   )
 
   return (
-    <section className="ws-section" aria-label="Workspaces">
+    <section className="ws-section" aria-label="Workspaces — This Window">
       <header className="ws-section-head">
-        <span className="section-label">Workspaces</span>
+        <span className="section-label">Workspaces — This Window</span>
         <button
           type="button"
           className="ws-section-add"

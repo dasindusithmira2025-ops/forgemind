@@ -113,7 +113,10 @@ export class TerminalRuntimeStore {
 
   ingestOutput(event: TerminalOutputEvent) {
     const current = this.snapshots.get(event.sessionId) ?? EMPTY
-    let chunks = [...current.chunks, event]
+    if(current.chunks.some((chunk)=>chunk.sequence===event.sequence))return
+    // Native sequence is authoritative. Sorting here makes a renderer reconnect resilient to
+    // event-loop reordering while deduplication prevents replay/live overlap from writing twice.
+    let chunks = [...current.chunks, event].sort((left,right)=>left.sequence-right.sequence)
     let bytes = chunks.reduce((total, chunk) => total + chunk.data.length, 0)
     while (bytes > MAX_PENDING_BYTES && chunks.length > 1) {
       bytes -= chunks[0].data.length

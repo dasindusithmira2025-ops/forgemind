@@ -10,9 +10,15 @@ import { ErrorNotice } from '../components/ui/ErrorNotice'
 import { Modal } from '../components/ui/Modal'
 import { TextPromptDialog } from '../components/ui/TextPromptDialog'
 import { asNativeError, native } from '../native/commands'
-import type { AgentProvider, PaneAssignment, Project, ShellProfile, SplitDirection, TerminalSession, Workspace } from '../native/types'
+import type { AgentProvider, MonitorInfo, PaneAssignment, Project, ShellProfile, SplitDirection, TerminalSession, Workspace, WorkspacePlacement } from '../native/types'
+import { handoffController } from '../features/workspace-windows/handoffController'
+import { MonitorRecoveryWatcher } from '../features/workspace-windows/MonitorRecoveryWatcher'
+import { monitorLabel } from '../features/workspace-windows/placementSelectors'
+import type { WorkspaceWindowIntent } from '../features/workspace-windows/windowIntent'
 import { newId, paneIds, providerLabel } from '../shared/layout'
 import { useAppStore } from '../stores/appStore'
+import { useSessionStore } from '../stores/sessionStore'
+import type { SidebarOpenProject } from '../features/sidebar/sidebarTypes'
 import { terminalRuntime, useWorkspaceSessions } from '../features/terminals/runtimeStore'
 import { AppShell } from '../components/shell/AppShell'
 import { ForgeSpaceSidebar } from '../features/sidebar/components/ForgeSpaceSidebar'
@@ -68,6 +74,13 @@ export function WorkspaceScreen() {
   const [liveSessionsSnapshot, setLiveSessionsSnapshot] = useState<TerminalSession[]>([])
   const [switchingWorkspaceId, setSwitchingWorkspaceId] = useState<string>()
   const [deferredPaneIds, setDeferredPaneIds] = useState<string[]>([])
+  const [placements, setPlacements] = useState<WorkspacePlacement[]>([])
+  const [monitors, setMonitors] = useState<MonitorInfo[]>([])
+  const [monitorPicker, setMonitorPicker] = useState<string>()
+  // Multi-Project session: which Projects are open in the main window (authority = Rust
+  // WindowRegistry; this store is a low-frequency UI cache). Drives the Current Projects section.
+  const openProjectSessions = useSessionStore((state) => state.openProjects)
+  const projectCache = useSessionStore((state) => state.projects)
   const paneSession = useCallback((paneId: string) => sessions.find((session) => session.paneId === paneId), [sessions])
 
   const scanProviders = useCallback(async () => {
@@ -148,6 +161,11 @@ export function WorkspaceScreen() {
           if (liveSessions.length > 0) terminalRuntime.hydrate(liveSessions)
         }
         await launchAll(loadedWorkspace)
+        // If a detached window requested an attach, the main renderer only commits ownership
+        // after its canvas, replay tail, and terminal subscriptions are ready.
+        await native.completeWorkspaceHandoff(loadedWorkspace.id).catch((caught)=>{
+          if(asNativeError(caught).code!=='handoff_not_pending')throw caught
+        })
       } catch (caught) { if (live) setError(asNativeError(caught).message) }
       finally { if (live) { setLoading(false); setSwitchingWorkspaceId(undefined) } }
     })()
@@ -222,7 +240,155 @@ export function WorkspaceScreen() {
     }
   }, [project?.id, setRecentWorkspaces])
 
-  useEffect(() => { void refreshWorkspaces() }, [refreshWorkspaces, workspaceId])
+  // Load Workspace placements + monitors (low-frequency; never terminal output). Drives the
+  // "This window" vs "Other monitors" sidebar split and the Move-to-Monitor picker.
+  const refreshPlacements = useCallback(async (currentProjectId?: string) => {
+    const projectId = currentProjectId ?? project?.id
+    if (!projectId) return
+    try {
+      const [placementList, monitorList] = await Promise.all([
+        native.listWorkspacePlacements(projectId),
+        native.listMonitors().catch(() => [] as MonitorInfo[]),
+      ])
+      setPlacements(placementList)
+      setMonitors(monitorList)
+    } catch { /* placement is non-essential UI cache; never block the workspace on it */ }
+  }, [project?.id])
+
+  useEffect(() => { void refreshWorkspaces(); void refreshPlacements() }, [refreshWorkspaces, refreshPlacements, workspaceId])
+
+  // ---- Multi-Project session (several Projects open at once in the main window) ------------
+  // Register the focused Project as open+active and cache the other open Projects' metadata so
+  // the Current Projects section can name them. Best-effort: never block the workspace on it.
+  const registerOpenProject = useCallback(async (openedProject: Project) => {
+    try {
+      const list = await native.openProjectSession(openedProject.id, true)
+      const store = useSessionStore.getState()
+      store.setOpenProjects(list)
+      store.upsertProject(openedProject)
+      await Promise.all(list.map(async (session) => {
+        if (session.projectId !== openedProject.id && !useSessionStore.getState().projects[session.projectId]) {
+          const meta = await native.getProject(session.projectId).catch(() => undefined)
+          if (meta) useSessionStore.getState().upsertProject(meta)
+        }
+      }))
+    } catch { /* session cache is best-effort */ }
+  }, [])
+
+  useEffect(() => { if (project) void registerOpenProject(project) }, [project, registerOpenProject])
+
+  // Remember this Project's last-active Workspace + Pane so focusing it later restores exactly
+  // this view. Kept separate per Project so switching never leaks one Project's state into another.
+  useEffect(() => {
+    if (!project?.id || !workspace?.id) return
+    try {
+      void native.setProjectLastActive(project.id, workspace.id, activePaneId)?.catch(() => undefined)
+    } catch { /* binding unavailable (e.g. tests / older backend) */ }
+  }, [project?.id, workspace?.id, activePaneId])
+
+  // Focus an already-open Project without closing the others: mark it active in the session,
+  // then navigate to its remembered last Workspace (or its first, or setup when it has none).
+  const selectProject = useCallback(async (projectId: string) => {
+    if (projectId === project?.id) return
+    try {
+      const list = await native.setActiveProject(projectId)
+      useSessionStore.getState().setOpenProjects(list)
+      const target = list.find((session) => session.projectId === projectId)
+      let nextWorkspaceId = target?.lastWorkspaceId
+      if (!nextWorkspaceId) {
+        const list = await native.listWorkspacesForProject(projectId).catch(() => [] as Workspace[])
+        nextWorkspaceId = list[0]?.id
+      }
+      if (nextWorkspaceId) { setSwitchingWorkspaceId(nextWorkspaceId); navigate(`/workspace/${nextWorkspaceId}`) }
+      else navigate(`/setup/${projectId}`)
+    } catch (caught) { setError(asNativeError(caught).message) }
+  }, [project?.id, navigate])
+
+  const openProjectFromSelection = useCallback(async (projectId: string) => {
+    if (openProjectSessions.some((session)=>session.projectId===projectId)) { await selectProject(projectId); return }
+    try {
+      const sessions=await native.openProjectSession(projectId,true)
+      useSessionStore.getState().setOpenProjects(sessions)
+      const meta=await native.getProject(projectId);useSessionStore.getState().upsertProject(meta)
+      const target=sessions.find((session)=>session.projectId===projectId)
+      const workspaces=await native.listWorkspacesForProject(projectId)
+      const next=target?.lastWorkspaceId??workspaces[0]?.id
+      navigate(next?`/workspace/${next}`:`/setup/${projectId}`)
+    } catch (caught) { setError(asNativeError(caught).message) }
+  },[navigate,openProjectSessions,selectProject])
+
+  // Close an open Project. Its background terminals are handled by the configured policy: stop
+  // (always), keep_running (never), or ask (confirm). Closing the active Project focuses another.
+  const closeProject = useCallback(async (projectId: string) => {
+    try {
+      if (settings.inactiveWorkspaceProcesses !== 'keep_running') {
+        const stop = settings.inactiveWorkspaceProcesses === 'stop'
+          || window.confirm('Stop this project\'s running terminals? Choose Cancel to leave them running in the background.')
+        if (stop) {
+          const projectWorkspaceList = await native.listWorkspacesForProject(projectId).catch(() => [] as Workspace[])
+          await Promise.all(projectWorkspaceList.map((item) => native.terminateWorkspaceSessions(item.id).catch(() => undefined)))
+        }
+      }
+      let list = await native.closeProjectSession(projectId)
+      const closedActive = projectId === project?.id
+      if (closedActive && list.length > 0 && !list.some((session) => session.isActive)) {
+        list = await native.setActiveProject(list[list.length - 1].projectId)
+      }
+      useSessionStore.getState().setOpenProjects(list)
+      if (closedActive) {
+        const next = list.find((session) => session.isActive) ?? list[0]
+        const nextWorkspaceId = next?.lastWorkspaceId
+        if (nextWorkspaceId) { setSwitchingWorkspaceId(nextWorkspaceId); navigate(`/workspace/${nextWorkspaceId}`) }
+        else navigate('/')
+      }
+    } catch (caught) { setError(asNativeError(caught).message) }
+  }, [project?.id, navigate, settings.inactiveWorkspaceProcesses])
+
+  // ---- Multi-monitor Workspace handoff (client guards; PTYs stay alive in Rust) -----------
+  const runHandoff = useCallback(async (id: string, intent: WorkspaceWindowIntent, options?: { monitorId?: string }) => {
+    const placement = placements.find((item) => item.workspaceId === id)
+    try {
+      await handoffController.run(id, placement, intent, options)
+    } catch (caught) {
+      setError(asNativeError(caught).message)
+    } finally {
+      await refreshPlacements()
+    }
+  }, [placements, refreshPlacements])
+
+  const openInNewWindow = useCallback(async (id: string) => {
+    const wasActive = id === workspace?.id
+    await runHandoff(id, 'open-in-new-window')
+    // If the now-detached Workspace was the one on the main canvas, move the main window to
+    // another attached Workspace so there is never a stale/read-only duplicate view here.
+    if (wasActive) {
+      const fallback = projectWorkspaces.find((item) => item.id !== id)
+      if (fallback) { setSwitchingWorkspaceId(fallback.id); navigate(`/workspace/${fallback.id}`) }
+      else navigate('/')
+    }
+  }, [runHandoff, workspace?.id, projectWorkspaces, navigate])
+
+  // Focus a detached Workspace's window, or recreate it if it was closed with "Keep running in
+  // background". detach_workspace focuses an existing window or rebuilds a missing one, so this
+  // never spawns a duplicate — it just brings a backgrounded Workspace back on screen.
+  const focusOrReopen = useCallback(async (id: string) => {
+    try {
+      await native.focusWorkspaceWindow(id)
+    } catch {
+      try {
+        await native.detachWorkspace(id)
+      } catch (caught) {
+        setError(asNativeError(caught).message)
+      }
+    }
+    await refreshPlacements()
+  }, [refreshPlacements])
+
+  const chooseMonitor = useCallback(async (monitorId: string) => {
+    const id = monitorPicker
+    setMonitorPicker(undefined)
+    if (id) await runHandoff(id, 'move-to-monitor', { monitorId })
+  }, [monitorPicker, runHandoff])
 
   // Mirror the canvas store's docked tree + active pane into WorkspaceScreen's workspace state so
   // pane-config operations (split, close, replace…) keep operating on a consistent docked tree.
@@ -533,6 +699,9 @@ export function WorkspaceScreen() {
     await refreshWorkspaces(project.id)
   }, [project, refreshWorkspaces, setProject])
 
+  const revealProjectById=useCallback(async(projectId:string)=>{const meta=projectId===project?.id?project:(projectCache[projectId]??await native.getProject(projectId));await openPath(meta.rootPath)},[project,projectCache])
+  const refreshProjectById=useCallback(async(projectId:string)=>{if(projectId===project?.id){await refreshProject();return}const meta=projectCache[projectId]??await native.getProject(projectId);const refreshed=await native.openProject(meta.rootPath);useSessionStore.getState().upsertProject(refreshed)},[project?.id,projectCache,refreshProject])
+
   const sidebarActions: SidebarActions = useMemo(() => ({
     onSelectWorkspace: (id) => void switchWorkspace(id),
     onOpenFresh: (id) => void openFresh(id),
@@ -549,11 +718,24 @@ export function WorkspaceScreen() {
     onOpenProjectFolder: openProjectFolder,
     onLocateFolder: () => void locateFolder(),
     onRefreshProject: () => void refreshProject(),
+    onSelectProject: (id) => void selectProject(id),
+    onCloseProject: (id) => void closeProject(id),
+    onOpenProject: (id) => void openProjectFromSelection(id),
+    onCreateProjectWorkspace: (id) => navigate(`/setup/${id}`),
+    onOpenProjectMission: (id) => navigate(`/project/${id}/missions`,{state:{from:`/workspace/${workspace?.id??''}`,originWorkspaceId:workspace?.projectId===id?workspace.id:undefined}}),
+    onOpenProjectMemory: (id) => navigate(`/project/${id}/memory`,{state:{from:`/workspace/${workspace?.id??''}`}}),
+    onRevealProject: (id) => void revealProjectById(id),
+    onRefreshProjectById: (id) => void refreshProjectById(id),
     onOpenLauncher: () => navigate('/'),
     onOpenSettings: () => navigate('/settings'),
     onToggleCollapse: toggleCollapse,
     onResizeCommit: commitSidebarWidth,
-  }), [switchWorkspace, openFresh, newWorkspace, renameWorkspaceById, reconfigureWorkspaceById, duplicateWorkspace, restartWorkspaceById, stopWorkspaceById, moveWorkspace, reorderWorkspaces, removeFromRecents, deleteWorkspaceById, openProjectFolder, locateFolder, refreshProject, navigate, toggleCollapse, commitSidebarWidth])
+    onOpenInNewWindow: (id) => void openInNewWindow(id),
+    onAttachWorkspace: (id) => void runHandoff(id, 'attach-to-main'),
+    onFocusWorkspaceWindow: (id) => void focusOrReopen(id),
+    onMoveToMonitor: (id) => setMonitorPicker(id),
+    onCloseWorkspaceWindow: (id) => void runHandoff(id, 'close-window'),
+  }), [switchWorkspace, openFresh, newWorkspace, renameWorkspaceById, reconfigureWorkspaceById, duplicateWorkspace, restartWorkspaceById, stopWorkspaceById, moveWorkspace, reorderWorkspaces, removeFromRecents, deleteWorkspaceById, openProjectFolder, locateFolder, refreshProject, navigate, toggleCollapse, commitSidebarWidth, openInNewWindow, runHandoff, focusOrReopen, selectProject, closeProject, openProjectFromSelection, revealProjectById, refreshProjectById, workspace])
 
   const sidebarWorkspaces: SidebarWorkspace[] = useMemo(() => {
     const grouped = groupSessionsByWorkspace(liveSessionsSnapshot)
@@ -575,6 +757,24 @@ export function WorkspaceScreen() {
     const record = recentWorkspaces.find((item) => item.workspace.projectId === project.id)
     return record?.projectMissing ?? false
   }, [project, recentWorkspaces])
+
+  const sidebarOpenProjects: SidebarOpenProject[] = useMemo(() => {
+    return openProjectSessions
+      .map((session): SidebarOpenProject | undefined => {
+        const meta = session.projectId === project?.id ? project : projectCache[session.projectId]
+        if (!meta) return undefined
+        const missing=recentWorkspaces.find((item)=>item.workspace.projectId===session.projectId)?.projectMissing??false
+        const attention=session.projectId===project?.id&&sidebarWorkspaces.some((item)=>item.runtime.requiresAttention)
+        return {
+          project: meta,
+          isActive: session.isActive,
+          folderMissing: missing,
+          state: missing ? 'missing' : attention ? 'attention' : session.isActive ? 'active' : 'background',
+          runtimeSummary: session.isActive ? `${sidebarWorkspaces.reduce((sum,item)=>sum+item.runtime.runningCount,0)} running terminals` : 'Background · terminals retained',
+        }
+      })
+      .filter((item): item is SidebarOpenProject => Boolean(item))
+  }, [openProjectSessions, projectCache, project, recentWorkspaces, sidebarWorkspaces])
 
   useEffect(() => {
     const handle = (event: KeyboardEvent) => {
@@ -629,12 +829,13 @@ export function WorkspaceScreen() {
 
   return <AppShell className={`workspace-shell ${switchingWorkspaceId ? 'workspace-switching' : ''}`} sidebarOpen={!maximizedPaneId}
     titleBar={<><div className="workspace-heading"><strong>{activePane?.title || workspace.name}</strong>{project.gitBranch && <span className="branch-label">{project.gitBranch}</span>}</div><div className="titlebar-spacer" /><span className="compact-count">{running}/{workspace.panes.length} running</span><div className="workspace-menu-wrap"><Button variant="ghost" icon={<ChevronDown size={14} />} aria-expanded={workspaceMenu} aria-haspopup="menu" onClick={() => setWorkspaceMenu((value) => !value)}>Workspace</Button>{workspaceMenu && <><button className="context-scrim" aria-label="Close workspace menu" onClick={() => setWorkspaceMenu(false)} /><div className="context-popover workspace-popover" role="menu"><button role="menuitem" onClick={() => { setWorkspaceMenu(false); renameWorkspaceById(workspace.id) }}>Rename workspace</button><button role="menuitem" onClick={reconfigureWorkspace}>Reconfigure workspace</button><button role="menuitem" onClick={() => navigate(`/setup/${project.id}`)}>New workspace for this project</button><span className="menu-separator" /><button role="menuitem" onClick={() => void restartAll()}><RotateCcw size={14} />Restart all terminals</button><button role="menuitem" onClick={() => void stopAll()}><CircleStop size={14} />Stop all terminals</button><button role="menuitem" onClick={openLauncher}><FolderOpen size={14} />Project launcher</button><button role="menuitem" className="danger-item" onClick={() => void closeWorkspace()}>Close workspace</button></div></>}</div></>}
-    sidebar={<ForgeSpaceSidebar project={project} activeWorkspaceId={workspace.id} workspaces={sidebarWorkspaces} recents={recentWorkspaces} collapsed={collapsed} width={sidebarWidth} switchingWorkspaceId={switchingWorkspaceId} projectFolderMissing={projectFolderMissing} loadingWorkspaces={projectWorkspaces.length === 0 && loading} actions={sidebarActions} />}
-    canvas={<>{error && <div className="workspace-error"><ErrorNotice message={error} onRetry={() => void restartAll()} /></div>}<section className="terminal-canvas"><WorkspaceCanvas reducedMotion={reducedMotion} persist={persistCanvas} onFocusPane={setActivePane} renderPane={renderPane} /></section></>}
+    sidebar={<ForgeSpaceSidebar project={project} activeWorkspaceId={workspace.id} workspaces={sidebarWorkspaces} recents={recentWorkspaces} collapsed={collapsed} width={sidebarWidth} switchingWorkspaceId={switchingWorkspaceId} projectFolderMissing={projectFolderMissing} loadingWorkspaces={projectWorkspaces.length === 0 && loading} actions={sidebarActions} placements={placements} monitors={monitors} openProjects={sidebarOpenProjects} />}
+    canvas={<>{error && <div className="workspace-error"><ErrorNotice message={error} onRetry={() => void restartAll()} /></div>}<MonitorRecoveryWatcher monitors={monitors} onChanged={() => void refreshPlacements()} /><section className="terminal-canvas"><WorkspaceCanvas reducedMotion={reducedMotion} persist={persistCanvas} onFocusPane={setActivePane} renderPane={renderPane} /></section></>}
     statusBar={<><span>{project.gitBranch || 'No branch'}</span><span className="status-path" title={project.rootPath}>{project.name}</span><span>{running}/{workspace.panes.length} running</span><span>{activePane?.title || 'No active pane'}</span>{Object.keys(paneErrors).some((id) => paneErrors[id]) && <span className="status-alert">Needs attention</span>}</>}
   >
     {pendingInsert && <Modal title={pendingInsert.replace ? 'Replace terminal' : 'Choose terminal'} onClose={() => setPendingInsert(undefined)}><div className="provider-picker">{choices.length === 0 ? <ErrorNotice message="No available agents or shells were detected." onRetry={() => void scanProviders()} /> : choices.map((choice) => <button key={`${choice.provider}:${choice.name}`} onClick={() => void insertOrReplace(choice)}><TerminalSquare size={18} /><div><strong>{choice.name}</strong><span>Available · {providerLabel(choice.provider)}</span></div></button>)}</div></Modal>}
     {renameTarget && <TextPromptDialog title={renameTarget.kind === 'workspace' ? 'Rename workspace' : 'Rename terminal'} label={renameTarget.kind === 'workspace' ? 'Workspace name' : 'Terminal title'} initialValue={renameTarget.initialValue} confirmLabel="Rename" onClose={() => setRenameTarget(undefined)} onConfirm={(value) => void confirmRename(value)} />}
+    {monitorPicker && <Modal title="Move workspace to monitor" onClose={() => setMonitorPicker(undefined)}><div className="provider-picker">{monitors.length === 0 ? <ErrorNotice message="No additional monitors were detected." /> : monitors.map((monitor) => <button key={monitor.id} onClick={() => void chooseMonitor(monitor.id)}><TerminalSquare size={18} /><div><strong>{monitorLabel(monitor)}{monitor.isPrimary ? ' · Primary' : ''}</strong><span>{monitor.bounds.width}×{monitor.bounds.height} · {Math.round(monitor.scaleFactor * 100)}% · {monitor.windowCount} window{monitor.windowCount === 1 ? '' : 's'}</span></div></button>)}</div></Modal>}
     {paneMenu && <PaneMenu menu={paneMenu} onClose={() => setPaneMenu(undefined)} onAction={(action) => { const paneId = paneMenu.paneId; setPaneMenu(undefined); if (action === 'rename') void renamePane(paneId); if (action === 'split_right') setPendingInsert({ targetPaneId: paneId, direction: 'vertical' }); if (action === 'split_down') setPendingInsert({ targetPaneId: paneId, direction: 'horizontal' }); if (action === 'duplicate') { const pane = workspace.panes.find((item) => item.id === paneId); if (pane) setPendingInsert({ targetPaneId: paneId, direction: 'vertical', duplicate: pane }) } if (action === 'replace') setPendingInsert({ targetPaneId: paneId, direction: 'vertical', replace: true }); if (action === 'directory') void changeDirectory(paneId); if (action === 'restart') void restartPane(paneId); if (action === 'stop') void stopPane(paneId); if (action === 'close') void closePane(paneId); if (['search','copy','paste','select_all','clear','focus'].includes(action)) dispatchTerminalAction(paneId, action as Parameters<typeof dispatchTerminalAction>[1]) }} />}
   </AppShell>
 }

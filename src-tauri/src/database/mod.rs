@@ -1,4 +1,7 @@
+mod memory;
 pub mod migrations;
+mod mission;
+mod placement;
 mod repair;
 
 use crate::errors::{AppError, AppResult};
@@ -145,7 +148,9 @@ impl DatabaseService {
             messages.push("Database metadata and relationships are healthy.".into());
         }
         Ok(crate::models::HealthReport {
-            healthy: schema_version == 5 && foreign_key_violations == 0 && stale_live_sessions == 0,
+            healthy: schema_version == 10
+                && foreign_key_violations == 0
+                && stale_live_sessions == 0,
             schema_version,
             foreign_key_violations,
             stale_live_sessions,
@@ -1013,6 +1018,48 @@ impl DatabaseService {
             params![id, status, Utc::now().to_rfc3339()],
         )?;
         Ok(())
+    }
+
+    /// Last durable terminal snapshot, retained after the PTY leaves the live-process map.
+    pub fn get_terminal_session(
+        &self,
+        id: &str,
+    ) -> AppResult<Option<crate::models::TerminalSession>> {
+        self.connection
+            .lock()
+            .query_row(
+                "SELECT id,project_id,workspace_id,pane_id,provider_type,executable_path,args_json,title,working_directory,status,process_id,started_at,ended_at,exit_code,output_tail,log_path,restoration_state,dropped_output_bytes FROM terminal_sessions WHERE id=?1",
+                [id],
+                |row| {
+                    let provider: String = row.get(4)?;
+                    let arguments: String = row.get(6)?;
+                    let dropped: i64 = row.get(17)?;
+                    Ok(crate::models::TerminalSession {
+                        id: row.get(0)?,
+                        project_id: row.get(1)?,
+                        workspace_id: row.get(2)?,
+                        pane_id: row.get(3)?,
+                        provider: AgentProvider::from_db(&provider)
+                            .ok_or_else(|| rusqlite::Error::InvalidQuery)?,
+                        executable: row.get(5)?,
+                        arguments: serde_json::from_str(&arguments).unwrap_or_default(),
+                        title: row.get(7)?,
+                        working_directory: row.get(8)?,
+                        status: row.get(9)?,
+                        process_id: row.get(10)?,
+                        started_at: row.get(11)?,
+                        ended_at: row.get(12)?,
+                        exit_code: row.get(13)?,
+                        output_tail: row.get(14)?,
+                        next_sequence: 0,
+                        log_path: row.get(15)?,
+                        restoration_state: row.get(16)?,
+                        dropped_output_bytes: dropped.max(0) as u64,
+                    })
+                },
+            )
+            .optional()
+            .map_err(Into::into)
     }
 }
 

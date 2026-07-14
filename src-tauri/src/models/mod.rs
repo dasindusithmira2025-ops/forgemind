@@ -1,6 +1,8 @@
 pub mod agent;
 pub mod diagnostics;
 pub mod layout;
+pub mod mission;
+pub mod placement;
 pub mod project;
 pub mod settings;
 pub mod terminal;
@@ -9,6 +11,8 @@ pub mod workspace;
 pub use agent::*;
 pub use diagnostics::*;
 pub use layout::*;
+pub use mission::*;
+pub use placement::*;
 pub use project::*;
 pub use settings::*;
 pub use terminal::*;

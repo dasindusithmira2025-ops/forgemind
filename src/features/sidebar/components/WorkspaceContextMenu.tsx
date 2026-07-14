@@ -3,18 +3,27 @@ import {
   ArrowDown,
   ArrowUp,
   CircleStop,
+  ExternalLink,
   FolderInput,
+  MonitorSmartphone,
   Pencil,
+  PictureInPicture2,
   RotateCcw,
   Settings2,
   SquareStack,
   Trash2,
+  X,
 } from 'lucide-react'
 import type { SidebarActions } from '../sidebarTypes'
 
 export type WorkspaceMenuAction =
   | 'open'
   | 'open_fresh'
+  | 'open_new_window'
+  | 'focus_window'
+  | 'move_monitor'
+  | 'attach'
+  | 'close_window'
   | 'rename'
   | 'reconfigure'
   | 'duplicate'
@@ -33,11 +42,14 @@ export function WorkspaceContextMenu({
   workspaceId,
   anchor,
   actions,
+  detached = false,
   onClose,
 }: {
   workspaceId: string
   anchor?: { x: number; y: number }
   actions: SidebarActions
+  /** True when this Workspace is currently shown in a detached native window. */
+  detached?: boolean
   onClose: () => void
 }) {
   const ref = useRef<HTMLDivElement>(null)
@@ -57,6 +69,16 @@ export function WorkspaceContextMenu({
         return actions.onSelectWorkspace(workspaceId)
       case 'open_fresh':
         return actions.onOpenFresh(workspaceId)
+      case 'open_new_window':
+        return actions.onOpenInNewWindow?.(workspaceId)
+      case 'focus_window':
+        return actions.onFocusWorkspaceWindow?.(workspaceId)
+      case 'move_monitor':
+        return actions.onMoveToMonitor?.(workspaceId)
+      case 'attach':
+        return actions.onAttachWorkspace?.(workspaceId)
+      case 'close_window':
+        return actions.onCloseWorkspaceWindow?.(workspaceId)
       case 'rename':
         return actions.onRenameWorkspace(workspaceId)
       case 'reconfigure':
@@ -109,6 +131,37 @@ export function WorkspaceContextMenu({
         <button role="menuitem" onClick={() => run('open_fresh')}>
           Open with fresh terminals
         </button>
+        {(actions.onOpenInNewWindow || actions.onFocusWorkspaceWindow) && <span className="menu-separator" />}
+        {!detached && actions.onOpenInNewWindow && (
+          <button role="menuitem" onClick={() => run('open_new_window')}>
+            <ExternalLink size={14} />
+            Open in new window
+          </button>
+        )}
+        {detached && actions.onFocusWorkspaceWindow && (
+          <button role="menuitem" onClick={() => run('focus_window')}>
+            <ExternalLink size={14} />
+            Focus window
+          </button>
+        )}
+        {detached && actions.onMoveToMonitor && (
+          <button role="menuitem" onClick={() => run('move_monitor')}>
+            <MonitorSmartphone size={14} />
+            Move to monitor…
+          </button>
+        )}
+        {detached && actions.onAttachWorkspace && (
+          <button role="menuitem" onClick={() => run('attach')}>
+            <PictureInPicture2 size={14} />
+            Attach to main window
+          </button>
+        )}
+        {detached && actions.onCloseWorkspaceWindow && (
+          <button role="menuitem" onClick={() => run('close_window')}>
+            <X size={14} />
+            Close workspace window
+          </button>
+        )}
         <span className="menu-separator" />
         <button role="menuitem" onClick={() => run('rename')}>
           <Pencil size={14} />

@@ -1,4 +1,4 @@
-import type { Project, RecentWorkspace, TerminalSession, Workspace } from '../../native/types'
+import type { MonitorInfo, Project, RecentWorkspace, TerminalSession, Workspace, WorkspacePlacement } from '../../native/types'
 
 /**
  * The canonical runtime state of one Workspace, derived from real Terminal Sessions rather
@@ -45,6 +45,17 @@ export interface SidebarWorkspace {
   providers: ProviderSummary
 }
 
+/** One open Project as the "Current Projects" section renders it. Several may be open at once
+ *  in the main window; exactly one is active (focused). Background Projects keep their terminals
+ *  running per the configured policy. */
+export interface SidebarOpenProject {
+  project: Project
+  isActive: boolean
+  folderMissing?: boolean
+  state?: 'active'|'background'|'missing'|'attention'
+  runtimeSummary?: string
+}
+
 /** Inputs the runtime derivation needs; kept explicit so the selector stays pure/testable. */
 export interface RuntimeDerivationInput {
   workspaceId: string
@@ -76,9 +87,31 @@ export interface SidebarActions {
   onLocateFolder: () => void
   onRefreshProject: () => void
   onOpenLauncher: () => void
+  // ---- Multi-Project session (main window; several Projects open at once) ------------------
+  /** Focus an already-open Project (never closes the others). */
+  onSelectProject?: (projectId: string) => void
+  /** Close an open Project's session, applying the background-terminal policy. */
+  onCloseProject?: (projectId: string) => void
+  onOpenProject?: (projectId: string) => void
+  onCreateProjectWorkspace?: (projectId: string) => void
+  onOpenProjectMission?: (projectId: string) => void
+  onOpenProjectMemory?: (projectId: string) => void
+  onRevealProject?: (projectId: string) => void
+  onRefreshProjectById?: (projectId: string) => void
   onOpenSettings: () => void
   onToggleCollapse: () => void
   onResizeCommit: (width: number) => void
+  // ---- Multi-monitor Workspace placement (optional; present only in the main window) ------
+  /** Detach a Workspace into its own native window (or focus it if already detached). */
+  onOpenInNewWindow?: (workspaceId: string) => void
+  /** Bring a detached Workspace back into the main window. */
+  onAttachWorkspace?: (workspaceId: string) => void
+  /** Raise and focus an already-detached Workspace window (never duplicates it). */
+  onFocusWorkspaceWindow?: (workspaceId: string) => void
+  /** Open the Move-to-Monitor picker for a detached Workspace. */
+  onMoveToMonitor?: (workspaceId: string) => void
+  /** Close a detached Workspace's native window. */
+  onCloseWorkspaceWindow?: (workspaceId: string) => void
 }
 
 export interface ForgeSpaceSidebarProps {
@@ -92,4 +125,12 @@ export interface ForgeSpaceSidebarProps {
   projectFolderMissing: boolean
   loadingWorkspaces?: boolean
   actions: SidebarActions
+  /** Placement per Workspace; drives the This-Window vs Other-Monitors split. Optional so the
+   *  detached window (which never renders the full sidebar) and tests can omit it. */
+  placements?: WorkspacePlacement[]
+  /** Connected monitors, for Move-to-Monitor and the Other-Monitors row subtitles. */
+  monitors?: MonitorInfo[]
+  /** Every Project currently open in the main window (the "Current Projects" section). When
+   *  omitted the section falls back to showing just the single active `project`. */
+  openProjects?: SidebarOpenProject[]
 }
