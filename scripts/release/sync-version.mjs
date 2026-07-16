@@ -57,7 +57,7 @@ let drift = false
 for (const [path, expected] of outputs) {
   const url = new URL(path, root)
   const actual = await readFile(url, 'utf8')
-  if (normalizeNewlines(actual) === expected) continue
+  if (normalizeNewlines(actual) === normalizeNewlines(expected)) continue
   drift = true
   if (!checkOnly) await writeFile(url, expected)
   else console.error(`Generated release metadata is stale: ${path}`)
