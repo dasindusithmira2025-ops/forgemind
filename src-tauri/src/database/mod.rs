@@ -6,9 +6,10 @@ mod repair;
 
 use crate::errors::{AppError, AppResult};
 use crate::models::{
-    AgentDetectionResult, AgentProfile, AgentProvider, AgentSession, AppSettings,
-    CreateTerminalRequest, LayoutNode, PaneAssignment, Project, ProjectOverview, RecentWorkspace,
-    ShellProfile, StartTerminalRequest, Workspace, WorkspaceSaveRequest,
+    AgentActivityState, AgentDetectionResult, AgentProfile, AgentProvider, AgentSession,
+    AgentStateEvent, AgentStateSource, AppSettings, CreateTerminalRequest, LayoutNode,
+    PaneAssignment, Project, ProjectOverview, RecentWorkspace, ShellProfile, StartTerminalRequest,
+    Workspace, WorkspaceSaveRequest,
 };
 use chrono::Utc;
 use parking_lot::Mutex;
@@ -21,6 +22,16 @@ pub struct DatabaseService {
     connection: Mutex<Connection>,
     path: Option<PathBuf>,
     migration_backup: Option<PathBuf>,
+}
+
+pub struct PaneWorktreeRecord<'a> {
+    pub project_id: &'a str,
+    pub workspace_id: &'a str,
+    pub pane_id: &'a str,
+    pub repository_path: &'a str,
+    pub worktree_path: &'a str,
+    pub branch_name: &'a str,
+    pub base_ref: &'a str,
 }
 
 impl DatabaseService {
@@ -988,7 +999,7 @@ impl DatabaseService {
 
     pub fn list_agent_sessions(&self, workspace_id: &str) -> AppResult<Vec<AgentSession>> {
         let connection = self.connection.lock();
-        let mut statement = connection.prepare("SELECT terminal_session_id,project_id,workspace_id,pane_id,profile_id,provider_type,provider_session_id,transcript_path,status,created_at,updated_at FROM agent_sessions WHERE workspace_id=?1 ORDER BY created_at DESC")?;
+        let mut statement = connection.prepare("SELECT terminal_session_id,project_id,workspace_id,pane_id,profile_id,provider_type,provider_session_id,transcript_path,status,agent_state,agent_state_source,agent_state_reason,agent_attention_since,agent_state_updated_at,created_at,updated_at FROM agent_sessions WHERE workspace_id=?1 ORDER BY created_at DESC")?;
         let sessions = statement
             .query_map([workspace_id], |row| {
                 let provider: String = row.get(5)?;
@@ -1003,8 +1014,13 @@ impl DatabaseService {
                     provider_session_id: row.get(6)?,
                     transcript_path: row.get(7)?,
                     status: row.get(8)?,
-                    created_at: row.get(9)?,
-                    updated_at: row.get(10)?,
+                    agent_state: row.get(9)?,
+                    agent_state_source: row.get(10)?,
+                    agent_state_reason: row.get(11)?,
+                    agent_attention_since: row.get(12)?,
+                    agent_state_updated_at: row.get(13)?,
+                    created_at: row.get(14)?,
+                    updated_at: row.get(15)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -1030,12 +1046,67 @@ impl DatabaseService {
                 )
                 .optional()?
                 .flatten();
+            let now = Utc::now().to_rfc3339();
             transaction.execute(
-                "INSERT INTO agent_sessions(terminal_session_id,project_id,workspace_id,pane_id,profile_id,provider_type,provider_session_id,transcript_path,status,created_at,updated_at) VALUES(?1,?2,?3,?4,?5,?6,NULL,NULL,?7,?8,?8) ON CONFLICT(terminal_session_id) DO UPDATE SET status=excluded.status,updated_at=excluded.updated_at",
-                params![session.id,session.project_id,session.workspace_id,session.pane_id,profile_id,session.provider.as_str(),session.status,Utc::now().to_rfc3339()],
+                "INSERT INTO agent_sessions(terminal_session_id,project_id,workspace_id,pane_id,profile_id,provider_type,provider_session_id,transcript_path,status,agent_state,agent_state_source,agent_state_reason,agent_state_updated_at,created_at,updated_at) VALUES(?1,?2,?3,?4,?5,?6,NULL,NULL,?7,?8,?9,?10,?11,?11,?11) ON CONFLICT(terminal_session_id) DO UPDATE SET status=excluded.status,updated_at=excluded.updated_at",
+                params![
+                    session.id,
+                    session.project_id,
+                    session.workspace_id,
+                    session.pane_id,
+                    profile_id,
+                    session.provider.as_str(),
+                    session.status,
+                    AgentActivityState::Working.as_str(),
+                    AgentStateSource::Heuristic.as_str(),
+                    "session started",
+                    now,
+                ],
             )?;
         }
         transaction.commit()?;
+        Ok(())
+    }
+
+    pub fn update_agent_state(&self, event: &AgentStateEvent) -> AppResult<()> {
+        let attention_since = if event.state.requires_attention() {
+            event
+                .attention_since
+                .as_deref()
+                .or(Some(event.updated_at.as_str()))
+        } else {
+            None
+        };
+        self.connection.lock().execute(
+            "UPDATE agent_sessions SET agent_state=?2,agent_state_source=?3,agent_state_reason=?4,agent_attention_since=?5,agent_state_updated_at=?6,updated_at=?6 WHERE terminal_session_id=?1",
+            params![
+                event.terminal_session_id,
+                event.state.as_str(),
+                event.source.as_str(),
+                event.reason,
+                attention_since,
+                event.updated_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn record_pane_worktree(&self, record: PaneWorktreeRecord<'_>) -> AppResult<()> {
+        let now = Utc::now().to_rfc3339();
+        self.connection.lock().execute(
+            "INSERT INTO pane_worktrees(id,project_id,workspace_id,pane_id,repository_path,worktree_path,branch_name,base_ref,status,created_at,updated_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,'active',?9,?9)",
+            params![
+                Uuid::new_v4().to_string(),
+                record.project_id,
+                record.workspace_id,
+                record.pane_id,
+                record.repository_path,
+                record.worktree_path,
+                record.branch_name,
+                record.base_ref,
+                now,
+            ],
+        )?;
         Ok(())
     }
 
@@ -1047,9 +1118,24 @@ impl DatabaseService {
         output_tail: &[u8],
     ) -> AppResult<()> {
         self.connection.lock().execute("UPDATE terminal_sessions SET status=?2,ended_at=?3,exit_code=?4,output_tail=?5,process_id=NULL WHERE id=?1", params![id, status, Utc::now().to_rfc3339(), exit_code, output_tail])?;
+        let (agent_state, source, reason) = if status == "exited" && exit_code.unwrap_or(0) == 0 {
+            (
+                AgentActivityState::Finished,
+                AgentStateSource::ProcessExit,
+                "agent process exited successfully",
+            )
+        } else {
+            (
+                AgentActivityState::Failed,
+                AgentStateSource::ProcessExit,
+                "agent process exited before reporting success",
+            )
+        };
+        let now = Utc::now().to_rfc3339();
+        let attention_since = now.clone();
         self.connection.lock().execute(
-            "UPDATE agent_sessions SET status=?2,updated_at=?3 WHERE terminal_session_id=?1",
-            params![id, status, Utc::now().to_rfc3339()],
+            "UPDATE agent_sessions SET status=?2,agent_state=?3,agent_state_source=?4,agent_state_reason=?5,agent_attention_since=?6,agent_state_updated_at=?7,updated_at=?7 WHERE terminal_session_id=?1",
+            params![id, status, agent_state.as_str(), source.as_str(), reason, attention_since, now],
         )?;
         Ok(())
     }
