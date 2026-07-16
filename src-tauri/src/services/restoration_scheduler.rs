@@ -75,8 +75,8 @@ impl RestorationScheduler {
         // spawns probe processes (the WSL enumeration alone can block for three seconds), so
         // resolving it inside the per-pane loop multiplied helper processes by the pane count
         // and stalled restoration — one source of the "dozens of terminals open" freezes.
-        let fresh_shell: Option<AppResult<ShellProfile>> = (behavior == "fresh_shells")
-            .then(|| {
+        let fresh_shell: Option<AppResult<ShellProfile>> =
+            (behavior == "fresh_shells").then(|| {
                 let settings = self.database.get_settings()?;
                 let shells = self.detector.detect_shells();
                 settings
