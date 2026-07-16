@@ -1,6 +1,6 @@
 [package]
 name = "forgemind"
-version = "0.1.0"
+version = "0.1.1"
 description = "ForgeMind native multi-agent terminal workspace"
 authors = ["ForgeMind"]
 license = "MIT"
