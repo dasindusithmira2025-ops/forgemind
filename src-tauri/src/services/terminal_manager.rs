@@ -536,6 +536,8 @@ impl TerminalManager {
     }
 
     pub fn terminate_workspace_sessions(&self, workspace_id: &str) -> AppResult<()> {
+        // Snapshot the owned ids under the read lock, then release it before any process
+        // termination so the registry is never held across the blocking kill/reap waits.
         let session_ids: Vec<String> = self
             .sessions
             .read()
@@ -545,20 +547,57 @@ impl TerminalManager {
                 (metadata.workspace_id == workspace_id).then_some(metadata.id.clone())
             })
             .collect();
-        let mut first_error = None;
-        for session_id in session_ids {
-            if let Err(error) = self.terminate_session(&session_id) {
-                first_error.get_or_insert(error);
-            }
-        }
-        first_error.map_or(Ok(()), Err)
+        self.terminate_many(session_ids)
     }
 
     pub fn terminate_all_sessions(&self) -> AppResult<()> {
         let session_ids: Vec<String> = self.sessions.read().keys().cloned().collect();
+        self.terminate_many(session_ids)
+    }
+
+    /// Terminate a batch of sessions concurrently with a bounded per-session wait, then join.
+    ///
+    /// [`terminate_session`] blocks up to one second per session while the OS reaps the process
+    /// tree. Doing that sequentially on the caller (the Tauri event loop drives app-exit and
+    /// main-window close) turns N terminals into N seconds of frozen UI — the reported close
+    /// lag. Running each termination on its own worker thread overlaps those waits so the total
+    /// stays bounded by the slowest single session regardless of how many are open. The batch is
+    /// idempotent: an already-gone session simply resolves to `terminal_session_not_found`, which
+    /// is ignored so a duplicate close never fails.
+    fn terminate_many(&self, session_ids: Vec<String>) -> AppResult<()> {
+        // One or zero sessions gains nothing from a worker thread — terminate inline.
+        if session_ids.len() <= 1 {
+            return session_ids.into_iter().try_for_each(|session_id| {
+                ignore_already_gone(self.terminate_session(&session_id))
+            });
+        }
+        let workers: Vec<(String, _)> = session_ids
+            .into_iter()
+            .map(|session_id| {
+                let manager = self.clone();
+                let worker_id = session_id.clone();
+                let spawned = thread::Builder::new()
+                    .name(format!("forgemind-terminate-{session_id}"))
+                    .spawn(move || manager.terminate_session(&worker_id));
+                (session_id, spawned)
+            })
+            .collect();
         let mut first_error = None;
-        for session_id in session_ids {
-            if let Err(error) = self.terminate_session(&session_id) {
+        for (session_id, spawned) in workers {
+            let result = match spawned {
+                Ok(handle) => handle.join().unwrap_or_else(|_| {
+                    Err(AppError::new(
+                        "process_termination_failed",
+                        "A terminal shutdown worker stopped unexpectedly.",
+                        true,
+                    )
+                    .entity(&session_id))
+                }),
+                // A worker thread could not be created: fall back to terminating inline so the
+                // process is never leaked just because the runtime is out of threads.
+                Err(_) => self.terminate_session(&session_id),
+            };
+            if let Err(error) = ignore_already_gone(result) {
                 first_error.get_or_insert(error);
             }
         }
@@ -606,6 +645,15 @@ impl TerminalManager {
                 )
                 .entity(session_id)
             })
+    }
+}
+
+/// Bulk/duplicate termination must be idempotent: a session another path already reaped is a
+/// success, not a failure. Any other error is preserved so a genuine kill failure still surfaces.
+fn ignore_already_gone(result: AppResult<()>) -> AppResult<()> {
+    match result {
+        Err(error) if error.code == "terminal_session_not_found" => Ok(()),
+        other => other,
     }
 }
 
@@ -739,6 +787,37 @@ mod tests {
         manager.terminate_workspace_sessions("one").unwrap();
         assert!(manager.session_status(&other.id).is_ok());
         manager.terminate_all_sessions().unwrap();
+    }
+
+    #[test]
+    fn terminate_all_is_concurrent_bounded_and_idempotent() {
+        let manager = TerminalManager::for_test();
+        let sessions = (0..8)
+            .map(|index| {
+                manager
+                    .create_session(shell_request("bulk", &format!("pane-{index}")))
+                    .unwrap()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            manager.list_live_sessions(Some("bulk")).len(),
+            sessions.len()
+        );
+
+        // Concurrent termination must overlap the per-session reap waits, so eight sessions do
+        // not take eight times the single-session budget. A generous ceiling still fails loudly
+        // if this ever regresses to sequential blocking on the caller thread.
+        let started = Instant::now();
+        manager.terminate_all_sessions().unwrap();
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "bulk termination blocked far longer than a bounded concurrent sweep"
+        );
+        assert!(manager.list_live_sessions(Some("bulk")).is_empty());
+
+        // A duplicate close over the now-empty set is a no-op success, never an error.
+        manager.terminate_all_sessions().unwrap();
+        manager.terminate_workspace_sessions("bulk").unwrap();
     }
 
     #[test]
