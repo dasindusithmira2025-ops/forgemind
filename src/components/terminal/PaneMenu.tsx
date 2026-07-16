@@ -24,8 +24,10 @@ export function PaneMenu({ menu, compact = false, onClose, onAction }: { menu: {
         <button onClick={() => onAction('duplicate')}>Duplicate configuration</button>
         <button onClick={() => onAction('replace')}>Replace agent or shell</button>
         <button onClick={() => onAction('directory')}>Change working directory</button>
+        <button onClick={() => onAction('isolate_worktree')}>Isolate in worktree</button>
       </>}
       <span className="menu-separator" />
+      <button onClick={() => onAction('review_changes')}>Review pane changes</button>
       <button onClick={() => onAction('search')}><Search size={14} />Search terminal</button>
       <button onClick={() => onAction('copy')}><Copy size={14} />Copy terminal output</button>
       <button onClick={() => onAction('paste')}>Paste</button>

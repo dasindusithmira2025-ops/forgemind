@@ -6,7 +6,7 @@ import { WebLinksAddon } from '@xterm/addon-web-links'
 import { ChevronDown, Maximize2, Minimize2, MoreHorizontal, RotateCw, Search, X } from 'lucide-react'
 import { Button } from '../ui/Button'
 import { native } from '../../native/commands'
-import type { AppSettings, PaneAssignment, TerminalSession } from '../../native/types'
+import type { AgentActivityState, AppSettings, PaneAssignment, TerminalSession } from '../../native/types'
 import { providerLabel } from '../../shared/layout'
 import type { TerminalAction } from './terminalActions'
 import { terminalRuntime, useTerminalRuntime } from '../../features/terminals/runtimeStore'
@@ -44,6 +44,7 @@ export function TerminalPane({ assignment, session, deferred = false, active, ma
   const sessionId = session?.id
   const runtime = useTerminalRuntime(sessionId)
   const currentSession = runtime.session ?? session
+  const agentState = runtime.agentState
   const nextSequence = useRef(0)
   const historyReady = useRef(false)
   const writeInFlight = useRef(false)
@@ -240,11 +241,12 @@ export function TerminalPane({ assignment, session, deferred = false, active, ma
     return () => window.removeEventListener('forgemind:terminal-action', handle)
   }, [assignment.id, settings.confirmMultilinePaste])
 
-  return <article className={`terminal-pane ${active ? 'active' : ''} ${maximized ? 'maximized' : ''} ${bell ? 'bell' : ''}`} onMouseDown={onFocus} data-pane-id={assignment.id}>
+  return <article className={`terminal-pane ${active ? 'active' : ''} ${maximized ? 'maximized' : ''} ${bell ? 'bell' : ''} ${agentState ? `agent-${agentState.state}` : ''}`} onMouseDown={onFocus} data-pane-id={assignment.id}>
     <header className={`terminal-header ${onHeaderPointerDown ? 'draggable' : ''}`} onPointerDown={onHeaderPointerDown}>
-      <span className={`terminal-status status-${currentSession?.status ?? 'loading'}`} aria-label={currentSession?.status ?? 'starting'} />
-      <div className="terminal-title"><strong>{assignment.title}</strong><span>{providerLabel(assignment.provider)}</span></div>
+      <span className={`terminal-status status-${agentState?.state ?? currentSession?.status ?? 'loading'}`} aria-label={agentState ? agentStateLabel(agentState.state) : currentSession?.status ?? 'starting'} title={agentState?.reason} />
+      <div className="terminal-title"><strong>{assignment.title}</strong><span>{providerLabel(assignment.provider)}{agentState ? ` · ${agentStateLabel(agentState.state)}` : ''}</span></div>
       <span className="terminal-path" title={assignment.workingDirectory}>{assignment.workingDirectory}</span>
+      {agentState?.attentionSince && <span className="agent-attention-badge" title={`${agentState.source}: ${agentState.reason}`}>Needs review</span>}
       <div className="terminal-controls">
         <Button variant="ghost" icon={<Search size={14} />} aria-label="Search terminal" onClick={() => setSearchOpen(true)} />
         <Button variant="ghost" icon={maximized ? <Minimize2 size={14} /> : <Maximize2 size={14} />} aria-label={maximized ? 'Restore pane' : 'Maximize pane'} onClick={onMaximize} />
@@ -258,6 +260,12 @@ export function TerminalPane({ assignment, session, deferred = false, active, ma
     {!currentSession && deferred && <div className="terminal-recovery"><strong>Deferred by restoration budget</strong><span>The Pane remains in the saved layout and can be resumed when needed.</span><button onClick={onRestart}><RotateCw size={12} />Resume Pane</button></div>}
     {currentSession && currentSession.status !== 'running' && <div className="terminal-recovery"><strong>{terminalStateTitle(currentSession)}</strong><span>{terminalStateDetail(currentSession)}</span><button onClick={onRestart}><RotateCw size={12} />Open fresh session</button></div>}
   </article>
+}
+
+function agentStateLabel(state: AgentActivityState) {
+  if (state === 'needs_input') return 'Needs input'
+  if (state === 'needs_permission') return 'Needs permission'
+  return state[0].toUpperCase() + state.slice(1)
 }
 
 const terminalTheme = { background: '#0a0c10', foreground: '#d8dde7', cursor: '#72a7ff', cursorAccent: '#0a0c10', selectionBackground: '#315f9b78', black: '#161a22', red: '#ef7d7d', green: '#82c99a', yellow: '#d9bf76', blue: '#72a7ff', magenta: '#b99af7', cyan: '#70c4c9', white: '#d8dde7', brightBlack: '#6f7889', brightWhite: '#f2f5fa' }
