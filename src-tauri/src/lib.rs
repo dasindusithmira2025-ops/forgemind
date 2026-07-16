@@ -1,30 +1,36 @@
 mod agents;
+mod build_info;
 mod commands;
 mod database;
 mod errors;
-mod memory;
 mod models;
 mod services;
 
 use database::DatabaseService;
 use services::{
-    AgentDetector, MissionControlService, RestorationScheduler, TerminalManager, WindowRegistry,
+    AgentDetector, RestorationScheduler, TerminalManager, UpdateService, WindowRegistry,
 };
 use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::{AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
 
+#[derive(Clone)]
 pub struct AppState {
     database: Arc<DatabaseService>,
     detector: Arc<AgentDetector>,
     terminals: TerminalManager,
-    missions: MissionControlService,
     restoration: RestorationScheduler,
     /// Authoritative runtime layer for open-Project sessions, Workspace placement, exclusive
     /// interactive leases, handoff coordination, and monitor state.
     windows: WindowRegistry,
     log_directory: PathBuf,
+    app_data_directory: PathBuf,
+    app_config_directory: PathBuf,
+    app_local_data_directory: PathBuf,
+    backup_directory: PathBuf,
+    legacy_migration: database::legacy_migration::LegacyMigrationStatus,
+    updates: UpdateService,
 }
 
 pub(crate) fn require_main_window(window: &tauri::Window) -> errors::AppResult<()> {
@@ -33,7 +39,7 @@ pub(crate) fn require_main_window(window: &tauri::Window) -> errors::AppResult<(
     }
     Err(errors::AppError::new(
         "main_window_required",
-        "This administrative action is available only in the main ForgeMind window.",
+        "This administrative action is available only in the main PARALITH window.",
         true,
     )
     .layer("window_security"))
@@ -53,7 +59,7 @@ fn build_logger() -> tauri_plugin_log::Builder {
         .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepOne)
         .target(tauri_plugin_log::Target::new(
             tauri_plugin_log::TargetKind::LogDir {
-                file_name: Some("forgemind".into()),
+                file_name: Some("paralith".into()),
             },
         ));
     if cfg!(debug_assertions) {
@@ -77,7 +83,7 @@ fn fatal_startup(app: &AppHandle, message: &str, detail: &str) -> ! {
     };
     app.dialog()
         .message(body)
-        .title("ForgeMind cannot start")
+        .title("PARALITH cannot start")
         .kind(MessageDialogKind::Error)
         .blocking_show();
     std::process::exit(1);
@@ -95,10 +101,37 @@ fn focus_main_window(app: &AppHandle) {
     }
 }
 
+fn sibling_identifier(directory: &std::path::Path, identifier: &str) -> PathBuf {
+    directory.parent().unwrap_or(directory).join(identifier)
+}
+
+fn startup_diagnostic(subsystem: &str, message: &str) {
+    // Keep bootstrap output intentionally free of paths, arguments and environment values. In
+    // debug builds this is visible in the integrated terminal before the file logger exists.
+    eprintln!("PARALITH startup [{subsystem}]: {message}");
+    log::info!("startup [{subsystem}]: {message}");
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let mut context = tauri::generate_context!();
+    if cfg!(debug_assertions) {
+        // Tauri derives its Windows single-instance mutex, WebView2 profile and platform data
+        // directories from this identifier. Scoping it before Builder::build lets an installed
+        // release and `tauri dev` coexist without creating a second public product or build flavor.
+        context.config_mut().identifier = build_info::runtime_identifier().into();
+        startup_diagnostic(
+            "runtime-isolation",
+            "local development identity active; installed application resources are not shared",
+        );
+    } else {
+        startup_diagnostic(
+            "runtime-isolation",
+            "release identity active; production single-instance protection is enabled",
+        );
+    }
     let mut builder = tauri::Builder::default();
-    // Single-instance guard MUST be the first registered plugin. A second `forgemind` launch
+    // Single-instance guard MUST be the first registered plugin. A second PARALITH launch
     // hands its argv/cwd to the already-running instance (which just refocuses) and then exits,
     // so there is never a second backend competing for the SQLite database or the PTYs.
     #[cfg(desktop)]
@@ -106,44 +139,184 @@ pub fn run() {
         builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             focus_main_window(app);
         }));
+        if build_info::updater_enabled() {
+            startup_diagnostic("updater", "production updater plugin enabled");
+        } else {
+            startup_diagnostic("updater", "disabled for local development");
+        }
+        if build_info::updater_enabled() {
+            if let Some(public_key) = build_info::updater_public_key() {
+                builder = builder.plugin(
+                    tauri_plugin_updater::Builder::new()
+                        .pubkey(public_key)
+                        .build(),
+                );
+            }
+        }
     }
     let app = builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
-            // Logging is best-effort: an unwritable log directory must never stop the app
-            // from opening.
-            if let Err(error) = app.handle().plugin(build_logger().build()) {
-                eprintln!("ForgeMind: file logging unavailable: {error}");
-            }
+            startup_diagnostic("setup", "application setup started");
             let data_dir = match app.path().app_data_dir() {
                 Ok(dir) => dir,
                 Err(error) => fatal_startup(
                     app.handle(),
-                    "ForgeMind could not locate its application data directory.",
+                    "PARALITH could not locate its application data directory.",
                     &error.to_string(),
                 ),
             };
-            let database = match DatabaseService::open(&data_dir.join("forgemind.sqlite3")) {
-                Ok(database) => Arc::new(database),
-                Err(error) => fatal_startup(
+            let config_dir = app
+                .path()
+                .app_config_dir()
+                .unwrap_or_else(|_| data_dir.join("config"));
+            let local_data_dir = app
+                .path()
+                .app_local_data_dir()
+                .unwrap_or_else(|_| data_dir.clone());
+            let edition = build_info::ProductEdition::current();
+            let backup_base = database::backup::default_backup_base(&local_data_dir);
+            let migration_roots = database::legacy_migration::LegacyMigrationRoots {
+                app_data: &data_dir,
+                app_config: &config_dir,
+                app_local_data: &local_data_dir,
+                legacy_app_data: &sibling_identifier(
+                    &data_dir,
+                    build_info::LEGACY_STABLE_IDENTIFIER,
+                ),
+                legacy_app_config: &sibling_identifier(
+                    &config_dir,
+                    build_info::LEGACY_STABLE_IDENTIFIER,
+                ),
+                legacy_app_local_data: &sibling_identifier(
+                    &local_data_dir,
+                    build_info::LEGACY_STABLE_IDENTIFIER,
+                ),
+                backup_base: &backup_base,
+            };
+            let mut legacy_migration = if cfg!(debug_assertions) {
+                database::legacy_migration::local_development_not_applicable(migration_roots)
+            } else {
+                database::legacy_migration::migrate_legacy_stable(
+                    edition,
+                    migration_roots,
+                    env!("CARGO_PKG_VERSION"),
+                )
+            };
+            // Logging is initialized after the one-time profile migration so the new log file
+            // cannot make the destination look non-empty or race legacy log preservation.
+            if let Err(error) = app.handle().plugin(build_logger().build()) {
+                eprintln!("PARALITH: file logging unavailable: {error}");
+            }
+            startup_diagnostic("persistence", "isolated runtime directories resolved");
+            let database_path = data_dir.join(database::backup::DATABASE_FILENAME);
+            let restored = database::backup::apply_staged_restore(&data_dir, &database_path)
+                .unwrap_or_else(|error| {
+                    fatal_startup(
+                        app.handle(),
+                        &error.message,
+                        error.detail.as_deref().unwrap_or_default(),
+                    )
+                });
+            if let Some(path) = restored.as_deref() {
+                if let Ok(status) = database::legacy_migration::mark_recovered(&data_dir, path) {
+                    legacy_migration = status;
+                }
+            }
+            let (schema_version, migration_required) =
+                DatabaseService::migration_preflight(&database_path).unwrap_or_else(|error| {
+                    fatal_startup(
+                        app.handle(),
+                        &error.message,
+                        error.detail.as_deref().unwrap_or_default(),
+                    )
+                });
+            let updates = UpdateService::new(&data_dir, schema_version).unwrap_or_else(|error| {
+                fatal_startup(
                     app.handle(),
                     &error.message,
                     error.detail.as_deref().unwrap_or_default(),
-                ),
+                )
+            });
+            if restored.is_some() && updates.startup_status().recovery_mode {
+                let _ = updates.retry();
+            }
+            let mut recovery_mode = updates.startup_status().recovery_mode;
+            let post_update_startup = updates.post_update_startup_active();
+            let migration_backup = if migration_required && schema_version > 0 && !recovery_mode {
+                let path = database::backup::create_pre_migration_backup(
+                    &database_path,
+                    database::backup::BackupRoots {
+                        app_data: &data_dir,
+                        app_config: &config_dir,
+                        app_local_data: &local_data_dir,
+                        backup_base: &backup_base,
+                    },
+                    env!("CARGO_PKG_VERSION"),
+                    build_info::ProductEdition::current().channel(),
+                    schema_version,
+                    database::migrations::CURRENT_SCHEMA_VERSION,
+                )
+                .unwrap_or_else(|error| {
+                    fatal_startup(
+                        app.handle(),
+                        &error.message,
+                        error.detail.as_deref().unwrap_or_default(),
+                    )
+                });
+                if post_update_startup {
+                    updates.set_backup(&path).unwrap_or_else(|error| {
+                        fatal_startup(
+                            app.handle(),
+                            &error.message,
+                            error.detail.as_deref().unwrap_or_default(),
+                        )
+                    });
+                }
+                Some(path)
+            } else {
+                None
             };
-            match database.repair_metadata() {
-                Ok(summary) => log::info!(
-                    "metadata repair inspected={} repaired={} quarantined={}",
-                    summary.inspected,
-                    summary.repaired,
-                    summary.quarantined
-                ),
-                Err(error) => fatal_startup(
+            if migration_required && post_update_startup {
+                updates
+                    .migration_started(schema_version)
+                    .unwrap_or_else(|error| {
+                        fatal_startup(
+                            app.handle(),
+                            &error.message,
+                            error.detail.as_deref().unwrap_or_default(),
+                        )
+                    });
+            }
+            let startup_database = services::startup_service::open_startup_database(
+                &updates,
+                &database_path,
+                migration_backup,
+            )
+            .unwrap_or_else(|error| {
+                fatal_startup(
                     app.handle(),
-                    "ForgeMind could not validate its saved workspace metadata.",
-                    error.detail.as_deref().unwrap_or(&error.message),
-                ),
+                    &error.message,
+                    error.detail.as_deref().unwrap_or_default(),
+                )
+            });
+            recovery_mode = startup_database.recovery_mode;
+            let database = Arc::new(startup_database.database);
+            if !recovery_mode {
+                match database.repair_metadata() {
+                    Ok(summary) => log::info!(
+                        "metadata repair inspected={} repaired={} quarantined={}",
+                        summary.inspected,
+                        summary.repaired,
+                        summary.quarantined
+                    ),
+                    Err(error) => fatal_startup(
+                        app.handle(),
+                        "PARALITH could not validate its saved workspace metadata.",
+                        error.detail.as_deref().unwrap_or(&error.message),
+                    ),
+                }
             }
             let detector = Arc::new(AgentDetector::default());
             let terminals = TerminalManager::new(database.clone(), app.handle().clone());
@@ -153,21 +326,20 @@ pub fn run() {
                 detector.clone(),
                 app.handle().clone(),
             );
-            let missions = MissionControlService::new(
-                database.clone(),
-                terminals.clone(),
-                app.handle().clone(),
-            );
             let windows = WindowRegistry::new(database.clone());
             // Rehydrate detached-window bookkeeping from persisted placements. Best-effort:
             // a stale placement must never stop the app from opening.
             if let Err(error) = windows.hydrate_from_disk() {
                 log::warn!("window registry hydration skipped: {}", error.message);
             }
-            let detached_to_restore = windows.detached_placements().unwrap_or_else(|error| {
-                log::warn!("detached placement restoration skipped: {}", error.message);
+            let detached_to_restore = if recovery_mode {
                 Vec::new()
-            });
+            } else {
+                windows.detached_placements().unwrap_or_else(|error| {
+                    log::warn!("detached placement restoration skipped: {}", error.message);
+                    Vec::new()
+                })
+            };
             let log_directory = app
                 .path()
                 .app_log_dir()
@@ -176,10 +348,15 @@ pub fn run() {
                 database,
                 detector,
                 terminals,
-                missions,
                 restoration,
                 windows,
                 log_directory,
+                app_data_directory: data_dir.clone(),
+                app_config_directory: config_dir,
+                app_local_data_directory: local_data_dir,
+                backup_directory: backup_base.join(edition.channel()),
+                legacy_migration,
+                updates: updates.clone(),
             });
             for placement in detached_to_restore {
                 let label = services::detached_label(&placement.workspace_id);
@@ -191,11 +368,13 @@ pub fn run() {
                 });
                 if let Err(error) =
                     WebviewWindowBuilder::new(app, &label, WebviewUrl::App("index.html".into()))
-                        .title("ForgeMind Workspace")
+                        .title("PARALITH Workspace")
                         .inner_size(geometry.width as f64, geometry.height as f64)
                         .min_inner_size(640.0, 420.0)
                         .position(geometry.x as f64, geometry.y as f64)
-                        .visible(false)
+                        // Keep restored detached windows visible so their WebView2 renderer
+                        // initializes and can reclaim the persisted Workspace lease.
+                        .visible(true)
                         .build()
                 {
                     log::warn!(
@@ -204,7 +383,34 @@ pub fn run() {
                     );
                 }
             }
-            log::info!("ForgeMind initialized (data dir: {})", data_dir.display());
+            if !recovery_mode {
+                let _ = updates.health_check_started();
+            }
+            let main_window_config = app
+                .config()
+                .app
+                .windows
+                .iter()
+                .find(|config| config.label == services::MAIN_WINDOW_LABEL)
+                .cloned()
+                .unwrap_or_else(|| {
+                    fatal_startup(
+                        app.handle(),
+                        "PARALITH could not load its main-window configuration.",
+                        "The packaged Tauri configuration has no main window.",
+                    )
+                });
+            WebviewWindowBuilder::from_config(app.handle(), &main_window_config)
+                .and_then(|builder| builder.build())
+                .unwrap_or_else(|error| {
+                    fatal_startup(
+                        app.handle(),
+                        "PARALITH could not create its main window.",
+                        &error.to_string(),
+                    )
+                });
+            log::info!("PARALITH initialized (data dir: {})", data_dir.display());
+            startup_diagnostic("ready", "main window created and backend initialized");
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -251,43 +457,7 @@ pub fn run() {
             commands::get_diagnostics,
             commands::run_health_check,
             commands::repair_database_metadata,
-            commands::memory_search,
-            commands::memory_get_item,
-            commands::memory_get_sources,
-            commands::memory_capture_file,
-            commands::memory_add_note,
-            commands::memory_resolve_source_path,
-            commands::memory_health,
-            commands::memory_rebuild_index,
-            commands::save_mission,
-            commands::list_missions,
-            commands::get_mission_bundle,
-            commands::get_project_mission_draft,
-            commands::delete_draft_mission,
-            commands::save_mission_task,
-            commands::suggest_mission_plan,
-            commands::dispatch_mission_task,
-            commands::refresh_mission_task,
-            commands::run_task_verification,
-            commands::cancel_task_verification,
-            commands::collect_task_evidence,
-            commands::add_manual_task_evidence,
-            commands::get_task_review,
-            commands::accept_mission_task,
-            commands::request_task_changes,
-            commands::retry_mission_task,
-            commands::stop_mission_task,
-            commands::merge_mission_task,
-            commands::discard_mission_task,
-            commands::cleanup_merged_task_worktree,
-            commands::rollback_mission_merge,
-            commands::reconcile_mission_recovery,
-            commands::recover_mission_session,
-            commands::discover_project_context,
-            commands::save_project_context,
-            commands::get_project_context,
-            commands::save_verification_profile,
-            commands::list_verification_profiles,
+            commands::export_redacted_support_bundle,
             commands::list_open_projects,
             commands::open_project_session,
             commands::set_active_project,
@@ -308,21 +478,45 @@ pub fn run() {
             commands::recover_workspace_windows,
             commands::list_monitors,
             commands::set_monitor_alias,
+            commands::get_update_status,
+            commands::get_startup_status,
+            commands::check_for_updates,
+            commands::download_update,
+            commands::assess_safe_restart,
+            commands::install_downloaded_update,
+            commands::install_update_on_exit,
+            commands::retry_update,
+            commands::confirm_healthy_startup,
+            commands::stage_database_backup_restore,
+            commands::start_in_safe_mode,
+            commands::restart_after_recovery,
         ])
-        .build(tauri::generate_context!());
+        .build(context);
 
     let app = match app {
         Ok(app) => app,
         Err(error) => {
-            log::error!("ForgeMind failed to initialize: {error}");
-            eprintln!("ForgeMind failed to initialize: {error}");
+            log::error!("PARALITH failed to initialize: {error}");
+            eprintln!("PARALITH startup [tauri-build]: failed: {error}");
             std::process::exit(1);
         }
     };
 
     app.run(|app_handle, event| {
         match event {
-            RunEvent::Exit | RunEvent::ExitRequested { .. } => {
+            RunEvent::ExitRequested { .. } => {
+                startup_diagnostic("shutdown", "exit requested");
+                if let Some(state) = app_handle.try_state::<AppState>() {
+                    if let Err(error) =
+                        commands::update_commands::perform_install(app_handle, &state, true)
+                    {
+                        log::error!("install-on-exit failed: {error}");
+                    }
+                    let _ = state.terminals.terminate_all_sessions();
+                }
+            }
+            RunEvent::Exit => {
+                startup_diagnostic("shutdown", "runtime exited");
                 if let Some(state) = app_handle.try_state::<AppState>() {
                     let _ = state.terminals.terminate_all_sessions();
                 }

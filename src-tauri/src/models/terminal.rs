@@ -61,7 +61,7 @@ pub struct TerminalOutputEvent {
     pub pane_id: String,
     pub sequence: u64,
     pub timestamp: String,
-    pub data: Vec<u8>,
+    pub data: String,
 }
 
 #[derive(Debug, Clone, Serialize)]

@@ -67,7 +67,7 @@ describe('Workspace screen', () => {
 
   it('renders the focused sidebar without removed navigation surfaces', async () => {
     renderWorkspace(); await screen.findByTestId('terminal-pane')
-    expect(screen.getByText('ForgeMind')).toBeInTheDocument()
+    expect(screen.getByLabelText('PARALITH')).toBeInTheDocument()
     expect(screen.getByText('Project Selection')).toBeInTheDocument()
     expect(screen.getByText('Current Projects')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /^Fixture/ })).toBeInTheDocument()

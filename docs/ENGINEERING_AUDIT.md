@@ -1,4 +1,4 @@
-# ForgeMind Refactor Audit
+# PARALITH Refactor Audit
 
 ## Baseline findings
 

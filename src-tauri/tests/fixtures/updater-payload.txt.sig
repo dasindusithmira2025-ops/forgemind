@@ -1,0 +1,4 @@
+untrusted comment: signature from tauri secret key
+RUSSwIGNC6/VeDlbgElilI8UJ9IdWkorGQoTSp5CSMK+tHzv89cl7pJh5NKsZVtDSaaRyrva2OcV3kgonSVJvSOIXksVL2bQIg0=
+trusted comment: timestamp:1784065396	file:updater-payload.txt
+oDyy+rCAgtbHyNcSktPNuu70MnNVtYoAKvGUrvdMQy5fYSsw3+PaQDVzMwBK4/d/O4PlssX5PW0SjV1S6aC1DQ==

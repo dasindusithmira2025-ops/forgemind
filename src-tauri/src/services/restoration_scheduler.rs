@@ -1,7 +1,8 @@
 use crate::database::DatabaseService;
 use crate::errors::{AppError, AppResult};
 use crate::models::{
-    AgentProvider, RestorationFailure, RestorationProgress, RestorationResult, StartTerminalRequest,
+    AgentProvider, RestorationFailure, RestorationProgress, RestorationResult, ShellProfile,
+    StartTerminalRequest,
 };
 use crate::services::{AgentDetector, TerminalManager};
 use parking_lot::Mutex;
@@ -17,6 +18,10 @@ pub struct RestorationScheduler {
     terminals: TerminalManager,
     detector: Arc<AgentDetector>,
     attempts: Arc<Mutex<HashMap<(String, String), u16>>>,
+    /// One lock per Workspace so concurrent restore requests (a re-mounted screen racing a
+    /// still-running earlier restore) serialize instead of both planning launches from the
+    /// same "nothing is live yet" snapshot and doubling every pane's terminal.
+    restores: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
     app: AppHandle,
 }
 
@@ -32,6 +37,7 @@ impl RestorationScheduler {
             terminals,
             detector,
             attempts: Arc::new(Mutex::new(HashMap::new())),
+            restores: Arc::new(Mutex::new(HashMap::new())),
             app,
         }
     }
@@ -42,6 +48,13 @@ impl RestorationScheduler {
         budget: u16,
         behavior: &str,
     ) -> AppResult<RestorationResult> {
+        let workspace_lock = self
+            .restores
+            .lock()
+            .entry(workspace_id.to_owned())
+            .or_default()
+            .clone();
+        let _serialized = workspace_lock.lock();
         let budget = budget.clamp(1, 8);
         let workspace = self.database.get_workspace(workspace_id)?;
         let existing = self.terminals.list_live_sessions(Some(workspace_id));
@@ -58,6 +71,32 @@ impl RestorationScheduler {
         );
         let mut sessions = existing;
         let mut failures = Vec::new();
+        // fresh_shells needs exactly one shell resolution for the whole restore. detect_shells()
+        // spawns probe processes (the WSL enumeration alone can block for three seconds), so
+        // resolving it inside the per-pane loop multiplied helper processes by the pane count
+        // and stalled restoration — one source of the "dozens of terminals open" freezes.
+        let fresh_shell: Option<AppResult<ShellProfile>> = (behavior == "fresh_shells")
+            .then(|| {
+                let settings = self.database.get_settings()?;
+                let shells = self.detector.detect_shells();
+                settings
+                    .default_shell
+                    .as_deref()
+                    .and_then(|id| {
+                        shells
+                            .iter()
+                            .find(|shell| shell.id == id && shell.available)
+                    })
+                    .or_else(|| shells.iter().find(|shell| shell.available))
+                    .cloned()
+                    .ok_or_else(|| {
+                        AppError::new(
+                            "shell_unavailable",
+                            "No usable shell is available for fresh-session restoration.",
+                            true,
+                        )
+                    })
+            });
         for (completed, pane_id) in launch.iter().enumerate() {
             let key = (workspace_id.to_owned(), pane_id.clone());
             let attempt = {
@@ -94,25 +133,8 @@ impl RestorationScheduler {
                 self.database
                     .resolve_terminal_request(&request)
                     .and_then(|mut request| {
-                        if behavior == "fresh_shells" {
-                            let settings = self.database.get_settings()?;
-                            let shells = self.detector.detect_shells();
-                            let shell = settings
-                                .default_shell
-                                .as_deref()
-                                .and_then(|id| {
-                                    shells
-                                        .iter()
-                                        .find(|shell| shell.id == id && shell.available)
-                                })
-                                .or_else(|| shells.iter().find(|shell| shell.available))
-                                .ok_or_else(|| {
-                                    AppError::new(
-                                    "shell_unavailable",
-                                    "No usable shell is available for fresh-session restoration.",
-                                    true,
-                                )
-                                })?;
+                        if let Some(resolved) = &fresh_shell {
+                            let shell = resolved.as_ref().map_err(AppError::clone)?;
                             request.provider = shell_provider(&shell.name);
                             request.executable_path = shell.executable_path.clone();
                             request.args = shell.args.clone();

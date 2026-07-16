@@ -1,11 +1,13 @@
 use crate::errors::{AppError, AppResult};
 use crate::models::{AgentDetectionResult, AgentProvider, ShellProfile};
+use crate::services::process_util::background_command;
 use chrono::Utc;
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
+use std::thread;
 use std::time::{Duration, Instant};
 use wait_timeout::ChildExt;
 
@@ -31,20 +33,37 @@ impl AgentDetector {
         force: bool,
         custom_paths: &HashMap<AgentProvider, String>,
     ) -> Vec<AgentDetectionResult> {
-        [
+        let providers = [
             AgentProvider::Claude,
             AgentProvider::Codex,
             AgentProvider::Opencode,
-        ]
-        .into_iter()
-        .map(|provider| {
-            self.detect(
-                provider.clone(),
-                custom_paths.get(&provider).map(String::as_str),
-                force,
-            )
+        ];
+        // Version probes are independent and each has its own timeout. Running them serially
+        // made one unhealthy installation delay workspace setup by up to nine seconds.
+        thread::scope(|scope| {
+            let handles = providers
+                .into_iter()
+                .map(|provider| {
+                    let fallback = provider.clone();
+                    let custom_path = custom_paths.get(&provider).cloned();
+                    let handle =
+                        scope.spawn(move || self.detect(provider, custom_path.as_deref(), force));
+                    (fallback, handle)
+                })
+                .collect::<Vec<_>>();
+            handles
+                .into_iter()
+                .map(|(provider, handle)| {
+                    handle.join().unwrap_or_else(|_| {
+                        unavailable(
+                            provider,
+                            "detection_worker_failed",
+                            "The agent version probe stopped unexpectedly.",
+                        )
+                    })
+                })
+                .collect()
         })
-        .collect()
     }
 
     pub fn detect(
@@ -254,21 +273,40 @@ fn stable_profile_id(name: &str, executable_path: &str, args: &[String]) -> Stri
 }
 
 fn wsl_distributions(wsl: &Path) -> Vec<String> {
-    Command::new(wsl)
+    // Hidden probe: a plain spawn from the GUI-subsystem app pops a visible console window.
+    let mut child = match background_command(wsl)
         .args(["--list", "--quiet"])
-        .output()
-        .ok()
-        .filter(|output| output.status.success())
-        .map(|output| {
-            let decoded = decode_wsl_output(&output.stdout);
-            decoded
-                .lines()
-                .map(str::trim)
-                .filter(|line| !line.is_empty())
-                .map(str::to_owned)
-                .collect()
-        })
-        .unwrap_or_default()
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(_) => return Vec::new(),
+    };
+    let success = match child.wait_timeout(DETECTION_TIMEOUT) {
+        Ok(Some(status)) => status.success(),
+        Ok(None) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            false
+        }
+        Err(_) => false,
+    };
+    if !success {
+        return Vec::new();
+    }
+    let mut bytes = Vec::new();
+    if let Some(stdout) = child.stdout.take() {
+        let _ = stdout.take(OUTPUT_LIMIT as u64).read_to_end(&mut bytes);
+    }
+    let decoded = decode_wsl_output(&bytes);
+    decoded
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(str::to_owned)
+        .collect()
 }
 
 fn decode_wsl_output(bytes: &[u8]) -> String {
@@ -301,7 +339,9 @@ fn run_detection_command(
     timeout: Duration,
 ) -> AgentDetectionResult {
     let now = Utc::now().to_rfc3339();
-    let mut child = match Command::new(executable)
+    // Hidden probe: version checks run in parallel on workspace load; visible console
+    // windows here were one source of the "PARALITH opens external terminals" reports.
+    let mut child = match background_command(executable)
         .args(arguments)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())

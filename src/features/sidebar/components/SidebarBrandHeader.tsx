@@ -1,4 +1,5 @@
-import { ChevronsLeft, FolderOpen, Rocket, Settings, TerminalSquare } from 'lucide-react'
+import { ChevronsLeft, FolderOpen, Rocket, Settings } from 'lucide-react'
+import { Brand } from '../../../components/ui/Brand'
 import { useSidebarStore } from '../sidebarStore'
 import type { SidebarActions } from '../sidebarTypes'
 
@@ -19,13 +20,10 @@ export function SidebarBrandHeader({ actions }: { actions: SidebarActions }) {
           className="sidebar-logo"
           aria-haspopup="menu"
           aria-expanded={menuOpen}
-          aria-label="ForgeMind menu"
+          aria-label="PARALITH menu"
           onClick={() => setMenuOpen(!menuOpen)}
         >
-          <span className="brand-mark">
-            <TerminalSquare size={17} strokeWidth={1.7} />
-          </span>
-          <span className="sidebar-wordmark">ForgeMind</span>
+          <Brand />
         </button>
         {menuOpen && (
           <>

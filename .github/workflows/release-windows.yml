@@ -1,0 +1,115 @@
+name: Release Windows (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      edition:
+        required: true
+        type: string
+      tag:
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    uses: ./.github/workflows/ci.yml
+  release:
+    needs: validate
+    runs-on: windows-latest
+    timeout-minutes: 60
+    environment: ${{ inputs.edition }}-release
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.tag }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: npm ci
+      - name: Validate protected release tag
+        shell: pwsh
+        run: |
+          npm run release:check
+          npm run typecheck
+          npm run lint
+          npm test -- --run
+          npm run build
+          Push-Location src-tauri
+          cargo fmt --all -- --check
+          cargo clippy --all-targets --all-features -- -D warnings
+          cargo test --all-targets --all-features
+          Pop-Location
+      - name: Verify clean tagged source and release identity
+        shell: pwsh
+        run: |
+          if (git status --porcelain) { throw 'Release checkout is not clean.' }
+          node scripts/release/verify-release.mjs '${{ inputs.edition }}' '${{ inputs.tag }}'
+      - name: Build signed MSI, NSIS, and updater artifacts
+        shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          PARALITH_STABLE_UPDATE_ENDPOINT: ${{ vars.PARALITH_STABLE_UPDATE_ENDPOINT }}
+          PARALITH_PREVIEW_UPDATE_ENDPOINT: ${{ vars.PARALITH_PREVIEW_UPDATE_ENDPOINT }}
+          PARALITH_UPDATE_ARTIFACT_BASE_URL: ${{ vars.PARALITH_UPDATE_ARTIFACT_BASE_URL }}
+          PARALITH_PREVIOUS_INSTALLER_URL: ${{ vars.PARALITH_PREVIOUS_INSTALLER_URL }}
+          PARALITH_ROLLOUT_PERCENT: ${{ vars.PARALITH_ROLLOUT_PERCENT }}
+          PARALITH_WINDOWS_SIGN_COMMAND: ${{ secrets.PARALITH_WINDOWS_SIGN_COMMAND }}
+        run: |
+          if (-not $env:TAURI_SIGNING_PRIVATE_KEY) { throw 'TAURI_SIGNING_PRIVATE_KEY is required.' }
+          $env:PARALITH_EDITION='${{ inputs.edition }}'
+          $env:PARALITH_RELEASE_CHANNEL='${{ inputs.edition }}'
+          $env:PARALITH_GIT_COMMIT=(git rev-parse HEAD).Trim()
+          $env:PARALITH_BUILD_TIMESTAMP=(Get-Date).ToUniversalTime().ToString('o')
+          $endpoint = if ('${{ inputs.edition }}' -eq 'stable') { $env:PARALITH_STABLE_UPDATE_ENDPOINT } else { $env:PARALITH_PREVIEW_UPDATE_ENDPOINT }
+          if (-not $endpoint) { throw 'Edition update endpoint repository variable is required.' }
+          $env:PARALITH_UPDATE_ENDPOINT=$endpoint
+          $config = node scripts/release/render-tauri-config.mjs '${{ inputs.edition }}' release | Select-Object -Last 1
+          npm run tauri -- build --bundles msi,nsis --config $config
+          node scripts/release/assemble-release.mjs '${{ inputs.edition }}'
+      - name: Archive workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: paralith-${{ inputs.edition }}-${{ inputs.tag }}
+          path: .artifacts/release/${{ inputs.edition }}/**
+          if-no-files-found: error
+          retention-days: 90
+      - name: Create private repository release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $dir = Get-ChildItem '.artifacts/release/${{ inputs.edition }}' -Directory | Select-Object -First 1
+          $notes = Join-Path $dir.FullName 'release-notes.md'
+          $assets = Get-ChildItem $dir.FullName -File | ForEach-Object FullName
+          $pre = if ('${{ inputs.edition }}' -eq 'preview') { '--prerelease' } else { $null }
+          $commit = (git rev-parse HEAD).Trim()
+          gh release create '${{ inputs.tag }}' $assets --title "PARALITH ${{ inputs.edition }} $($dir.Name)" --notes-file $notes --target $commit $pre
+      - name: Detect internal publication configuration
+        id: publication
+        shell: pwsh
+        env:
+          PUBLISH_TARGET: ${{ secrets.PARALITH_UPDATE_PUBLISH_TARGET }}
+        run: |
+          if ($env:PUBLISH_TARGET) {
+            'enabled=true' | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          } else {
+            'enabled=false' | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          }
+      - name: Publish to internal update endpoint
+        if: steps.publication.outputs.enabled == 'true'
+        shell: pwsh
+        env:
+          PARALITH_UPDATE_PUBLISH_TARGET: ${{ secrets.PARALITH_UPDATE_PUBLISH_TARGET }}
+          PARALITH_UPDATE_PUBLISH_PROVIDER: ${{ vars.PARALITH_UPDATE_PUBLISH_PROVIDER }}
+          PARALITH_UPDATE_PUBLISH_TOKEN: ${{ secrets.PARALITH_UPDATE_PUBLISH_TOKEN }}
+        run: ./scripts/release/publish-internal-update.ps1

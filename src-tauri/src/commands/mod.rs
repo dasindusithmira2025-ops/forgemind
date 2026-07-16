@@ -1,19 +1,17 @@
 pub mod agent_commands;
 pub mod diagnostics_commands;
-pub mod memory_commands;
-pub mod mission_commands;
 pub mod project_commands;
 pub mod settings_commands;
 pub mod terminal_commands;
+pub mod update_commands;
 pub mod window_commands;
 pub mod workspace_commands;
 
 pub use agent_commands::*;
 pub use diagnostics_commands::*;
-pub use memory_commands::*;
-pub use mission_commands::*;
 pub use project_commands::*;
 pub use settings_commands::*;
 pub use terminal_commands::*;
+pub use update_commands::*;
 pub use window_commands::*;
 pub use workspace_commands::*;

@@ -1,6 +1,6 @@
 import { SETUP_DRAFT_VERSION, type WorkspaceSetupDraft } from './setupTypes'
 
-// Unfinished setup drafts survive an app restart so reopening ForgeMind never discards progress.
+// Unfinished setup drafts survive an app restart so reopening PARALITH never discards progress.
 // Drafts are keyed by their context (create-for-project / edit-/duplicate-workspace) so concurrent
 // setups do not clobber each other.
 

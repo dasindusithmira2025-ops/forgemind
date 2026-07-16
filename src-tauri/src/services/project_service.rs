@@ -1,9 +1,9 @@
 use crate::errors::{AppError, AppResult};
 use crate::models::Project;
+use crate::services::process_util::background_command;
 use chrono::Utc;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use uuid::Uuid;
 
 pub struct ProjectService;
@@ -30,7 +30,7 @@ impl ProjectService {
         let canonical = std::fs::canonicalize(requested).map_err(|error| {
             AppError::new(
                 "invalid_project_path",
-                "ForgeMind could not resolve this folder.",
+                "PARALITH could not resolve this folder.",
                 true,
             )
             .detail(error.to_string())
@@ -101,11 +101,11 @@ impl ProjectService {
             )
             .entity(working_directory));
         }
-        Ok(working.to_string_lossy().to_string())
+        Ok(display_path(&working))
     }
 }
 
-fn display_path(path: &Path) -> String {
+pub(crate) fn display_path(path: &Path) -> String {
     let value = path.to_string_lossy();
     if cfg!(windows) {
         if let Some(unc) = value.strip_prefix(r"\\?\UNC\") {
@@ -151,7 +151,9 @@ fn path_starts_with(child: &Path, parent: &Path) -> bool {
 }
 
 fn git_branch(root: &Path) -> Option<String> {
-    Command::new("git")
+    // Hidden helper: a plain spawn from the GUI-subsystem app flashes a console window
+    // every time a Project is opened or refreshed.
+    background_command("git")
         .args(["-C", &root.to_string_lossy(), "branch", "--show-current"])
         .output()
         .ok()
@@ -284,6 +286,23 @@ mod tests {
                 .code,
             "invalid_project_path"
         );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn working_directory_is_safe_for_windows_child_processes() {
+        let root = std::env::temp_dir().join(format!("paralith-working-dir-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let validated = ProjectService::validate_working_directory(
+            &root.to_string_lossy(),
+            &root.to_string_lossy(),
+            false,
+        )
+        .unwrap();
+        if cfg!(windows) {
+            assert!(!validated.starts_with(r"\\?\"));
+        }
+        assert!(Path::new(&validated).is_dir());
         fs::remove_dir_all(root).unwrap();
     }
 }

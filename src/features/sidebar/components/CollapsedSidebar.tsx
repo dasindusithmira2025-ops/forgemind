@@ -1,4 +1,5 @@
-import { Activity, ChevronsRight, Folder, MoreHorizontal, Settings, TerminalSquare } from 'lucide-react'
+import { Activity, ChevronsRight, Folder, MoreHorizontal, Settings } from 'lucide-react'
+import { Brand } from '../../../components/ui/Brand'
 import { useSidebarStore } from '../sidebarStore'
 import { runtimeStatusLabel, runtimeStatusText } from '../sidebarSelectors'
 import type { ForgeSpaceSidebarProps } from '../sidebarTypes'
@@ -34,9 +35,7 @@ export function CollapsedSidebar({
         title="Expand sidebar"
         onClick={actions.onToggleCollapse}
       >
-        <span className="brand-mark">
-          <TerminalSquare size={16} strokeWidth={1.7} />
-        </span>
+        <Brand compact />
       </button>
 
       <button

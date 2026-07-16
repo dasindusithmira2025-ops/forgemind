@@ -1,8 +1,9 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "ForgeMind",
-  "version": "0.1.0",
-  "identifier": "com.forgemind.workspace",
+  "productName": "PARALITH",
+  "mainBinaryName": "PARALITH",
+  "version": "0.2.0",
+  "identifier": "com.corelith.paralith",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://127.0.0.1:1420",
@@ -12,7 +13,9 @@
   "app": {
     "windows": [
       {
-        "title": "ForgeMind",
+        "label": "main",
+        "title": "PARALITH",
+        "create": false,
         "width": 1440,
         "height": 900,
         "minWidth": 980,
@@ -28,6 +31,10 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "publisher": "Corelith Technologies",
+    "copyright": "Copyright © 2026 Corelith Technologies",
+    "shortDescription": "PARALITH multi-agent development workspace",
+    "longDescription": "PARALITH is Corelith Technologies' native multi-agent terminal workspace for internal software development.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

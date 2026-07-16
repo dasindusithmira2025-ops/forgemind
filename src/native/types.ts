@@ -140,7 +140,7 @@ export interface TerminalOutputEvent {
   paneId: string
   sequence: number
   timestamp: string
-  data: number[]
+  data: Uint8Array
 }
 
 export interface TerminalExitEvent {
@@ -206,10 +206,26 @@ export interface AgentSession {
 export interface HealthReport {
   healthy: boolean
   schemaVersion: number
+  integrityCheck: string
   foreignKeyViolations: number
   staleLiveSessions: number
   quarantinedRecords: number
   messages: string[]
+}
+
+export type ReadinessStatus = 'pass' | 'warning' | 'fail'
+export interface ReadinessCheck {
+  id: string
+  label: string
+  status: ReadinessStatus
+  detail: string
+  action?: string
+}
+export interface ReadinessReport {
+  checkedAt: string
+  firstRun: boolean
+  ready: boolean
+  checks: ReadinessCheck[]
 }
 
 export interface RepairSummary {
@@ -220,13 +236,113 @@ export interface RepairSummary {
 }
 
 export interface DiagnosticsSnapshot {
+  product: string
+  company: string
+  appIdentifier: string
   applicationVersion: string
+  edition: string
+  buildCommit: string
+  buildTimestamp: string
+  releaseChannel: string
+  target: string
+  architecture: string
   databasePath: string
   logDirectory: string
   schemaVersion: number
   backupPath?: string
+  backupDirectory: string
   liveTerminalCount: number
+  updaterEndpointStatus: string
+  lastUpdateCheck?: string
+  lastUpdateResult?: string
+  pendingUpdate?: string
+  backupStatus: string
+  migrationStatus: string
+  legacyMigrationStatus: string
+  legacyMigrationMessage: string
+  legacyMigrationBackup?: string
+  installerType: string
+  updateDataDirectory: string
+  updateLogEntries: string[]
   health: HealthReport
+  readiness: ReadinessReport
+}
+
+export type ProductEdition = 'stable' | 'preview'
+export type UpdatePhase = 'idle'|'checking'|'no_update'|'available'|'downloading'|'downloaded'|'restart_requested'|'installation_started'|'first_launch_pending'|'migration_started'|'health_check_started'|'healthy_startup_confirmed'|'failed'|'recovery_mode'
+export interface BuildInfo {
+  product: string
+  edition: ProductEdition
+  version: string
+  gitCommit: string
+  buildTimestamp: string
+  releaseChannel: string
+  databaseSchemaVersion: number
+  target: string
+  architecture: string
+  appIdentifier: string
+  updateEndpoint: string
+  updaterPublicKeyProvisioned: boolean
+  bundledRelease: Record<string, unknown>
+}
+export interface AvailableUpdate {
+  version: string
+  releaseNotes: string
+  publishedAt?: string
+  edition: string
+  channel: string
+  schemaVersion: number
+  minimumSchemaVersion: number
+  maximumSchemaVersion: number
+  rolloutPercent: number
+  commit?: string
+  buildTimestamp?: string
+  previousInstallerUrl?: string
+}
+export interface UpdateJournal {
+  phase: UpdatePhase
+  fromVersion: string
+  targetVersion?: string
+  fromSchemaVersion: number
+  targetSchemaVersion?: number
+  lastCheckAt?: string
+  lastResult?: string
+  signatureVerified: boolean
+  downloadReceived: number
+  downloadTotal?: number
+  installOnExit: boolean
+  firstLaunchAttempts: number
+  latestBackupPath?: string
+  previousInstallerUrl?: string
+  error?: string
+  available?: AvailableUpdate
+  history: Array<{ phase: UpdatePhase; at: string; detail?: string }>
+}
+export interface UpdateStatus {
+  build: BuildInfo
+  journal: UpdateJournal
+  endpointConfigured: boolean
+  endpointStatus: string
+  installerType: string
+  recoveryMode: boolean
+  updateDataDirectory: string
+}
+export interface SafeRestartClientState { unsavedEditorState: boolean; unsavedSettings: boolean; unsavedMissionDraft: boolean }
+export interface SafeRestartAssessment extends SafeRestartClientState {
+  safe: boolean
+  runningTerminals: number
+  activeAgents: number
+  activeMissions: number
+  pendingDatabaseWrites: number
+  blockers: string[]
+}
+export interface StartupStatus {
+  recoveryMode: boolean
+  failingAppVersion?: string
+  failingSchemaVersion?: number
+  message?: string
+  latestBackupPath?: string
+  previousInstallerUrl?: string
 }
 
 export interface AppSettings {
@@ -253,6 +369,7 @@ export interface AppSettings {
   defaultPaneCount: number
   inactiveWorkspaceProcesses: 'keep_running' | 'ask' | 'stop'
   inactiveWorkspaceRendering: 'hibernate'
+  automaticUpdateChecks: boolean
   settingsVersion: number
 }
 

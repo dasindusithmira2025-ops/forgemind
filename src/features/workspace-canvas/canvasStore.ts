@@ -71,7 +71,11 @@ export const useCanvasStore = create<CanvasStoreState>((set, get) => ({
 
   reset: () => set({ workspaceId: undefined, layout: null, revision: 0, drag: undefined, resize: undefined, guides: [], settlingPaneIds: [] }),
 
-  setBounds: (bounds) => set({ bounds }),
+  setBounds: (bounds) => {
+    const current = get().bounds
+    if (current.width === bounds.width && current.height === bounds.height) return
+    set({ bounds })
+  },
 
   setLayout: (layout, revision) => set(revision === undefined ? { layout } : { layout, revision }),
 

@@ -22,7 +22,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
 
-/// The window label ForgeMind's primary window always uses. Detached Workspace windows use
+/// The window label PARALITH's primary window always uses. Detached Workspace windows use
 /// `ws-<workspaceId>` labels (see [`detached_label`]).
 pub const MAIN_WINDOW_LABEL: &str = "main";
 

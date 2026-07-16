@@ -1,0 +1,18 @@
+name: Release Preview
+
+on:
+  push:
+    tags: ['preview-v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing protected preview-vX.Y.Z-preview.N tag
+        required: true
+
+jobs:
+  release:
+    uses: ./.github/workflows/release-windows.yml
+    with:
+      edition: preview
+      tag: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
+    secrets: inherit

@@ -51,7 +51,7 @@ impl AppError {
     pub fn database(error: impl Display) -> Self {
         Self::new(
             "database_error",
-            "ForgeMind could not access its local database.",
+            "PARALITH could not access its local database.",
             true,
         )
         .detail(error.to_string())

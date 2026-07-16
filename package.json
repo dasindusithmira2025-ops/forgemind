@@ -1,7 +1,7 @@
 {
-  "name": "forgemind",
+  "name": "paralith",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,7 +11,15 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "release:sync": "node scripts/release/sync-version.mjs",
+    "release:check": "node scripts/release/sync-version.mjs --check",
+    "release:config:stable": "node scripts/release/render-tauri-config.mjs stable local",
+    "release:config:preview": "node scripts/release/render-tauri-config.mjs preview local",
+    "build:stable": "node scripts/release/build-edition.mjs stable",
+    "build:preview": "node scripts/release/build-edition.mjs preview",
+    "release:assemble": "node scripts/release/assemble-release.mjs",
+    "update-server": "node scripts/release/test-update-server.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.1",

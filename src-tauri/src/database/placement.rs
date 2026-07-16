@@ -99,7 +99,7 @@ impl DatabaseService {
         if changed == 0 {
             return Err(crate::errors::AppError::new(
                 "project_session_not_open",
-                "That Project is not open in this ForgeMind session.",
+                "That Project is not open in this PARALITH session.",
                 true,
             )
             .entity(project_id)

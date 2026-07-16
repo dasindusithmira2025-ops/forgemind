@@ -14,9 +14,39 @@ src-tauri/target
 .artifacts
 *.local
 
+# PARALITH local state and recovery material
+*.sqlite
+*.sqlite3
+*.sqlite-wal
+*.sqlite-shm
+*.db
+*.db-wal
+*.db-shm
+*.key
+*.pem
+*.pfx
+*.p12
+*.cer
+*.crt
+*.sig.local
+recovery-backups/
+update-data/
+support-bundle-*/
+terminal-output/
+*.support.zip
+
+# Local release signing / publication configuration
+.env
+.env.*
+!.env.example
+release/private/
+release/local/
+release/test-keys/
+
 # Local tooling output (not part of the app source)
 graphify-out
 .claude/settings.local.json
+tmp/
 
 # Editor directories and files
 .vscode/*

@@ -1,21 +1,18 @@
-import { lazy, Suspense, useEffect } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { listen } from '@tauri-apps/api/event'
 import { HashRouter, Navigate, Route, Routes, useNavigate } from 'react-router-dom'
 import { native } from './native/commands'
 import { useAppStore } from './stores/appStore'
 import { terminalRuntime } from './features/terminals/runtimeStore'
 import { detachedWorkspaceId } from './native/windowContext'
-import type { HandoffTicket } from './native/types'
+import type { HandoffTicket, StartupStatus, UpdateStatus } from './native/types'
+import { RecoveryScreen } from './screens/RecoveryScreen'
 
 const ProjectLauncher = lazy(() => import('./screens/ProjectLauncher').then((module) => ({ default: module.ProjectLauncher })))
 const WorkspaceSetup = lazy(() => import('./screens/WorkspaceSetup').then((module) => ({ default: module.WorkspaceSetup })))
 const WorkspaceScreen = lazy(() => import('./screens/WorkspaceScreen').then((module) => ({ default: module.WorkspaceScreen })))
 const SettingsScreen = lazy(() => import('./screens/SettingsScreen').then((module) => ({ default: module.SettingsScreen })))
 const DetachedWorkspaceWindow = lazy(() => import('./screens/DetachedWorkspaceWindow').then((module) => ({ default: module.DetachedWorkspaceWindow })))
-const MissionControl = lazy(() => import('./screens/MissionControl').then((module) => ({ default: module.MissionControl })))
-const MissionComposerRoute = lazy(() => import('./screens/MissionControl').then((module) => ({ default: module.MissionComposerRoute })))
-const LegacyMissionControlRedirect = lazy(() => import('./screens/MissionControl').then((module) => ({ default: module.LegacyMissionControlRedirect })))
-const MemoryScreen = lazy(() => import('./screens/MemoryScreen').then((module) => ({ default: module.MemoryScreen })))
 
 function StartupWorkspaceRedirect() {
   const navigate = useNavigate()
@@ -44,21 +41,41 @@ function StartupWorkspaceRedirect() {
 
 function WorkspaceHandoffListener(){
   const navigate=useNavigate()
-  useEffect(()=>{let stop:(()=>void)|undefined;void listen<HandoffTicket>('workspace-attach-requested',(event)=>{navigate(`/workspace/${event.payload.workspaceId}`)}).then((unlisten)=>{stop=unlisten});return()=>stop?.()},[navigate])
+  useEffect(()=>{let cancelled=false;let stop:(()=>void)|undefined;void listen<HandoffTicket>('workspace-attach-requested',(event)=>{navigate(`/workspace/${event.payload.workspaceId}`)}).then((unlisten)=>{if(cancelled)unlisten();else stop=unlisten});return()=>{cancelled=true;stop?.()}},[navigate])
   return null
 }
 
 export default function App() {
   const setSettings = useAppStore((state) => state.setSettings)
   const uiScale = useAppStore((state) => state.settings.uiScale)
+  const [startup, setStartup] = useState<StartupStatus | null>()
+  const [whatsNew, setWhatsNew] = useState<UpdateStatus>()
 
   useEffect(() => {
-    if (!detachedWorkspaceId) {
-      void native.getSettings().then(setSettings).catch(() => undefined)
-      void native.reconcileMissionRecovery().catch(() => undefined)
-    }
-    void terminalRuntime.start().catch(() => undefined)
-    return () => terminalRuntime.stop()
+    let active = true
+    void (async () => {
+      if (detachedWorkspaceId) {
+        setStartup(null)
+        const settings = await native.getSettings()
+        if (!active) return
+        setSettings(settings)
+        await terminalRuntime.start()
+        return
+      }
+      const status = await native.getStartupStatus()
+      if (!active) return
+      setStartup(status)
+      if (status.recoveryMode) return
+      const settings = await native.getSettings()
+      if (!active) return
+      setSettings(settings)
+      await terminalRuntime.start()
+      if (!active) return
+      const confirmed = await native.confirmHealthyStartup()
+      if (confirmed.journal.phase === 'healthy_startup_confirmed' && confirmed.journal.targetVersion === confirmed.build.version) setWhatsNew(confirmed)
+      if (settings.automaticUpdateChecks) void native.checkForUpdates().catch(() => undefined)
+    })().catch(() => { if (active) void native.getStartupStatus().then(setStartup).catch(() => setStartup(null)) })
+    return () => { active = false; terminalRuntime.stop() }
   }, [setSettings])
 
   useEffect(() => {
@@ -71,32 +88,30 @@ export default function App() {
   // to the still-running PTYs.
   if (detachedWorkspaceId) {
     return (
-      <Suspense fallback={<div className="route-loading" aria-label="Loading ForgeMind"><span /><span /><span /></div>}>
+      <Suspense fallback={<div className="route-loading" aria-label="Loading PARALITH"><span /><span /><span /></div>}>
         <DetachedWorkspaceWindow workspaceId={detachedWorkspaceId} />
       </Suspense>
     )
   }
 
+  if (startup === undefined) return <div className="route-loading" aria-label="Starting PARALITH safely"><span /><span /><span /></div>
+  if (startup?.recoveryMode) return <RecoveryScreen startup={startup} />
+
   return (
     <HashRouter>
       <StartupWorkspaceRedirect />
       <WorkspaceHandoffListener />
-      <Suspense fallback={<div className="route-loading" aria-label="Loading ForgeMind"><span /><span /><span /></div>}>
+      <Suspense fallback={<div className="route-loading" aria-label="Loading PARALITH"><span /><span /><span /></div>}>
       <Routes>
         <Route path="/" element={<ProjectLauncher />} />
         <Route path="/setup/:projectId" element={<WorkspaceSetup />} />
         <Route path="/workspace/:workspaceId/configure" element={<WorkspaceSetup />} />
         <Route path="/workspace/:workspaceId" element={<WorkspaceScreen />} />
-        <Route path="/project/:projectId/missions/new" element={<MissionComposerRoute />} />
-        <Route path="/project/:projectId/missions/:missionId/tasks/:taskId" element={<MissionControl />} />
-        <Route path="/project/:projectId/missions/:missionId" element={<MissionControl />} />
-        <Route path="/project/:projectId/missions" element={<MissionControl />} />
-        <Route path="/project/:projectId/memory" element={<MemoryScreen />} />
-        <Route path="/missions" element={<LegacyMissionControlRedirect />} />
         <Route path="/settings" element={<SettingsScreen />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
       </Suspense>
+      {whatsNew && <aside className="whats-new" aria-label="What's new"><span>UPDATED · {whatsNew.build.edition.toUpperCase()}</span><h2>PARALITH {whatsNew.build.version} is healthy.</h2><p>{Array.isArray(whatsNew.build.bundledRelease.highlights) ? (whatsNew.build.bundledRelease.highlights as string[]).join(' · ') : 'The signed update passed migration and startup health checks.'}</p><button onClick={() => setWhatsNew(undefined)}>Dismiss</button></aside>}
     </HashRouter>
   )
 }

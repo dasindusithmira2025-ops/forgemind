@@ -1,0 +1,20 @@
+{
+  "version": "0.1.0",
+  "channel": "stable",
+  "date": "2026-07-15",
+  "highlights": [
+    "PARALITH internal Windows distribution foundation",
+    "Independent Stable and Preview application identities",
+    "Signed in-app update lifecycle with migration backups and recovery journaling"
+  ],
+  "fixes": [],
+  "databaseChanges": [
+    "Adds the additive schema 11 AI Capacity metadata tables while preserving all existing Projects, Workspaces, Missions, Memory, settings, and migration history"
+  ],
+  "knownIssues": [
+    "Production update publication remains disabled until administrators provision the updater signing key and internal HTTPS endpoint"
+  ],
+  "requiredManualActions": [
+    "Provision the production updater public key and GitHub Actions signing secrets before publishing the first office update"
+  ]
+}

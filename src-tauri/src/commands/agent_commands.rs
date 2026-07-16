@@ -1,4 +1,4 @@
-use crate::errors::AppResult;
+use crate::errors::{AppError, AppResult};
 use crate::models::{
     AgentDetectionResult, AgentProfile, AgentProvider, AgentSession, ShellProfile,
 };
@@ -15,7 +15,7 @@ pub struct CustomAgentPath {
 }
 
 #[tauri::command]
-pub fn detect_agents(
+pub async fn detect_agents(
     force: bool,
     custom_paths: Vec<CustomAgentPath>,
     window: Window,
@@ -26,11 +26,17 @@ pub fn detect_agents(
         .into_iter()
         .map(|entry| (entry.provider, entry.path))
         .collect();
-    let detections = state.detector.detect_all(force, &paths);
-    if let Err(error) = state.database.sync_agent_profiles(&detections) {
-        log::warn!("agent profile persistence failed: {}", error.code);
-    }
-    Ok(detections)
+    let detector = state.detector.clone();
+    let database = state.database.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let detections = detector.detect_all(force, &paths);
+        if let Err(error) = database.sync_agent_profiles(&detections) {
+            log::warn!("agent profile persistence failed: {}", error.code);
+        }
+        Ok(detections)
+    })
+    .await
+    .map_err(blocking_task_error)?
 }
 
 #[tauri::command]
@@ -53,13 +59,32 @@ pub fn list_agent_sessions(
 }
 
 #[tauri::command]
-pub fn detect_shells(window: Window, state: State<'_, AppState>) -> AppResult<Vec<ShellProfile>> {
+pub async fn detect_shells(
+    window: Window,
+    state: State<'_, AppState>,
+) -> AppResult<Vec<ShellProfile>> {
     crate::require_main_window(&window)?;
-    let mut profiles = state.detector.detect_shells();
-    if let Ok(custom) = state.database.list_custom_shell_profiles() {
-        profiles.extend(custom);
-    }
-    Ok(profiles)
+    let detector = state.detector.clone();
+    let database = state.database.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut profiles = detector.detect_shells();
+        if let Ok(custom) = database.list_custom_shell_profiles() {
+            profiles.extend(custom);
+        }
+        Ok(profiles)
+    })
+    .await
+    .map_err(blocking_task_error)?
+}
+
+fn blocking_task_error(error: impl std::fmt::Display) -> AppError {
+    AppError::new(
+        "runtime_task_failed",
+        "A background runtime check stopped unexpectedly.",
+        true,
+    )
+    .detail(error.to_string())
+    .layer("agent_detector")
 }
 
 #[tauri::command]

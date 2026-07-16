@@ -76,7 +76,7 @@ pub fn remove_layout_pane(layout: LayoutNode, pane_id: String) -> AppResult<Layo
 
 #[tauri::command]
 pub fn save_workspace(
-    request: WorkspaceSaveRequest,
+    mut request: WorkspaceSaveRequest,
     window: Window,
     state: State<'_, AppState>,
 ) -> AppResult<Workspace> {
@@ -84,7 +84,7 @@ pub fn save_workspace(
     let project = state.database.get_project(&request.project_id)?;
     ProjectService::inspect(&project.root_path)?;
     request.layout.validate()?;
-    for pane in &request.panes {
+    for pane in &mut request.panes {
         if !Path::new(&pane.executable_path).is_file() {
             return Err(AppError::new(
                 "executable_not_found",
@@ -96,7 +96,7 @@ pub fn save_workspace(
             )
             .entity(&pane.id));
         }
-        ProjectService::validate_working_directory(
+        pane.working_directory = ProjectService::validate_working_directory(
             &project.root_path,
             &pane.working_directory,
             false,

@@ -1,6 +1,6 @@
-# ForgeMind
+# PARALITH
 
-ForgeMind is a native multi-agent terminal workspace built with Tauri 2, Rust, React, TypeScript, SQLite, portable-pty, and xterm.js.
+PARALITH is a native multi-agent terminal workspace built with Tauri 2, Rust, React, TypeScript, SQLite, portable-pty, and xterm.js.
 
 The durable product model, runtime boundaries, restoration policy, and persistence rules are documented in [Architecture](docs/ARCHITECTURE.md). The refactor baseline and decisions are recorded in [Engineering Audit](docs/ENGINEERING_AUDIT.md).
 
@@ -36,10 +36,12 @@ Rust owns PTY handles, child processes, per-session bounded output pipelines, re
 
 ## Diagnostics
 
-ForgeMind writes a rotating log (`forgemind.log`, capped at 5 MB) to the platform log directory in every build, so failures are diagnosable from a packaged install:
+PARALITH writes a rotating log (`paralith.log`, capped at 5 MB) to the edition-specific platform log directory in every build, so failures are diagnosable from a packaged install:
 
-- Windows: `%APPDATA%\com.forgemind.workspace\logs\`
-- macOS: `~/Library/Logs/com.forgemind.workspace/`
-- Linux: `~/.local/share/com.forgemind.workspace/logs/`
+- Windows Stable: `%APPDATA%\com.corelith.paralith\logs\`
+- Windows Preview: `%APPDATA%\com.corelith.paralith.preview\logs\`
 
 If startup fails (for example, the application data directory or SQLite database cannot be opened), the app shows a native error dialog explaining the cause instead of exiting silently. The renderer is wrapped in an error boundary that offers a reload path if the interface hits an unexpected error.
+# Internal Windows distribution
+
+PARALITH has separate Stable and Preview Windows editions, protected GitHub validation/release workflows, signed in-app updates through a company-controlled endpoint, pre-migration backups, post-update health confirmation, and Safe Recovery. Administrator setup and release policy are documented in [docs/INTERNAL_RELEASES.md](docs/INTERNAL_RELEASES.md); the end-to-end recovery test is in [docs/UPDATE_RECOVERY.md](docs/UPDATE_RECOVERY.md).

@@ -5,14 +5,17 @@ use crate::models::{
     CreateTerminalRequest, TerminalExitEvent, TerminalOutputEvent, TerminalSession,
     TerminalStatusEvent,
 };
+#[cfg(windows)]
+use crate::services::process_util::background_command;
+use crate::services::project_service::display_path;
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use chrono::Utc;
 use parking_lot::{Mutex, RwLock};
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{sync_channel, RecvTimeoutError, TrySendError};
 use std::sync::Arc;
@@ -31,13 +34,12 @@ const OUTPUT_LOG_ROTATE_BYTES: u64 = 5 * 1024 * 1024;
 struct TerminalLog {
     path: PathBuf,
     file: File,
+    bytes_written: u64,
 }
 
 impl TerminalLog {
     fn append(&mut self, data: &[u8]) {
-        if self.file.metadata().is_ok_and(|metadata| {
-            metadata.len().saturating_add(data.len() as u64) > OUTPUT_LOG_ROTATE_BYTES
-        }) {
+        if self.bytes_written.saturating_add(data.len() as u64) > OUTPUT_LOG_ROTATE_BYTES {
             let backup = self.path.with_extension("log.1");
             let _ = self.file.flush();
             let _ = fs::remove_file(&backup);
@@ -48,10 +50,12 @@ impl TerminalLog {
                 .open(&self.path)
             {
                 self.file = file;
+                self.bytes_written = 0;
             }
         }
-        let _ = self.file.write_all(data);
-        let _ = self.file.flush();
+        if self.file.write_all(data).is_ok() {
+            self.bytes_written = self.bytes_written.saturating_add(data.len() as u64);
+        }
     }
 }
 
@@ -70,14 +74,34 @@ struct TerminalHandle {
 #[derive(Clone)]
 pub struct TerminalManager {
     sessions: Arc<RwLock<HashMap<String, Arc<TerminalHandle>>>>,
+    /// Panes with a session creation in flight, keyed by (workspace_id, pane_id). The
+    /// running-duplicate check in [`create_session`](Self::create_session) reads `sessions`,
+    /// but a session only lands there *after* the PTY spawn completes — a window long enough
+    /// for a concurrent create (restore racing an auto-resume, a double-clicked Restart) to
+    /// pass the same check and leak an orphan process. Reserving the pane here makes the
+    /// check-and-claim atomic.
+    creating: Arc<Mutex<HashSet<(String, String)>>>,
     database: Option<Arc<DatabaseService>>,
     app_handle: Option<AppHandle>,
+}
+
+/// Releases a pane's creation reservation on every exit path, including panics.
+struct CreationReservation {
+    set: Arc<Mutex<HashSet<(String, String)>>>,
+    key: (String, String),
+}
+
+impl Drop for CreationReservation {
+    fn drop(&mut self) {
+        self.set.lock().remove(&self.key);
+    }
 }
 
 impl TerminalManager {
     pub fn new(database: Arc<DatabaseService>, app_handle: AppHandle) -> Self {
         Self {
             sessions: Arc::new(RwLock::new(HashMap::new())),
+            creating: Arc::new(Mutex::new(HashSet::new())),
             database: Some(database),
             app_handle: Some(app_handle),
         }
@@ -87,30 +111,46 @@ impl TerminalManager {
     fn for_test() -> Self {
         Self {
             sessions: Arc::new(RwLock::new(HashMap::new())),
+            creating: Arc::new(Mutex::new(HashSet::new())),
             database: None,
             app_handle: None,
         }
     }
 
     pub fn create_session(&self, request: CreateTerminalRequest) -> AppResult<TerminalSession> {
-        if self.sessions.read().values().any(|handle| {
-            let metadata = handle.metadata.read();
-            metadata.workspace_id == request.workspace_id
-                && metadata.pane_id == request.pane_id
-                && metadata.status == "running"
-        }) {
-            return Err(AppError::new(
-                "terminal_create_failed",
-                "This pane already has a running terminal session.",
-                true,
-            )
-            .entity(request.pane_id));
-        }
+        let reservation_key = (request.workspace_id.clone(), request.pane_id.clone());
+        // Atomically check for a live or in-flight duplicate and claim the pane. Both checks
+        // happen under the `creating` lock so two concurrent creates can never both pass.
+        let _reservation = {
+            let mut creating = self.creating.lock();
+            let duplicate = creating.contains(&reservation_key)
+                || self.sessions.read().values().any(|handle| {
+                    let metadata = handle.metadata.read();
+                    metadata.workspace_id == request.workspace_id
+                        && metadata.pane_id == request.pane_id
+                        && metadata.status == "running"
+                });
+            if duplicate {
+                return Err(AppError::new(
+                    "terminal_create_failed",
+                    "This pane already has a running terminal session.",
+                    true,
+                )
+                .entity(request.pane_id));
+            }
+            creating.insert(reservation_key.clone());
+            CreationReservation {
+                set: self.creating.clone(),
+                key: reservation_key,
+            }
+        };
         let adapter = ProviderAdapter(request.provider.clone());
         debug_assert_eq!(adapter.provider_id(), request.provider);
+        let launch_working_directory =
+            PathBuf::from(display_path(Path::new(&request.working_directory)));
         let spec = adapter.launch_spec(
             Path::new(&request.executable_path),
-            Path::new(&request.working_directory),
+            &launch_working_directory,
             &request.args,
         )?;
         let session_id = Uuid::new_v4().to_string();
@@ -129,7 +169,7 @@ impl TerminalManager {
             .map_err(|error| {
                 AppError::new(
                     "terminal_create_failed",
-                    "ForgeMind could not create a native terminal.",
+                    "PARALITH could not create a native terminal.",
                     true,
                 )
                 .detail(error.to_string())
@@ -159,7 +199,7 @@ impl TerminalManager {
         let reader = pair.master.try_clone_reader().map_err(|error| {
             AppError::new(
                 "terminal_create_failed",
-                "ForgeMind could not open the terminal output stream.",
+                "PARALITH could not open the terminal output stream.",
                 true,
             )
             .detail(error.to_string())
@@ -167,7 +207,7 @@ impl TerminalManager {
         let writer = pair.master.take_writer().map_err(|error| {
             AppError::new(
                 "terminal_create_failed",
-                "ForgeMind could not open the terminal input stream.",
+                "PARALITH could not open the terminal input stream.",
                 true,
             )
             .detail(error.to_string())
@@ -254,7 +294,7 @@ impl TerminalManager {
             self.sessions.write().remove(&session.id);
             return Err(AppError::new(
                 "terminal_create_failed",
-                "ForgeMind could not start the terminal worker threads.",
+                "PARALITH could not start the terminal worker threads.",
                 true,
             )
             .detail(error.to_string())
@@ -281,7 +321,7 @@ impl TerminalManager {
         fs::create_dir_all(&directory).map_err(|error| {
             AppError::new(
                 "terminal_log_unavailable",
-                "ForgeMind could not create the terminal log directory.",
+                "PARALITH could not create the terminal log directory.",
                 true,
             )
             .detail(error.to_string())
@@ -294,12 +334,17 @@ impl TerminalManager {
             .map_err(|error| {
                 AppError::new(
                     "terminal_log_unavailable",
-                    "ForgeMind could not open the terminal output log.",
+                    "PARALITH could not open the terminal output log.",
                     true,
                 )
                 .detail(error.to_string())
             })?;
-        Ok(Some(TerminalLog { path, file }))
+        let bytes_written = file.metadata().map(|metadata| metadata.len()).unwrap_or(0);
+        Ok(Some(TerminalLog {
+            path,
+            file,
+            bytes_written,
+        }))
     }
 
     fn spawn_output_reader(
@@ -315,30 +360,44 @@ impl TerminalManager {
                 "forgemind-output-pipeline-{}",
                 handle.metadata.read().id
             ))
-            .spawn(move || loop {
-                let mut data = match receiver.recv_timeout(OUTPUT_BATCH_WINDOW) {
-                    Ok(data) => data,
-                    Err(RecvTimeoutError::Timeout) => continue,
-                    Err(RecvTimeoutError::Disconnected) => break,
-                };
-                while data.len() < OUTPUT_BATCH_LIMIT {
-                    match receiver.try_recv() {
-                        Ok(next) if data.len() + next.len() <= OUTPUT_BATCH_LIMIT => {
-                            data.extend_from_slice(&next)
+            .spawn(move || {
+                let mut pending = None;
+                loop {
+                    let mut data = match pending.take() {
+                        Some(data) => data,
+                        None => match receiver.recv() {
+                            Ok(data) => data,
+                            Err(_) => break,
+                        },
+                    };
+                    let deadline = Instant::now() + OUTPUT_BATCH_WINDOW;
+                    let mut disconnected = false;
+                    while data.len() < OUTPUT_BATCH_LIMIT {
+                        let remaining = deadline.saturating_duration_since(Instant::now());
+                        if remaining.is_zero() {
+                            break;
                         }
-                        Ok(next) => {
-                            // A PTY read is at most OUTPUT_BUFFER_SIZE, so this branch only
-                            // occurs after an already full batch. Deliver the remainder as a
-                            // distinct ordered event rather than merging beyond the bound.
-                            let sequence = append_and_sequence(&emitter_handle, &data);
-                            emit_output(&app, &emitter_handle, sequence, std::mem::take(&mut data));
-                            data = next;
+                        match receiver.recv_timeout(remaining) {
+                            Ok(next) if data.len() + next.len() <= OUTPUT_BATCH_LIMIT => {
+                                data.extend_from_slice(&next)
+                            }
+                            Ok(next) => {
+                                pending = Some(next);
+                                break;
+                            }
+                            Err(RecvTimeoutError::Timeout) => break,
+                            Err(RecvTimeoutError::Disconnected) => {
+                                disconnected = true;
+                                break;
+                            }
                         }
-                        Err(_) => break,
+                    }
+                    let sequence = append_and_sequence(&emitter_handle, &data);
+                    emit_output(&app, &emitter_handle, sequence, data);
+                    if disconnected && pending.is_none() {
+                        break;
                     }
                 }
-                let sequence = append_and_sequence(&emitter_handle, &data);
-                emit_output(&app, &emitter_handle, sequence, data);
             })?;
         thread::Builder::new()
             .name(format!(
@@ -502,7 +561,9 @@ impl TerminalManager {
         // process tree instead.
         #[cfg(windows)]
         let tree_killed = match process_id {
-            Some(process_id) => Command::new("taskkill")
+            // `background_command` sets CREATE_NO_WINDOW: a plain spawn from this GUI-subsystem
+            // app would flash a visible console window for every terminated terminal.
+            Some(process_id) => background_command("taskkill")
                 .args(["/PID", &process_id.to_string(), "/T", "/F"])
                 .output()
                 .map(|output| output.status.success())
@@ -535,6 +596,8 @@ impl TerminalManager {
     }
 
     pub fn terminate_workspace_sessions(&self, workspace_id: &str) -> AppResult<()> {
+        // Snapshot the owned ids under the read lock, then release it before any process
+        // termination so the registry is never held across the blocking kill/reap waits.
         let session_ids: Vec<String> = self
             .sessions
             .read()
@@ -544,20 +607,57 @@ impl TerminalManager {
                 (metadata.workspace_id == workspace_id).then_some(metadata.id.clone())
             })
             .collect();
-        let mut first_error = None;
-        for session_id in session_ids {
-            if let Err(error) = self.terminate_session(&session_id) {
-                first_error.get_or_insert(error);
-            }
-        }
-        first_error.map_or(Ok(()), Err)
+        self.terminate_many(session_ids)
     }
 
     pub fn terminate_all_sessions(&self) -> AppResult<()> {
         let session_ids: Vec<String> = self.sessions.read().keys().cloned().collect();
+        self.terminate_many(session_ids)
+    }
+
+    /// Terminate a batch of sessions concurrently with a bounded per-session wait, then join.
+    ///
+    /// [`terminate_session`] blocks up to one second per session while the OS reaps the process
+    /// tree. Doing that sequentially on the caller (the Tauri event loop drives app-exit and
+    /// main-window close) turns N terminals into N seconds of frozen UI — the reported close
+    /// lag. Running each termination on its own worker thread overlaps those waits so the total
+    /// stays bounded by the slowest single session regardless of how many are open. The batch is
+    /// idempotent: an already-gone session simply resolves to `terminal_session_not_found`, which
+    /// is ignored so a duplicate close never fails.
+    fn terminate_many(&self, session_ids: Vec<String>) -> AppResult<()> {
+        // One or zero sessions gains nothing from a worker thread — terminate inline.
+        if session_ids.len() <= 1 {
+            return session_ids.into_iter().try_for_each(|session_id| {
+                ignore_already_gone(self.terminate_session(&session_id))
+            });
+        }
+        let workers: Vec<(String, _)> = session_ids
+            .into_iter()
+            .map(|session_id| {
+                let manager = self.clone();
+                let worker_id = session_id.clone();
+                let spawned = thread::Builder::new()
+                    .name(format!("forgemind-terminate-{session_id}"))
+                    .spawn(move || manager.terminate_session(&worker_id));
+                (session_id, spawned)
+            })
+            .collect();
         let mut first_error = None;
-        for session_id in session_ids {
-            if let Err(error) = self.terminate_session(&session_id) {
+        for (session_id, spawned) in workers {
+            let result = match spawned {
+                Ok(handle) => handle.join().unwrap_or_else(|_| {
+                    Err(AppError::new(
+                        "process_termination_failed",
+                        "A terminal shutdown worker stopped unexpectedly.",
+                        true,
+                    )
+                    .entity(&session_id))
+                }),
+                // A worker thread could not be created: fall back to terminating inline so the
+                // process is never leaked just because the runtime is out of threads.
+                Err(_) => self.terminate_session(&session_id),
+            };
+            if let Err(error) = ignore_already_gone(result) {
                 first_error.get_or_insert(error);
             }
         }
@@ -610,11 +710,20 @@ impl TerminalManager {
             .ok_or_else(|| {
                 AppError::new(
                     "terminal_session_not_found",
-                    "This terminal session is no longer live or is not owned by ForgeMind.",
+                    "This terminal session is no longer live or is not owned by PARALITH.",
                     true,
                 )
                 .entity(session_id)
             })
+    }
+}
+
+/// Bulk/duplicate termination must be idempotent: a session another path already reaped is a
+/// success, not a failure. Any other error is preserved so a genuine kill failure still surfaces.
+fn ignore_already_gone(result: AppResult<()>) -> AppResult<()> {
+    match result {
+        Err(error) if error.code == "terminal_session_not_found" => Ok(()),
+        other => other,
     }
 }
 
@@ -640,7 +749,7 @@ fn emit_output(app: &Option<AppHandle>, handle: &TerminalHandle, sequence: u64, 
         pane_id: metadata.pane_id.clone(),
         sequence,
         timestamp: Utc::now().to_rfc3339(),
-        data,
+        data: BASE64.encode(data),
     };
     drop(metadata);
     if let Some(app) = app {
@@ -747,6 +856,33 @@ mod tests {
     }
 
     #[test]
+    fn concurrent_creates_for_one_pane_yield_exactly_one_session() {
+        let manager = TerminalManager::for_test();
+        // Before the creation reservation, every one of these racing creates could pass the
+        // running-duplicate check (sessions only register after the PTY spawn) and each leaked
+        // an orphan shell process for the same pane.
+        let results = thread::scope(|scope| {
+            (0..4)
+                .map(|_| scope.spawn(|| manager.create_session(shell_request("race", "same-pane"))))
+                .collect::<Vec<_>>()
+                .into_iter()
+                .map(|handle| handle.join().unwrap())
+                .collect::<Vec<_>>()
+        });
+        assert_eq!(
+            results.iter().filter(|result| result.is_ok()).count(),
+            1,
+            "exactly one concurrent create may claim the pane"
+        );
+        assert!(results
+            .iter()
+            .filter_map(|result| result.as_ref().err())
+            .all(|error| error.code == "terminal_create_failed"));
+        assert_eq!(manager.list_live_sessions(Some("race")).len(), 1);
+        manager.terminate_all_sessions().unwrap();
+    }
+
+    #[test]
     fn terminates_only_sessions_in_selected_workspace() {
         let manager = TerminalManager::for_test();
         manager
@@ -758,6 +894,37 @@ mod tests {
         manager.terminate_workspace_sessions("one").unwrap();
         assert!(manager.session_status(&other.id).is_ok());
         manager.terminate_all_sessions().unwrap();
+    }
+
+    #[test]
+    fn terminate_all_is_concurrent_bounded_and_idempotent() {
+        let manager = TerminalManager::for_test();
+        let sessions = (0..8)
+            .map(|index| {
+                manager
+                    .create_session(shell_request("bulk", &format!("pane-{index}")))
+                    .unwrap()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            manager.list_live_sessions(Some("bulk")).len(),
+            sessions.len()
+        );
+
+        // Concurrent termination must overlap the per-session reap waits, so eight sessions do
+        // not take eight times the single-session budget. A generous ceiling still fails loudly
+        // if this ever regresses to sequential blocking on the caller thread.
+        let started = Instant::now();
+        manager.terminate_all_sessions().unwrap();
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "bulk termination blocked far longer than a bounded concurrent sweep"
+        );
+        assert!(manager.list_live_sessions(Some("bulk")).is_empty());
+
+        // A duplicate close over the now-empty set is a no-op success, never an error.
+        manager.terminate_all_sessions().unwrap();
+        manager.terminate_workspace_sessions("bulk").unwrap();
     }
 
     #[test]
@@ -801,5 +968,70 @@ mod tests {
         assert!(status.output_tail.len() <= OUTPUT_TAIL_LIMIT);
         assert!(status.next_sequence > 1);
         manager.terminate_all_sessions().unwrap();
+    }
+
+    #[test]
+    fn concurrent_noisy_sessions_remain_responsive_and_terminable() {
+        let manager = TerminalManager::for_test();
+        let sessions = (0..6)
+            .map(|index| {
+                manager
+                    .create_session(shell_request("multi-stress", &format!("pane-{index}")))
+                    .unwrap()
+            })
+            .collect::<Vec<_>>();
+        thread::sleep(Duration::from_millis(100));
+        for session in &sessions {
+            manager.resize_session(&session.id, 100, 32).unwrap();
+            #[cfg(windows)]
+            {
+                manager.write_input(&session.id, b"\x1b[1;1R").unwrap();
+                manager
+                    .write_input(
+                        &session.id,
+                        b"for /L %i in (1,1,800) do @echo %i-CONCURRENT-OUTPUT-012345678901234567890123456789\r\n",
+                    )
+                    .unwrap();
+            }
+            #[cfg(not(windows))]
+            manager
+                .write_input(
+                    &session.id,
+                    b"i=1; while [ $i -le 800 ]; do echo $i-CONCURRENT-OUTPUT-012345678901234567890123456789; i=$((i+1)); done\n",
+                )
+                .unwrap();
+        }
+
+        let deadline = Instant::now() + Duration::from_secs(8);
+        let mut completed = 0;
+        while Instant::now() < deadline {
+            completed = sessions
+                .iter()
+                .filter(|session| {
+                    manager.session_status(&session.id).is_ok_and(|status| {
+                        status.output_tail.len() <= OUTPUT_TAIL_LIMIT
+                            && String::from_utf8_lossy(&status.output_tail)
+                                .contains("800-CONCURRENT")
+                    })
+                })
+                .count();
+            if completed == sessions.len() {
+                break;
+            }
+            thread::sleep(Duration::from_millis(30));
+        }
+        assert_eq!(
+            completed,
+            sessions.len(),
+            "not every noisy PTY stayed responsive"
+        );
+        assert_eq!(
+            manager.list_live_sessions(Some("multi-stress")).len(),
+            sessions.len()
+        );
+        manager
+            .terminate_workspace_sessions("multi-stress")
+            .unwrap();
+        assert!(manager.list_live_sessions(Some("multi-stress")).is_empty());
     }
 }

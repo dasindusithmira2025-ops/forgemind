@@ -24,7 +24,8 @@ export const defaultSettings: AppSettings = {
   defaultPaneCount: 4,
   inactiveWorkspaceProcesses: 'keep_running',
   inactiveWorkspaceRendering: 'hibernate',
-  settingsVersion: 2,
+  automaticUpdateChecks: true,
+  settingsVersion: 3,
 }
 
 interface AppStore {

@@ -1,82 +1,65 @@
-name: CI
+name: Validate
 
 on:
-  push:
-    branches: [main]
   pull_request:
-    branches: [main]
+  push:
+    branches: [main, integration]
+  workflow_call:
 
-# Cancel superseded runs on the same ref to save CI minutes.
+permissions:
+  contents: read
+
 concurrency:
-  group: ci-${{ github.ref }}
+  group: validate-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  frontend:
-    name: Frontend (typecheck, lint, test, build)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Typecheck
-        run: npm run typecheck
-
-      - name: Lint
-        run: npm run lint
-
-      - name: Test
-        run: npm test
-
-      - name: Build
-        run: npm run build
-
-  rust:
-    name: Rust (fmt, clippy, test)
+  validate:
     runs-on: windows-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up Node
-        uses: actions/setup-node@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-
-      # tauri::generate_context! validates that frontendDist (../dist) exists at
-      # compile time, so the renderer must be built before any cargo command runs.
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build renderer
-        run: npm run build
-
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-
-      - name: Cache cargo build
-        uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
-
-      - name: Format check
+      - run: npm ci
+      - name: Canonical release metadata
+        run: npm run release:check
+      - name: TypeScript
+        run: npm run typecheck
+      - name: Frontend lint
+        run: npm run lint
+      - name: Frontend tests
+        run: npm test -- --run
+      - name: Production frontend build
+        run: npm run build
+      - name: Rust formatting
         working-directory: src-tauri
-        run: cargo fmt --check
-
-      - name: Clippy
+        run: cargo fmt --all -- --check
+      - name: Rust clippy
         working-directory: src-tauri
         run: cargo clippy --all-targets --all-features -- -D warnings
-
-      - name: Test
+      - name: Rust and migration tests
         working-directory: src-tauri
-        run: cargo test
+        run: cargo test --all-targets --all-features
+      - name: Tauri compilation
+        shell: pwsh
+        run: |
+          $env:PARALITH_EDITION='stable'
+          $env:PARALITH_RELEASE_CHANNEL='stable'
+          $env:PARALITH_UPDATE_ENDPOINT='https://updates.invalid/paralith/stable/latest.json'
+          npm run tauri -- build --no-bundle --config src-tauri/tauri.stable.conf.json
+      - name: Generated files and clean diff
+        shell: pwsh
+        run: |
+          npm run release:sync
+          git diff --exit-code -- package.json src-tauri/Cargo.toml src-tauri/tauri.conf.json release/generated/current-release.json

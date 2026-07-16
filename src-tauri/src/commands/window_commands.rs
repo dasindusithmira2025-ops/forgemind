@@ -126,7 +126,7 @@ pub fn claim_workspace_lease(
 /// Detach a Workspace into its own native window, or focus the existing one if already
 /// detached. Terminals are never touched: the new renderer rehydrates from live sessions.
 #[tauri::command]
-pub fn detach_workspace(
+pub async fn detach_workspace(
     workspace_id: String,
     app: AppHandle,
     window: Window,
@@ -135,7 +135,7 @@ pub fn detach_workspace(
     if window.label() != MAIN_WINDOW_LABEL {
         return Err(AppError::new(
             "main_window_required",
-            "Only the main ForgeMind window can detach a workspace.",
+            "Only the main PARALITH window can detach a workspace.",
             true,
         )
         .entity(&workspace_id)
@@ -172,16 +172,19 @@ pub fn detach_workspace(
     });
 
     let built = WebviewWindowBuilder::new(&app, &label, WebviewUrl::App("index.html".into()))
-        .title("ForgeMind Workspace")
+        .title("PARALITH Workspace")
         .inner_size(geometry.width as f64, geometry.height as f64)
         .min_inner_size(640.0, 420.0)
         .position(geometry.x as f64, geometry.y as f64)
-        .visible(false)
+        // WebView2 may defer page initialization for an invisible native window. Showing it
+        // immediately guarantees the detached renderer can load and complete its handoff.
+        // Until then, Rust still keeps the main window's lease and terminal ownership intact.
+        .visible(true)
         .build();
 
     match built {
-        // The renderer remains hidden and the old view retains its lease until it has loaded
-        // layout + bounded terminal replay and explicitly reports readiness.
+        // The window displays its loading shell while the renderer restores layout + bounded
+        // terminal replay. The old view retains its lease until the renderer reports ready.
         Ok(_window) => Ok(ticket),
         Err(error) => {
             // Destination failed to start: roll back so the Workspace stays attached & visible.
@@ -198,15 +201,18 @@ pub fn detach_workspace(
     }
 }
 
-/// Attach a detached Workspace back to the main window and close its native window. Terminals
-/// keep running throughout.
+/// Attach a detached Workspace back to the already-running main window and close its native
+/// window. Unlike detaching, attaching does not need to wait for a second WebView to start: the
+/// main renderer is already live and the Rust-owned PTYs never leave this process. Commit the
+/// placement before emitting the navigation event so the sidebar cannot render stale
+/// "Other Monitors" ownership while the main route is changing.
 #[tauri::command]
 pub fn attach_workspace(
     workspace_id: String,
     app: AppHandle,
     window: Window,
     state: State<'_, AppState>,
-) -> AppResult<HandoffTicket> {
+) -> AppResult<WorkspacePlacement> {
     state
         .windows
         .validate_workspace_caller(&workspace_id, window.label(), false)?;
@@ -214,18 +220,35 @@ pub fn attach_workspace(
         state
             .windows
             .begin_handoff(&workspace_id, MAIN_WINDOW_LABEL, PlacementMode::Attached)?;
+    let placement =
+        state
+            .windows
+            .commit_handoff(&ticket.operation_id, None, None, None, false, false)?;
+    if let Some(main) = app.get_webview_window(MAIN_WINDOW_LABEL) {
+        let _ = main.show();
+        let _ = main.set_focus();
+    }
+    if let Some(source) = app.get_webview_window(window.label()) {
+        let _ = source.close();
+    }
+    state.windows.forget_window(window.label());
     app.emit_to(
         MAIN_WINDOW_LABEL,
         "workspace-attach-requested",
         ticket.clone(),
     )
     .map_err(window_error)?;
-    Ok(ticket)
+    let _ = app.emit_to(
+        MAIN_WINDOW_LABEL,
+        "workspace-handoff-committed",
+        placement.clone(),
+    );
+    Ok(placement)
 }
 
 /// Commit only after the destination renderer has restored layout, replayed bounded terminal
 /// output, and subscribed for live output. The caller's trusted Tauri label must match the
-/// pending ticket destination. Detached windows stay hidden until this succeeds.
+/// pending ticket destination. Detached windows display a loading shell until this succeeds.
 #[tauri::command]
 pub fn complete_workspace_handoff(
     workspace_id: String,
@@ -592,7 +615,7 @@ fn collect_monitors(
     let source = app.get_webview_window(MAIN_WINDOW_LABEL).ok_or_else(|| {
         AppError::new(
             "main_window_missing",
-            "The main ForgeMind window is unavailable.",
+            "The main PARALITH window is unavailable.",
             true,
         )
     })?;

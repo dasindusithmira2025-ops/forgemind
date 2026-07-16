@@ -1,6 +1,6 @@
-mod memory;
+pub mod backup;
+pub mod legacy_migration;
 pub mod migrations;
-mod mission;
 mod placement;
 mod repair;
 
@@ -24,12 +24,12 @@ pub struct DatabaseService {
 }
 
 impl DatabaseService {
-    pub fn open(path: &Path) -> AppResult<Self> {
+    pub fn open_with_backup(path: &Path, migration_backup: Option<PathBuf>) -> AppResult<Self> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|error| {
                 AppError::new(
                     "database_error",
-                    "ForgeMind could not create its application data directory.",
+                    "PARALITH could not create its application data directory.",
                     false,
                 )
                 .detail(error.to_string())
@@ -39,31 +39,6 @@ impl DatabaseService {
         connection
             .pragma_update(None, "foreign_keys", true)
             .map_err(AppError::database)?;
-        let schema_version: i64 = connection
-            .query_row("PRAGMA user_version", [], |row| row.get(0))
-            .map_err(AppError::database)?;
-        let migration_backup = if schema_version > 0 && schema_version < 5 {
-            let backup = path.with_extension(format!(
-                "pre-migration-{}.sqlite3",
-                Utc::now().format("%Y%m%d%H%M%S")
-            ));
-            let escaped = backup.to_string_lossy().replace('\'', "''");
-            connection
-                .execute_batch(&format!("VACUUM INTO '{escaped}'"))
-                .map_err(|error| {
-                    AppError::new(
-                        "migration_backup_failed",
-                        "ForgeMind could not create the required migration backup.",
-                        false,
-                    )
-                    .detail(error.to_string())
-                    .action("Check free disk space and application-data permissions.")
-                    .layer("migration")
-                })?;
-            Some(backup)
-        } else {
-            None
-        };
         // WAL + NORMAL is durable across app crashes (only risks the last commit on OS
         // crash / power loss) and avoids an fsync per write. The busy timeout lets the
         // reader/exit-watcher threads wait for a writer instead of failing with
@@ -81,7 +56,7 @@ impl DatabaseService {
         if !journal_mode.eq_ignore_ascii_case("wal") {
             return Err(AppError::new(
                 "database_journal_error",
-                "ForgeMind could not enable its validated SQLite journal mode.",
+                "PARALITH could not enable its validated SQLite journal mode.",
                 false,
             )
             .detail(format!("SQLite selected {journal_mode}."))
@@ -91,6 +66,21 @@ impl DatabaseService {
             connection: Mutex::new(connection),
             path: Some(path.to_path_buf()),
             migration_backup,
+        })
+    }
+
+    pub fn open_recovery(path: &Path) -> AppResult<Self> {
+        let connection = Connection::open(path).map_err(AppError::database)?;
+        connection
+            .busy_timeout(std::time::Duration::from_secs(5))
+            .map_err(AppError::database)?;
+        connection
+            .pragma_update(None, "foreign_keys", true)
+            .map_err(AppError::database)?;
+        Ok(Self {
+            connection: Mutex::new(connection),
+            path: Some(path.to_path_buf()),
+            migration_backup: None,
         })
     }
 
@@ -116,9 +106,46 @@ impl DatabaseService {
         self.migration_backup.as_deref()
     }
 
+    pub fn migration_preflight(path: &Path) -> AppResult<(i64, bool)> {
+        if !path.exists() {
+            return Ok((0, true));
+        }
+        let connection = Connection::open(path).map_err(AppError::database)?;
+        connection
+            .busy_timeout(std::time::Duration::from_secs(5))
+            .map_err(AppError::database)?;
+        let schema_version = connection
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .map_err(AppError::database)?;
+        let required = migrations::requires_migration(&connection)?;
+        Ok((schema_version, required))
+    }
+
+    pub fn prepare_for_update(&self) -> AppResult<()> {
+        let connection = self.connection.lock();
+        connection
+            .execute_batch("PRAGMA wal_checkpoint(TRUNCATE); PRAGMA optimize;")
+            .map_err(AppError::database)
+    }
+
+    pub fn active_mission_count(&self) -> AppResult<usize> {
+        let count: i64 = self
+            .connection
+            .lock()
+            .query_row(
+                "SELECT count(*) FROM missions WHERE status IN ('planning','running','verifying')",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(AppError::database)?;
+        Ok(count.max(0) as usize)
+    }
+
     pub fn health_report(&self) -> AppResult<crate::models::HealthReport> {
         let connection = self.connection.lock();
         let schema_version = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+        let integrity_check =
+            connection.query_row("PRAGMA integrity_check", [], |row| row.get::<_, String>(0))?;
         let foreign_key_violations = {
             let mut statement = connection.prepare("PRAGMA foreign_key_check")?;
             let count = statement.query_map([], |_| Ok(()))?.count() as u64;
@@ -139,6 +166,11 @@ impl DatabaseService {
                 "{foreign_key_violations} foreign-key violations require repair."
             ));
         }
+        if integrity_check != "ok" {
+            messages.push(format!(
+                "SQLite integrity check returned: {integrity_check}."
+            ));
+        }
         if stale_live_sessions > 0 {
             messages.push(format!(
                 "{stale_live_sessions} stale live-session records require normalization."
@@ -148,10 +180,12 @@ impl DatabaseService {
             messages.push("Database metadata and relationships are healthy.".into());
         }
         Ok(crate::models::HealthReport {
-            healthy: schema_version == 10
+            healthy: schema_version == migrations::CURRENT_SCHEMA_VERSION
+                && integrity_check == "ok"
                 && foreign_key_violations == 0
                 && stale_live_sessions == 0,
             schema_version,
+            integrity_check,
             foreign_key_violations,
             stale_live_sessions,
             quarantined_records,

@@ -41,7 +41,7 @@ export function DiagnosticsDrawer({
 
   const buildSummary = () =>
     [
-      `ForgeMind ${snapshot?.applicationVersion ?? 'unknown'}`,
+      `PARALITH ${snapshot?.applicationVersion ?? 'unknown'}`,
       `Schema version: ${snapshot?.schemaVersion ?? '—'}`,
       `Database: ${snapshot?.databasePath ?? '—'}`,
       `Logs: ${snapshot?.logDirectory ?? '—'}`,

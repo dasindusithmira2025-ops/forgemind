@@ -1,0 +1,22 @@
+{
+  "version": "0.2.0",
+  "channel": "stable",
+  "date": "2026-07-16",
+  "highlights": [
+    "Docking canvas for terminal panes with strict tiling: drag, dock, snap, swap, and split-resize",
+    "Multiple projects open simultaneously with detachable multi-monitor workspace windows",
+    "Count-based workspace setup wizard (Start / Layout / Agents)"
+  ],
+  "fixes": [
+    "Eliminate the release-build bug where PARALITH opened external console windows (occasionally dozens) that led to freezes: all background helper processes now spawn hidden via CREATE_NO_WINDOW",
+    "Prevent duplicate or orphaned terminal processes through an atomic per-pane creation reservation and per-workspace restore serialization",
+    "Guard superseded workspace hydration so rapid switching can no longer spawn terminals for a screen that is no longer displayed"
+  ],
+  "databaseChanges": [
+    "No schema changes; the database remains at additive schema 11"
+  ],
+  "knownIssues": [
+    "Production update publication remains disabled until administrators provision the updater signing key and internal HTTPS endpoint"
+  ],
+  "requiredManualActions": []
+}

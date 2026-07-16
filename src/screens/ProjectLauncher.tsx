@@ -112,7 +112,7 @@ export function ProjectLauncher() {
 
   return <main className="launcher-shell">
     <header className="launcher-topbar">
-      <Brand />
+      <Brand primary />
       <Button variant="ghost" icon={<Settings size={16} />} onClick={() => navigate('/settings')}>Settings</Button>
     </header>
     <section className="launcher-content">
@@ -133,7 +133,7 @@ export function ProjectLauncher() {
         : overviews.length === 0 ? <div className="launcher-empty">
           <FolderOpen size={24} strokeWidth={1.4} />
           <h2>No recent projects yet.</h2>
-          <p>Open a folder to get started. ForgeMind remembers the projects you work in and the workspaces inside them.</p>
+          <p>Open a folder to get started. PARALITH remembers the projects you work in and the workspaces inside them.</p>
           <Button variant="primary" onClick={chooseFolder}>Open a project folder</Button>
         </div> : <div className="project-list">
           {overviews.map((overview) => {

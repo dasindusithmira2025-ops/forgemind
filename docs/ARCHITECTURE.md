@@ -1,6 +1,6 @@
-# ForgeMind Architecture
+# PARALITH Architecture
 
-ForgeMind is a single-window, terminal-first Tauri application. Its durable hierarchy is:
+PARALITH is a single-window, terminal-first Tauri application. Its durable hierarchy is:
 
 `Project -> Workspace -> Pane Configuration -> Terminal Session -> Agent Session`
 
@@ -40,7 +40,7 @@ There is one native `TerminalManager`. Each handle owns its PTY master, writer, 
 
 Queue overflow is isolated to the noisy session and counted in `droppedOutputBytes`. The renderer uses one serialized xterm write chain per Pane and acknowledges ordered chunks. Reconnecting renderers request the current native tail and sequence before consuming new events.
 
-On Windows, ForgeMind verifies executable targets, rejects WindowsApps aliases, resolves shell fallbacks, and wraps `.ps1`, `.cmd`, and `.bat` shims through quote-safe PowerShell commands. Runtime termination addresses only manager-owned session IDs and stops the owned Windows process tree.
+On Windows, PARALITH verifies executable targets, rejects WindowsApps aliases, resolves shell fallbacks, and wraps `.ps1`, `.cmd`, and `.bat` shims through quote-safe PowerShell commands. Runtime termination addresses only manager-owned session IDs and stops the owned Windows process tree.
 
 ## Restoration and inactive Workspaces
 

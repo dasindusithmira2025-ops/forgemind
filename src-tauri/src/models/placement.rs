@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Where a Workspace is currently displayed. Authoritative in Rust; renderers only cache it.
-/// `Attached` = shown inside the main ForgeMind window. `Detached` = shown in its own native
+/// `Attached` = shown inside the main PARALITH window. `Detached` = shown in its own native
 /// window (potentially on another monitor).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

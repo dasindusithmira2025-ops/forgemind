@@ -11,6 +11,8 @@ import { providerLabel } from '../../shared/layout'
 import type { TerminalAction } from './terminalActions'
 import { terminalRuntime, useTerminalRuntime } from '../../features/terminals/runtimeStore'
 
+const MAX_RENDER_BATCH_BYTES = 256 * 1024
+
 interface TerminalPaneProps {
   assignment: PaneAssignment
   session?: TerminalSession
@@ -44,15 +46,15 @@ export function TerminalPane({ assignment, session, deferred = false, active, ma
   const currentSession = runtime.session ?? session
   const nextSequence = useRef(0)
   const historyReady = useRef(false)
-  const writeChain = useRef(Promise.resolve())
+  const writeInFlight = useRef(false)
+  const replayGeneration = useRef(0)
+  const lastNativeSize = useRef<{ sessionId: string; cols: number; rows: number } | undefined>(undefined)
+  const [replayVersion, setReplayVersion] = useState(0)
 
-  const serialWrite = (data: Uint8Array) => {
+  const writeTerminal = (data: Uint8Array): Promise<void> => {
     const terminal = terminalRef.current
-    if (!terminal) return
-    writeChain.current = writeChain.current.then(() => new Promise<void>((resolve) => {
-      if (!terminalRef.current) return resolve()
-      terminal.write(data, resolve)
-    }))
+    if (!terminal || data.byteLength === 0) return Promise.resolve()
+    return new Promise<void>((resolve) => terminal.write(data, resolve))
   }
 
   useEffect(() => {
@@ -97,38 +99,104 @@ export function TerminalPane({ assignment, session, deferred = false, active, ma
     terminal.options.cursorStyle = settings.cursorStyle
     terminal.options.scrollback = settings.scrollbackSize
     requestAnimationFrame(() => fitRef.current?.fit())
-  }, [settings])
+  }, [settings.cursorStyle, settings.scrollbackSize, settings.terminalFontFamily, settings.terminalFontSize, settings.terminalLineHeight])
 
   useEffect(() => {
     sessionRef.current = sessionId
     const terminal = terminalRef.current
     if (!terminal || !sessionId) return
     terminal.reset()
+    const generation = ++replayGeneration.current
     let cancelled = false
     historyReady.current = false
+    writeInFlight.current = true
     nextSequence.current = 0
-    void native.terminalSessionStatus(sessionId).then((current) => {
-      if (cancelled) return
-      if (current.outputTail.length > 0) serialWrite(new Uint8Array(current.outputTail))
+    void native.terminalSessionStatus(sessionId).then(async (current) => {
+      if (cancelled || generation !== replayGeneration.current) return
+      await writeTerminal(new Uint8Array(current.outputTail))
+      if (cancelled || generation !== replayGeneration.current) return
       nextSequence.current = current.nextSequence
       historyReady.current = true
       terminalRuntime.acknowledge(sessionId, current.nextSequence - 1)
-    }).catch(() => undefined)
-    return () => { cancelled = true; historyReady.current = false }
+      setReplayVersion((value) => value + 1)
+    }).catch(() => {
+      if (cancelled || generation !== replayGeneration.current) return
+      // A transient status-replay failure must not permanently block subsequent live output.
+      nextSequence.current = terminalRuntime.getSessionSnapshot(sessionId).chunks[0]?.sequence ?? 0
+      historyReady.current = true
+      setReplayVersion((value) => value + 1)
+    }).finally(() => {
+      if (!cancelled && generation === replayGeneration.current) writeInFlight.current = false
+    })
+    return () => {
+      cancelled = true
+      replayGeneration.current += 1
+      historyReady.current = false
+      writeInFlight.current = false
+    }
   }, [sessionId])
 
   useEffect(() => {
-    if (!sessionId || !historyReady.current) return
+    if (!sessionId || !historyReady.current || writeInFlight.current) return
+
+    // If the bounded renderer queue had to evict output while xterm was busy, replay the
+    // authoritative native tail. Waiting forever for an evicted sequence is what previously
+    // made a noisy terminal appear frozen even though its PTY was still healthy.
+    if (runtime.droppedThroughSequence !== undefined && runtime.droppedThroughSequence >= nextSequence.current) {
+      const generation = ++replayGeneration.current
+      const fallbackSequence = runtime.chunks[0]?.sequence ?? nextSequence.current
+      historyReady.current = false
+      writeInFlight.current = true
+      void native.terminalSessionStatus(sessionId).then(async (current) => {
+        if (generation !== replayGeneration.current || sessionRef.current !== sessionId) return
+        terminalRef.current?.reset()
+        await writeTerminal(new Uint8Array(current.outputTail))
+        if (generation !== replayGeneration.current || sessionRef.current !== sessionId) return
+        nextSequence.current = current.nextSequence
+        terminalRuntime.acknowledge(sessionId, current.nextSequence - 1)
+        historyReady.current = true
+      }).catch(() => {
+        if (generation !== replayGeneration.current || sessionRef.current !== sessionId) return
+        nextSequence.current = fallbackSequence
+        historyReady.current = true
+      }).finally(() => {
+        if (generation === replayGeneration.current && sessionRef.current === sessionId) {
+          writeInFlight.current = false
+          setReplayVersion((value) => value + 1)
+        }
+      })
+      return
+    }
+
     const ordered = runtime.chunks
       .filter((chunk) => chunk.sequence >= nextSequence.current)
-      .sort((a, b) => a.sequence - b.sequence)
+    const contiguous = [] as typeof ordered
+    let bytes = 0
     for (const chunk of ordered) {
       if (chunk.sequence !== nextSequence.current) break
-      serialWrite(new Uint8Array(chunk.data))
+      if (contiguous.length > 0 && bytes + chunk.data.byteLength > MAX_RENDER_BATCH_BYTES) break
+      contiguous.push(chunk)
+      bytes += chunk.data.byteLength
       nextSequence.current += 1
-      terminalRuntime.acknowledge(sessionId, chunk.sequence)
     }
-  }, [runtime.outputVersion, runtime.chunks, sessionId])
+    if (contiguous.length === 0) return
+    const payload = new Uint8Array(bytes)
+    let offset = 0
+    for (const chunk of contiguous) {
+      payload.set(chunk.data, offset)
+      offset += chunk.data.byteLength
+    }
+    const throughSequence = contiguous[contiguous.length - 1].sequence
+    writeInFlight.current = true
+    void writeTerminal(payload).then(() => {
+      if (sessionRef.current === sessionId) terminalRuntime.acknowledge(sessionId, throughSequence)
+    }).finally(() => {
+      if (sessionRef.current === sessionId) {
+        writeInFlight.current = false
+        setReplayVersion((value) => value + 1)
+      }
+    })
+  }, [runtime.outputVersion, runtime.chunks, runtime.droppedThroughSequence, replayVersion, sessionId])
 
   useEffect(() => {
     const target = containerRef.current
@@ -140,7 +208,13 @@ export function TerminalPane({ assignment, session, deferred = false, active, ma
         try {
           fitRef.current?.fit()
           const terminal = terminalRef.current
-          if (terminal && terminal.cols > 0 && terminal.rows > 0) void native.resizeTerminalSession(sessionId, terminal.cols, terminal.rows)
+          if (terminal && terminal.cols > 0 && terminal.rows > 0) {
+            const previous = lastNativeSize.current
+            if (!previous || previous.sessionId !== sessionId || previous.cols !== terminal.cols || previous.rows !== terminal.rows) {
+              lastNativeSize.current = { sessionId, cols: terminal.cols, rows: terminal.rows }
+              void native.resizeTerminalSession(sessionId, terminal.cols, terminal.rows)
+            }
+          }
         } catch { /* The pane may be temporarily hidden during layout changes. */ }
       }, 55)
     }
@@ -156,7 +230,7 @@ export function TerminalPane({ assignment, session, deferred = false, active, ma
       const terminal = terminalRef.current
       if (!terminal) return
       if (detail.action === 'search') setSearchOpen(true)
-      if (detail.action === 'copy') void navigator.clipboard.writeText(terminal.getSelection() || bufferText(terminal))
+      if (detail.action === 'copy') void copyTerminalOutput(terminal)
       if (detail.action === 'paste') void pasteIntoTerminal(terminal, settings.confirmMultilinePaste)
       if (detail.action === 'select_all') terminal.selectAll()
       if (detail.action === 'clear') terminal.clear()
@@ -194,11 +268,20 @@ async function pasteIntoTerminal(terminal: Terminal, confirmMultiline: boolean) 
   terminal.paste(text)
 }
 
-function bufferText(terminal: Terminal): string {
+async function copyTerminalOutput(terminal: Terminal) {
+  const selection = terminal.getSelection()
+  if (selection) {
+    await navigator.clipboard.writeText(selection)
+    return
+  }
   const buffer = terminal.buffer.active
   const lines: string[] = []
-  for (let index = 0; index < buffer.length; index += 1) lines.push(buffer.getLine(index)?.translateToString(true) ?? '')
-  return lines.join('\n')
+  for (let index = 0; index < buffer.length; index += 1) {
+    lines.push(buffer.getLine(index)?.translateToString(true) ?? '')
+    // Very large scrollback buffers should not monopolize the renderer while being copied.
+    if (index > 0 && index % 500 === 0) await new Promise<void>((resolve) => setTimeout(resolve, 0))
+  }
+  await navigator.clipboard.writeText(lines.join('\n'))
 }
 
 function terminalStateTitle(session: TerminalSession) {

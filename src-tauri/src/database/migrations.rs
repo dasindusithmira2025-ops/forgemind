@@ -1,6 +1,8 @@
 use crate::errors::{AppError, AppResult};
 use rusqlite::{params, Connection};
 
+pub const CURRENT_SCHEMA_VERSION: i64 = 11;
+
 const MIGRATION_1: &str = r#"
 CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
 CREATE TABLE projects(
@@ -631,6 +633,142 @@ PRAGMA user_version=10;
 COMMIT;
 "#;
 
+// AI Capacity Center. A self-contained, additive local usage model. It never stores prompt
+// text, terminal input/output, Memory, Mission content, tokens, cookies, or credentials — only
+// numeric usage aggregates and lifecycle metadata attributed to Project/Workspace/Mission/Agent
+// Session ids. Every table is CREATE TABLE IF NOT EXISTS so a partial v11 build re-runs safely.
+// Project attribution is a nullable id column so cross-Project isolation is a query concern, and
+// the caller (usage service) always scopes by it.
+const MIGRATION_11: &str = r#"
+BEGIN IMMEDIATE;
+-- Provider connectivity + last-known machine-readable reading (Verified/Observed source only).
+CREATE TABLE IF NOT EXISTS usage_providers(
+  provider TEXT PRIMARY KEY,
+  display_name TEXT NOT NULL,
+  tracking_enabled INTEGER NOT NULL DEFAULT 1,
+  connection_state TEXT NOT NULL DEFAULT 'unknown',
+  last_reading_at TEXT,
+  last_error TEXT,
+  updated_at TEXT NOT NULL
+);
+-- Subscription profiles / accounts + plans. Manual limits and reset rules live here. No secrets.
+CREATE TABLE IF NOT EXISTS usage_profiles(
+  id TEXT PRIMARY KEY,
+  provider TEXT NOT NULL,
+  account_label TEXT NOT NULL DEFAULT '',
+  plan_label TEXT NOT NULL DEFAULT '',
+  unit TEXT NOT NULL DEFAULT 'agent_time',
+  limit_value REAL,
+  reset_rule TEXT NOT NULL DEFAULT 'rolling_5h',
+  reset_anchor TEXT,
+  is_unlimited INTEGER NOT NULL DEFAULT 0,
+  source TEXT NOT NULL DEFAULT 'manual',
+  warn_threshold REAL NOT NULL DEFAULT 0.8,
+  critical_threshold REAL NOT NULL DEFAULT 0.95,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(provider, account_label)
+);
+-- Current usage windows (rolling 5h, daily, etc.) with the classified reset time.
+CREATE TABLE IF NOT EXISTS usage_windows(
+  id TEXT PRIMARY KEY,
+  provider TEXT NOT NULL,
+  profile_id TEXT REFERENCES usage_profiles(id) ON DELETE CASCADE,
+  window_type TEXT NOT NULL,
+  started_at TEXT NOT NULL,
+  reset_at TEXT,
+  reset_source TEXT NOT NULL DEFAULT 'estimated',
+  confidence REAL NOT NULL DEFAULT 0.5,
+  updated_at TEXT NOT NULL
+);
+-- Bounded historical aggregates. One row per persisted summary sample. NEVER raw content.
+CREATE TABLE IF NOT EXISTS usage_snapshots(
+  id TEXT PRIMARY KEY,
+  provider TEXT NOT NULL,
+  profile_id TEXT,
+  project_id TEXT,
+  workspace_id TEXT,
+  mission_id TEXT,
+  unit TEXT NOT NULL,
+  used_value REAL,
+  remaining_value REAL,
+  limit_value REAL,
+  window_type TEXT NOT NULL DEFAULT 'rolling_5h',
+  reset_at TEXT,
+  source TEXT NOT NULL,
+  confidence REAL NOT NULL DEFAULT 0.5,
+  active_sessions INTEGER NOT NULL DEFAULT 0,
+  captured_at TEXT NOT NULL
+);
+-- Discrete observed activity derived from PARALITH Agent Session lifecycle. Metadata only.
+CREATE TABLE IF NOT EXISTS usage_events(
+  id TEXT PRIMARY KEY,
+  provider TEXT NOT NULL,
+  event_type TEXT NOT NULL,
+  project_id TEXT,
+  workspace_id TEXT,
+  mission_id TEXT,
+  agent_session_id TEXT,
+  pane_id TEXT,
+  unit TEXT NOT NULL DEFAULT 'agent_time',
+  amount REAL NOT NULL DEFAULT 0,
+  source TEXT NOT NULL DEFAULT 'observed',
+  occurred_at TEXT NOT NULL
+);
+-- Observed reset boundaries (from provider readings or observed quiet-window inference).
+CREATE TABLE IF NOT EXISTS usage_reset_observations(
+  id TEXT PRIMARY KEY,
+  provider TEXT NOT NULL,
+  profile_id TEXT,
+  window_type TEXT NOT NULL,
+  observed_reset_at TEXT NOT NULL,
+  source TEXT NOT NULL,
+  confidence REAL NOT NULL DEFAULT 0.5,
+  recorded_at TEXT NOT NULL
+);
+-- Throttling / limit / availability / auth / threshold / manual-change events.
+CREATE TABLE IF NOT EXISTS usage_limit_events(
+  id TEXT PRIMARY KEY,
+  provider TEXT NOT NULL,
+  project_id TEXT,
+  workspace_id TEXT,
+  event_kind TEXT NOT NULL,
+  severity TEXT NOT NULL,
+  detail TEXT NOT NULL,
+  recommended_action TEXT,
+  source TEXT NOT NULL DEFAULT 'observed',
+  occurred_at TEXT NOT NULL
+);
+-- Alert preferences (single JSON row) + a dedup/cooldown ledger for raised alerts.
+CREATE TABLE IF NOT EXISTS usage_alert_prefs(
+  id INTEGER PRIMARY KEY CHECK(id=1),
+  prefs_json TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS usage_alerts(
+  alert_key TEXT PRIMARY KEY,
+  provider TEXT NOT NULL,
+  severity TEXT NOT NULL,
+  title TEXT NOT NULL,
+  detail TEXT NOT NULL,
+  recommended_action TEXT,
+  first_raised_at TEXT NOT NULL,
+  last_raised_at TEXT NOT NULL,
+  occurrences INTEGER NOT NULL DEFAULT 1,
+  acknowledged INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_usage_snapshots_time ON usage_snapshots(provider, captured_at DESC);
+CREATE INDEX IF NOT EXISTS idx_usage_snapshots_project ON usage_snapshots(project_id, captured_at DESC);
+CREATE INDEX IF NOT EXISTS idx_usage_events_time ON usage_events(provider, occurred_at DESC);
+CREATE INDEX IF NOT EXISTS idx_usage_events_project ON usage_events(project_id, occurred_at DESC);
+CREATE INDEX IF NOT EXISTS idx_usage_limit_events_time ON usage_limit_events(occurred_at DESC);
+CREATE INDEX IF NOT EXISTS idx_usage_reset_provider ON usage_reset_observations(provider, recorded_at DESC);
+INSERT OR IGNORE INTO schema_migrations(version,applied_at) VALUES(11,datetime('now'));
+PRAGMA user_version=11;
+COMMIT;
+"#;
+
 pub fn apply(connection: &Connection) -> AppResult<()> {
     let current: i64 = connection
         .query_row("PRAGMA user_version", [], |row| row.get(0))
@@ -681,7 +819,25 @@ pub fn apply(connection: &Connection) -> AppResult<()> {
         )?;
         connection.execute("UPDATE workspace_placements SET preferred_monitor_id=monitor_id WHERE preferred_monitor_id IS NULL", []).map_err(AppError::database)?;
     }
+    if current < 11 || !table_exists(connection, "usage_snapshots")? {
+        migrate_v11(connection)?;
+    }
     Ok(())
+}
+
+pub fn requires_migration(connection: &Connection) -> AppResult<bool> {
+    let current: i64 = connection
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .map_err(AppError::database)?;
+    Ok(current < CURRENT_SCHEMA_VERSION
+        || !table_exists(connection, "missions")?
+        || !table_exists(connection, "memory_items")?
+        || !table_exists(connection, "open_project_sessions")?
+        || !table_exists(connection, "workspace_placements")?
+        || !table_exists(connection, "usage_snapshots")?
+        || !column_exists(connection, "workspaces", "system_kind")?
+        || !column_exists(connection, "missions", "origin_workspace_id")?
+        || !column_exists(connection, "workspace_placements", "preferred_monitor_id")?)
 }
 
 fn table_exists(connection: &Connection, table: &str) -> AppResult<bool> {
@@ -824,6 +980,27 @@ fn migrate_v10(connection: &Connection) -> AppResult<()> {
     finish_migration_transaction(connection, result, 10)
 }
 
+fn migrate_v11(connection: &Connection) -> AppResult<()> {
+    connection
+        .execute_batch("BEGIN IMMEDIATE;")
+        .map_err(AppError::database)?;
+    let result = (|| {
+        let body = MIGRATION_11
+            .replace("BEGIN IMMEDIATE;", "")
+            .replace(
+                "INSERT OR IGNORE INTO schema_migrations(version,applied_at) VALUES(11,datetime('now'));",
+                "",
+            )
+            .replace("PRAGMA user_version=11;", "")
+            .replace("COMMIT;", "");
+        connection
+            .execute_batch(&body)
+            .map_err(AppError::database)?;
+        record_migration(connection, 11)
+    })();
+    finish_migration_transaction(connection, result, 11)
+}
+
 fn record_migration(connection: &Connection, version: i64) -> AppResult<()> {
     connection
         .execute(
@@ -852,7 +1029,7 @@ fn finish_migration_transaction(
             let _ = connection.execute_batch("ROLLBACK;");
             Err(AppError::new(
                 "migration_error",
-                format!("ForgeMind could not reconcile database migration {version}."),
+                format!("PARALITH could not reconcile database migration {version}."),
                 false,
             )
             .detail(error.to_string())
@@ -867,7 +1044,7 @@ fn run_migration_batch(connection: &Connection, sql: &str, version: i64) -> AppR
         let _ = connection.execute_batch("ROLLBACK;");
         return Err(AppError::new(
             "migration_error",
-            format!("ForgeMind could not apply database migration {version}."),
+            format!("PARALITH could not apply database migration {version}."),
             false,
         )
         .detail(error.to_string())
@@ -885,7 +1062,7 @@ fn migrate_v3(connection: &Connection) -> AppResult<()> {
     connection.execute_batch(MIGRATION_3_DDL).map_err(|error| {
         AppError::new(
             "migration_error",
-            "ForgeMind could not upgrade its database.",
+            "PARALITH could not upgrade its database.",
             false,
         )
         .detail(error.to_string())
@@ -897,7 +1074,7 @@ fn migrate_v3(connection: &Connection) -> AppResult<()> {
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_workspaces_unique_name ON workspaces(project_id, lower(name));",
         )
         .map_err(|error| {
-            AppError::new("migration_error", "ForgeMind could not upgrade its database.", false)
+            AppError::new("migration_error", "PARALITH could not upgrade its database.", false)
                 .detail(error.to_string())
         })?;
     connection
@@ -1072,7 +1249,7 @@ fn run_migration(connection: &Connection, sql: &str, version: i64) -> AppResult<
     connection.execute_batch(sql).map_err(|error| {
         AppError::new(
             "migration_error",
-            "ForgeMind could not initialize its local database.",
+            "PARALITH could not initialize its local database.",
             false,
         )
         .detail(error.to_string())
@@ -1121,7 +1298,7 @@ mod tests {
         let version: i64 = connection
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 10);
+        assert_eq!(version, CURRENT_SCHEMA_VERSION);
         let error = insert_session(&connection).unwrap_err().to_string();
         assert!(error.contains("project_id") || error.contains("FOREIGN KEY"));
     }
@@ -1203,7 +1380,7 @@ mod tests {
         let version: i64 = connection
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 10);
+        assert_eq!(version, CURRENT_SCHEMA_VERSION);
         let normalized: Vec<String> = {
             let mut statement = connection
                 .prepare("SELECT normalized_name FROM workspaces ORDER BY normalized_name")
@@ -1314,7 +1491,7 @@ mod tests {
             let version: i64 = connection
                 .query_row("PRAGMA user_version", [], |row| row.get(0))
                 .unwrap();
-            assert_eq!(version, 10);
+            assert_eq!(version, CURRENT_SCHEMA_VERSION);
             assert_eq!(
                 connection
                     .query_row("SELECT title FROM missions WHERE id='m'", [], |row| row

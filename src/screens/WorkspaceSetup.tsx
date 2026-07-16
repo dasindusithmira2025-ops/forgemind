@@ -111,7 +111,7 @@ function StartStep() {
   }
 
   return <section className="wiz-panel wiz-start">
-    <header className="wiz-head"><h1>Name your workspace</h1><p>Pick the project folder ForgeMind will open. You will choose the layout and agents next.</p></header>
+    <header className="wiz-head"><h1>Name your workspace</h1><p>Pick the project folder PARALITH will open. You will choose the layout and agents next.</p></header>
 
     <label className="wiz-field">
       <span className="wiz-label">Workspace name</span>

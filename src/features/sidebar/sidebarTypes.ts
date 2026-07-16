@@ -94,8 +94,6 @@ export interface SidebarActions {
   onCloseProject?: (projectId: string) => void
   onOpenProject?: (projectId: string) => void
   onCreateProjectWorkspace?: (projectId: string) => void
-  onOpenProjectMission?: (projectId: string) => void
-  onOpenProjectMemory?: (projectId: string) => void
   onRevealProject?: (projectId: string) => void
   onRefreshProjectById?: (projectId: string) => void
   onOpenSettings: () => void

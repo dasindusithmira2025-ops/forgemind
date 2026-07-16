@@ -1,31 +1,36 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { open } from '@tauri-apps/plugin-dialog'
 import { openPath } from '@tauri-apps/plugin-opener'
-import { ArrowLeft, CheckCircle2, Copy, FolderOpen, RefreshCw, Save, Stethoscope, Wrench } from 'lucide-react'
+import { ArrowLeft, CheckCircle2, Copy, Download, FolderOpen, RefreshCw, RotateCcw, Save, ShieldCheck, Stethoscope, Wrench } from 'lucide-react'
 import { Brand } from '../components/ui/Brand'
 import { Button } from '../components/ui/Button'
 import { ErrorNotice } from '../components/ui/ErrorNotice'
 import { TextPromptDialog } from '../components/ui/TextPromptDialog'
 import { asNativeError, native } from '../native/commands'
-import type { AgentProfile, AgentProvider, AppSettings, DiagnosticsSnapshot, ShellProfile } from '../native/types'
+import type { AgentProfile, AgentProvider, AppSettings, DiagnosticsSnapshot, SafeRestartClientState, ShellProfile, UpdateStatus } from '../native/types'
 import { defaultSettings, useAppStore } from '../stores/appStore'
 
-type Section = 'appearance' | 'terminal' | 'agents' | 'workspace' | 'diagnostics'
+type Section = 'appearance' | 'terminal' | 'agents' | 'workspace' | 'updates' | 'diagnostics'
 const sections: Array<{ id: Section; label: string }> = [
   { id: 'appearance', label: 'Appearance' },
   { id: 'terminal', label: 'Terminal' },
   { id: 'agents', label: 'Agents' },
   { id: 'workspace', label: 'Workspace' },
+  { id: 'updates', label: 'Updates' },
   { id: 'diagnostics', label: 'Diagnostics' },
 ]
 
 export function SettingsScreen() {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const stored = useAppStore((state) => state.settings)
   const setStored = useAppStore((state) => state.setSettings)
   const [settings, setSettings] = useState<AppSettings>(stored ?? defaultSettings)
-  const [section, setSection] = useState<Section>('appearance')
+  const requestedSection = searchParams.get('section')
+  const [section, setSection] = useState<Section>(
+    sections.some((item) => item.id === requestedSection) ? (requestedSection as Section) : 'appearance',
+  )
   const [error, setError] = useState('')
   const [status, setStatus] = useState('')
   const [saving, setSaving] = useState(false)
@@ -34,6 +39,8 @@ export function SettingsScreen() {
   const [shells, setShells] = useState<ShellProfile[]>([])
   const [profiles, setProfiles] = useState<AgentProfile[]>([])
   const [diagnostics, setDiagnostics] = useState<DiagnosticsSnapshot>()
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus>()
+  const [updating, setUpdating] = useState(false)
 
   useEffect(() => {
     document.documentElement.style.setProperty('--ui-scale', String(settings.uiScale))
@@ -41,9 +48,9 @@ export function SettingsScreen() {
   }, [settings.uiScale, stored.uiScale])
 
   useEffect(() => {
-    void Promise.all([native.detectShells(), native.listAgentProfiles(), native.getDiagnostics()])
-      .then(([nextShells, nextProfiles, nextDiagnostics]) => {
-        setShells(nextShells); setProfiles(nextProfiles); setDiagnostics(nextDiagnostics)
+    void Promise.all([native.detectShells(), native.listAgentProfiles(), native.getDiagnostics(), native.getUpdateStatus()])
+      .then(([nextShells, nextProfiles, nextDiagnostics, nextUpdateStatus]) => {
+        setShells(nextShells); setProfiles(nextProfiles); setDiagnostics(nextDiagnostics); setUpdateStatus(nextUpdateStatus)
       })
       .catch(() => undefined)
   }, [])
@@ -79,8 +86,7 @@ export function SettingsScreen() {
   }
   const refreshDiagnostics = async () => {
     try {
-      const health = await native.runHealthCheck()
-      setDiagnostics((current) => current ? { ...current, health, schemaVersion: health.schemaVersion } : current)
+      setDiagnostics(await native.getDiagnostics())
       setStatus('Health check complete')
     }
     catch (caught) { setError(asNativeError(caught).message) }
@@ -91,6 +97,33 @@ export function SettingsScreen() {
       setStatus(`Repair complete: ${summary.repaired} repaired, ${summary.quarantined} quarantined`)
       await refreshDiagnostics()
     } catch (caught) { setError(asNativeError(caught).message) }
+  }
+  const exportSupport = async () => {
+    try { const path = await native.exportRedactedSupportBundle(); setStatus('Redacted support bundle created'); await openPath(path) }
+    catch (caught) { setError(asNativeError(caught).message) }
+  }
+  const withUpdate = async (label: string, action: () => Promise<UpdateStatus>) => {
+    if (updating) return
+    setUpdating(true); setError(''); setStatus(label)
+    try { const result = await action(); setUpdateStatus(result); setStatus(result.journal.lastResult || label) }
+    catch (caught) { setError(asNativeError(caught).message); setStatus('Update operation failed') }
+    finally { setUpdating(false) }
+  }
+  const restartClientState = (): SafeRestartClientState => {
+    return { unsavedEditorState: false, unsavedSettings: status === 'Unsaved changes', unsavedMissionDraft: false }
+  }
+  const confirmRestart = async () => {
+    const client = restartClientState()
+    const assessment = await native.assessSafeRestart(client)
+    return { client, confirmed: assessment.safe || window.confirm(`PARALITH must stop active work before updating.\n\n${assessment.blockers.join('\n')}\n\nInstall and restart now?`) }
+  }
+  const installNow = async () => {
+    try { const request = await confirmRestart(); if (!request.confirmed) return; await native.installDownloadedUpdate(request.client, !((await native.assessSafeRestart(request.client)).safe)) }
+    catch (caught) { setError(asNativeError(caught).message) }
+  }
+  const installOnExit = async () => {
+    try { const request = await confirmRestart(); if (!request.confirmed) return; setUpdateStatus(await native.installUpdateOnExit(request.client, true)); setStatus('Verified update will install when PARALITH exits') }
+    catch (caught) { setError(asNativeError(caught).message) }
   }
 
   return <main className="settings-shell focused-settings">
@@ -125,13 +158,51 @@ export function SettingsScreen() {
           <SettingRow label="Inactive Workspace processes"><select aria-label="Inactive Workspace processes" value={settings.inactiveWorkspaceProcesses} onChange={(event) => update('inactiveWorkspaceProcesses', event.target.value as AppSettings['inactiveWorkspaceProcesses'])}><option value="keep_running">Keep running</option><option value="ask">Ask</option><option value="stop">Stop</option></select></SettingRow>
           <SettingRow label="Inactive Workspace rendering" detail="Hidden xterm canvases are unmounted while native tails continue."><select aria-label="Inactive Workspace rendering" value={settings.inactiveWorkspaceRendering} disabled><option value="hibernate">Hibernate canvases</option></select></SettingRow>
         </SettingsSection>}
-        {section === 'diagnostics' && <SettingsSection title="Diagnostics" description="Inspect and repair ForgeMind metadata without touching source Projects.">
-          {diagnostics && <div className={`health-banner ${diagnostics.health.healthy ? 'healthy' : 'attention'}`}>{diagnostics.health.healthy ? <CheckCircle2 size={18} /> : <Stethoscope size={18} />}<div><strong>{diagnostics.health.healthy ? 'ForgeMind is healthy' : 'Metadata needs attention'}</strong><span>{diagnostics.health.messages.join(' ')}</span></div></div>}
+        {section === 'updates' && <SettingsSection title="Updates" description="Signed internal releases for this isolated PARALITH edition.">
+          {updateStatus && <div className={`health-banner ${updateStatus.journal.phase === 'failed' || updateStatus.recoveryMode ? 'attention' : 'healthy'}`}><ShieldCheck size={18} /><div><strong>{updateStatus.build.product} {updateStatus.build.edition === 'stable' ? 'Stable' : 'Preview'} {updateStatus.build.version}</strong><span>{updateStatus.endpointStatus} · {updateStatus.journal.phase.replaceAll('_', ' ')}</span></div></div>}
+          <Toggle label="Check automatically after safe startup" checked={settings.automaticUpdateChecks} onChange={(value) => update('automaticUpdateChecks', value)} />
+          <SettingRow label="Edition / channel"><code>{updateStatus ? `${updateStatus.build.edition} / ${updateStatus.build.releaseChannel}` : 'Loading…'}</code></SettingRow>
+          <SettingRow label="Build identity"><code title={updateStatus?.build.gitCommit}>{updateStatus ? `${updateStatus.build.version} · ${updateStatus.build.gitCommit.slice(0, 12)} · ${updateStatus.build.buildTimestamp}` : 'Loading…'}</code></SettingRow>
+          <SettingRow label="Database schema"><code>{updateStatus?.build.databaseSchemaVersion ?? '—'}</code></SettingRow>
+          <SettingRow label="Last check"><code>{updateStatus?.journal.lastCheckAt || 'Never'}</code></SettingRow>
+          <SettingRow label="Available version"><code>{updateStatus?.journal.available?.version || 'None'}</code></SettingRow>
+          <SettingRow label="Signature verification"><code>{updateStatus?.journal.signatureVerified ? 'Verified by bundled updater public key' : 'Not yet verified'}</code></SettingRow>
+          <SettingRow label="Installation readiness"><code>{updateStatus?.journal.phase === 'downloaded' || updateStatus?.journal.phase === 'restart_requested' ? 'Ready' : updateStatus?.journal.phase.replaceAll('_', ' ') || 'Loading…'}</code></SettingRow>
+          <SettingRow label="Previous result"><code>{updateStatus?.journal.lastResult || 'None'}</code></SettingRow>
+          {updateStatus?.journal.phase === 'downloading' && <div className="update-progress"><span style={{ width: updateStatus.journal.downloadTotal ? `${Math.min(100, updateStatus.journal.downloadReceived / updateStatus.journal.downloadTotal * 100)}%` : '20%' }} /></div>}
+          {updateStatus?.journal.available?.releaseNotes && <div className="update-notes"><strong>Release notes</strong><p>{updateStatus.journal.available.releaseNotes}</p></div>}
+          <div className="diagnostic-actions">
+            <Button icon={<RefreshCw className={updating ? 'is-spinning' : ''} size={14} />} disabled={updating || !updateStatus?.endpointConfigured} onClick={() => void withUpdate('Checking for updates', native.checkForUpdates)}>Check for Updates</Button>
+            <Button icon={<Download size={14} />} disabled={updating || updateStatus?.journal.phase !== 'available'} onClick={() => void withUpdate('Downloading signed update', native.downloadUpdate)}>Download Update</Button>
+            <Button variant="primary" disabled={!updateStatus?.journal.signatureVerified} onClick={() => void installNow()}>Install and Restart</Button>
+            <Button disabled={!updateStatus?.journal.signatureVerified} onClick={() => void installOnExit()}>Install on Exit</Button>
+            <Button icon={<RotateCcw size={14} />} disabled={updating || updateStatus?.journal.phase !== 'failed'} onClick={() => void withUpdate('Retrying update', native.retryUpdate)}>Retry</Button>
+            <Button variant="ghost" onClick={() => setSection('diagnostics')}>Open Diagnostics</Button>
+          </div>
+        </SettingsSection>}
+        {section === 'diagnostics' && <SettingsSection title="Diagnostics" description="Inspect and repair PARALITH metadata without touching source Projects.">
+          {diagnostics && <div className={`health-banner ${diagnostics.health.healthy ? 'healthy' : 'attention'}`}>{diagnostics.health.healthy ? <CheckCircle2 size={18} /> : <Stethoscope size={18} />}<div><strong>{diagnostics.health.healthy ? 'PARALITH is healthy' : 'Metadata needs attention'}</strong><span>{diagnostics.health.messages.join(' ')}</span></div></div>}
+          <SettingRow label="Product / company"><code>{diagnostics ? `${diagnostics.product} · ${diagnostics.company}` : 'Loading…'}</code></SettingRow>
+          <SettingRow label="Application identifier"><code>{diagnostics?.appIdentifier || 'Loading…'}</code></SettingRow>
           <SettingRow label="Application version"><code>{diagnostics?.applicationVersion || 'Loading…'}</code></SettingRow>
+          <SettingRow label="Edition / channel"><code>{diagnostics ? `${diagnostics.edition} / ${diagnostics.releaseChannel}` : 'Loading…'}</code></SettingRow>
+          <SettingRow label="Build commit"><code>{diagnostics?.buildCommit || 'Loading…'}</code></SettingRow>
+          <SettingRow label="Database schema"><code>{diagnostics?.schemaVersion ?? 'Loading…'}</code></SettingRow>
+          <SettingRow label="Database integrity"><code>{diagnostics ? `${diagnostics.health.integrityCheck} · ${diagnostics.health.foreignKeyViolations} foreign-key violations` : 'Loading…'}</code></SettingRow>
+          <SettingRow label="Updater endpoint"><code>{diagnostics?.updaterEndpointStatus || 'Loading…'}</code></SettingRow>
+          <SettingRow label="Last update result"><code>{diagnostics?.lastUpdateResult || 'None'}</code></SettingRow>
+          <SettingRow label="Pending update"><code>{diagnostics?.pendingUpdate || 'None'}</code></SettingRow>
+          <SettingRow label="Backup status"><code>{diagnostics?.backupStatus || 'Loading…'}</code></SettingRow>
+          <SettingRow label="Migration status"><code>{diagnostics?.migrationStatus || 'Loading…'}</code></SettingRow>
+          <SettingRow label="Legacy data migration"><code>{diagnostics ? `${diagnostics.legacyMigrationStatus} · ${diagnostics.legacyMigrationMessage}` : 'Loading…'}</code></SettingRow>
+          <SettingRow label="Installer type"><code>{diagnostics?.installerType || 'Unknown'}</code></SettingRow>
           <SettingRow label="Database"><code title={diagnostics?.databasePath}>{diagnostics?.databasePath || 'Loading…'}</code></SettingRow>
           <SettingRow label="Log directory"><code title={diagnostics?.logDirectory}>{diagnostics?.logDirectory || 'Loading…'}</code><Button icon={<FolderOpen size={14} />} onClick={() => diagnostics && void openPath(diagnostics.logDirectory)}>Open logs</Button></SettingRow>
-          {diagnostics?.backupPath && <SettingRow label="Migration backup"><code title={diagnostics.backupPath}>{diagnostics.backupPath}</code></SettingRow>}
-          <div className="diagnostic-actions"><Button icon={<Stethoscope size={14} />} onClick={() => void refreshDiagnostics()}>Run health check</Button><Button icon={<Wrench size={14} />} onClick={() => void repair()}>Repair database metadata</Button><Button icon={<Copy size={14} />} onClick={() => diagnostics && void navigator.clipboard.writeText(JSON.stringify(diagnostics, null, 2))}>Copy diagnostics</Button><Button variant="ghost" onClick={() => { update('sidebarOpen', true); update('uiScale', 1) }}>Reset UI layout only</Button></div>
+          {diagnostics?.backupPath && <SettingRow label="Latest recovery backup"><code title={diagnostics.backupPath}>{diagnostics.backupPath}</code></SettingRow>}
+          {diagnostics?.legacyMigrationBackup && <SettingRow label="Legacy migration backup"><code title={diagnostics.legacyMigrationBackup}>{diagnostics.legacyMigrationBackup}</code></SettingRow>}
+          {diagnostics?.readiness && <div className="update-notes"><strong>{diagnostics.readiness.firstRun ? 'First-run readiness' : 'Daily-use readiness'} · {diagnostics.readiness.ready ? 'ready' : 'attention required'}</strong><p>{diagnostics.readiness.checks.map((check) => `${check.status.toUpperCase()} · ${check.label}: ${check.detail}${check.action ? ` Action: ${check.action}` : ''}`).join('\n')}</p></div>}
+          <div className="diagnostic-actions"><Button icon={<Stethoscope size={14} />} onClick={() => void refreshDiagnostics()}>Run health check</Button><Button icon={<Wrench size={14} />} onClick={() => void repair()}>Repair database metadata</Button><Button icon={<FolderOpen size={14} />} onClick={() => diagnostics && void openPath(diagnostics.backupDirectory)}>Open backups</Button><Button icon={<FolderOpen size={14} />} onClick={() => diagnostics && void openPath(diagnostics.updateDataDirectory)}>Open update-data folder</Button><Button icon={<Copy size={14} />} onClick={() => void exportSupport()}>Export redacted support bundle</Button><Button onClick={() => void native.startInSafeMode()}>Start in safe mode</Button><Button variant="ghost" onClick={() => { update('sidebarOpen', true); update('uiScale', 1) }}>Reset UI layout only</Button></div>
+          {diagnostics?.updateLogEntries.length ? <div className="update-notes"><strong>Update log</strong><p>{diagnostics.updateLogEntries.join('\n')}</p></div> : null}
         </SettingsSection>}
       </section>
     </div>

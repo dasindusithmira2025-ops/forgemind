@@ -27,6 +27,7 @@ pub struct AppSettings {
     pub default_pane_count: u16,
     pub inactive_workspace_processes: String,
     pub inactive_workspace_rendering: String,
+    pub automatic_update_checks: bool,
     pub settings_version: u16,
 }
 
@@ -56,7 +57,8 @@ impl Default for AppSettings {
             default_pane_count: 4,
             inactive_workspace_processes: "keep_running".into(),
             inactive_workspace_rendering: "hibernate".into(),
-            settings_version: 2,
+            automatic_update_checks: true,
+            settings_version: 3,
         }
     }
 }

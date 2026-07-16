@@ -23,7 +23,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
 
   componentDidCatch(error: Error, info: ErrorInfo) {
     // Surface to the devtools/console; picked up by the native log target in packaged builds.
-    console.error('ForgeMind interface error:', error, info.componentStack)
+    console.error('PARALITH interface error:', error, info.componentStack)
   }
 
   private reset = () => {
@@ -36,10 +36,10 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
       <main className="centered-error" role="alert">
         <div className="boundary-card">
           <h1>Something went wrong</h1>
-          <p>The ForgeMind interface hit an unexpected error. Your saved workspaces are safe.</p>
+          <p>The PARALITH interface hit an unexpected error. Your saved workspaces are safe.</p>
           <pre className="boundary-detail">{this.state.error.message}</pre>
           <div className="boundary-actions">
-            <Button variant="primary" onClick={() => window.location.reload()}>Reload ForgeMind</Button>
+            <Button variant="primary" onClick={() => window.location.reload()}>Reload PARALITH</Button>
             <Button variant="ghost" onClick={this.reset}>Dismiss</Button>
           </div>
         </div>

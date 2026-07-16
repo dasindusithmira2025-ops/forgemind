@@ -1,0 +1,34 @@
+{
+  "productName": "PARALITH",
+  "mainBinaryName": "PARALITH",
+  "identifier": "com.corelith.paralith",
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "PARALITH",
+        "create": false,
+        "width": 1440,
+        "height": 900,
+        "minWidth": 980,
+        "minHeight": 640,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ]
+  },
+  "bundle": {
+    "targets": ["msi", "nsis"],
+    "windows": {
+      "wix": {
+        "upgradeCode": "d8db21ad-3903-412d-9732-78d90071ca6a"
+      },
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      },
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
+  }
+}

@@ -12,7 +12,7 @@ import { SidebarResizeHandle } from './SidebarResizeHandle'
 import { DiagnosticsDrawer } from './DiagnosticsDrawer'
 
 /**
- * The one canonical ForgeMind sidebar. It is a controlled surface: all Project/Workspace
+ * The one canonical PARALITH sidebar. It is a controlled surface: all Project/Workspace
  * data and persistence live in WorkspaceScreen and flow in through props. This component
  * owns only presentation and the transient interaction state in `useSidebarStore`.
  */

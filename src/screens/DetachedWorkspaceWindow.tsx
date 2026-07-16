@@ -10,6 +10,9 @@ import { Button } from '../components/ui/Button'
 import { Modal } from '../components/ui/Modal'
 import { ErrorNotice } from '../components/ui/ErrorNotice'
 import { TerminalPane } from '../components/terminal/TerminalPane'
+import { PaneMenu, type PaneMenuState } from '../components/terminal/PaneMenu'
+import { dispatchTerminalAction, type TerminalAction } from '../components/terminal/terminalActions'
+import { TextPromptDialog } from '../components/ui/TextPromptDialog'
 import { WorkspaceCanvas, type RenderPaneContext } from '../features/workspace-canvas/components/WorkspaceCanvas'
 import { useCanvasStore } from '../features/workspace-canvas/canvasStore'
 import { buildFromPersisted } from '../features/workspace-canvas/canvasPersistence'
@@ -36,7 +39,10 @@ export function DetachedWorkspaceWindow({ workspaceId }: { workspaceId: string }
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [paneErrors, setPaneErrors] = useState<Record<string, string>>({})
+  const [paneMenu, setPaneMenu] = useState<PaneMenuState>()
+  const [renameTarget, setRenameTarget] = useState<{ paneId: string; initialValue: string }>()
   const [reducedMotion] = useState(() => typeof window !== 'undefined' && Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches))
+  const canvasSaveChain = useRef<Promise<void>>(Promise.resolve())
 
   useEffect(() => {
     let live = true
@@ -85,14 +91,23 @@ export function DetachedWorkspaceWindow({ workspaceId }: { workspaceId: string }
   const persistCanvas = useCallback((next: WorkspaceCanvasLayout, previous: WorkspaceCanvasLayout) => {
     const store = useCanvasStore.getState()
     if (!store.workspaceId) return
+    const targetWorkspaceId = store.workspaceId
     setActivePane(next.activePaneId)
-    void workspaceLayoutCommands
-      .saveCanvasLayout(toSaveRequest(store.workspaceId, store.revision, next))
-      .then((result) => useCanvasStore.getState().setRevision(result.revision))
-      .catch((caught) => {
-        useCanvasStore.getState().setLayout(previous)
-        setError(asNativeError(caught).message)
-      })
+    canvasSaveChain.current = canvasSaveChain.current.then(async () => {
+      const current = useCanvasStore.getState()
+      if (current.workspaceId !== targetWorkspaceId) return
+      const result = await workspaceLayoutCommands.saveCanvasLayout(
+        toSaveRequest(targetWorkspaceId, current.revision, next),
+      )
+      if (useCanvasStore.getState().workspaceId === targetWorkspaceId) {
+        useCanvasStore.getState().setRevision(result.revision)
+      }
+    }).catch((caught) => {
+      const current = useCanvasStore.getState()
+      if (current.workspaceId !== targetWorkspaceId) return
+      if (current.layout === next) current.setLayout(previous)
+      setError(asNativeError(caught).message)
+    })
   }, [setActivePane])
 
   const paneSession = useCallback((paneId: string) => sessions.find((session) => session.paneId === paneId), [sessions])
@@ -114,6 +129,21 @@ export function DetachedWorkspaceWindow({ workspaceId }: { workspaceId: string }
     const session = paneSession(paneId)
     if (session?.status === 'running') await native.terminateTerminalSession(session.id).catch(() => undefined)
   }, [paneSession])
+
+  // Rename persists only the pane title on the Workspace record; the canvas layout references
+  // panes by id, so it needs no resync. Updating local state re-renders the pane header title.
+  const confirmRename = useCallback(async (value: string) => {
+    const target = renameTarget
+    setRenameTarget(undefined)
+    if (!target || !workspace || value === target.initialValue) return
+    const panes = workspace.panes.map((pane) => pane.id === target.paneId ? { ...pane, title: value } : pane)
+    try {
+      const saved = await native.saveWorkspace({ id: workspace.id, projectId: workspace.projectId, name: workspace.name, layout: workspace.layout, activePaneId: workspace.activePaneId, restoreBehavior: workspace.restoreBehavior, panes })
+      setWorkspace(saved)
+    } catch (caught) {
+      setPaneErrors((current) => ({ ...current, [target.paneId]: asNativeError(caught).message }))
+    }
+  }, [renameTarget, workspace])
 
   // The native window's close button (the [x], Alt+F4, OS chrome) must not silently kill the
   // running terminals. We intercept the close request and ask what to do. `closeGuard` lets the
@@ -189,7 +219,7 @@ export function DetachedWorkspaceWindow({ workspaceId }: { workspaceId: string }
         onClose={() => void stopPane(paneId)}
         onRestart={() => void restartPane(paneId, assignment)}
         onStop={() => void stopPane(paneId)}
-        onMenu={() => undefined}
+        onMenu={(anchor) => { const rect = anchor.getBoundingClientRect(); setPaneMenu({ paneId, x: Math.min(rect.left, window.innerWidth - 230), y: rect.bottom + 4 }) }}
         onHeaderPointerDown={ctx.onHeaderPointerDown} />
       {paneErrors[paneId] && <div className="pane-native-error"><ErrorNotice message={paneErrors[paneId]} onRetry={() => void restartPane(paneId, assignment)} /></div>}
     </>
@@ -227,7 +257,7 @@ export function DetachedWorkspaceWindow({ workspaceId }: { workspaceId: string }
           <div className="close-policy-actions">
             <button className="close-policy-option" disabled={closeBusy} onClick={() => void attachToMain()}>
               <strong>Attach to main window</strong>
-              <span>Move this workspace back into the main ForgeMind window. Terminals keep running.</span>
+              <span>Move this workspace back into the main PARALITH window. Terminals keep running.</span>
             </button>
             <button className="close-policy-option" disabled={closeBusy} onClick={() => void keepRunningInBackground()}>
               <strong>Keep running in background</strong>
@@ -245,5 +275,16 @@ export function DetachedWorkspaceWindow({ workspaceId }: { workspaceId: string }
         </div>
       </Modal>
     )}
+    {paneMenu && <PaneMenu menu={paneMenu} compact onClose={() => setPaneMenu(undefined)} onAction={(action) => {
+      const paneId = paneMenu.paneId
+      setPaneMenu(undefined)
+      const assignment = workspace.panes.find((pane) => pane.id === paneId)
+      if (action === 'focus') { setActivePane(paneId); dispatchTerminalAction(paneId, 'focus'); return }
+      if (action === 'rename') { if (assignment) setRenameTarget({ paneId, initialValue: assignment.title }); return }
+      if (action === 'restart') { if (assignment) void restartPane(paneId, assignment); return }
+      if (action === 'stop') { void stopPane(paneId); return }
+      if (['search', 'copy', 'paste', 'select_all', 'clear'].includes(action)) dispatchTerminalAction(paneId, action as TerminalAction)
+    }} />}
+    {renameTarget && <TextPromptDialog title="Rename terminal" label="Terminal title" initialValue={renameTarget.initialValue} confirmLabel="Rename" onClose={() => setRenameTarget(undefined)} onConfirm={(value) => void confirmRename(value)} />}
   </AppShell>
 }

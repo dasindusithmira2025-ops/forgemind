@@ -1,4 +1,4 @@
-# ForgeMind Memory
+# PARALITH Memory
 
 Memory is durable, revisioned context owned by exactly one Project. Items, revisions, sources, chunks, and capture events carry a `project_id`; every Rust command requires that Project ID and verifies ownership before returning content.
 

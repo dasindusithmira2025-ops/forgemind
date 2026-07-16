@@ -9,7 +9,7 @@ import { buildRecoveryNotice } from './recoverySelectors'
  * Live monitor-disconnect recovery, mounted in the MAIN window only. It polls the Rust
  * recovery sweep (which moves any Workspace window stranded by a removed monitor onto the
  * primary work area — terminals and preferred monitor preserved) and also re-runs on window
- * focus, since a monitor is usually plugged/unplugged while ForgeMind is in the background.
+ * focus, since a monitor is usually plugged/unplugged while PARALITH is in the background.
  *
  * When a preferred monitor reconnects it renders a "Move workspace back" offer. The heavy
  * lifting is in Rust; this component is a thin, self-contained banner so WorkspaceScreen stays
@@ -29,7 +29,10 @@ export function MonitorRecoveryWatcher({
 
   useEffect(() => {
     let live = true
+    let inFlight = false
     const sweep = async () => {
+      if (inFlight) return
+      inFlight = true
       try {
         const report = await native.recoverWorkspaceWindows()
         if (!live) return
@@ -38,9 +41,11 @@ export function MonitorRecoveryWatcher({
           setMessage(notice.recoveredMessage)
           onChanged()
         }
-        setOffers(notice.offers)
+        setOffers((current) => sameOffers(current, notice.offers) ? current : notice.offers)
       } catch {
         /* recovery is best-effort; never surface a hard error for a background poll */
+      } finally {
+        inFlight = false
       }
     }
     void sweep()
@@ -93,4 +98,11 @@ export function MonitorRecoveryWatcher({
       })}
     </div>
   )
+}
+
+function sameOffers(left: ReconnectOffer[], right: ReconnectOffer[]) {
+  return left.length === right.length && left.every((item, index) => {
+    const other = right[index]
+    return item.workspaceId === other.workspaceId && item.monitorId === other.monitorId && item.monitorAlias === other.monitorAlias
+  })
 }

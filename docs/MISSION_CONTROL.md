@@ -1,8 +1,8 @@
-# ForgeMind Mission Control architecture
+# PARALITH Mission Control architecture
 
 ## Repository audit and preserved execution flow
 
-ForgeMind is a Tauri 2 desktop application with a React/TypeScript renderer, Rust command layer, SQLite persistence, and native PTYs through `portable-pty`. The pre-existing Workspace path remains `Project -> Workspace -> Pane Configuration -> Terminal Session -> Agent Session`. Workspace setup persists pane assignments; the Workspace route asks Rust to launch a trusted saved pane; `TerminalManager` owns the process, stream, tail, transcript log, exit watcher, and process-tree termination. Agent discovery persists provider-neutral profiles for Claude Code, Codex CLI, OpenCode, custom agents, and shells.
+PARALITH is a Tauri 2 desktop application with a React/TypeScript renderer, Rust command layer, SQLite persistence, and native PTYs through `portable-pty`. The pre-existing Workspace path remains `Project -> Workspace -> Pane Configuration -> Terminal Session -> Agent Session`. Workspace setup persists pane assignments; the Workspace route asks Rust to launch a trusted saved pane; `TerminalManager` owns the process, stream, tail, transcript log, exit watcher, and process-tree termination. Agent discovery persists provider-neutral profiles for Claude Code, Codex CLI, OpenCode, custom agents, and shells.
 
 Mission Control extends those seams instead of replacing them:
 
@@ -18,9 +18,9 @@ Mission drafts are written through the same validated command boundary after a s
 
 ## Worktree lifecycle
 
-Dispatch verifies the Project repository, resolves the base ref to an immutable commit, generates `forgemind/<mission-id>/<task-id>-<portable-slug>`, checks branch/path collisions, bounds Windows path length, and inserts a `creating` resource record before `git worktree add`. Worktrees live under the ForgeMind app-data directory. Ownership metadata is stored beside—not inside—the checkout and binds the worktree, task, mission, and repository identities.
+Dispatch verifies the Project repository, resolves the base ref to an immutable commit, generates `paralith/<mission-id>/<task-id>-<portable-slug>`, checks branch/path collisions, bounds Windows path length, and inserts a `creating` resource record before `git worktree add`. Worktrees live under the PARALITH app-data directory. Ownership metadata is stored beside—not inside—the checkout and binds the worktree, task, mission, and repository identities. Legacy `forgemind/` branches and ownership markers remain recognized for safe cleanup.
 
-Cleanup canonicalizes the worktree and controlled root, validates the ownership marker, confirms Git still lists the path, and only then removes that exact worktree. Only a `forgemind/` task branch can be deleted. Evidence and audit records remain. Missing or mismatched ownership produces a recoverable cleanup failure, never a recursive unknown-directory deletion.
+Cleanup canonicalizes the worktree and controlled root, validates the ownership marker, confirms Git still lists the path, and only then removes that exact worktree. Only a current `paralith/` task branch or a verified legacy task branch can be deleted. Evidence and audit records remain. Missing or mismatched ownership produces a recoverable cleanup failure, never a recursive unknown-directory deletion.
 
 Non-Git Projects can run only after explicit non-isolated confirmation. The UI warns that parallel execution is unsafe in this mode.
 
@@ -38,9 +38,9 @@ Each verification result creates task evidence and criterion-specific evidence f
 
 ## Merge, discard, and rollback transactions
 
-Merge is never automatic. It requires a passed task, required verification, proved assigned criteria, a mergeable owned worktree, and no unresolved conflict. The primary checkout must be clean and the task branch must still exist. The explicit Merge action snapshots uncommitted accepted work on the task branch using a local per-command ForgeMind identity, creates a restore ref, and performs `--no-ff` merge. Conflicts trigger `git merge --abort`, persist `conflicted`, retain the worktree, and record diagnostics.
+Merge is never automatic. It requires a passed task, required verification, proved assigned criteria, a mergeable owned worktree, and no unresolved conflict. The primary checkout must be clean and the task branch must still exist. The explicit Merge action snapshots uncommitted accepted work on the task branch using a local per-command PARALITH identity, creates a restore ref, and performs `--no-ff` merge. Conflicts trigger `git merge --abort`, persist `conflicted`, retain the worktree, and record diagnostics.
 
-Successful merge retains the worktree until a later verified cleanup. Rollback only reverts the recorded ForgeMind merge commit and aborts a failed revert. Discard first stops the owned session, validates worktree ownership, removes only the recorded worktree and ForgeMind branch, and retains logs/evidence. Every creation, launch, command approval, acceptance, merge, discard, recovery, and rollback writes an audit event with redacted details.
+Successful merge retains the worktree until a later verified cleanup. Rollback only reverts the recorded PARALITH merge commit and aborts a failed revert. Discard first stops the owned session, validates worktree ownership, removes only the recorded worktree and PARALITH branch, and retains logs/evidence. Every creation, launch, command approval, acceptance, merge, discard, recovery, and rollback writes an audit event with redacted details.
 
 ## Known first-version boundaries
 
