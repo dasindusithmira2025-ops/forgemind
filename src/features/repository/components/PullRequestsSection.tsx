@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   Bot, Check, CheckCircle2, CircleDashed, GitPullRequest, MessageSquare, User, X,
 } from 'lucide-react'
@@ -61,10 +61,19 @@ export function PullRequestsSection({ onRequestAgentWorktree }: { onRequestAgent
   )
 }
 
-function PullRequestDetail({ pr, onRequestAgentWorktree }: { pr: PullRequestView; onRequestAgentWorktree: (request: AgentActionRequest) => void }) {
+function PullRequestDetail({ pr: summary, onRequestAgentWorktree }: { pr: PullRequestView; onRequestAgentWorktree: (request: AgentActionRequest) => void }) {
+  const detail = useRepositoryStore((state) => state.pullRequestDetails[summary.number])
+  const detailLoading = useRepositoryStore((state) => state.pullRequestLoading[summary.number])
+  const detailError = useRepositoryStore((state) => state.pullRequestErrors[summary.number])
+  const loadDetail = useRepositoryStore((state) => state.loadPullRequestDetail)
   const runOperation = useRepositoryStore((state) => state.runOperation)
   const pending = useRepositoryStore((state) => state.pending)
   const [reviewBody, setReviewBody] = useState('')
+  const [selectedFile, setSelectedFile] = useState('')
+  const pr = detail ?? summary
+  const activeFile = pr.files.find((file) => file.path === selectedFile) ?? pr.files[0]
+
+  useEffect(() => { if (!detail && !detailLoading && !detailError) void loadDetail(summary.number) }, [detail, detailError, detailLoading, loadDetail, summary.number])
 
   const submitReview = (event: 'approve' | 'request_changes' | 'comment') => {
     void runOperation({ kind: 'submit_review', number: pr.number, event, body: reviewBody.trim() }, { key: `review:${pr.number}` })
@@ -94,7 +103,7 @@ function PullRequestDetail({ pr, onRequestAgentWorktree }: { pr: PullRequestView
       <header className="repo-pr-detail-head">
         <div>
           <h3>{pr.title} <span className="repo-muted">#{pr.number}</span></h3>
-          <div className="repo-pr-branches"><code>{pr.baseBranch}</code> ← <code>{pr.headBranch || 'unknown'}</code></div>
+          <div className="repo-pr-branches"><code>{pr.baseBranch || 'Base branch unavailable'}</code> ← <code>{pr.headBranch || 'Head branch unavailable'}</code></div>
         </div>
         <div className="repo-pr-detail-badges">
           <StatusBadge tone={stateTone(pr.state)}>{pr.state}</StatusBadge>
@@ -105,15 +114,38 @@ function PullRequestDetail({ pr, onRequestAgentWorktree }: { pr: PullRequestView
 
       <div className="repo-pr-stats">
         <span><strong>{pr.changedFiles}</strong> files</span>
-        <span><strong>{pr.commits}</strong> commits</span>
-        <span><MessageSquare size={12} /> {pr.comments}</span>
+        <span><strong>{pr.commits >= 0 ? pr.commits : '—'}</strong> {pr.commits >= 0 ? 'commits' : 'commits loading'}</span>
+        <span><MessageSquare size={12} /> {pr.comments >= 0 ? pr.comments : 'comments loading'}</span>
         {pr.labels.map((label) => <span key={label} className="repo-tag">{label}</span>)}
         {pr.linkedIssue && <span className="repo-tag">Linked {pr.linkedIssue}</span>}
+        <span className="repo-diff-add">+{pr.additions}</span><span className="repo-diff-del">−{pr.deletions}</span>
       </div>
+
+      {detailLoading && <p className="repo-muted">Refreshing files, commits, checks and review threads from GitHub…</p>}
+      {detailError && <ConnectedPlaceholder inline title="Pull request detail failed" message={detailError} onRetry={() => void loadDetail(pr.number)} />}
 
       {pr.body && <p className="repo-pr-body">{pr.body}</p>}
 
       <MergeGate pr={pr} />
+
+      <section className="repo-pr-cockpit">
+        <div className="repo-pr-file-list">
+          <header><strong>Changed files</strong><span>{pr.files.length || pr.changedFiles}</span></header>
+          {pr.files.map((file) => <button key={file.path} className={activeFile?.path === file.path ? 'active' : ''} onClick={() => setSelectedFile(file.path)}><span>{file.path}</span><small><span className="repo-diff-add">+{file.additions}</span> <span className="repo-diff-del">−{file.deletions}</span></small></button>)}
+          {!detailLoading && pr.files.length === 0 && !detailError && <p className="repo-muted">GitHub returned no changed files for this pull request.</p>}
+        </div>
+        <div className="repo-pr-diff">
+          <header><strong>{activeFile?.path ?? 'Select a changed file'}</strong>{activeFile && <span>{activeFile.status}</span>}</header>
+          {activeFile?.patch ? <pre>{activeFile.patch}</pre> : <div className="repo-diff-state">{activeFile ? 'GitHub omitted this patch because the file is binary or the diff is too large.' : 'No diff is available.'}</div>}
+        </div>
+        <aside className="repo-pr-review-rail">
+          <header><strong>Review activity</strong><span>{pr.reviews.length + pr.reviewThreads.length}</span></header>
+          {pr.reviews.map((review, index) => <article key={`${review.author}:${review.submittedAt}:${index}`}><strong>{review.author}</strong><StatusBadge tone={review.state === 'approved' ? 'success' : review.state === 'changes_requested' ? 'danger' : 'neutral'}>{review.state.replaceAll('_', ' ')}</StatusBadge>{review.body && <p>{review.body}</p>}</article>)}
+          {pr.reviewThreads.map((thread) => <article key={thread.id}><strong>{thread.author}</strong><span className="repo-muted">{thread.path}{thread.line ? `:${thread.line}` : ''}</span><p>{thread.body}</p></article>)}
+          {pr.reviews.length + pr.reviewThreads.length === 0 && <p className="repo-muted">No review activity has been submitted.</p>}
+          {pr.checks.length > 0 && <div className="repo-pr-checks"><strong>Checks</strong>{pr.checks.map((check) => <div key={`${check.workflowName}:${check.name}`}><StatusBadge tone={check.conclusion === 'success' ? 'success' : check.conclusion ? 'danger' : 'pending'}>{check.conclusion || check.status}</StatusBadge><span>{check.workflowName ? `${check.workflowName} / ` : ''}{check.name}</span></div>)}</div>}
+        </aside>
+      </section>
 
       <div className="repo-pr-review">
         <textarea value={reviewBody} onChange={(event) => setReviewBody(event.target.value)} placeholder="Leave a review comment…" aria-label="Review comment" rows={2} />
@@ -129,11 +161,6 @@ function PullRequestDetail({ pr, onRequestAgentWorktree }: { pr: PullRequestView
         </div>
       </div>
 
-      <ConnectedPlaceholder
-        inline
-        title="Inline threads & file diff"
-        message="Per-line review threads and the PR file diff stream from the provider projection. Approvals, review submissions, merge readiness and the merge itself are fully wired above."
-      />
     </div>
   )
 }

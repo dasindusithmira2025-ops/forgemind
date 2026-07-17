@@ -121,6 +121,7 @@ describe('parseRemoteProjection', () => {
   it('maps known object kinds and skips deleted/unknown ones defensively', () => {
     const projection: RemoteProjection = {
       projectId: 'p1', provider: 'github', repository: {}, lastSuccessfulSync: '', stale: false,
+      syncStatuses: [],
       objects: [
         { kind: 'pull_request', externalId: '1', fetchedAt: '2026-01-01T00:00:00Z', stale: false, deleted: false, payload: { number: 1, title: 'PR', draft: true, headBranch: 'x' } },
         { kind: 'pull_request', externalId: '2', fetchedAt: '', stale: false, deleted: true, payload: { number: 2 } },
@@ -136,6 +137,30 @@ describe('parseRemoteProjection', () => {
 
   it('returns empty views when no projection is present', () => {
     expect(parseRemoteProjection(undefined).pullRequests).toEqual([])
+  })
+
+  it('maps GitHub workflow definitions, paginated run payload fields and rich pull request data', () => {
+    const projection: RemoteProjection = {
+      projectId: 'p1', provider: 'github', repository: {}, lastSuccessfulSync: '2026-07-17T00:00:00Z', stale: false,
+      syncStatuses: [{ category: 'workflow', status: 'healthy', lastSuccessfulSync: '2026-07-17T00:00:00Z' }],
+      objects: [
+        { kind: 'workflow', externalId: '11', fetchedAt: '', stale: false, deleted: false, payload: { id: 11, name: 'Release Windows (reusable)', path: '.github/workflows/release-windows.yml', state: 'active', triggerKinds: ['workflow_call'] } },
+        { kind: 'workflow_run', externalId: '22', fetchedAt: '', stale: false, deleted: false, payload: { id: 22, workflow_id: 11, name: 'Release Windows (reusable)', status: 'completed', conclusion: 'failure', head_branch: 'main', head_sha: 'abcdef123456', run_attempt: 2, actor: { login: 'octocat' }, created_at: '2026-07-17T00:00:00Z', updated_at: '2026-07-17T00:01:00Z', artifacts: [{ id: 8, name: 'installer', size_in_bytes: 1024, expired: false }] } },
+        { kind: 'pull_request', externalId: '4', fetchedAt: '', stale: false, deleted: false, payload: { number: 4, title: 'Command Center', state: 'OPEN', isDraft: true, baseRefName: 'main', headRefName: 'feat/repository-command-center', headRefOid: 'abcdef', changedFiles: 52, additions: 8746, deletions: 196, commits: [{ oid: '1' }, { oid: '2' }], author: { login: 'dasindu' }, statusCheckRollup: [{ name: 'validate', status: 'COMPLETED', conclusion: 'SUCCESS', workflowName: 'Validate' }] } },
+      ],
+    }
+    const views = parseRemoteProjection(projection)
+    expect(views.workflows[0]).toMatchObject({ name: 'Release Windows (reusable)', triggerKinds: ['workflow_call'] })
+    expect(views.workflowRuns[0]).toMatchObject({ id: 22, workflowId: 11, state: 'failure', branch: 'main', attempt: 2, actor: 'octocat', artifacts: [{ id: 8, name: 'installer', size: 1024 }] })
+    expect(views.pullRequests[0]).toMatchObject({ number: 4, baseBranch: 'main', headBranch: 'feat/repository-command-center', changedFiles: 52, commits: 2, checksState: 'passing' })
+  })
+
+  it('keeps unexpanded PR summary counts diagnostic rather than presenting zero', () => {
+    const projection: RemoteProjection = {
+      projectId: 'p1', provider: 'github', repository: {}, lastSuccessfulSync: '', stale: false, syncStatuses: [],
+      objects: [{ kind: 'pull_request', externalId: '5', fetchedAt: '', stale: false, deleted: false, payload: { number: 5, title: 'Summary only', state: 'OPEN' } }],
+    }
+    expect(parseRemoteProjection(projection).pullRequests[0]).toMatchObject({ commits: -1, comments: -1 })
   })
 })
 

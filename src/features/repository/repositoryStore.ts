@@ -11,6 +11,7 @@ import type {
   ProviderAccountStatus,
   RemoteProjection,
   RepositoryApprovalRequest,
+  RepositoryBranchSummary,
   RepositoryDiff,
   RepositoryOperation,
   RepositoryOperationEvent,
@@ -24,8 +25,10 @@ import {
   humanActor,
   type RemoteProjectionViews,
   type RepositoryLoadState,
+  type PullRequestView,
+  type WorkflowRunView,
 } from './repositoryTypes'
-import { parseRemoteProjection } from './repositorySelectors'
+import { parsePullRequest, parseRemoteProjection, parseWorkflowRun } from './repositorySelectors'
 
 function uuid(): string {
   const globalCrypto = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto
@@ -50,11 +53,18 @@ interface RepositoryState {
   snapshot?: RepositorySnapshot
   leases: RepositoryWorktreeLease[]
   conflictRisks: WorktreeConflictRisk[]
+  branches: RepositoryBranchSummary[]
   providerStatus?: ProviderAccountStatus
   remoteProjection?: RemoteProjection
   remoteViews: RemoteProjectionViews
   remoteLoading: boolean
   remoteError?: string
+  workflowRunDetails: Record<number, WorkflowRunView>
+  workflowRunLoading: Record<number, boolean>
+  workflowRunErrors: Record<number, string>
+  pullRequestDetails: Record<number, PullRequestView>
+  pullRequestLoading: Record<number, boolean>
+  pullRequestErrors: Record<number, string>
   approvals: RepositoryApprovalRequest[]
   operations: RepositoryOperationRecord[]
   progress: Record<string, RepositoryOperationEvent>
@@ -65,7 +75,10 @@ interface RepositoryState {
   loadProject: (projectId: string) => Promise<void>
   refreshSnapshot: () => Promise<void>
   refreshLeases: () => Promise<void>
+  refreshBranches: () => Promise<void>
   refreshRemote: () => Promise<void>
+  loadWorkflowRunDetail: (runId: number) => Promise<void>
+  loadPullRequestDetail: (number: number) => Promise<void>
   fetchDiff: (path: string | undefined, staged: boolean, offset?: number, limit?: number) => Promise<RepositoryDiff>
   runOperation: (operation: RepositoryOperation, options?: RunOperationOptions) => Promise<RepositoryOperationRecord>
   decideApproval: (approvalId: string, approved: boolean, reason?: string) => Promise<void>
@@ -79,8 +92,15 @@ export const useRepositoryStore = create<RepositoryState>((set, get) => ({
   load: { status: 'idle' },
   leases: [],
   conflictRisks: [],
+  branches: [],
   remoteViews: EMPTY_REMOTE_VIEWS,
   remoteLoading: false,
+  workflowRunDetails: {},
+  workflowRunLoading: {},
+  workflowRunErrors: {},
+  pullRequestDetails: {},
+  pullRequestLoading: {},
+  pullRequestErrors: {},
   approvals: [],
   operations: [],
   progress: {},
@@ -92,11 +112,18 @@ export const useRepositoryStore = create<RepositoryState>((set, get) => ({
     snapshot: undefined,
     leases: [],
     conflictRisks: [],
+    branches: [],
     providerStatus: undefined,
     remoteProjection: undefined,
     remoteViews: EMPTY_REMOTE_VIEWS,
     remoteLoading: false,
     remoteError: undefined,
+    workflowRunDetails: {},
+    workflowRunLoading: {},
+    workflowRunErrors: {},
+    pullRequestDetails: {},
+    pullRequestLoading: {},
+    pullRequestErrors: {},
     approvals: [],
     operations: [],
     progress: {},
@@ -115,6 +142,7 @@ export const useRepositoryStore = create<RepositoryState>((set, get) => ({
       set({ snapshot, load: { status: 'ready' } })
       // Secondary, non-blocking context. Failures here never fail the whole surface.
       void get().refreshLeases()
+      void get().refreshBranches()
       void native.getGitHubProviderStatus(projectId)
         .then((providerStatus) => { if (get().loadToken === token) set({ providerStatus }) })
         .catch(() => undefined)
@@ -151,6 +179,17 @@ export const useRepositoryStore = create<RepositoryState>((set, get) => ({
     } catch { /* lease view is non-essential; keep the surface alive */ }
   },
 
+  refreshBranches: async () => {
+    const projectId = get().projectId
+    if (!projectId) return
+    try {
+      const branches = await native.listRepositoryBranches(projectId)
+      if (get().projectId === projectId) set({ branches })
+    } catch (caught) {
+      if (get().projectId === projectId) set({ actionError: asNativeError(caught).message })
+    }
+  },
+
   refreshRemote: async () => {
     const projectId = get().projectId
     if (!projectId) return
@@ -162,6 +201,43 @@ export const useRepositoryStore = create<RepositoryState>((set, get) => ({
     } catch (caught) {
       if (get().projectId !== projectId) return
       set({ remoteLoading: false, remoteError: asNativeError(caught).message })
+    }
+  },
+
+  loadWorkflowRunDetail: async (runId) => {
+    const projectId = get().projectId
+    if (!projectId || get().workflowRunLoading[runId]) return
+    set({
+      workflowRunLoading: { ...get().workflowRunLoading, [runId]: true },
+      workflowRunErrors: { ...get().workflowRunErrors, [runId]: '' },
+    })
+    try {
+      const object = await native.getRepositoryWorkflowRunDetail({ projectId, runId })
+      if (get().projectId !== projectId) return
+      const detail = parseWorkflowRun(object)
+      if (!detail) throw new Error('GitHub returned an invalid workflow run detail.')
+      set({ workflowRunDetails: { ...get().workflowRunDetails, [runId]: detail } })
+    } catch (caught) {
+      if (get().projectId === projectId) set({ workflowRunErrors: { ...get().workflowRunErrors, [runId]: asNativeError(caught).message } })
+    } finally {
+      if (get().projectId === projectId) set({ workflowRunLoading: { ...get().workflowRunLoading, [runId]: false } })
+    }
+  },
+
+  loadPullRequestDetail: async (number) => {
+    const projectId = get().projectId
+    if (!projectId || get().pullRequestLoading[number]) return
+    set({ pullRequestLoading: { ...get().pullRequestLoading, [number]: true }, pullRequestErrors: { ...get().pullRequestErrors, [number]: '' } })
+    try {
+      const object = await native.getRepositoryPullRequestDetail({ projectId, number })
+      if (get().projectId !== projectId) return
+      const detail = parsePullRequest(object)
+      if (!detail) throw new Error('GitHub returned an invalid pull request detail.')
+      set({ pullRequestDetails: { ...get().pullRequestDetails, [number]: detail } })
+    } catch (caught) {
+      if (get().projectId === projectId) set({ pullRequestErrors: { ...get().pullRequestErrors, [number]: asNativeError(caught).message } })
+    } finally {
+      if (get().projectId === projectId) set({ pullRequestLoading: { ...get().pullRequestLoading, [number]: false } })
     }
   },
 
@@ -197,6 +273,8 @@ export const useRepositoryStore = create<RepositoryState>((set, get) => ({
       if (record.status === 'succeeded' || record.status === 'needs_recovery') {
         void get().refreshSnapshot()
         void get().refreshLeases()
+        void get().refreshBranches()
+        if (refreshesRemote(operation.kind)) void get().refreshRemote()
       }
       if (record.status === 'failed') {
         set({ actionError: record.errorMessage ?? `Operation ${record.kind} failed.` })
@@ -280,4 +358,8 @@ function ingestRecord(set: SetState, get: GetState, record: RepositoryOperationR
   const existing = get().operations
   const filtered = existing.filter((item) => item.id !== record.id)
   set({ operations: [record, ...filtered].slice(0, MAX_LEDGER) })
+}
+
+function refreshesRemote(kind: RepositoryOperation['kind']): boolean {
+  return ['fetch_remote', 'push_branch', 'publish_branch', 'open_draft_pull_request', 'update_pull_request', 'mark_pull_request_ready', 'request_review', 'submit_review', 'resolve_review_thread', 'rerun_workflow', 'cancel_workflow', 'merge_pull_request', 'delete_remote_branch', 'create_release'].includes(kind)
 }

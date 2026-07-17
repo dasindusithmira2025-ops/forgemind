@@ -28,9 +28,14 @@ provider-installation metadata, worktree/branch leases, operations, approvals, r
 sync cursors, webhook-delivery deduplication, and recovery checkpoints. Active worktree and branch
 leases have partial unique indexes, and operation idempotency is unique per Project.
 
+Schema 14 extends each provider sync cursor with a safe failure message, required permission, and
+recovery action. Existing cursor state is preserved during the forward-only upgrade. The frontend
+can therefore distinguish an authoritative empty result from stale cache, expired authentication,
+missing permission, provider failure, or rate limiting for each remote data category.
+
 Repository operations append redacted records to the existing immutable `audit_events` ledger.
-The Mission Control and Memory runtime modules were removed from PARALITH 0.2.0; this integration
-uses the surviving ledger schema and does not claim that those deleted product surfaces are active.
+The integration preserves the existing Mission Control and Memory ownership boundaries and does
+not create a parallel task, evidence, or project model.
 
 ## Safety model
 
@@ -53,8 +58,10 @@ uses the surviving ledger schema and does not claim that those deleted product s
 
 GitHub draft PR, review, workflow, release, and merge actions run through typed operations. Merge
 execution refreshes PR state and validates the expected head SHA immediately before invoking the
-provider merge. Manual remote refresh synchronizes bounded PR, issue, workflow-run, release, and
-repository metadata into SQLite; failed refreshes return the last projection marked stale.
+provider merge. Initial, manual, mutation-triggered, and bounded background refresh synchronize
+repository metadata, pull requests, issues, workflow definitions, repository-wide workflow runs,
+releases, rulesets, and supported security alerts into SQLite. Each category refreshes
+independently; failures preserve the last projection and its explicit diagnostic state.
 
 The desktop does not host a public webhook endpoint. The schema includes delivery deduplication for
 an authenticated Corelith relay, but signature verification and relay ingestion belong in that
@@ -62,10 +69,9 @@ server boundary and are not exposed as a desktop command.
 
 The current desktop adapter uses the installed GitHub CLI as its secure API transport. Provider-
 neutral operation and projection contracts are in place, but extracting the CLI adapter behind a
-runtime-pluggable provider trait, adding GitLab or Bitbucket, and replacing manual refresh with an
-event relay plus bounded background synchronization remain separate delivery work. Repository
-changes made outside PARALITH are always reconciled by explicit refresh; a native debounced file
-watcher is not part of schema 13.
+runtime-pluggable provider trait, adding GitLab or Bitbucket, and adding an event relay remain
+separate delivery work. Repository changes made outside PARALITH are reconciled by explicit or
+bounded background refresh; a native debounced file watcher is not part of schema 14.
 
 ## Tauri boundary
 

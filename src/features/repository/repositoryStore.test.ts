@@ -12,10 +12,13 @@ vi.mock('../../native/commands', () => ({
     listRepositoryApprovals: vi.fn().mockResolvedValue([]),
     listRepositoryWorktreeLeases: vi.fn().mockResolvedValue([]),
     getWorktreeConflictRisks: vi.fn().mockResolvedValue([]),
+    listRepositoryBranches: vi.fn().mockResolvedValue([]),
     executeRepositoryOperation: vi.fn(),
     decideRepositoryApproval: vi.fn(),
     refreshRepositoryRemoteProjection: vi.fn(),
     getRepositoryDiff: vi.fn(),
+    getRepositoryWorkflowRunDetail: vi.fn(),
+    getRepositoryPullRequestDetail: vi.fn(),
   },
 }))
 

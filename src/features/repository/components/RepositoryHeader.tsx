@@ -31,7 +31,7 @@ export function RepositoryHeader({ projectName, menuOpen, onToggleMenu }: {
   const changeCount = snapshot?.files.length ?? 0
   const conflicts = snapshot?.files.filter((file) => file.conflicted).length ?? 0
   const activeAgentBranches = leases.filter((lease) => lease.status !== 'released').length
-  const remote = snapshot?.remotes[0] ?? 'no remote'
+  const remote = snapshot?.remotes[0]
   const provider = providerStatus?.provider ?? (snapshot?.remotes.length ? 'git remote' : 'local only')
 
   const latestRun = runs[0]
@@ -42,7 +42,7 @@ export function RepositoryHeader({ projectName, menuOpen, onToggleMenu }: {
   const openPrs = pullRequests.filter((pr) => pr.state === 'open' || pr.state === 'draft').length
 
   const fetchBusy = Boolean(pending['fetch'])
-  const doFetch = () => { void runOperation({ kind: 'fetch_remote', remote, prune: true }, { key: 'fetch' }).catch(() => undefined) }
+  const doFetch = () => { if (remote) void runOperation({ kind: 'fetch_remote', remote, prune: true }, { key: 'fetch' }).catch(() => undefined) }
 
   const branchLabel = useMemo(() => snapshot?.branch ?? (snapshot?.headSha ? `detached @ ${snapshot.headSha.slice(0, 7)}` : '—'), [snapshot])
 
@@ -72,7 +72,7 @@ export function RepositoryHeader({ projectName, menuOpen, onToggleMenu }: {
       </div>
 
       <div className="repo-header-actions">
-        <Button variant="secondary" icon={fetchBusy ? <Loader2 size={14} className="is-spinning" /> : <RefreshCw size={14} />} onClick={doFetch} disabled={fetchBusy || !snapshot}>
+        <Button variant="secondary" icon={fetchBusy ? <Loader2 size={14} className="is-spinning" /> : <RefreshCw size={14} />} onClick={doFetch} disabled={fetchBusy || !snapshot || !remote}>
           {fetchBusy ? 'Fetching' : 'Fetch'}
         </Button>
         <div className="repo-menu-wrap">

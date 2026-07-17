@@ -391,6 +391,21 @@ pub struct RepositorySnapshot {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct RepositoryBranchSummary {
+    pub name: String,
+    pub full_ref: String,
+    pub kind: String,
+    pub current: bool,
+    pub head_sha: String,
+    pub upstream: Option<String>,
+    pub ahead: u64,
+    pub behind: u64,
+    pub latest_subject: String,
+    pub latest_commit_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RepositoryDiffRequest {
     pub project_id: String,
     pub repository_path: Option<String>,
@@ -531,6 +546,22 @@ pub struct RemoteProjectionRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct WorkflowRunDetailRequest {
+    pub project_id: String,
+    pub repository_path: Option<String>,
+    pub run_id: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestDetailRequest {
+    pub project_id: String,
+    pub repository_path: Option<String>,
+    pub number: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RemoteProjectionObject {
     pub kind: String,
     pub external_id: String,
@@ -542,11 +573,26 @@ pub struct RemoteProjectionObject {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct RemoteSyncStatus {
+    pub category: String,
+    pub status: String,
+    pub last_attempt_at: Option<String>,
+    pub last_successful_sync: Option<String>,
+    pub stale_since: Option<String>,
+    pub error_code: Option<String>,
+    pub error_message: Option<String>,
+    pub required_permission: Option<String>,
+    pub recovery_action: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RemoteProjection {
     pub project_id: String,
     pub provider: String,
     pub repository: Value,
     pub objects: Vec<RemoteProjectionObject>,
+    pub sync_statuses: Vec<RemoteSyncStatus>,
     pub rate_limit: Option<Value>,
     pub last_successful_sync: String,
     pub stale: bool,

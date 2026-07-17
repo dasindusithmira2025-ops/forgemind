@@ -70,6 +70,13 @@ export interface PullRequestView {
   updatedAt: string
   headSha: string
   body: string
+  additions: number
+  deletions: number
+  url: string
+  reviews: Array<{ author: string; state: string; body: string; submittedAt: string }>
+  checks: Array<{ name: string; workflowName: string; status: string; conclusion: string; url: string }>
+  files: Array<{ path: string; status: string; additions: number; deletions: number; changes: number; patch?: string }>
+  reviewThreads: Array<{ id: number; path: string; line?: number; side?: string; author: string; body: string; createdAt: string; replyTo?: number }>
 }
 
 export type WorkflowRunState = 'queued' | 'in_progress' | 'success' | 'failure' | 'cancelled'
@@ -94,6 +101,31 @@ export interface WorkflowRunView {
   createdAt: string
   jobs: WorkflowJobView[]
   failureSummary?: string
+  workflowId?: number
+  actor: string
+  attempt: number
+  url: string
+  pullRequests: number[]
+  artifacts: WorkflowArtifactView[]
+}
+
+export interface WorkflowArtifactView {
+  id: number
+  name: string
+  size: number
+  expired: boolean
+  createdAt: string
+  url: string
+}
+
+export interface WorkflowDefinitionView {
+  id: number
+  name: string
+  path: string
+  state: string
+  url: string
+  updatedAt: string
+  triggerKinds: string[]
 }
 
 export interface IssueView {
@@ -113,6 +145,10 @@ export interface ReleaseView {
   prerelease: boolean
   publishedAt?: string
   author: string
+  target: string
+  body: string
+  url: string
+  assets: Array<{ id: number; name: string; size: number; downloadCount: number; url: string }>
 }
 
 export interface SecurityAlertView {
@@ -126,6 +162,7 @@ export interface SecurityAlertView {
 
 export interface RemoteProjectionViews {
   pullRequests: PullRequestView[]
+  workflows: WorkflowDefinitionView[]
   workflowRuns: WorkflowRunView[]
   issues: IssueView[]
   releases: ReleaseView[]
@@ -134,6 +171,7 @@ export interface RemoteProjectionViews {
 
 export const EMPTY_REMOTE_VIEWS: RemoteProjectionViews = {
   pullRequests: [],
+  workflows: [],
   workflowRuns: [],
   issues: [],
   releases: [],

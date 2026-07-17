@@ -61,6 +61,29 @@ pub async fn inspect_repository(
 }
 
 #[tauri::command]
+pub async fn list_repository_branches(
+    project_id: String,
+    repository_path: Option<String>,
+    window: Window,
+    state: State<'_, AppState>,
+) -> AppResult<Vec<RepositoryBranchSummary>> {
+    require_project_scope(&window, &state, &project_id)?;
+    let service = state.repository.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        service.list_branches(&project_id, repository_path.as_deref())
+    })
+    .await
+    .map_err(|error| {
+        AppError::new(
+            "repository_worker_failed",
+            "The repository worker stopped unexpectedly.",
+            true,
+        )
+        .detail(error.to_string())
+    })?
+}
+
+#[tauri::command]
 pub async fn get_repository_diff(
     request: RepositoryDiffRequest,
     window: Window,
@@ -299,6 +322,46 @@ pub async fn refresh_repository_remote_projection(
             })??;
     let _ = app.emit("repository-sync-health", &projection);
     Ok(projection)
+}
+
+#[tauri::command]
+pub async fn get_repository_workflow_run_detail(
+    request: WorkflowRunDetailRequest,
+    window: Window,
+    state: State<'_, AppState>,
+) -> AppResult<RemoteProjectionObject> {
+    require_project_scope(&window, &state, &request.project_id)?;
+    let service = state.repository.clone();
+    tauri::async_runtime::spawn_blocking(move || service.workflow_run_detail(&request))
+        .await
+        .map_err(|error| {
+            AppError::new(
+                "repository_worker_failed",
+                "The provider worker stopped unexpectedly.",
+                true,
+            )
+            .detail(error.to_string())
+        })?
+}
+
+#[tauri::command]
+pub async fn get_repository_pull_request_detail(
+    request: PullRequestDetailRequest,
+    window: Window,
+    state: State<'_, AppState>,
+) -> AppResult<RemoteProjectionObject> {
+    require_project_scope(&window, &state, &request.project_id)?;
+    let service = state.repository.clone();
+    tauri::async_runtime::spawn_blocking(move || service.pull_request_detail(&request))
+        .await
+        .map_err(|error| {
+            AppError::new(
+                "repository_worker_failed",
+                "The provider worker stopped unexpectedly.",
+                true,
+            )
+            .detail(error.to_string())
+        })?
 }
 
 #[tauri::command]

@@ -1,6 +1,7 @@
 import type {
   RemoteProjection,
   RemoteProjectionObject,
+  RemoteSyncStatus,
   RepositoryFileStatus,
   RepositorySnapshot,
 } from '../../native/types'
@@ -14,6 +15,7 @@ import {
   type SecurityAlertView,
   type SyncState,
   type WorkflowRunState,
+  type WorkflowDefinitionView,
   type WorkflowRunView,
 } from './repositoryTypes'
 
@@ -157,6 +159,7 @@ export function parseRemoteProjection(projection: RemoteProjection | undefined):
   if (!projection) return EMPTY_REMOTE_VIEWS
   const views: RemoteProjectionViews = {
     pullRequests: [],
+    workflows: [],
     workflowRuns: [],
     issues: [],
     releases: [],
@@ -166,15 +169,22 @@ export function parseRemoteProjection(projection: RemoteProjection | undefined):
     if (object.deleted) continue
     switch (object.kind) {
       case 'pull_request': { const pr = parsePullRequest(object); if (pr) views.pullRequests.push(pr); break }
+      case 'workflow': { const workflow = parseWorkflowDefinition(object); if (workflow) views.workflows.push(workflow); break }
       case 'workflow_run': { const run = parseWorkflowRun(object); if (run) views.workflowRuns.push(run); break }
       case 'issue': { const issue = parseIssue(object); if (issue) views.issues.push(issue); break }
       case 'release': { const release = parseRelease(object); if (release) views.releases.push(release); break }
-      case 'security_alert': { const alert = parseSecurityAlert(object); if (alert) views.securityAlerts.push(alert); break }
+      case 'security_alert': case 'dependabot_alert': case 'code_scanning_alert': case 'secret_scanning_alert': { const alert = parseSecurityAlert(object); if (alert) views.securityAlerts.push(alert); break }
     }
   }
   views.pullRequests.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
   views.workflowRuns.sort((a, b) => b.createdAt.localeCompare(a.createdAt))
   return views
+}
+
+export function remoteCategoryStatus(projection: RemoteProjection | undefined, ...categories: string[]): RemoteSyncStatus | undefined {
+  const statuses = projection?.syncStatuses ?? []
+  const failed = statuses.find((status) => categories.includes(status.category) && status.status !== 'healthy')
+  return failed ?? statuses.find((status) => categories.includes(status.category))
 }
 
 function record(object: RemoteProjectionObject): Record<string, unknown> {
@@ -184,19 +194,37 @@ function str(value: unknown, fallback = ''): string { return typeof value === 's
 function num(value: unknown, fallback = 0): number { return typeof value === 'number' && Number.isFinite(value) ? value : fallback }
 function bool(value: unknown): boolean { return value === true }
 function strArray(value: unknown): string[] { return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [] }
+function field(data: Record<string, unknown>, ...keys: string[]): unknown {
+  for (const key of keys) if (data[key] !== undefined && data[key] !== null) return data[key]
+  return undefined
+}
+function login(value: unknown, fallback = ''): string {
+  if (typeof value === 'string') return value
+  if (value && typeof value === 'object') return str((value as Record<string, unknown>).login, fallback)
+  return fallback
+}
+function namedArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return value.map((item) => typeof item === 'string' ? item : item && typeof item === 'object' ? str((item as Record<string, unknown>).name, str((item as Record<string, unknown>).login)) : '').filter(Boolean)
+}
 
-function parsePullRequest(object: RemoteProjectionObject): PullRequestView | undefined {
+export function parsePullRequest(object: RemoteProjectionObject): PullRequestView | undefined {
   const data = record(object)
   const number = num(data.number, NaN)
   if (Number.isNaN(number)) return undefined
-  const stateRaw = str(data.state, 'open')
-  const state: PullRequestView['state'] = bool(data.draft) ? 'draft'
+  const stateRaw = str(data.state, 'open').toLowerCase()
+  const state: PullRequestView['state'] = bool(field(data, 'draft', 'isDraft')) ? 'draft'
     : stateRaw === 'merged' ? 'merged' : stateRaw === 'closed' ? 'closed' : 'open'
-  const reviewRaw = str(data.reviewDecision)
+  const reviewRaw = str(data.reviewDecision).toLowerCase()
   const review: PullRequestView['reviewDecision'] = reviewRaw === 'approved' ? 'approved'
     : reviewRaw === 'changes_requested' ? 'changes_requested'
       : reviewRaw === 'review_required' ? 'review_required' : 'none'
-  const checksRaw = str(data.checksState)
+  const checkRows = Array.isArray(data.statusCheckRollup) ? data.statusCheckRollup : []
+  const checkConclusions = checkRows.map((item) => item && typeof item === 'object' ? str((item as Record<string, unknown>).conclusion).toLowerCase() : '')
+  const checkStatuses = checkRows.map((item) => item && typeof item === 'object' ? str((item as Record<string, unknown>).status).toLowerCase() : '')
+  const checksRaw = str(data.checksState) || (checkConclusions.some((item) => ['failure', 'timed_out', 'action_required', 'startup_failure'].includes(item)) ? 'failing'
+    : checkStatuses.some((item) => item && item !== 'completed') ? 'pending'
+      : checkRows.length > 0 && checkConclusions.every((item) => ['success', 'neutral', 'skipped'].includes(item)) ? 'passing' : '')
   const checks: PullRequestView['checksState'] = checksRaw === 'passing' || checksRaw === 'success' ? 'passing'
     : checksRaw === 'failing' || checksRaw === 'failure' ? 'failing'
       : checksRaw === 'pending' || checksRaw === 'in_progress' ? 'pending' : 'none'
@@ -204,22 +232,58 @@ function parsePullRequest(object: RemoteProjectionObject): PullRequestView | und
     number,
     title: str(data.title, `#${number}`),
     state,
-    author: str(data.author, 'unknown'),
+    author: login(data.author, 'Unavailable'),
     authorKind: str(data.authorKind) === 'agent' ? 'agent' : 'human',
-    baseBranch: str(data.baseBranch, 'main'),
-    headBranch: str(data.headBranch),
+    baseBranch: str(field(data, 'baseBranch', 'baseRefName')),
+    headBranch: str(field(data, 'headBranch', 'headRefName')),
     reviewDecision: review,
     checksState: checks,
     mergeable: typeof data.mergeable === 'boolean' ? data.mergeable : null,
     changedFiles: num(data.changedFiles),
-    commits: num(data.commits),
-    comments: num(data.comments),
-    labels: strArray(data.labels),
-    assignees: strArray(data.assignees),
+    // Summary projection deliberately avoids the unbounded GraphQL commits connection. The
+    // selected PR replaces this sentinel with an authoritative count from its detail request.
+    commits: Array.isArray(data.commits) ? data.commits.length : data.commits === undefined ? -1 : num(data.commits),
+    comments: Array.isArray(data.comments) ? data.comments.length : data.comments === undefined ? -1 : num(data.comments),
+    labels: namedArray(data.labels),
+    assignees: namedArray(data.assignees),
     linkedIssue: typeof data.linkedIssue === 'string' ? data.linkedIssue : undefined,
     updatedAt: str(data.updatedAt, object.fetchedAt),
-    headSha: str(data.headSha),
+    headSha: str(field(data, 'headSha', 'headRefOid')),
     body: str(data.body),
+    additions: num(data.additions),
+    deletions: num(data.deletions),
+    url: str(data.url),
+    reviews: Array.isArray(data.reviews) ? data.reviews.map((review) => {
+      const value = (review && typeof review === 'object' ? review : {}) as Record<string, unknown>
+      return { author: login(value.author, 'Unavailable'), state: str(value.state).toLowerCase(), body: str(value.body), submittedAt: str(value.submittedAt) }
+    }) : [],
+    checks: checkRows.map((check) => {
+      const value = (check && typeof check === 'object' ? check : {}) as Record<string, unknown>
+      return { name: str(value.name, 'Check'), workflowName: str(value.workflowName), status: str(value.status).toLowerCase(), conclusion: str(value.conclusion).toLowerCase(), url: str(value.detailsUrl) }
+    }),
+    files: Array.isArray(data.files) ? data.files.map((file) => {
+      const value = (file && typeof file === 'object' ? file : {}) as Record<string, unknown>
+      return { path: str(value.filename), status: str(value.status), additions: num(value.additions), deletions: num(value.deletions), changes: num(value.changes), patch: typeof value.patch === 'string' ? value.patch : undefined }
+    }) : [],
+    reviewThreads: Array.isArray(data.reviewThreads) ? data.reviewThreads.map((thread) => {
+      const value = (thread && typeof thread === 'object' ? thread : {}) as Record<string, unknown>
+      return { id: num(value.id), path: str(value.path), line: typeof value.line === 'number' ? value.line : undefined, side: typeof value.side === 'string' ? value.side : undefined, author: login(value.user, 'Unavailable'), body: str(value.body), createdAt: str(value.created_at), replyTo: typeof value.in_reply_to_id === 'number' ? value.in_reply_to_id : undefined }
+    }) : [],
+  }
+}
+
+function parseWorkflowDefinition(object: RemoteProjectionObject): WorkflowDefinitionView | undefined {
+  const data = record(object)
+  const id = num(field(data, 'id', 'databaseId'), NaN)
+  if (Number.isNaN(id)) return undefined
+  return {
+    id,
+    name: str(data.name, `Workflow ${id}`),
+    path: str(data.path),
+    state: str(data.state, 'state unavailable'),
+    url: str(field(data, 'html_url', 'url')),
+    updatedAt: str(field(data, 'updated_at', 'updatedAt'), object.fetchedAt),
+    triggerKinds: strArray(data.triggerKinds),
   }
 }
 
@@ -232,17 +296,17 @@ function normalizeRunState(value: unknown): WorkflowRunState {
   return 'queued'
 }
 
-function parseWorkflowRun(object: RemoteProjectionObject): WorkflowRunView | undefined {
+export function parseWorkflowRun(object: RemoteProjectionObject): WorkflowRunView | undefined {
   const data = record(object)
-  const id = num(data.id, NaN)
+  const id = num(field(data, 'id', 'databaseId'), NaN)
   if (Number.isNaN(id)) return undefined
   const jobs = Array.isArray(data.jobs) ? data.jobs.map((job) => {
     const jobRecord = (job && typeof job === 'object' ? job : {}) as Record<string, unknown>
     return {
-      id: num(jobRecord.id),
+      id: num(field(jobRecord, 'id', 'databaseId')),
       name: str(jobRecord.name, 'job'),
       state: normalizeRunState(jobRecord.state ?? jobRecord.conclusion ?? jobRecord.status),
-      durationSeconds: typeof jobRecord.durationSeconds === 'number' ? jobRecord.durationSeconds : undefined,
+      durationSeconds: typeof jobRecord.durationSeconds === 'number' ? jobRecord.durationSeconds : elapsedSeconds(str(jobRecord.startedAt), str(jobRecord.completedAt)),
       steps: Array.isArray(jobRecord.steps) ? jobRecord.steps.map((step) => {
         const stepRecord = (step && typeof step === 'object' ? step : {}) as Record<string, unknown>
         return { name: str(stepRecord.name, 'step'), state: normalizeRunState(stepRecord.state ?? stepRecord.conclusion) }
@@ -252,16 +316,38 @@ function parseWorkflowRun(object: RemoteProjectionObject): WorkflowRunView | und
   return {
     id,
     name: str(data.name, 'workflow'),
-    branch: str(data.branch),
-    commitSha: str(data.commitSha),
-    commitMessage: str(data.commitMessage),
+    branch: str(field(data, 'branch', 'head_branch', 'headBranch')),
+    commitSha: str(field(data, 'commitSha', 'head_sha', 'headSha')),
+    commitMessage: str(field(data, 'commitMessage', 'display_title', 'displayTitle')),
     state: normalizeRunState(data.state ?? data.conclusion ?? data.status),
     event: str(data.event, 'push'),
-    durationSeconds: typeof data.durationSeconds === 'number' ? data.durationSeconds : undefined,
-    createdAt: str(data.createdAt, object.fetchedAt),
+    durationSeconds: typeof data.durationSeconds === 'number' ? data.durationSeconds : elapsedSeconds(str(field(data, 'startedAt', 'started_at', 'createdAt', 'created_at')), str(field(data, 'updatedAt', 'updated_at'))),
+    createdAt: str(field(data, 'createdAt', 'created_at'), object.fetchedAt),
     jobs,
     failureSummary: typeof data.failureSummary === 'string' ? data.failureSummary : undefined,
+    workflowId: num(field(data, 'workflowId', 'workflow_id'), 0) || undefined,
+    actor: login(data.actor, 'Unavailable'),
+    attempt: num(field(data, 'attempt', 'run_attempt'), 1),
+    url: str(field(data, 'html_url', 'url')),
+    pullRequests: Array.isArray(data.pull_requests) ? data.pull_requests.map((item) => item && typeof item === 'object' ? num((item as Record<string, unknown>).number, NaN) : NaN).filter(Number.isFinite) : [],
+    artifacts: Array.isArray(data.artifacts) ? data.artifacts.map((artifact) => {
+      const value = (artifact && typeof artifact === 'object' ? artifact : {}) as Record<string, unknown>
+      return {
+        id: num(value.id),
+        name: str(value.name, 'artifact'),
+        size: num(field(value, 'size_in_bytes', 'size')),
+        expired: bool(value.expired),
+        createdAt: str(field(value, 'created_at', 'createdAt')),
+        url: str(field(value, 'archive_download_url', 'url')),
+      }
+    }) : [],
   }
+}
+
+function elapsedSeconds(start: string, end: string): number | undefined {
+  const started = Date.parse(start)
+  const completed = Date.parse(end)
+  return Number.isFinite(started) && Number.isFinite(completed) && completed >= started ? Math.round((completed - started) / 1000) : undefined
 }
 
 function parseIssue(object: RemoteProjectionObject): IssueView | undefined {
@@ -272,24 +358,31 @@ function parseIssue(object: RemoteProjectionObject): IssueView | undefined {
     number,
     title: str(data.title, `#${number}`),
     state: str(data.state) === 'closed' ? 'closed' : 'open',
-    author: str(data.author, 'unknown'),
-    labels: strArray(data.labels),
-    comments: num(data.comments),
+    author: login(data.author, 'Unavailable'),
+    labels: namedArray(data.labels),
+    comments: Array.isArray(data.comments) ? data.comments.length : num(data.comments),
     updatedAt: str(data.updatedAt, object.fetchedAt),
   }
 }
 
 function parseRelease(object: RemoteProjectionObject): ReleaseView | undefined {
   const data = record(object)
-  const tag = str(data.tag, str(data.tagName))
+  const tag = str(data.tag, str(field(data, 'tagName', 'tag_name')))
   if (!tag) return undefined
   return {
     tag,
     name: str(data.name, tag),
-    draft: bool(data.draft),
-    prerelease: bool(data.prerelease),
-    publishedAt: typeof data.publishedAt === 'string' ? data.publishedAt : undefined,
-    author: str(data.author, 'unknown'),
+    draft: bool(field(data, 'draft', 'isDraft')),
+    prerelease: bool(field(data, 'prerelease', 'isPrerelease')),
+    publishedAt: str(field(data, 'publishedAt', 'published_at')) || undefined,
+    author: login(data.author, 'Unavailable'),
+    target: str(field(data, 'target', 'target_commitish')),
+    body: str(data.body),
+    url: str(field(data, 'html_url', 'url')),
+    assets: Array.isArray(data.assets) ? data.assets.map((asset) => {
+      const value = (asset && typeof asset === 'object' ? asset : {}) as Record<string, unknown>
+      return { id: num(value.id), name: str(value.name), size: num(value.size), downloadCount: num(value.download_count), url: str(value.browser_download_url) }
+    }) : [],
   }
 }
 
@@ -300,13 +393,13 @@ function parseSecurityAlert(object: RemoteProjectionObject): SecurityAlertView |
   const severityRaw = str(data.severity, 'low')
   const severity: SecurityAlertView['severity'] = ['critical', 'high', 'medium', 'low'].includes(severityRaw)
     ? (severityRaw as SecurityAlertView['severity']) : 'low'
-  const kindRaw = str(data.kind, 'code_scanning')
+  const kindRaw = object.kind === 'secret_scanning_alert' ? 'secret_scanning' : object.kind === 'dependabot_alert' ? 'dependabot' : str(data.kind, 'code_scanning')
   const kind: SecurityAlertView['kind'] = kindRaw === 'secret_scanning' || kindRaw === 'dependabot' ? kindRaw : 'code_scanning'
   return {
     id,
     kind,
     severity,
-    summary: str(data.summary, 'Security alert'),
+    summary: str(data.summary, str((data.rule && typeof data.rule === 'object' ? (data.rule as Record<string, unknown>).description : undefined), str((data.security_advisory && typeof data.security_advisory === 'object' ? (data.security_advisory as Record<string, unknown>).summary : undefined), str(data.secret_type_display_name, 'Security alert')))),
     state: str(data.state) === 'resolved' ? 'resolved' : str(data.state) === 'dismissed' ? 'dismissed' : 'open',
     updatedAt: str(data.updatedAt, object.fetchedAt),
   }

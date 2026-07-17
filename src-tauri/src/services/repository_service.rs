@@ -111,6 +111,59 @@ impl RepositoryService {
         Ok(snapshot)
     }
 
+    pub fn list_branches(
+        &self,
+        project_id: &str,
+        repository_path: Option<&str>,
+    ) -> AppResult<Vec<RepositoryBranchSummary>> {
+        let project = self.database.get_project(project_id)?;
+        let repository = self.validate_repository_path(&project, repository_path)?;
+        let snapshot = self.inspect_validated(project_id, &repository, &repository)?;
+        let output = self.git_bytes(
+            &repository,
+            &[
+                "for-each-ref",
+                "--sort=-committerdate",
+                "--format=%(refname)%00%(refname:short)%00%(objectname)%00%(upstream:short)%00%(upstream:track)%00%(committerdate:iso-strict)%00%(subject)%00",
+                "refs/heads",
+                "refs/remotes",
+            ],
+            None,
+            None,
+        )?;
+        let mut branches = Vec::new();
+        for line in output.split(|byte| *byte == b'\n') {
+            let fields = line.split(|byte| *byte == 0).collect::<Vec<_>>();
+            if fields.len() < 7 {
+                continue;
+            }
+            let full_ref = String::from_utf8_lossy(fields[0]).into_owned();
+            let name = String::from_utf8_lossy(fields[1]).into_owned();
+            if name.ends_with("/HEAD") {
+                continue;
+            }
+            let (ahead, behind) = parse_tracking_counts(&String::from_utf8_lossy(fields[4]));
+            branches.push(RepositoryBranchSummary {
+                current: full_ref.starts_with("refs/heads/")
+                    && snapshot.branch.as_deref() == Some(name.as_str()),
+                kind: if full_ref.starts_with("refs/remotes/") {
+                    "remote".into()
+                } else {
+                    "local".into()
+                },
+                name,
+                full_ref,
+                head_sha: String::from_utf8_lossy(fields[2]).into_owned(),
+                upstream: nonempty_string(fields[3]),
+                ahead,
+                behind,
+                latest_commit_at: String::from_utf8_lossy(fields[5]).into_owned(),
+                latest_subject: String::from_utf8_lossy(fields[6]).into_owned(),
+            });
+        }
+        Ok(branches)
+    }
+
     pub fn diff(&self, request: &RepositoryDiffRequest) -> AppResult<RepositoryDiff> {
         let project = self.database.get_project(&request.project_id)?;
         let repository =
@@ -650,36 +703,49 @@ impl RepositoryService {
         validate_host(host)?;
         let project = self.database.get_project(project_id)?;
         let directory = Path::new(&project.root_path);
-        let status = self.run_program(
-            "gh",
+        let status = self.gh_json(
             directory,
-            &["auth", "status", "--hostname", host],
-            None,
-            Duration::from_secs(20),
+            &["auth", "status", "--hostname", host, "--json", "hosts"],
             None,
         );
         match status {
-            Ok(_) => {
-                let login = self
-                    .run_program(
-                        "gh",
-                        directory,
-                        &["api", "user", "--hostname", host, "--jq", ".login"],
-                        None,
-                        Duration::from_secs(20),
-                        None,
-                    )
-                    .ok()
-                    .map(|output| safe_text(&output.stdout).trim().to_owned())
-                    .filter(|value| !value.is_empty());
+            Ok(value) => {
+                let account = value
+                    .get("hosts")
+                    .and_then(|hosts| hosts.get(host))
+                    .and_then(Value::as_array)
+                    .and_then(|accounts| {
+                        accounts
+                            .iter()
+                            .find(|account| {
+                                account.get("active").and_then(Value::as_bool) == Some(true)
+                            })
+                            .or_else(|| accounts.first())
+                    });
+                let login = account
+                    .and_then(|account| account.get("login"))
+                    .and_then(Value::as_str)
+                    .map(str::to_owned);
+                let permissions = account
+                    .and_then(|account| account.get("scopes"))
+                    .and_then(Value::as_str)
+                    .map(|scopes| {
+                        scopes
+                            .split(',')
+                            .map(str::trim)
+                            .filter(|scope| !scope.is_empty())
+                            .map(str::to_owned)
+                            .collect()
+                    })
+                    .unwrap_or_default();
                 Ok(ProviderAccountStatus {
                     provider: "github".into(),
                     host: host.into(),
                     authenticated: true,
                     account_login: login,
                     authentication_source: "gh_cli_secure_store".into(),
-                    permissions: Vec::new(),
-                    message: "GitHub API access is delegated to the authenticated gh CLI; no token is exposed to PARALITH.".into(),
+                    permissions,
+                    message: "GitHub API access is delegated to the authenticated gh CLI keyring entry; no token is exposed to PARALITH.".into(),
                 })
             }
             Err(error) => Ok(ProviderAccountStatus {
@@ -702,175 +768,458 @@ impl RepositoryService {
         let repository =
             self.validate_repository_path(&project, request.repository_path.as_deref())?;
         let fetched_at = Utc::now().to_rfc3339();
-        let refreshed = (|| {
-            let repository_metadata = self.gh_json(
-                &repository,
-                &[
-                    "repo",
-                    "view",
-                    "--json",
-                    "id,nameWithOwner,defaultBranchRef,url",
-                ],
-                None,
-            )?;
-            let streams = [
-                (
+        let repository_metadata = match self.gh_json(
+            &repository,
+            &[
+                "repo",
+                "view",
+                "--json",
+                "id,nameWithOwner,defaultBranchRef,url",
+            ],
+            None,
+        ) {
+            Ok(value) => {
+                self.store_remote_stream(
+                    &request.project_id,
                     "repository",
-                    repository_metadata.clone(),
+                    Ok(value.clone()),
                     "nameWithOwner",
                     None,
-                ),
-                (
-                    "pull_request",
-                    self.gh_json(
-                        &repository,
-                        &[
-                            "pr",
-                            "list",
-                            "--state",
-                            "all",
-                            "--limit",
-                            "250",
-                            "--json",
-                            "number,title,state,isDraft,headRefName,baseRefName,updatedAt,url",
-                        ],
-                        None,
-                    )?,
-                    "number",
-                    Some("updatedAt"),
-                ),
-                (
-                    "issue",
-                    self.gh_json(
-                        &repository,
-                        &[
-                            "issue",
-                            "list",
-                            "--state",
-                            "all",
-                            "--limit",
-                            "250",
-                            "--json",
-                            "number,title,state,updatedAt,url,labels,assignees",
-                        ],
-                        None,
-                    )?,
-                    "number",
-                    Some("updatedAt"),
-                ),
-                (
-                    "workflow_run",
-                    self.gh_json(
-                        &repository,
-                        &[
-                            "run",
-                            "list",
-                            "--limit",
-                            "250",
-                            "--json",
-                            "databaseId,name,status,conclusion,headSha,createdAt,updatedAt,url,event",
-                        ],
-                        None,
-                    )?,
-                    "databaseId",
-                    Some("updatedAt"),
-                ),
-                (
-                    "release",
-                    self.gh_json(
-                        &repository,
-                        &[
-                            "release",
-                            "list",
-                            "--limit",
-                            "250",
-                            "--json",
-                            "tagName,name,isDraft,isPrerelease,publishedAt",
-                        ],
-                        None,
-                    )?,
-                    "tagName",
-                    Some("publishedAt"),
-                ),
-            ];
-            for (kind, payload, id_field, updated_field) in streams {
-                let values: Vec<Value> = match payload {
-                    Value::Array(values) => values,
-                    value => vec![value],
+                    None,
+                    &fetched_at,
+                    Some("metadata:read"),
+                )?;
+                value
+            }
+            Err(error) => {
+                self.record_remote_stream_failure(
+                    &request.project_id,
+                    "repository",
+                    &error,
+                    Some("metadata:read"),
+                )?;
+                let cached = self
+                    .database
+                    .load_remote_projection(&request.project_id, "github")?;
+                let Some(value) = cached
+                    .iter()
+                    .find(|item| item.kind == "repository" && !item.deleted)
+                    .map(|item| item.payload.clone())
+                else {
+                    return Err(error);
                 };
-                let objects: Vec<(String, Value, Option<String>)> = values
+                value
+            }
+        };
+        let name_with_owner = repository_metadata
+            .get("nameWithOwner")
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                AppError::new(
+                    "github_repository_identity_missing",
+                    "GitHub did not return a repository owner and name.",
+                    true,
+                )
+                .layer("github_provider")
+            })?;
+
+        self.store_remote_stream(
+            &request.project_id,
+            "pull_request",
+            // Keep the repository-wide list shallow. Asking the CLI to traverse commit authors,
+            // reviews, comments, and check nodes for 250 PRs exceeds GitHub's GraphQL node budget.
+            // The selected PR is enriched by `pull_request_detail`, where those bounded nested
+            // collections are both affordable and current.
+            self.gh_json(&repository, &["pr", "list", "--state", "all", "--limit", "250", "--json", "number,title,state,isDraft,headRefName,baseRefName,headRefOid,updatedAt,url,author,body,changedFiles,additions,deletions,reviewDecision,mergeable,labels,assignees"], None),
+            "number", Some("updatedAt"), None, &fetched_at, Some("pull_requests:read"),
+        )?;
+        self.store_remote_stream(
+            &request.project_id,
+            "issue",
+            self.gh_json(
+                &repository,
+                &[
+                    "issue",
+                    "list",
+                    "--state",
+                    "all",
+                    "--limit",
+                    "250",
+                    "--json",
+                    "number,title,state,updatedAt,url,author,labels,assignees,comments,milestone",
+                ],
+                None,
+            ),
+            "number",
+            Some("updatedAt"),
+            None,
+            &fetched_at,
+            Some("issues:read"),
+        )?;
+
+        let workflows_endpoint = format!("repos/{name_with_owner}/actions/workflows?per_page=100");
+        let workflow_result = self
+            .gh_json(
+                &repository,
+                &["api", &workflows_endpoint, "--paginate", "--slurp"],
+                None,
+            )
+            .and_then(|payload| {
+                self.enrich_workflow_definitions(&repository, name_with_owner, payload)
+            });
+        self.store_remote_stream(
+            &request.project_id,
+            "workflow",
+            workflow_result,
+            "id",
+            Some("updated_at"),
+            None,
+            &fetched_at,
+            Some("actions:read"),
+        )?;
+        let runs_endpoint = format!("repos/{name_with_owner}/actions/runs?per_page=100");
+        self.store_remote_stream(
+            &request.project_id,
+            "workflow_run",
+            self.gh_json(
+                &repository,
+                &["api", &runs_endpoint, "--paginate", "--slurp"],
+                None,
+            ),
+            "id",
+            Some("updated_at"),
+            Some("workflow_runs"),
+            &fetched_at,
+            Some("actions:read"),
+        )?;
+
+        let releases_endpoint = format!("repos/{name_with_owner}/releases?per_page=100");
+        self.store_remote_stream(
+            &request.project_id,
+            "release",
+            self.gh_json(
+                &repository,
+                &["api", &releases_endpoint, "--paginate", "--slurp"],
+                None,
+            ),
+            "id",
+            Some("published_at"),
+            None,
+            &fetched_at,
+            Some("contents:read"),
+        )?;
+        for (kind, endpoint, permission) in [
+            (
+                "dependabot_alert",
+                format!("repos/{name_with_owner}/dependabot/alerts?per_page=100"),
+                "dependabot_alerts:read",
+            ),
+            (
+                "code_scanning_alert",
+                format!("repos/{name_with_owner}/code-scanning/alerts?per_page=100"),
+                "security_events:read",
+            ),
+            (
+                "secret_scanning_alert",
+                format!("repos/{name_with_owner}/secret-scanning/alerts?per_page=100"),
+                "secret_scanning_alerts:read",
+            ),
+            (
+                "ruleset",
+                format!("repos/{name_with_owner}/rulesets?per_page=100"),
+                "metadata:read",
+            ),
+        ] {
+            self.store_remote_stream(
+                &request.project_id,
+                kind,
+                self.gh_json(
+                    &repository,
+                    &["api", &endpoint, "--paginate", "--slurp"],
+                    None,
+                ),
+                "number",
+                Some("updated_at"),
+                None,
+                &fetched_at,
+                Some(permission),
+            )?;
+        }
+
+        let objects = self
+            .database
+            .load_remote_projection(&request.project_id, "github")?;
+        let sync_statuses = self
+            .database
+            .load_remote_sync_statuses(&request.project_id, "github")?;
+        let stale = sync_statuses
+            .iter()
+            .any(|status| status.status != "healthy");
+        let last_successful_sync = sync_statuses
+            .iter()
+            .filter_map(|status| status.last_successful_sync.as_deref())
+            .max()
+            .unwrap_or_default()
+            .to_owned();
+        Ok(RemoteProjection {
+            project_id: request.project_id.clone(),
+            provider: "github".into(),
+            repository: repository_metadata,
+            objects,
+            sync_statuses,
+            rate_limit: self.gh_json(&repository, &["api", "rate_limit"], None).ok(),
+            last_successful_sync,
+            stale,
+        })
+    }
+
+    pub fn workflow_run_detail(
+        &self,
+        request: &WorkflowRunDetailRequest,
+    ) -> AppResult<RemoteProjectionObject> {
+        if request.run_id == 0 {
+            return Err(invalid(
+                "invalid_workflow_run",
+                "The workflow run identifier is invalid.",
+            ));
+        }
+        let project = self.database.get_project(&request.project_id)?;
+        let repository =
+            self.validate_repository_path(&project, request.repository_path.as_deref())?;
+        let run_id = request.run_id.to_string();
+        let mut payload = self.gh_json(
+            &repository,
+            &["run", "view", &run_id, "--json", "databaseId,name,status,conclusion,headBranch,headSha,event,createdAt,startedAt,updatedAt,url,attempt,jobs"],
+            None,
+        )?;
+        let metadata = self.gh_json(
+            &repository,
+            &["repo", "view", "--json", "nameWithOwner"],
+            None,
+        )?;
+        let name_with_owner = metadata
+            .get("nameWithOwner")
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                AppError::new(
+                    "github_repository_identity_missing",
+                    "GitHub did not return a repository owner and name.",
+                    true,
+                )
+                .layer("github_provider")
+            })?;
+        let artifacts_endpoint = format!(
+            "repos/{name_with_owner}/actions/runs/{}/artifacts?per_page=100",
+            request.run_id
+        );
+        let artifacts = self
+            .gh_json(
+                &repository,
+                &["api", &artifacts_endpoint, "--paginate", "--slurp"],
+                None,
+            )
+            .map(|value| projection_values(value, Some("artifacts")))
+            .unwrap_or_default();
+        if let Some(object) = payload.as_object_mut() {
+            object.insert("artifacts".into(), Value::Array(artifacts));
+        }
+        Ok(RemoteProjectionObject {
+            kind: "workflow_run".into(),
+            external_id: run_id,
+            payload,
+            fetched_at: Utc::now().to_rfc3339(),
+            stale: false,
+            deleted: false,
+        })
+    }
+
+    pub fn pull_request_detail(
+        &self,
+        request: &PullRequestDetailRequest,
+    ) -> AppResult<RemoteProjectionObject> {
+        if request.number == 0 {
+            return Err(invalid(
+                "invalid_pull_request",
+                "The pull request number is invalid.",
+            ));
+        }
+        let project = self.database.get_project(&request.project_id)?;
+        let repository =
+            self.validate_repository_path(&project, request.repository_path.as_deref())?;
+        let number = request.number.to_string();
+        let mut payload = self.gh_json(
+            &repository,
+            &["pr", "view", &number, "--json", "number,title,state,isDraft,headRefName,baseRefName,headRefOid,updatedAt,url,author,body,changedFiles,commits,additions,deletions,reviews,reviewDecision,mergeable,statusCheckRollup,labels,assignees,comments"],
+            None,
+        )?;
+        let metadata = self.gh_json(
+            &repository,
+            &["repo", "view", "--json", "nameWithOwner"],
+            None,
+        )?;
+        let name_with_owner = metadata
+            .get("nameWithOwner")
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                AppError::new(
+                    "github_repository_identity_missing",
+                    "GitHub did not return a repository owner and name.",
+                    true,
+                )
+                .layer("github_provider")
+            })?;
+        let files_endpoint = format!(
+            "repos/{name_with_owner}/pulls/{}/files?per_page=100",
+            request.number
+        );
+        let comments_endpoint = format!(
+            "repos/{name_with_owner}/pulls/{}/comments?per_page=100",
+            request.number
+        );
+        let files = projection_values(
+            self.gh_json(
+                &repository,
+                &["api", &files_endpoint, "--paginate", "--slurp"],
+                None,
+            )?,
+            None,
+        );
+        let review_comments = projection_values(
+            self.gh_json(
+                &repository,
+                &["api", &comments_endpoint, "--paginate", "--slurp"],
+                None,
+            )?,
+            None,
+        );
+        if let Some(object) = payload.as_object_mut() {
+            object.insert("files".into(), Value::Array(files));
+            object.insert("reviewThreads".into(), Value::Array(review_comments));
+        }
+        Ok(RemoteProjectionObject {
+            kind: "pull_request".into(),
+            external_id: number,
+            payload,
+            fetched_at: Utc::now().to_rfc3339(),
+            stale: false,
+            deleted: false,
+        })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn store_remote_stream(
+        &self,
+        project_id: &str,
+        kind: &str,
+        result: AppResult<Value>,
+        id_field: &str,
+        updated_field: Option<&str>,
+        collection_field: Option<&str>,
+        fetched_at: &str,
+        required_permission: Option<&str>,
+    ) -> AppResult<()> {
+        match result {
+            Ok(payload) => {
+                let objects = projection_values(payload, collection_field)
                     .into_iter()
                     .filter_map(|value| {
-                        let id = value.get(id_field).and_then(|id| match id {
-                            Value::String(value) => Some(value.clone()),
-                            Value::Number(value) => Some(value.to_string()),
-                            _ => None,
-                        })?;
+                        let id = value
+                            .get(id_field)
+                            .or_else(|| value.get("id"))
+                            .or_else(|| value.get("number"))
+                            .or_else(|| value.get("tag_name"))
+                            .and_then(json_identifier)?;
                         let updated = updated_field
                             .and_then(|field| value.get(field))
                             .and_then(Value::as_str)
                             .map(str::to_owned);
                         Some((id, value, updated))
                     })
-                    .collect();
+                    .collect::<Vec<_>>();
                 self.database.replace_remote_projection_kind(
-                    &request.project_id,
-                    "github",
-                    kind,
-                    &objects,
-                    &fetched_at,
-                )?;
+                    project_id, "github", kind, &objects, fetched_at,
+                )
             }
-            let rate_limit = self.gh_json(&repository, &["api", "rate_limit"], None).ok();
-            let objects = self
-                .database
-                .load_remote_projection(&request.project_id, "github")?;
-            Ok::<_, AppError>((repository_metadata, objects, rate_limit))
-        })();
-        match refreshed {
-            Ok((repository_metadata, objects, rate_limit)) => Ok(RemoteProjection {
-                project_id: request.project_id.clone(),
-                provider: "github".into(),
-                repository: repository_metadata,
-                objects,
-                rate_limit,
-                last_successful_sync: fetched_at,
-                stale: false,
-            }),
             Err(error) => {
-                self.database.mark_remote_projection_stale(
-                    &request.project_id,
-                    "github",
-                    &error.code,
-                )?;
-                let objects = self
-                    .database
-                    .load_remote_projection(&request.project_id, "github")?;
-                if objects.is_empty() {
-                    return Err(error);
-                }
-                let repository_metadata = objects
-                    .iter()
-                    .find(|object| object.kind == "repository" && !object.deleted)
-                    .map(|object| object.payload.clone())
-                    .unwrap_or(Value::Null);
-                let last_successful_sync = objects
-                    .iter()
-                    .map(|object| object.fetched_at.as_str())
-                    .max()
-                    .unwrap_or_default()
-                    .to_owned();
-                Ok(RemoteProjection {
-                    project_id: request.project_id.clone(),
-                    provider: "github".into(),
-                    repository: repository_metadata,
-                    objects,
-                    rate_limit: None,
-                    last_successful_sync,
-                    stale: true,
-                })
+                self.record_remote_stream_failure(project_id, kind, &error, required_permission)
             }
         }
+    }
+
+    fn record_remote_stream_failure(
+        &self,
+        project_id: &str,
+        kind: &str,
+        error: &AppError,
+        required_permission: Option<&str>,
+    ) -> AppResult<()> {
+        let security_stream = matches!(
+            kind,
+            "dependabot_alert" | "code_scanning_alert" | "secret_scanning_alert" | "ruleset"
+        );
+        let (error_code, error_message) = if security_stream
+            && error.code == "github_repository_not_found"
+        {
+            ("github_feature_unavailable", "This GitHub security feature is disabled, unavailable for the repository, or hidden by the current permission.")
+        } else {
+            (error.code.as_str(), error.message.as_str())
+        };
+        let recovery = match error_code {
+            "github_authentication_expired" => {
+                "Reconnect the GitHub account, then refresh this category."
+            }
+            "github_permission_missing" => {
+                "Update the GitHub App installation permissions, then refresh."
+            }
+            "github_rate_limited" => "Wait for the GitHub rate limit to reset, then refresh.",
+            "github_repository_not_found" => {
+                "Verify the repository connection and selected GitHub account."
+            }
+            _ => "Retry the provider synchronization. Cached data is preserved if available.",
+        };
+        self.database.mark_remote_projection_kind_stale(
+            project_id,
+            "github",
+            kind,
+            error_code,
+            error_message,
+            required_permission,
+            recovery,
+        )
+    }
+
+    fn enrich_workflow_definitions(
+        &self,
+        repository: &Path,
+        name_with_owner: &str,
+        payload: Value,
+    ) -> AppResult<Value> {
+        let mut definitions = projection_values(payload, Some("workflows"));
+        for definition in definitions.iter_mut().take(100) {
+            let Some(path) = definition.get("path").and_then(Value::as_str) else {
+                continue;
+            };
+            let endpoint = format!("repos/{name_with_owner}/contents/{path}");
+            if let Ok(source) = self.gh_text(
+                repository,
+                &[
+                    "api",
+                    &endpoint,
+                    "-H",
+                    "Accept: application/vnd.github.raw+json",
+                ],
+                None,
+            ) {
+                if let Some(object) = definition.as_object_mut() {
+                    object.insert(
+                        "triggerKinds".into(),
+                        serde_json::to_value(workflow_trigger_kinds(&source))
+                            .unwrap_or(Value::Array(Vec::new())),
+                    );
+                }
+            }
+        }
+        Ok(Value::Array(definitions))
     }
 
     pub fn merge_readiness(&self, request: &MergeReadinessRequest) -> AppResult<MergeReadiness> {
@@ -2409,26 +2758,16 @@ impl RepositoryService {
         let (stdout, stdout_truncated) = stdout_thread.join().unwrap_or_default();
         let (stderr, _) = stderr_thread.join().unwrap_or_default();
         if !status.success() {
-            let message = if program == "git" {
-                "Git rejected the requested repository operation."
-            } else {
-                "GitHub rejected the requested provider operation."
-            };
+            if program == "gh" {
+                return Err(classify_github_error(&safe_text(&stderr)));
+            }
             return Err(AppError::new(
-                if program == "git" {
-                    "git_command_failed"
-                } else {
-                    "github_operation_failed"
-                },
-                message,
+                "git_command_failed",
+                "Git rejected the requested repository operation.",
                 true,
             )
             .detail(redact(&safe_text(&stderr)))
-            .layer(if program == "git" {
-                "git_cli"
-            } else {
-                "github_provider"
-            }));
+            .layer("git_cli"));
         }
         Ok(CommandOutput {
             stdout,
@@ -2444,6 +2783,25 @@ struct ParsedStatus {
     ahead: u64,
     behind: u64,
     files: Vec<RepositoryFileStatus>,
+}
+
+fn nonempty_string(bytes: &[u8]) -> Option<String> {
+    let value = String::from_utf8_lossy(bytes).trim().to_owned();
+    (!value.is_empty()).then_some(value)
+}
+
+fn parse_tracking_counts(value: &str) -> (u64, u64) {
+    let mut ahead = 0;
+    let mut behind = 0;
+    for segment in value.trim_matches(|ch| ch == '[' || ch == ']').split(',') {
+        let mut parts = segment.split_whitespace();
+        match (parts.next(), parts.next()) {
+            (Some("ahead"), Some(count)) => ahead = count.parse().unwrap_or(0),
+            (Some("behind"), Some(count)) => behind = count.parse().unwrap_or(0),
+            _ => {}
+        }
+    }
+    (ahead, behind)
 }
 
 fn parse_porcelain_v2(output: &[u8]) -> AppResult<ParsedStatus> {
@@ -2743,6 +3101,122 @@ fn validate_host(value: &str) -> AppResult<()> {
     Ok(())
 }
 
+fn projection_values(payload: Value, collection_field: Option<&str>) -> Vec<Value> {
+    let pages = match payload {
+        Value::Array(values) => values,
+        value => vec![value],
+    };
+    let mut output = Vec::new();
+    for page in pages {
+        if let Some(field) = collection_field {
+            if let Some(values) = page.get(field).and_then(Value::as_array) {
+                output.extend(values.iter().cloned());
+            }
+        } else if let Value::Array(values) = page {
+            output.extend(values);
+        } else {
+            output.push(page);
+        }
+    }
+    output
+}
+
+fn json_identifier(value: &Value) -> Option<String> {
+    match value {
+        Value::String(value) => Some(value.clone()),
+        Value::Number(value) => Some(value.to_string()),
+        _ => None,
+    }
+}
+
+fn workflow_trigger_kinds(source: &str) -> Vec<String> {
+    let known = [
+        "workflow_call",
+        "workflow_dispatch",
+        "pull_request_target",
+        "pull_request",
+        "merge_group",
+        "push",
+        "schedule",
+        "release",
+    ];
+    let mut triggers = Vec::new();
+    let mut in_on_block = false;
+    let mut on_indent = 0usize;
+    for line in source.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let indent = line.len().saturating_sub(line.trim_start().len());
+        if let Some(value) = trimmed.strip_prefix("on:") {
+            in_on_block = value.trim().is_empty();
+            on_indent = indent;
+            for trigger in known {
+                if value
+                    .split(|ch: char| !ch.is_ascii_alphanumeric() && ch != '_')
+                    .any(|part| part == trigger)
+                {
+                    triggers.push(trigger.to_owned());
+                }
+            }
+            continue;
+        }
+        if in_on_block {
+            if indent <= on_indent {
+                in_on_block = false;
+                continue;
+            }
+            if let Some((key, _)) = trimmed.split_once(':') {
+                if known.contains(&key) && !triggers.iter().any(|value| value == key) {
+                    triggers.push(key.to_owned());
+                }
+            }
+        }
+    }
+    triggers
+}
+
+fn classify_github_error(stderr: &str) -> AppError {
+    let lower = stderr.to_ascii_lowercase();
+    let (code, message) = if lower.contains("authentication")
+        || lower.contains("bad credentials")
+        || lower.contains("not logged into")
+        || lower.contains("http 401")
+    {
+        (
+            "github_authentication_expired",
+            "The GitHub authorization is missing or expired.",
+        )
+    } else if lower.contains("rate limit") || lower.contains("http 429") {
+        (
+            "github_rate_limited",
+            "GitHub's API rate limit has been reached.",
+        )
+    } else if lower.contains("http 403")
+        || lower.contains("resource not accessible by integration")
+        || lower.contains("must have") && lower.contains("permission")
+    {
+        (
+            "github_permission_missing",
+            "The connected GitHub account or App installation lacks the required permission.",
+        )
+    } else if lower.contains("http 404") || lower.contains("could not resolve to a repository") {
+        (
+            "github_repository_not_found",
+            "GitHub could not find this repository for the connected account.",
+        )
+    } else {
+        (
+            "github_operation_failed",
+            "GitHub rejected the requested provider operation.",
+        )
+    };
+    AppError::new(code, message, true)
+        .detail(redact(stderr))
+        .layer("github_provider")
+}
+
 fn safe_text(bytes: &[u8]) -> String {
     redact(&String::from_utf8_lossy(
         &bytes[..bytes.len().min(MAX_COMMAND_OUTPUT)],
@@ -2772,16 +3246,26 @@ fn redact_url_credentials(value: &str) -> String {
         let mut search = 0;
         while let Some(offset) = output[search..].find(scheme) {
             let start = search + offset + scheme.len();
-            let Some(at) = output[start..].find('@') else {
-                break;
-            };
-            let at = start + at;
-            if output[start..at].contains(':') {
-                output.replace_range(start..=at, "[credential]@");
-                search = start + 13;
-            } else {
-                search = at + 1;
+            // Credentials, when present, can only occur in the URI authority. Never scan to an
+            // `@` in a later JSON field (for example a commit author's email), because doing so
+            // both corrupts provider JSON and may remove unrelated diagnostic content.
+            let authority_end = output[start..]
+                .find(|character: char| {
+                    matches!(character, '/' | '?' | '#' | '\\' | '"' | '\'' | '<' | '>')
+                        || character.is_whitespace()
+                })
+                .map(|end| start + end)
+                .unwrap_or(output.len());
+            let authority = &output[start..authority_end];
+            if let Some(relative_at) = authority.find('@') {
+                let at = start + relative_at;
+                if output[start..at].contains(':') {
+                    output.replace_range(start..=at, "[credential]@");
+                    search = start + "[credential]@".len();
+                    continue;
+                }
             }
+            search = authority_end.max(start + 1);
         }
     }
     output
@@ -2913,6 +3397,44 @@ mod tests {
             redact("Authorization: Bearer secret\nhttps://alice:token@example.com/repo.git");
         assert!(!value.contains("secret"));
         assert!(!value.contains("token@"));
+    }
+    #[test]
+    fn url_redaction_does_not_corrupt_json_with_a_later_email_address() {
+        let value = r#"{"url":"https://github.com/example/repo","email":"agent@example.com"}"#;
+        assert_eq!(redact(value), value);
+        assert!(serde_json::from_str::<Value>(&redact(value)).is_ok());
+    }
+    #[test]
+    fn paginated_provider_collections_are_flattened() {
+        let payload = serde_json::json!([
+            {"workflows":[{"id":1,"name":"Validate"}]},
+            {"workflows":[{"id":2,"name":"Release"}]}
+        ]);
+        let values = projection_values(payload, Some("workflows"));
+        assert_eq!(values.len(), 2);
+        assert_eq!(values[1]["name"], "Release");
+    }
+    #[test]
+    fn workflow_trigger_parser_represents_reusable_and_manual_definitions() {
+        let triggers = workflow_trigger_kinds(
+            "name: Release\non:\n  workflow_call:\n  workflow_dispatch:\n  push:\n    tags: ['v*']\n",
+        );
+        assert_eq!(triggers, ["workflow_call", "workflow_dispatch", "push"]);
+    }
+    #[test]
+    fn github_failures_preserve_auth_permission_and_rate_limit_categories() {
+        assert_eq!(
+            classify_github_error("HTTP 401: Bad credentials").code,
+            "github_authentication_expired"
+        );
+        assert_eq!(
+            classify_github_error("HTTP 403: Resource not accessible by integration").code,
+            "github_permission_missing"
+        );
+        assert_eq!(
+            classify_github_error("API rate limit exceeded").code,
+            "github_rate_limited"
+        );
     }
     #[test]
     fn cancelled_helper_is_classified_without_returning_command_output() {

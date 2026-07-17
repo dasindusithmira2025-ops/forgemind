@@ -349,6 +349,10 @@ export interface RepositorySnapshot {
   projectId: string; repositoryPath: string; worktreePath: string; branch?: string; headSha: string; upstream?: string
   ahead: number; behind: number; remotes: string[]; files: RepositoryFileStatus[]; health: RepositoryHealth; capturedAt: string
 }
+export interface RepositoryBranchSummary {
+  name: string; fullRef: string; kind: 'local' | 'remote'; current: boolean; headSha: string; upstream?: string
+  ahead: number; behind: number; latestSubject: string; latestCommitAt: string
+}
 export interface RepositoryDiffRequest {
   projectId: string; repositoryPath?: string; worktreePath?: string; path?: string; staged: boolean
   contextLines?: number; offset?: number; limit?: number
@@ -375,10 +379,16 @@ export interface MergeReadiness {
 export interface ProviderAccountStatus { provider: string; host: string; authenticated: boolean; accountLogin?: string; authenticationSource: string; permissions: string[]; message: string }
 export interface WorktreeConflictRisk { leftLeaseId: string; rightLeaseId: string; overlappingPaths: string[]; inferred: boolean }
 export interface RemoteProjectionRequest { projectId: string; repositoryPath?: string }
+export interface WorkflowRunDetailRequest { projectId: string; repositoryPath?: string; runId: number }
+export interface PullRequestDetailRequest { projectId: string; repositoryPath?: string; number: number }
 export interface RemoteProjectionObject { kind: string; externalId: string; payload: unknown; fetchedAt: string; stale: boolean; deleted: boolean }
+export interface RemoteSyncStatus {
+  category: string; status: 'healthy' | 'stale' | 'failed'; lastAttemptAt?: string; lastSuccessfulSync?: string
+  staleSince?: string; errorCode?: string; errorMessage?: string; requiredPermission?: string; recoveryAction?: string
+}
 export interface RemoteProjection {
   projectId: string; provider: string; repository: unknown; objects: RemoteProjectionObject[]
-  rateLimit?: unknown; lastSuccessfulSync: string; stale: boolean
+  syncStatuses: RemoteSyncStatus[]; rateLimit?: unknown; lastSuccessfulSync: string; stale: boolean
 }
 
 export interface HealthReport {

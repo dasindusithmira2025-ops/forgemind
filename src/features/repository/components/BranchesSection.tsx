@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import {
-  Bot, GitBranch, GitMerge, Loader2, Plus, RefreshCw, Trash2, TriangleAlert,
+  Bot, GitBranch, Loader2, Plus, RefreshCw, Trash2, TriangleAlert,
 } from 'lucide-react'
 import { Button } from '../../../components/ui/Button'
 import { useRepositoryStore } from '../repositoryStore'
@@ -19,10 +19,15 @@ export function BranchesSection({ onRequestAgentWorktree }: { onRequestAgentWork
   const snapshot = useRepositoryStore((state) => state.snapshot)
   const leases = useRepositoryStore((state) => state.leases)
   const conflictRisks = useRepositoryStore((state) => state.conflictRisks)
+  const branches = useRepositoryStore((state) => state.branches)
+  const pullRequests = useRepositoryStore((state) => state.remoteViews.pullRequests)
+  const runs = useRepositoryStore((state) => state.remoteViews.workflowRuns)
   const pending = useRepositoryStore((state) => state.pending)
   const runOperation = useRepositoryStore((state) => state.runOperation)
   const refreshLeases = useRepositoryStore((state) => state.refreshLeases)
+  const refreshBranches = useRepositoryStore((state) => state.refreshBranches)
   const [newBranch, setNewBranch] = useState('')
+  const [createOpen, setCreateOpen] = useState(false)
 
   const sync = deriveSyncState(snapshot)
   const dirty = (snapshot?.files.length ?? 0) > 0
@@ -39,13 +44,8 @@ export function BranchesSection({ onRequestAgentWorktree }: { onRequestAgentWork
     const name = newBranch.trim()
     if (!name) return
     void runOperation({ kind: 'create_branch', name, startPoint: snapshot?.headSha }, { key: 'create-branch' })
-      .then((record) => { if (record.status === 'succeeded') setNewBranch('') })
+      .then((record) => { if (record.status === 'succeeded') { setNewBranch(''); setCreateOpen(false) } })
       .catch(() => undefined)
-  }
-  const switchBranch = () => {
-    const name = window.prompt('Switch to which branch?')?.trim()
-    if (!name) return
-    void runOperation({ kind: 'switch_branch', name }, { key: 'switch-branch' }).catch(() => undefined)
   }
   const removeWorktree = (leaseId: string, branchName: string) => {
     if (!window.confirm(`Request cleanup of the agent worktree for ${branchName}? The lease is released and the worktree removed.`)) return
@@ -65,16 +65,28 @@ export function BranchesSection({ onRequestAgentWorktree }: { onRequestAgentWork
   return (
     <div className="repo-branches">
       <div className="repo-branch-toolbar">
-        <div className="repo-inline-form">
-          <input value={newBranch} onChange={(event) => setNewBranch(event.target.value)} placeholder="new-branch-name" aria-label="New branch name" spellCheck={false} />
-          <Button variant="secondary" icon={pending['create-branch'] ? <Loader2 size={14} className="is-spinning" /> : <Plus size={14} />} onClick={createBranch} disabled={Boolean(pending['create-branch']) || !newBranch.trim()}>Create branch</Button>
-        </div>
+        <div className="repo-branch-summary"><strong>{branches.filter((branch) => branch.kind === 'local').length} local</strong><span>{branches.filter((branch) => branch.kind === 'remote').length} remote refs</span></div>
         <div className="repo-branch-toolbar-actions">
-          <Button variant="ghost" icon={<GitMerge size={14} />} onClick={switchBranch} disabled={dirty || Boolean(pending['switch-branch'])} title={dirty ? 'Commit, stash or discard changes before switching' : 'Switch the current branch'}>Switch</Button>
+          <Button variant="secondary" icon={<Plus size={14} />} onClick={() => setCreateOpen(true)}>Create branch</Button>
           <Button variant="secondary" icon={<Bot size={14} />} onClick={requestAgentWorktree}>New agent worktree</Button>
-          <Button variant="ghost" icon={<RefreshCw size={14} />} aria-label="Refresh branches" onClick={() => void refreshLeases()} />
+          <Button variant="ghost" icon={<RefreshCw size={14} />} aria-label="Refresh branches" onClick={() => { void refreshLeases(); void refreshBranches() }} />
         </div>
       </div>
+
+      {(['local', 'remote'] as const).map((kind) => <div key={kind} className="repo-branch-group">
+        <div className="repo-section-subhead"><span>{kind === 'local' ? 'Local branches' : 'Remote branches'}</span><span className="repo-count">{branches.filter((branch) => branch.kind === kind && !branch.current).length}</span></div>
+        <ul className="repo-lane-list">{branches.filter((branch) => branch.kind === kind && !branch.current).map((branch) => {
+          const lease = leases.find((item) => item.branchName === branch.name)
+          const pr = pullRequests.find((item) => item.headBranch === branch.name || branch.name.endsWith(`/${item.headBranch}`))
+          const ci = pr ? runs.find((run) => run.commitSha === pr.headSha) : undefined
+          const switchTo = () => void runOperation({ kind: 'switch_branch', name: branch.name }, { key: `switch:${branch.name}` }).catch(() => undefined)
+          const deleteBranch = () => { if (window.confirm(`Delete local branch ${branch.name}? Protected, active and unmerged branches are blocked by backend policy.`)) void runOperation({ kind: 'delete_branch', name: branch.name }, { key: `delete:${branch.name}` }).catch(() => undefined) }
+          return <li key={branch.fullRef} className="repo-branch-lane">
+            <div className="repo-branch-lane-main"><GitBranch size={14} /><div><strong>{branch.name}</strong><span className="repo-muted">{branch.latestSubject || 'No commit subject'} · {relativeTime(branch.latestCommitAt)}</span></div></div>
+            <div className="repo-branch-lane-status">{lease ? <StatusBadge tone="accent"><Bot size={11} /> {lease.agentId}</StatusBadge> : <StatusBadge tone="neutral">Human</StatusBadge>}{branch.upstream && <span className="repo-muted">{branch.ahead} ahead · {branch.behind} behind</span>}{pr && <StatusBadge tone="accent">PR #{pr.number}</StatusBadge>}{ci && <StatusBadge tone={ci.state === 'success' ? 'success' : ci.state === 'failure' ? 'danger' : 'pending'}>{ci.state}</StatusBadge>}{kind === 'local' && <Button variant="ghost" onClick={switchTo} disabled={dirty}>Switch</Button>}{kind === 'local' && !lease && <button className="repo-icon-btn danger" aria-label={`Delete ${branch.name}`} onClick={deleteBranch}><Trash2 size={13} /></button>}</div>
+          </li>
+        })}</ul>
+      </div>)}
 
       <div className="repo-branch-lane current">
         <div className="repo-branch-lane-main">
@@ -128,6 +140,7 @@ export function BranchesSection({ onRequestAgentWorktree }: { onRequestAgentWork
           <span>{conflictRisks.length} worktree pair{conflictRisks.length === 1 ? '' : 's'} share file scope. Coordinate or rebase before merging to avoid conflicts.</span>
         </div>
       )}
+      {createOpen && <div className="repo-modal-backdrop" role="presentation" onMouseDown={() => setCreateOpen(false)}><div className="repo-branch-dialog" role="dialog" aria-modal="true" aria-labelledby="create-branch-title" onMouseDown={(event) => event.stopPropagation()}><header><div><strong id="create-branch-title">Create branch</strong><span>Start from {snapshot?.headSha.slice(0, 10)}</span></div></header><label>Branch name<input autoFocus value={newBranch} onChange={(event) => setNewBranch(event.target.value)} placeholder="feature/short-description" spellCheck={false} /></label><p>PARALITH validates the ref name and creates it from the current commit. Switching remains a separate action.</p><footer><Button variant="ghost" onClick={() => setCreateOpen(false)}>Cancel</Button><Button variant="primary" icon={pending['create-branch'] ? <Loader2 size={14} className="is-spinning" /> : <GitBranch size={14} />} onClick={createBranch} disabled={!newBranch.trim() || Boolean(pending['create-branch'])}>Create branch</Button></footer></div></div>}
     </div>
   )
 }

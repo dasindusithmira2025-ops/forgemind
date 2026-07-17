@@ -1,7 +1,7 @@
 use crate::errors::{AppError, AppResult};
 use rusqlite::{params, Connection};
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 13;
+pub const CURRENT_SCHEMA_VERSION: i64 = 14;
 
 const MIGRATION_1: &str = r#"
 CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
@@ -831,6 +831,13 @@ pub fn apply(connection: &Connection) -> AppResult<()> {
     if current < 13 || !table_exists(connection, "repository_operations")? {
         migrate_v13(connection)?;
     }
+    if current < 14
+        || !column_exists(connection, "repository_sync_cursors", "error_message")?
+        || !column_exists(connection, "repository_sync_cursors", "required_permission")?
+        || !column_exists(connection, "repository_sync_cursors", "recovery_action")?
+    {
+        migrate_v14(connection)?;
+    }
     Ok(())
 }
 
@@ -849,7 +856,10 @@ pub fn requires_migration(connection: &Connection) -> AppResult<bool> {
         || !column_exists(connection, "workspace_placements", "preferred_monitor_id")?
         || !column_exists(connection, "agent_sessions", "agent_state")?
         || !table_exists(connection, "pane_worktrees")?
-        || !table_exists(connection, "repository_operations")?)
+        || !table_exists(connection, "repository_operations")?
+        || !column_exists(connection, "repository_sync_cursors", "error_message")?
+        || !column_exists(connection, "repository_sync_cursors", "required_permission")?
+        || !column_exists(connection, "repository_sync_cursors", "recovery_action")?)
 }
 
 fn table_exists(connection: &Connection, table: &str) -> AppResult<bool> {
@@ -1290,6 +1300,36 @@ WHERE status='active';
     finish_migration_transaction(connection, result, 13)
 }
 
+/// Persist category-specific provider diagnostics so an offline restart can distinguish an
+/// empty collection from a failed synchronization without keeping credentials or responses.
+fn migrate_v14(connection: &Connection) -> AppResult<()> {
+    connection
+        .execute_batch("BEGIN IMMEDIATE;")
+        .map_err(AppError::database)?;
+    let result = (|| {
+        add_column_if_missing(
+            connection,
+            "repository_sync_cursors",
+            "error_message",
+            "TEXT",
+        )?;
+        add_column_if_missing(
+            connection,
+            "repository_sync_cursors",
+            "required_permission",
+            "TEXT",
+        )?;
+        add_column_if_missing(
+            connection,
+            "repository_sync_cursors",
+            "recovery_action",
+            "TEXT",
+        )?;
+        record_migration(connection, 14)
+    })();
+    finish_migration_transaction(connection, result, 14)
+}
+
 fn record_migration(connection: &Connection, version: i64) -> AppResult<()> {
     connection
         .execute(
@@ -1577,7 +1617,7 @@ mod tests {
         let version: i64 = connection
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 13);
+        assert_eq!(version, CURRENT_SCHEMA_VERSION);
         for table in [
             "repository_connections",
             "repository_policies",
@@ -1591,6 +1631,42 @@ mod tests {
         ] {
             assert!(table_exists(&connection, table).unwrap(), "missing {table}");
         }
+        for column in ["error_message", "required_permission", "recovery_action"] {
+            assert!(column_exists(&connection, "repository_sync_cursors", column).unwrap());
+        }
+    }
+
+    #[test]
+    fn v13_repository_projection_upgrades_without_losing_cursors() {
+        let connection = Connection::open_in_memory().unwrap();
+        apply(&connection).unwrap();
+        connection
+            .execute_batch(
+                "ALTER TABLE repository_sync_cursors RENAME TO repository_sync_cursors_v14;
+             CREATE TABLE repository_sync_cursors(
+               project_id TEXT NOT NULL, provider TEXT NOT NULL, stream TEXT NOT NULL,
+               cursor TEXT, status TEXT NOT NULL, last_attempt_at TEXT, last_success_at TEXT,
+               stale_since TEXT, error_code TEXT,
+               PRIMARY KEY(project_id,provider,stream)
+             );
+             INSERT INTO repository_sync_cursors(project_id,provider,stream,status,last_success_at)
+               VALUES('project-1','github','workflow_run','healthy','2026-07-17T00:00:00Z');
+             DROP TABLE repository_sync_cursors_v14;
+             PRAGMA user_version=13;",
+            )
+            .unwrap();
+        apply(&connection).unwrap();
+        let preserved: String = connection.query_row(
+            "SELECT last_success_at FROM repository_sync_cursors WHERE project_id='project-1' AND stream='workflow_run'",
+            [], |row| row.get(0),
+        ).unwrap();
+        assert_eq!(preserved, "2026-07-17T00:00:00Z");
+        assert_eq!(
+            connection
+                .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            CURRENT_SCHEMA_VERSION
+        );
     }
 
     #[test]

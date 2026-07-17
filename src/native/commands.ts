@@ -33,7 +33,9 @@ import type {
   MergeReadiness,
   MergeReadinessRequest,
   ProviderAccountStatus,
+  PullRequestDetailRequest,
   RepositoryApprovalOutcome,
+  RepositoryBranchSummary,
   RepositoryApprovalRequest,
   RepositoryDiff,
   RepositoryDiffRequest,
@@ -41,7 +43,9 @@ import type {
   RepositoryOperationRequest,
   RepositoryPolicyConfiguration,
   RemoteProjection,
+  RemoteProjectionObject,
   RemoteProjectionRequest,
+  WorkflowRunDetailRequest,
   RepositorySnapshot,
   RepositoryWorktreeLease,
   WorktreeConflictRisk,
@@ -86,6 +90,8 @@ export const native = {
     invoke<IsolatedWorktreeResult>('create_isolated_pane_worktree', { workspaceId, paneId }),
   inspectRepository: (projectId: string, repositoryPath?: string, worktreePath?: string) =>
     invoke<RepositorySnapshot>('inspect_repository', { projectId, repositoryPath, worktreePath }),
+  listRepositoryBranches: (projectId: string, repositoryPath?: string) =>
+    invoke<RepositoryBranchSummary[]>('list_repository_branches', { projectId, repositoryPath }),
   getRepositoryDiff: (request: RepositoryDiffRequest) => invoke<RepositoryDiff>('get_repository_diff', { request }),
   executeRepositoryOperation: (request: RepositoryOperationRequest) =>
     invoke<RepositoryOperationRecord>('execute_repository_operation', { request }),
@@ -108,6 +114,10 @@ export const native = {
     invoke<ProviderAccountStatus>('get_github_provider_status', { projectId, host }),
   refreshRepositoryRemoteProjection: (request: RemoteProjectionRequest) =>
     invoke<RemoteProjection>('refresh_repository_remote_projection', { request }),
+  getRepositoryWorkflowRunDetail: (request: WorkflowRunDetailRequest) =>
+    invoke<RemoteProjectionObject>('get_repository_workflow_run_detail', { request }),
+  getRepositoryPullRequestDetail: (request: PullRequestDetailRequest) =>
+    invoke<RemoteProjectionObject>('get_repository_pull_request_detail', { request }),
   evaluateMergeReadiness: (request: MergeReadinessRequest) =>
     invoke<MergeReadiness>('evaluate_merge_readiness', { request }),
   writeTerminalInput: (sessionId: string, data: number[]) => invoke<void>('write_terminal_input', { sessionId, data }),

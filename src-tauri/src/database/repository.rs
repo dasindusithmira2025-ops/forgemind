@@ -1,9 +1,10 @@
 use super::DatabaseService;
 use crate::errors::{AppError, AppResult};
 use crate::models::{
-    RemoteProjectionObject, RepositoryActor, RepositoryApprovalRequest, RepositoryOperationRecord,
-    RepositoryOperationStatus, RepositoryPolicyDecision, RepositoryPolicyDecisionKind,
-    RepositoryPolicyProfile, RepositorySnapshot, RepositoryWorktreeLease,
+    RemoteProjectionObject, RemoteSyncStatus, RepositoryActor, RepositoryApprovalRequest,
+    RepositoryOperationRecord, RepositoryOperationStatus, RepositoryPolicyDecision,
+    RepositoryPolicyDecisionKind, RepositoryPolicyProfile, RepositorySnapshot,
+    RepositoryWorktreeLease,
 };
 use chrono::Utc;
 use rusqlite::{params, OptionalExtension};
@@ -487,28 +488,62 @@ impl DatabaseService {
             ).map_err(AppError::database)?;
         }
         transaction.execute(
-            "INSERT INTO repository_sync_cursors(project_id,provider,stream,status,last_attempt_at,last_success_at,stale_since,error_code) VALUES(?1,?2,?3,'healthy',?4,?4,NULL,NULL) ON CONFLICT(project_id,provider,stream) DO UPDATE SET status='healthy',last_attempt_at=excluded.last_attempt_at,last_success_at=excluded.last_success_at,stale_since=NULL,error_code=NULL",
+            "INSERT INTO repository_sync_cursors(project_id,provider,stream,status,last_attempt_at,last_success_at,stale_since,error_code,error_message,required_permission,recovery_action) VALUES(?1,?2,?3,'healthy',?4,?4,NULL,NULL,NULL,NULL,NULL) ON CONFLICT(project_id,provider,stream) DO UPDATE SET status='healthy',last_attempt_at=excluded.last_attempt_at,last_success_at=excluded.last_success_at,stale_since=NULL,error_code=NULL,error_message=NULL,required_permission=NULL,recovery_action=NULL",
             params![project_id,provider,kind,fetched_at],
         ).map_err(AppError::database)?;
         transaction.commit().map_err(AppError::database)
     }
 
-    pub(crate) fn mark_remote_projection_stale(
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn mark_remote_projection_kind_stale(
         &self,
         project_id: &str,
         provider: &str,
+        kind: &str,
         error_code: &str,
+        error_message: &str,
+        required_permission: Option<&str>,
+        recovery_action: &str,
     ) -> AppResult<()> {
         let now = Utc::now().to_rfc3339();
-        self.connection.lock().execute(
-            "UPDATE repository_remote_cache SET stale_at=COALESCE(stale_at,?3) WHERE project_id=?1 AND provider=?2 AND deleted_at IS NULL",
-            params![project_id,provider,now],
+        let connection = self.connection.lock();
+        connection.execute(
+            "UPDATE repository_remote_cache SET stale_at=COALESCE(stale_at,?4) WHERE project_id=?1 AND provider=?2 AND object_kind=?3 AND deleted_at IS NULL",
+            params![project_id, provider, kind, now],
         ).map_err(AppError::database)?;
-        self.connection.lock().execute(
-            "UPDATE repository_sync_cursors SET status='stale',last_attempt_at=?3,stale_since=COALESCE(stale_since,?3),error_code=?4 WHERE project_id=?1 AND provider=?2",
-            params![project_id,provider,now,error_code],
+        connection.execute(
+            "INSERT INTO repository_sync_cursors(project_id,provider,stream,status,last_attempt_at,last_success_at,stale_since,error_code,error_message,required_permission,recovery_action) VALUES(?1,?2,?3,'failed',?4,NULL,?4,?5,?6,?7,?8) ON CONFLICT(project_id,provider,stream) DO UPDATE SET status=CASE WHEN repository_sync_cursors.last_success_at IS NULL THEN 'failed' ELSE 'stale' END,last_attempt_at=excluded.last_attempt_at,stale_since=COALESCE(repository_sync_cursors.stale_since,excluded.stale_since),error_code=excluded.error_code,error_message=excluded.error_message,required_permission=excluded.required_permission,recovery_action=excluded.recovery_action",
+            params![project_id, provider, kind, now, error_code, error_message, required_permission, recovery_action],
         ).map_err(AppError::database)?;
         Ok(())
+    }
+
+    pub(crate) fn load_remote_sync_statuses(
+        &self,
+        project_id: &str,
+        provider: &str,
+    ) -> AppResult<Vec<RemoteSyncStatus>> {
+        let connection = self.connection.lock();
+        let mut statement = connection.prepare(
+            "SELECT stream,status,last_attempt_at,last_success_at,stale_since,error_code,error_message,required_permission,recovery_action FROM repository_sync_cursors WHERE project_id=?1 AND provider=?2 ORDER BY stream",
+        ).map_err(AppError::database)?;
+        let rows = statement
+            .query_map(params![project_id, provider], |row| {
+                Ok(RemoteSyncStatus {
+                    category: row.get(0)?,
+                    status: row.get(1)?,
+                    last_attempt_at: row.get(2)?,
+                    last_successful_sync: row.get(3)?,
+                    stale_since: row.get(4)?,
+                    error_code: row.get(5)?,
+                    error_message: row.get(6)?,
+                    required_permission: row.get(7)?,
+                    recovery_action: row.get(8)?,
+                })
+            })
+            .map_err(AppError::database)?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(AppError::database)
     }
 
     pub(crate) fn load_remote_projection(

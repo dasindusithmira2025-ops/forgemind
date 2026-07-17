@@ -12,9 +12,12 @@ vi.mock('../../native/commands', () => ({
     listRepositoryApprovals: vi.fn().mockResolvedValue([]),
     listRepositoryWorktreeLeases: vi.fn().mockResolvedValue([]),
     getWorktreeConflictRisks: vi.fn().mockResolvedValue([]),
+    listRepositoryBranches: vi.fn().mockResolvedValue([]),
     executeRepositoryOperation: vi.fn(),
     decideRepositoryApproval: vi.fn(),
-    refreshRepositoryRemoteProjection: vi.fn().mockResolvedValue({ projectId: 'p1', provider: 'github', repository: {}, objects: [], lastSuccessfulSync: '', stale: false }),
+    refreshRepositoryRemoteProjection: vi.fn().mockResolvedValue({ projectId: 'p1', provider: 'github', repository: {}, objects: [], syncStatuses: [], lastSuccessfulSync: '', stale: false }),
+    getRepositoryWorkflowRunDetail: vi.fn(),
+    getRepositoryPullRequestDetail: vi.fn(),
     getRepositoryDiff: vi.fn().mockResolvedValue({ text: '', totalBytes: 0, offset: 0, truncated: false, binary: false }),
     evaluateMergeReadiness: vi.fn(),
     listAgentProfiles: vi.fn().mockResolvedValue([{ id: 'a1', provider: 'claude', name: 'Claude', executablePath: '', available: true, createdAt: '', updatedAt: '' }]),
@@ -68,7 +71,8 @@ beforeEach(() => {
   mockNative.listRepositoryApprovals.mockResolvedValue([])
   mockNative.listRepositoryWorktreeLeases.mockResolvedValue([])
   mockNative.getWorktreeConflictRisks.mockResolvedValue([])
-  mockNative.refreshRepositoryRemoteProjection.mockResolvedValue({ projectId: 'p1', provider: 'github', repository: {}, objects: [], lastSuccessfulSync: '', stale: false })
+  mockNative.listRepositoryBranches.mockResolvedValue([])
+  mockNative.refreshRepositoryRemoteProjection.mockResolvedValue({ projectId: 'p1', provider: 'github', repository: {}, objects: [], syncStatuses: [], lastSuccessfulSync: '', stale: false })
   mockNative.getRepositoryDiff.mockResolvedValue({ text: '', totalBytes: 0, offset: 0, truncated: false, binary: false })
   mockNative.listAgentProfiles.mockResolvedValue([{ id: 'a1', provider: 'claude', name: 'Claude', executablePath: '', available: true, createdAt: '', updatedAt: '' }])
 })
@@ -126,6 +130,7 @@ describe('RepositoryCommandCenter', () => {
     mockNative.inspectRepository.mockResolvedValue(snapshot('p1'))
     mockNative.refreshRepositoryRemoteProjection.mockResolvedValue({
       projectId: 'p1', provider: 'github', repository: {}, lastSuccessfulSync: '', stale: false,
+      syncStatuses: [{ category: 'pull_request', status: 'healthy' }],
       objects: [{ kind: 'pull_request', externalId: '1', fetchedAt: '2026-01-01T00:00:00Z', stale: false, deleted: false, payload: { number: 5, title: 'A PR', headBranch: 'feat', baseBranch: 'main', headSha: 'deadbeef' } }],
     })
     const readiness: MergeReadiness = { ready: false, blockingReasons: ['Required review missing'], warnings: [], requiredActions: [], evidence: {}, evaluatedAt: '', sourceHeadSha: 'deadbeef' }
@@ -136,6 +141,40 @@ describe('RepositoryCommandCenter', () => {
     expect(screen.getByText('Required review missing')).toBeInTheDocument()
     const mergeButton = screen.getByRole('button', { name: /Merge pull request/ })
     expect(mergeButton).toBeDisabled()
+  })
+
+  it('renders workflow definitions separately from repository-wide runs', async () => {
+    mockNative.inspectRepository.mockResolvedValue(snapshot('p1'))
+    mockNative.getGitHubProviderStatus.mockResolvedValue({ provider: 'github', authenticated: true, permissions: [], message: 'Connected' })
+    mockNative.refreshRepositoryRemoteProjection.mockResolvedValue({
+      projectId: 'p1', provider: 'github', repository: {}, lastSuccessfulSync: '2026-07-17T00:00:00Z', stale: false,
+      syncStatuses: [{ category: 'workflow', status: 'healthy' }, { category: 'workflow_run', status: 'healthy' }],
+      objects: [
+        ...['Release Preview', 'Release Stable', 'Release Windows (reusable)', 'Validate'].map((name, index) => ({ kind: 'workflow', externalId: String(index + 1), fetchedAt: '', stale: false, deleted: false, payload: { id: index + 1, name, path: `.github/workflows/${index}.yml`, state: 'active', triggerKinds: index === 2 ? ['workflow_call'] : ['push'] } })),
+        { kind: 'workflow_run', externalId: '99', fetchedAt: '', stale: false, deleted: false, payload: { id: 99, workflow_id: 4, name: 'Validate', display_title: 'feat: repository UI', head_branch: 'feat/repository-command-center', head_sha: 'abcdef123456', status: 'completed', conclusion: 'failure', event: 'pull_request', actor: { login: 'dasindu' }, created_at: '2026-07-17T00:00:00Z' } },
+      ],
+    })
+    render(<RepositoryCommandCenter projectId="p1" projectName="Alpha" />)
+    fireEvent.click(await screen.findByRole('button', { name: /Actions/ }))
+    expect(await screen.findByText('Release Preview')).toBeInTheDocument()
+    expect(screen.getByText('Release Stable')).toBeInTheDocument()
+    expect(screen.getByText('Release Windows (reusable)')).toBeInTheDocument()
+    expect(screen.getAllByText('Validate').length).toBeGreaterThan(0)
+    expect(screen.queryByText(/No workflow runs found/)).not.toBeInTheDocument()
+  })
+
+  it('shows provider failure diagnostics instead of a legitimate empty state', async () => {
+    mockNative.inspectRepository.mockResolvedValue(snapshot('p1'))
+    mockNative.getGitHubProviderStatus.mockResolvedValue({ provider: 'github', authenticated: true, permissions: [], message: 'Connected' })
+    mockNative.refreshRepositoryRemoteProjection.mockResolvedValue({
+      projectId: 'p1', provider: 'github', repository: {}, objects: [], lastSuccessfulSync: '', stale: true,
+      syncStatuses: [{ category: 'workflow', status: 'failed', errorCode: 'github_permission_missing', errorMessage: 'Actions permission is missing.', requiredPermission: 'actions:read', recoveryAction: 'Update the installation.' }],
+    })
+    render(<RepositoryCommandCenter projectId="p1" projectName="Alpha" />)
+    fireEvent.click(await screen.findByRole('button', { name: /Actions/ }))
+    expect(await screen.findByText('Actions synchronization failed')).toBeInTheDocument()
+    expect(screen.getByText('Actions permission is missing.')).toBeInTheDocument()
+    expect(screen.queryByText('No workflow files exist')).not.toBeInTheDocument()
   })
 
   it('resets repository state when the project changes', async () => {

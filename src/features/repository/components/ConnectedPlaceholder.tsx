@@ -6,9 +6,10 @@ import { Button } from '../../../components/ui/Button'
  * It is not a fake card: it reflects real connection state, offers the real refresh action, and
  * never fabricates rows. Used when a provider account is missing or a projection is genuinely empty.
  */
-export function ConnectedPlaceholder({ title, message, onRetry, loading, authHint, inline }: {
+export function ConnectedPlaceholder({ title, message, detail, onRetry, loading, authHint, inline }: {
   title: string
   message: string
+  detail?: string
   onRetry?: () => void
   loading?: boolean
   authHint?: boolean
@@ -20,9 +21,10 @@ export function ConnectedPlaceholder({ title, message, onRetry, loading, authHin
       <div className="repo-placeholder-body">
         <strong>{title}</strong>
         <p>{message}</p>
-        {authHint && <p className="repo-muted">Sign in with the GitHub CLI (<code>gh auth login</code>) or configure a token in Settings to enable this surface.</p>}
+        {detail && <p className="repo-placeholder-detail">{detail}</p>}
+        {authHint && <p className="repo-muted">Reconnect the GitHub provider account or run <code>gh auth login</code>. Credentials remain in the operating-system credential store and are never sent to the renderer.</p>}
       </div>
-      {onRetry && !inline && (
+      {onRetry && (
         <Button variant="secondary" icon={loading ? <Loader2 size={14} className="is-spinning" /> : <RefreshCw size={14} />} onClick={onRetry} disabled={loading}>
           {loading ? 'Refreshing' : 'Refresh'}
         </Button>

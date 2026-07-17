@@ -5,7 +5,6 @@ import { ErrorNotice } from '../../components/ui/ErrorNotice'
 import { native } from '../../native/commands'
 import type { AgentProfile } from '../../native/types'
 import { useRepositoryStore } from './repositoryStore'
-import { isRepositoryMockEnabled, mockRemoteViews } from './devMocks'
 import { REPOSITORY_SECTIONS, type RepositorySectionId } from './repositoryTypes'
 import { RepositoryHeader } from './components/RepositoryHeader'
 import { RepositorySectionNav } from './components/RepositorySectionNav'
@@ -45,17 +44,14 @@ export function RepositoryCommandCenter({ projectId, projectName }: { projectId:
     return () => stop()
   }, [projectId, loadProject, subscribe])
 
-  // Best-effort: fetch the remote projection once the local snapshot is ready, and pull the agent
-  // roster for the agent-action dialog. Dev mocks are injected only behind the explicit flag.
+  // Fetch the provider projection once local ownership is established. The bounded timer keeps
+  // active collaboration state useful without polling individual endpoints or crossing projects.
   useEffect(() => {
     if (load.status !== 'ready' || activeProjectId !== projectId) return
-    void refreshRemote().then(() => {
-      if (isRepositoryMockEnabled() && useRepositoryStore.getState().remoteViews.pullRequests.length === 0) {
-        const snapshot = useRepositoryStore.getState().snapshot
-        useRepositoryStore.setState({ remoteViews: mockRemoteViews(snapshot?.branch ?? 'main', snapshot?.headSha ?? '') })
-      }
-    })
+    void refreshRemote()
     void native.listAgentProfiles().then(setAgents).catch(() => undefined)
+    const timer = window.setInterval(() => { if (useRepositoryStore.getState().projectId === projectId) void refreshRemote() }, 120_000)
+    return () => window.clearInterval(timer)
   }, [load.status, activeProjectId, projectId, refreshRemote])
 
   const counts = useRepositoryCounts()
@@ -96,7 +92,7 @@ export function RepositoryCommandCenter({ projectId, projectName }: { projectId:
 
       <div className="repo-section-body" role="region" aria-label={REPOSITORY_SECTIONS.find((item) => item.id === section)?.label}>
         {section === 'overview' && <OverviewSection onNavigate={setSection} />}
-        {section === 'changes' && <ChangesSection />}
+        {section === 'changes' && <ChangesSection onNavigate={setSection} onRequestAgentWorktree={requestAgentWorktree} />}
         {section === 'branches' && <BranchesSection onRequestAgentWorktree={requestAgentWorktree} />}
         {section === 'pull-requests' && <PullRequestsSection onRequestAgentWorktree={requestAgentWorktree} />}
         {section === 'actions' && <ActionsSection onRequestAgentWorktree={requestAgentWorktree} />}
