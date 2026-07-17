@@ -260,6 +260,127 @@ export interface IsolatedWorktreeResult {
   baseRef: string
 }
 
+// ---- Repository Command Center -----------------------------------------------------------
+
+export type RepositoryActorKind = 'human' | 'agent' | 'system'
+export interface RepositoryActor {
+  kind: RepositoryActorKind
+  id: string
+  displayName: string
+  agentRunId?: string
+  model?: string
+  taskId?: string
+}
+
+export type RepositoryPolicyProfile = 'conservative' | 'balanced' | 'autonomous' | 'custom'
+export type RepositoryPolicyDecisionKind = 'allowed' | 'approval_required' | 'blocked'
+export interface RepositoryPolicyDecision { decision: RepositoryPolicyDecisionKind; risk: string; reason: string }
+
+export interface RepositoryOperationContext {
+  projectId: string
+  repositoryPath?: string
+  worktreePath?: string
+  actor: RepositoryActor
+  baseCommit?: string
+  expectedBranch?: string
+  approvalId?: string
+  idempotencyKey: string
+  timeoutSeconds?: number
+}
+
+export type RepositoryOperation =
+  | { kind: 'refresh_repository' }
+  | { kind: 'stage_paths'; paths: string[] }
+  | { kind: 'stage_hunks'; patch: string }
+  | { kind: 'unstage_paths'; paths: string[] }
+  | { kind: 'restore_paths'; paths: string[] }
+  | { kind: 'create_branch'; name: string; startPoint?: string }
+  | { kind: 'switch_branch'; name: string }
+  | { kind: 'delete_branch'; name: string }
+  | { kind: 'create_agent_worktree'; branch: string; baseCommit: string; agentId: string; taskId: string; fileScope: string[]; expiresAt?: string }
+  | { kind: 'remove_worktree'; leaseId: string }
+  | { kind: 'create_checkpoint'; message: string; paths: string[] }
+  | { kind: 'commit_change_set'; message: string; paths: string[] }
+  | { kind: 'amend_commit'; message?: string; paths: string[] }
+  | { kind: 'fetch_remote'; remote: string; prune: boolean }
+  | { kind: 'pull_branch'; remote: string; branch: string; rebase: boolean }
+  | { kind: 'push_branch'; remote: string; branch: string; forceWithLease: boolean }
+  | { kind: 'publish_branch'; remote: string; branch: string }
+  | { kind: 'create_tag'; name: string; revision: string; message?: string }
+  | { kind: 'delete_tag'; name: string }
+  | { kind: 'create_stash'; message?: string; includeUntracked: boolean }
+  | { kind: 'apply_stash'; revision: string; pop: boolean }
+  | { kind: 'revert_commit'; revision: string }
+  | { kind: 'cherry_pick'; revision: string }
+  | { kind: 'rebase_branch'; upstream: string }
+  | { kind: 'merge_branch'; branch: string; noFf: boolean }
+  | { kind: 'open_draft_pull_request'; base: string; head: string; title: string; body: string }
+  | { kind: 'update_pull_request'; number: number; title?: string; body?: string }
+  | { kind: 'mark_pull_request_ready'; number: number }
+  | { kind: 'request_review'; number: number; reviewers: string[] }
+  | { kind: 'submit_review'; number: number; event: 'approve' | 'request_changes' | 'comment'; body: string }
+  | { kind: 'resolve_review_thread'; threadId: string }
+  | { kind: 'rerun_workflow'; runId: number; failedOnly: boolean }
+  | { kind: 'cancel_workflow'; runId: number }
+  | { kind: 'merge_pull_request'; number: number; method: 'merge' | 'squash' | 'rebase'; expectedHeadSha: string }
+  | { kind: 'delete_remote_branch'; remote: string; branch: string }
+  | { kind: 'create_release'; tag: string; title: string; notes: string; draft: boolean }
+
+export interface RepositoryOperationRequest { context: RepositoryOperationContext; operation: RepositoryOperation }
+export type RepositoryOperationStatus = 'queued' | 'running' | 'awaiting_approval' | 'succeeded' | 'failed' | 'cancelled' | 'needs_recovery'
+export interface RepositoryOperationRecord {
+  id: string; projectId: string; kind: string; status: RepositoryOperationStatus
+  policy: RepositoryPolicyDecision; result?: unknown; errorCode?: string; errorMessage?: string
+  createdAt: string; startedAt?: string; completedAt?: string
+}
+export interface RepositoryOperationEvent {
+  operationId: string; projectId: string; kind: string; phase: string; message: string; percent?: number; at: string
+}
+export interface RepositoryFileStatus {
+  path: string; originalPath?: string; indexStatus: string; worktreeStatus: string; conflicted: boolean
+  untracked: boolean; renamed: boolean; deleted: boolean; submodule: boolean
+}
+export interface RepositoryHealth {
+  gitAvailable: boolean; worktreeValid: boolean; bare: boolean; shallow: boolean
+  mergeInProgress: boolean; rebaseInProgress: boolean; cherryPickInProgress: boolean; revertInProgress: boolean
+  indexLocked: boolean; submodulesPresent: boolean; gitLfsAvailable: boolean; warnings: string[]
+}
+export interface RepositorySnapshot {
+  projectId: string; repositoryPath: string; worktreePath: string; branch?: string; headSha: string; upstream?: string
+  ahead: number; behind: number; remotes: string[]; files: RepositoryFileStatus[]; health: RepositoryHealth; capturedAt: string
+}
+export interface RepositoryDiffRequest {
+  projectId: string; repositoryPath?: string; worktreePath?: string; path?: string; staged: boolean
+  contextLines?: number; offset?: number; limit?: number
+}
+export interface RepositoryDiff { text: string; totalBytes: number; offset: number; truncated: boolean; binary: boolean }
+export interface RepositoryWorktreeLease {
+  id: string; projectId: string; repositoryPath: string; worktreePath: string; branchName: string; baseCommit: string
+  agentId: string; taskId: string; fileScope: string[]; status: string; createdAt: string; lastActivityAt: string
+  expiresAt?: string; cleanupState: string
+}
+export interface RepositoryApprovalRequest {
+  id: string; operationId: string; projectId: string; operationKind: string; actor: RepositoryActor; branch?: string
+  commitSha: string; risk: string; reason: string; expectedEffects: string; recoveryStrategy: string
+  stateFingerprint: string; status: string; expiresAt: string; approvedBy?: string; approvedAt?: string; finalResult?: unknown
+}
+export interface ApprovalDecisionRequest { projectId: string; approvalId: string; approved: boolean; humanId: string; reason?: string }
+export interface RepositoryApprovalOutcome { approval: RepositoryApprovalRequest; operation?: RepositoryOperationRecord }
+export interface RepositoryPolicyConfiguration { projectId: string; profile: RepositoryPolicyProfile; customRules: Record<string, unknown>; protectedBranches: string[] }
+export interface MergeReadinessRequest { projectId: string; repositoryPath?: string; pullRequestNumber: number; expectedHeadSha?: string }
+export interface MergeReadiness {
+  ready: boolean; blockingReasons: string[]; warnings: string[]; requiredActions: string[]; evidence: unknown
+  evaluatedAt: string; sourceHeadSha: string; sourceUpdatedAt?: string
+}
+export interface ProviderAccountStatus { provider: string; host: string; authenticated: boolean; accountLogin?: string; authenticationSource: string; permissions: string[]; message: string }
+export interface WorktreeConflictRisk { leftLeaseId: string; rightLeaseId: string; overlappingPaths: string[]; inferred: boolean }
+export interface RemoteProjectionRequest { projectId: string; repositoryPath?: string }
+export interface RemoteProjectionObject { kind: string; externalId: string; payload: unknown; fetchedAt: string; stale: boolean; deleted: boolean }
+export interface RemoteProjection {
+  projectId: string; provider: string; repository: unknown; objects: RemoteProjectionObject[]
+  rateLimit?: unknown; lastSuccessfulSync: string; stale: boolean
+}
+
 export interface HealthReport {
   healthy: boolean
   schemaVersion: number

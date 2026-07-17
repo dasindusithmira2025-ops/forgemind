@@ -3,6 +3,9 @@ pub mod legacy_migration;
 pub mod migrations;
 mod placement;
 mod repair;
+mod repository;
+
+pub(crate) use repository::NewRepositoryOperation;
 
 use crate::errors::{AppError, AppResult};
 use crate::models::{

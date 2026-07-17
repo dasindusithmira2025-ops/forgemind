@@ -29,6 +29,22 @@ import type {
   MonitorInfo,
   MonitorRecoveryReport,
   HandoffTicket,
+  ApprovalDecisionRequest,
+  MergeReadiness,
+  MergeReadinessRequest,
+  ProviderAccountStatus,
+  RepositoryApprovalOutcome,
+  RepositoryApprovalRequest,
+  RepositoryDiff,
+  RepositoryDiffRequest,
+  RepositoryOperationRecord,
+  RepositoryOperationRequest,
+  RepositoryPolicyConfiguration,
+  RemoteProjection,
+  RemoteProjectionRequest,
+  RepositorySnapshot,
+  RepositoryWorktreeLease,
+  WorktreeConflictRisk,
 } from './types'
 
 export const native = {
@@ -68,6 +84,32 @@ export const native = {
   restorePaneFile: (workspaceId: string, paneId: string, path: string, confirmed: boolean) => invoke<PaneGitReview>('restore_pane_file', { workspaceId, paneId, path, confirmed }),
   createIsolatedPaneWorktree: (workspaceId: string, paneId: string) =>
     invoke<IsolatedWorktreeResult>('create_isolated_pane_worktree', { workspaceId, paneId }),
+  inspectRepository: (projectId: string, repositoryPath?: string, worktreePath?: string) =>
+    invoke<RepositorySnapshot>('inspect_repository', { projectId, repositoryPath, worktreePath }),
+  getRepositoryDiff: (request: RepositoryDiffRequest) => invoke<RepositoryDiff>('get_repository_diff', { request }),
+  executeRepositoryOperation: (request: RepositoryOperationRequest) =>
+    invoke<RepositoryOperationRecord>('execute_repository_operation', { request }),
+  cancelRepositoryOperation: (projectId: string, operationId: string) =>
+    invoke<boolean>('cancel_repository_operation', { projectId, operationId }),
+  getRepositoryOperation: (projectId: string, operationId: string) =>
+    invoke<RepositoryOperationRecord>('get_repository_operation', { projectId, operationId }),
+  getRepositoryPolicy: (projectId: string) => invoke<RepositoryPolicyConfiguration>('get_repository_policy', { projectId }),
+  saveRepositoryPolicy: (configuration: RepositoryPolicyConfiguration, humanId: string) =>
+    invoke<RepositoryPolicyConfiguration>('save_repository_policy', { configuration, humanId }),
+  listRepositoryApprovals: (projectId: string, pendingOnly = true) =>
+    invoke<RepositoryApprovalRequest[]>('list_repository_approvals', { projectId, pendingOnly }),
+  decideRepositoryApproval: (request: ApprovalDecisionRequest) =>
+    invoke<RepositoryApprovalOutcome>('decide_repository_approval', { request }),
+  listRepositoryWorktreeLeases: (projectId: string) =>
+    invoke<RepositoryWorktreeLease[]>('list_repository_worktree_leases', { projectId }),
+  getWorktreeConflictRisks: (projectId: string) =>
+    invoke<WorktreeConflictRisk[]>('get_worktree_conflict_risks', { projectId }),
+  getGitHubProviderStatus: (projectId: string, host = 'github.com') =>
+    invoke<ProviderAccountStatus>('get_github_provider_status', { projectId, host }),
+  refreshRepositoryRemoteProjection: (request: RemoteProjectionRequest) =>
+    invoke<RemoteProjection>('refresh_repository_remote_projection', { request }),
+  evaluateMergeReadiness: (request: MergeReadinessRequest) =>
+    invoke<MergeReadiness>('evaluate_merge_readiness', { request }),
   writeTerminalInput: (sessionId: string, data: number[]) => invoke<void>('write_terminal_input', { sessionId, data }),
   resizeTerminalSession: (sessionId: string, cols: number, rows: number) => invoke<void>('resize_terminal_session', { sessionId, cols, rows }),
   terminateTerminalSession: (sessionId: string) => invoke<void>('terminate_terminal_session', { sessionId }),

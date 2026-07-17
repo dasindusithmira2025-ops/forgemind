@@ -1,7 +1,7 @@
 use crate::errors::{AppError, AppResult};
 use rusqlite::{params, Connection};
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 12;
+pub const CURRENT_SCHEMA_VERSION: i64 = 13;
 
 const MIGRATION_1: &str = r#"
 CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
@@ -828,6 +828,9 @@ pub fn apply(connection: &Connection) -> AppResult<()> {
     {
         migrate_v12(connection)?;
     }
+    if current < 13 || !table_exists(connection, "repository_operations")? {
+        migrate_v13(connection)?;
+    }
     Ok(())
 }
 
@@ -845,7 +848,8 @@ pub fn requires_migration(connection: &Connection) -> AppResult<bool> {
         || !column_exists(connection, "missions", "origin_workspace_id")?
         || !column_exists(connection, "workspace_placements", "preferred_monitor_id")?
         || !column_exists(connection, "agent_sessions", "agent_state")?
-        || !table_exists(connection, "pane_worktrees")?)
+        || !table_exists(connection, "pane_worktrees")?
+        || !table_exists(connection, "repository_operations")?)
 }
 
 fn table_exists(connection: &Connection, table: &str) -> AppResult<bool> {
@@ -1069,6 +1073,221 @@ CREATE INDEX IF NOT EXISTS idx_pane_worktrees_pane ON pane_worktrees(workspace_i
         record_migration(connection, 12)
     })();
     finish_migration_transaction(connection, result, 12)
+}
+
+/// Repository Command Center projection and recovery state. Git and the remote provider remain
+/// authoritative; these rows exist to enforce leases/idempotency, survive process interruption,
+/// and retain an attributable operation trail without copying raw repository history.
+fn migrate_v13(connection: &Connection) -> AppResult<()> {
+    connection
+        .execute_batch("BEGIN IMMEDIATE;")
+        .map_err(AppError::database)?;
+    let result = (|| {
+        connection
+            .execute_batch(
+                r#"
+CREATE TABLE IF NOT EXISTS repository_connections(
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  repository_path TEXT NOT NULL,
+  canonical_repository_path TEXT NOT NULL,
+  provider TEXT,
+  provider_host TEXT,
+  provider_repository_id TEXT,
+  provider_account_id TEXT,
+  default_branch TEXT,
+  last_head_sha TEXT,
+  last_branch TEXT,
+  last_status_hash TEXT,
+  last_inspected_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(project_id,canonical_repository_path)
+);
+CREATE TABLE IF NOT EXISTS repository_provider_accounts(
+  id TEXT PRIMARY KEY,
+  provider TEXT NOT NULL,
+  host TEXT NOT NULL,
+  login TEXT,
+  auth_source TEXT NOT NULL,
+  credential_reference TEXT,
+  status TEXT NOT NULL,
+  permissions_json TEXT NOT NULL DEFAULT '[]',
+  last_verified_at TEXT,
+  revoked_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(provider,host,id)
+);
+CREATE TABLE IF NOT EXISTS repository_provider_installations(
+  id TEXT PRIMARY KEY,
+  account_id TEXT NOT NULL REFERENCES repository_provider_accounts(id) ON DELETE CASCADE,
+  external_id TEXT NOT NULL,
+  owner_login TEXT NOT NULL,
+  permissions_json TEXT NOT NULL DEFAULT '{}',
+  repository_selection TEXT,
+  suspended_at TEXT,
+  updated_at TEXT NOT NULL,
+  UNIQUE(account_id,external_id)
+);
+CREATE TABLE IF NOT EXISTS repository_policies(
+  project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+  profile TEXT NOT NULL DEFAULT 'conservative',
+  custom_rules_json TEXT NOT NULL DEFAULT '{}',
+  protected_branches_json TEXT NOT NULL DEFAULT '["main","master"]',
+  updated_by TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS repository_worktree_leases(
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  repository_path TEXT NOT NULL,
+  worktree_path TEXT NOT NULL,
+  canonical_worktree_path TEXT NOT NULL,
+  branch_name TEXT NOT NULL,
+  base_commit TEXT NOT NULL,
+  agent_id TEXT NOT NULL,
+  task_id TEXT NOT NULL,
+  agent_run_id TEXT,
+  file_scope_json TEXT NOT NULL DEFAULT '[]',
+  status TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  last_activity_at TEXT NOT NULL,
+  expires_at TEXT,
+  cleanup_state TEXT NOT NULL DEFAULT 'preserve',
+  recovery_detail TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_repository_active_worktree_lease
+  ON repository_worktree_leases(canonical_worktree_path) WHERE status='active';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_repository_active_branch_lease
+  ON repository_worktree_leases(project_id,repository_path,branch_name) WHERE status='active';
+CREATE INDEX IF NOT EXISTS idx_repository_worktree_task
+  ON repository_worktree_leases(project_id,task_id,status);
+CREATE TABLE IF NOT EXISTS repository_operations(
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  repository_path TEXT NOT NULL,
+  worktree_path TEXT NOT NULL,
+  branch_name TEXT,
+  kind TEXT NOT NULL,
+  actor_kind TEXT NOT NULL,
+  actor_id TEXT NOT NULL,
+  agent_run_id TEXT,
+  task_id TEXT,
+  idempotency_key TEXT NOT NULL,
+  request_json TEXT NOT NULL,
+  operation_hash TEXT NOT NULL,
+  lock_key TEXT NOT NULL,
+  policy_decision TEXT NOT NULL,
+  risk TEXT NOT NULL,
+  status TEXT NOT NULL,
+  before_state_json TEXT,
+  result_json TEXT,
+  after_state_json TEXT,
+  error_code TEXT,
+  error_message TEXT,
+  recovery_json TEXT,
+  cancellation_requested INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  started_at TEXT,
+  completed_at TEXT,
+  UNIQUE(project_id,idempotency_key)
+);
+CREATE INDEX IF NOT EXISTS idx_repository_operations_recovery
+  ON repository_operations(status,created_at);
+CREATE INDEX IF NOT EXISTS idx_repository_operations_project
+  ON repository_operations(project_id,created_at DESC);
+CREATE TABLE IF NOT EXISTS repository_approvals(
+  id TEXT PRIMARY KEY,
+  operation_id TEXT NOT NULL UNIQUE REFERENCES repository_operations(id) ON DELETE CASCADE,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  operation_kind TEXT NOT NULL,
+  actor_json TEXT NOT NULL,
+  branch_name TEXT,
+  commit_sha TEXT NOT NULL,
+  risk TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  expected_effects TEXT NOT NULL,
+  recovery_strategy TEXT NOT NULL,
+  operation_hash TEXT NOT NULL,
+  state_fingerprint TEXT NOT NULL,
+  status TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  approved_by TEXT,
+  approved_at TEXT,
+  consumed_at TEXT,
+  final_result_json TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_repository_approvals_pending
+  ON repository_approvals(project_id,status,expires_at);
+CREATE TABLE IF NOT EXISTS repository_remote_cache(
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  provider TEXT NOT NULL,
+  object_kind TEXT NOT NULL,
+  external_id TEXT NOT NULL,
+  etag TEXT,
+  updated_cursor TEXT,
+  payload_json TEXT NOT NULL,
+  remote_updated_at TEXT,
+  fetched_at TEXT NOT NULL,
+  stale_at TEXT,
+  deleted_at TEXT,
+  PRIMARY KEY(project_id,provider,object_kind,external_id)
+);
+CREATE INDEX IF NOT EXISTS idx_repository_remote_cache_kind
+  ON repository_remote_cache(project_id,object_kind,remote_updated_at DESC);
+CREATE TABLE IF NOT EXISTS repository_sync_cursors(
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  provider TEXT NOT NULL,
+  stream TEXT NOT NULL,
+  cursor TEXT,
+  status TEXT NOT NULL,
+  last_attempt_at TEXT,
+  last_success_at TEXT,
+  stale_since TEXT,
+  error_code TEXT,
+  PRIMARY KEY(project_id,provider,stream)
+);
+CREATE TABLE IF NOT EXISTS repository_webhook_deliveries(
+  provider TEXT NOT NULL,
+  host TEXT NOT NULL,
+  delivery_id TEXT NOT NULL,
+  event_kind TEXT NOT NULL,
+  signature_verified INTEGER NOT NULL,
+  payload_hash TEXT NOT NULL,
+  received_at TEXT NOT NULL,
+  processed_at TEXT,
+  status TEXT NOT NULL,
+  error_code TEXT,
+  PRIMARY KEY(provider,host,delivery_id)
+);
+CREATE TABLE IF NOT EXISTS repository_recovery_checkpoints(
+  id TEXT PRIMARY KEY,
+  operation_id TEXT NOT NULL REFERENCES repository_operations(id) ON DELETE CASCADE,
+  repository_state_json TEXT NOT NULL,
+  git_state TEXT NOT NULL,
+  recovery_actions_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  resolved_at TEXT
+);
+INSERT OR IGNORE INTO repository_worktree_leases(
+  id,project_id,repository_path,worktree_path,canonical_worktree_path,branch_name,base_commit,
+  agent_id,task_id,agent_run_id,file_scope_json,status,created_at,last_activity_at,expires_at,
+  cleanup_state,recovery_detail
+)
+SELECT
+  id,project_id,repository_path,worktree_path,worktree_path,branch_name,base_ref,
+  'pane:' || pane_id,'workspace:' || workspace_id,NULL,'[]','active',created_at,updated_at,NULL,
+  'preserve','Imported from the pre-control-plane pane worktree registry.'
+FROM pane_worktrees
+WHERE status='active';
+"#,
+            )
+            .map_err(AppError::database)?;
+        record_migration(connection, 13)
+    })();
+    finish_migration_transaction(connection, result, 13)
 }
 
 fn record_migration(connection: &Connection, version: i64) -> AppResult<()> {
@@ -1346,6 +1565,81 @@ mod tests {
              VALUES('s1','ephemeral-workspace','p1','claude','Claude','/tmp','running','now')",
             [],
         )
+    }
+
+    #[test]
+    fn fresh_schema_contains_repository_control_plane_tables() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", true)
+            .unwrap();
+        apply(&connection).unwrap();
+        let version: i64 = connection
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, 13);
+        for table in [
+            "repository_connections",
+            "repository_policies",
+            "repository_worktree_leases",
+            "repository_operations",
+            "repository_approvals",
+            "repository_remote_cache",
+            "repository_sync_cursors",
+            "repository_webhook_deliveries",
+            "repository_recovery_checkpoints",
+        ] {
+            assert!(table_exists(&connection, table).unwrap(), "missing {table}");
+        }
+    }
+
+    #[test]
+    fn v13_preserves_active_pane_worktrees_as_authoritative_leases() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", true)
+            .unwrap();
+        apply(&connection).unwrap();
+        connection.execute("INSERT INTO projects(id,name,root_path,canonical_root_path,major_languages_json,is_git_repository,has_package_json,has_lockfile,created_at,updated_at,last_opened_at) VALUES('p','Demo','C:/repo','C:/repo','[]',1,0,0,'t','t','t')",[]).unwrap();
+        connection.execute("INSERT INTO workspaces(id,project_id,name,layout_json,created_at,updated_at,last_opened_at) VALUES('w','p','Main','{\"type\":\"pane\",\"paneId\":\"pane\"}','t','t','t')",[]).unwrap();
+        connection.execute("INSERT INTO workspace_panes(id,workspace_id,title,provider_type,executable_path,working_directory,position_order,created_at,updated_at) VALUES('pane','w','Agent','codex','codex','C:/worktree',0,'t','t')",[]).unwrap();
+        connection.execute("INSERT INTO pane_worktrees(id,project_id,workspace_id,pane_id,repository_path,worktree_path,branch_name,base_ref,status,created_at,updated_at) VALUES('lease','p','w','pane','C:/repo','C:/worktree','paralith/task','0123456789012345678901234567890123456789','active','t','t')",[]).unwrap();
+
+        connection
+            .execute_batch(
+                "DROP TABLE repository_recovery_checkpoints;
+                 DROP TABLE repository_webhook_deliveries;
+                 DROP TABLE repository_sync_cursors;
+                 DROP TABLE repository_remote_cache;
+                 DROP TABLE repository_approvals;
+                 DROP TABLE repository_operations;
+                 DROP TABLE repository_worktree_leases;
+                 DROP TABLE repository_policies;
+                 DROP TABLE repository_provider_installations;
+                 DROP TABLE repository_provider_accounts;
+                 DROP TABLE repository_connections;
+                 DELETE FROM schema_migrations WHERE version=13;
+                 PRAGMA user_version=12;",
+            )
+            .unwrap();
+
+        migrate_v13(&connection).unwrap();
+        let lease: (String, String, String, String) = connection
+            .query_row(
+                "SELECT branch_name,agent_id,task_id,status FROM repository_worktree_leases WHERE id='lease'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            lease,
+            (
+                "paralith/task".into(),
+                "pane:pane".into(),
+                "workspace:w".into(),
+                "active".into()
+            )
+        );
     }
 
     #[test]
