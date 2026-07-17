@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { MergeReadiness, RepositoryOperationRecord, RepositorySnapshot } from '../../native/types'
 
 const handlers: Record<string, (payload: unknown) => void> = {}
@@ -175,6 +175,33 @@ describe('RepositoryCommandCenter', () => {
     expect(await screen.findByText('Actions synchronization failed')).toBeInTheDocument()
     expect(screen.getByText('Actions permission is missing.')).toBeInTheDocument()
     expect(screen.queryByText('No workflow files exist')).not.toBeInTheDocument()
+  })
+
+  it('uses the attention strip as a real navigation target into a section', async () => {
+    mockNative.inspectRepository.mockResolvedValue(snapshot('p1'))
+    render(<RepositoryCommandCenter projectId="p1" projectName="Alpha" />)
+    // Default section is Overview; the "Working tree" stat opens the Changes surface.
+    fireEvent.click(await screen.findByRole('button', { name: /Working tree/ }))
+    expect(await screen.findByRole('button', { name: 'Stage src/app.ts' })).toBeInTheDocument()
+  })
+
+  it('opens the scoped Actions surface from the Failed CI left-rail filter', async () => {
+    mockNative.inspectRepository.mockResolvedValue(snapshot('p1'))
+    mockNative.getGitHubProviderStatus.mockResolvedValue({ provider: 'github', authenticated: true, permissions: [], message: 'Connected' })
+    mockNative.refreshRepositoryRemoteProjection.mockResolvedValue({
+      projectId: 'p1', provider: 'github', repository: {}, lastSuccessfulSync: '2026-07-17T00:00:00Z', stale: false,
+      syncStatuses: [{ category: 'workflow', status: 'healthy' }, { category: 'workflow_run', status: 'healthy' }],
+      objects: [
+        { kind: 'workflow', externalId: '4', fetchedAt: '', stale: false, deleted: false, payload: { id: 4, name: 'Validate', path: '.github/workflows/validate.yml', state: 'active', triggerKinds: ['push'] } },
+        { kind: 'workflow_run', externalId: '99', fetchedAt: '', stale: false, deleted: false, payload: { id: 99, workflow_id: 4, name: 'Validate', display_title: 'feat: repository UI', head_branch: 'feat/repository-command-center', head_sha: 'abcdef123456', status: 'completed', conclusion: 'failure', event: 'pull_request', actor: { login: 'dasindu' }, created_at: '2026-07-17T00:00:00Z' } },
+      ],
+    })
+    render(<RepositoryCommandCenter projectId="p1" projectName="Alpha" />)
+    // Scope to the navigation rail so the "Failed CI" filter is unambiguous from the stat strip.
+    const rail = await screen.findByRole('navigation', { name: 'Repository navigation' })
+    fireEvent.click(within(rail).getByRole('button', { name: /Failed CI/ }))
+    // The Actions surface renders the failed run's commit message.
+    expect(await screen.findByText('feat: repository UI')).toBeInTheDocument()
   })
 
   it('resets repository state when the project changes', async () => {

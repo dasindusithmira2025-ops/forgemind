@@ -8,10 +8,11 @@ import { useRepositoryStore } from '../repositoryStore'
 import { formatDuration, relativeTime, remoteCategoryStatus } from '../repositorySelectors'
 import { StatusBadge, type BadgeTone } from './StatusBadge'
 import { ConnectedPlaceholder } from './ConnectedPlaceholder'
+import type { ActionsFilterId } from '../repositoryNav'
 import type { WorkflowDefinitionView, WorkflowRunState, WorkflowRunView } from '../repositoryTypes'
 import type { AgentActionRequest } from './AgentActionDialog'
 
-export function ActionsSection({ onRequestAgentWorktree }: { onRequestAgentWorktree: (request: AgentActionRequest) => void }) {
+export function ActionsSection({ runFilter = 'all', onRequestAgentWorktree }: { runFilter?: ActionsFilterId; onRequestAgentWorktree: (request: AgentActionRequest) => void }) {
   const workflows = useRepositoryStore((state) => state.remoteViews.workflows)
   const runs = useRepositoryStore((state) => state.remoteViews.workflowRuns)
   const projection = useRepositoryStore((state) => state.remoteProjection)
@@ -24,7 +25,10 @@ export function ActionsSection({ onRequestAgentWorktree }: { onRequestAgentWorkt
   const runStatus = remoteCategoryStatus(projection, 'workflow_run')
   const problem = workflowStatus?.status !== 'healthy' ? workflowStatus : runStatus?.status !== 'healthy' ? runStatus : undefined
 
-  const visibleRuns = useMemo(() => workflowId === 'all' ? runs : runs.filter((run) => run.workflowId === workflowId), [runs, workflowId])
+  const visibleRuns = useMemo(() => {
+    const byWorkflow = workflowId === 'all' ? runs : runs.filter((run) => run.workflowId === workflowId)
+    return runFilter === 'failed' ? byWorkflow.filter((run) => run.state === 'failure') : byWorkflow
+  }, [runs, workflowId, runFilter])
 
   if (!providerStatus?.authenticated && workflows.length === 0 && runs.length === 0) {
     return <ConnectedPlaceholder title="GitHub Actions authorization required" message={providerStatus?.message ?? 'Reconnect the repository account to retrieve workflow definitions and runs.'} onRetry={() => void refreshRemote()} loading={remoteLoading} authHint />

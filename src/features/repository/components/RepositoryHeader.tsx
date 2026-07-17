@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import {
   AlertTriangle, CheckCircle2, ChevronDown, CircleDot, Cloud, CloudOff, GitBranch,
-  Loader2, RefreshCw, Users,
+  Loader2, RefreshCcw, RefreshCw, Users,
 } from 'lucide-react'
 import { Button } from '../../../components/ui/Button'
 import { useRepositoryStore } from '../repositoryStore'
@@ -13,10 +13,12 @@ import { StatusBadge, type BadgeTone } from './StatusBadge'
  * status plus the fetch/sync and repository-action controls — so it never eats vertical space
  * that belongs to the diff or review content below.
  */
-export function RepositoryHeader({ projectName, menuOpen, onToggleMenu }: {
+export function RepositoryHeader({ projectName, menuOpen, onToggleMenu, onSync, syncing }: {
   projectName: string
   menuOpen: boolean
   onToggleMenu: () => void
+  onSync: () => void
+  syncing: boolean
 }) {
   const snapshot = useRepositoryStore((state) => state.snapshot)
   const providerStatus = useRepositoryStore((state) => state.providerStatus)
@@ -74,6 +76,9 @@ export function RepositoryHeader({ projectName, menuOpen, onToggleMenu }: {
       <div className="repo-header-actions">
         <Button variant="secondary" icon={fetchBusy ? <Loader2 size={14} className="is-spinning" /> : <RefreshCw size={14} />} onClick={doFetch} disabled={fetchBusy || !snapshot || !remote}>
           {fetchBusy ? 'Fetching' : 'Fetch'}
+        </Button>
+        <Button variant="primary" icon={syncing ? <Loader2 size={14} className="is-spinning" /> : <RefreshCcw size={14} />} onClick={onSync} disabled={syncing || !snapshot} title="Fetch and refresh the provider projection">
+          {syncing ? 'Syncing' : 'Sync'}
         </Button>
         <div className="repo-menu-wrap">
           <Button variant="ghost" icon={<ChevronDown size={14} />} aria-haspopup="menu" aria-expanded={menuOpen} onClick={onToggleMenu}>Repository</Button>

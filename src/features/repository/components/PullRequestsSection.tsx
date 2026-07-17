@@ -5,22 +5,29 @@ import {
 import { Button } from '../../../components/ui/Button'
 import { useRepositoryStore } from '../repositoryStore'
 import { relativeTime } from '../repositorySelectors'
+import { applyPrFilter, PR_FILTER_LABELS, type PrFilterId } from '../repositoryNav'
 import { StatusBadge, type BadgeTone } from './StatusBadge'
 import { MergeGate } from './MergeGate'
 import { ConnectedPlaceholder } from './ConnectedPlaceholder'
 import type { PullRequestView } from '../repositoryTypes'
 import type { AgentActionRequest } from './AgentActionDialog'
 
-export function PullRequestsSection({ onRequestAgentWorktree }: { onRequestAgentWorktree: (request: AgentActionRequest) => void }) {
+const PR_FILTER_TABS: PrFilterId[] = ['active', 'mine', 'drafts', 'awaiting-review', 'agents', 'all']
+
+export function PullRequestsSection({ filter = 'active', selected, onFilterChange, onSelect, onRequestAgentWorktree }: {
+  filter?: PrFilterId
+  selected?: number
+  onFilterChange?: (filter: PrFilterId) => void
+  onSelect?: (number: number) => void
+  onRequestAgentWorktree: (request: AgentActionRequest) => void
+}) {
   const pullRequests = useRepositoryStore((state) => state.remoteViews.pullRequests)
   const remoteLoading = useRepositoryStore((state) => state.remoteLoading)
   const remoteError = useRepositoryStore((state) => state.remoteError)
   const providerStatus = useRepositoryStore((state) => state.providerStatus)
   const refreshRemote = useRepositoryStore((state) => state.refreshRemote)
-  const [selected, setSelected] = useState<number>()
-  const [filter, setFilter] = useState<'active' | 'all'>('active')
 
-  const visible = useMemo(() => filter === 'all' ? pullRequests : pullRequests.filter((pr) => pr.state === 'open' || pr.state === 'draft'), [pullRequests, filter])
+  const visible = useMemo(() => applyPrFilter(pullRequests, filter, providerStatus?.accountLogin), [pullRequests, filter, providerStatus?.accountLogin])
   const current = visible.find((pr) => pr.number === selected) ?? visible[0]
 
   if (!providerStatus?.authenticated && pullRequests.length === 0) {
@@ -33,14 +40,16 @@ export function PullRequestsSection({ onRequestAgentWorktree }: { onRequestAgent
   return (
     <div className="repo-pr">
       <div className="repo-pr-list" aria-label="Pull requests">
-        <div className="repo-segmented" role="tablist" aria-label="Filter pull requests">
-          <button role="tab" aria-selected={filter === 'active'} className={filter === 'active' ? 'active' : ''} onClick={() => setFilter('active')}>Active</button>
-          <button role="tab" aria-selected={filter === 'all'} className={filter === 'all' ? 'active' : ''} onClick={() => setFilter('all')}>All</button>
+        <div className="repo-segmented repo-pr-filters" role="tablist" aria-label="Filter pull requests">
+          {PR_FILTER_TABS.map((id) => (
+            <button key={id} role="tab" aria-selected={filter === id} className={filter === id ? 'active' : ''} onClick={() => onFilterChange?.(id)}>{PR_FILTER_LABELS[id]}</button>
+          ))}
         </div>
+        {visible.length === 0 && <p className="repo-empty">No pull requests match this filter.</p>}
         <ul>
           {visible.map((pr) => (
             <li key={pr.number}>
-              <button className={current?.number === pr.number ? 'active' : ''} aria-current={current?.number === pr.number ? 'true' : undefined} onClick={() => setSelected(pr.number)}>
+              <button className={current?.number === pr.number ? 'active' : ''} aria-current={current?.number === pr.number ? 'true' : undefined} onClick={() => onSelect?.(pr.number)}>
                 <span className="repo-pr-row-top">
                   <GitPullRequest size={13} className={`pr-state-${pr.state}`} aria-hidden />
                   <span className="repo-pr-title">{pr.title}</span>
