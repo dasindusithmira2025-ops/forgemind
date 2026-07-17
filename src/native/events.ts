@@ -1,5 +1,5 @@
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
-import type { AgentStateEvent, RestorationProgress, TerminalExitEvent, TerminalOutputEvent, TerminalStatusEvent } from './types'
+import type { AgentStateEvent, RemoteProjection, RepositoryApprovalRequest, RepositoryOperationEvent, RepositoryOperationRecord, RestorationProgress, TerminalExitEvent, TerminalOutputEvent, TerminalStatusEvent } from './types'
 
 type TerminalOutputWireEvent = Omit<TerminalOutputEvent, 'data'> & { data: string }
 
@@ -17,6 +17,21 @@ export const onAgentState = (handler: (event: AgentStateEvent) => void): Promise
 
 export const onRestorationProgress = (handler: (event: RestorationProgress) => void): Promise<UnlistenFn> =>
   listen<RestorationProgress>('restoration-progress', (event) => handler(event.payload))
+
+export const onRepositoryOperationProgress = (handler: (event: RepositoryOperationEvent) => void): Promise<UnlistenFn> =>
+  listen<RepositoryOperationEvent>('repository-operation-progress', (event) => handler(event.payload))
+
+export const onRepositoryApprovalRequired = (handler: (event: RepositoryOperationRecord) => void): Promise<UnlistenFn> =>
+  listen<RepositoryOperationRecord>('repository-approval-required', (event) => handler(event.payload))
+
+export const onRepositoryApprovalDecision = (handler: (event: RepositoryApprovalRequest) => void): Promise<UnlistenFn> =>
+  listen<RepositoryApprovalRequest>('repository-approval-decision', (event) => handler(event.payload))
+
+export const onRepositoryStateChanged = (handler: (projectId: string) => void): Promise<UnlistenFn> =>
+  listen<string>('repository-state-changed', (event) => handler(event.payload))
+
+export const onRepositorySyncHealth = (handler: (projection: RemoteProjection) => void): Promise<UnlistenFn> =>
+  listen<RemoteProjection>('repository-sync-health', (event) => handler(event.payload))
 
 function decodeBase64(encoded: string): Uint8Array {
   const binary = atob(encoded)

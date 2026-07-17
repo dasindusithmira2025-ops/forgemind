@@ -8,7 +8,8 @@ mod services;
 
 use database::DatabaseService;
 use services::{
-    AgentDetector, RestorationScheduler, TerminalManager, UpdateService, WindowRegistry,
+    AgentDetector, RepositoryService, RestorationScheduler, TerminalManager, UpdateService,
+    WindowRegistry,
 };
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -21,6 +22,7 @@ pub struct AppState {
     detector: Arc<AgentDetector>,
     terminals: TerminalManager,
     restoration: RestorationScheduler,
+    repository: Arc<RepositoryService>,
     /// Authoritative runtime layer for open-Project sessions, Workspace placement, exclusive
     /// interactive leases, handoff coordination, and monitor state.
     windows: WindowRegistry,
@@ -327,6 +329,19 @@ pub fn run() {
                 app.handle().clone(),
             );
             let windows = WindowRegistry::new(database.clone());
+            let repository = Arc::new(RepositoryService::new(database.clone(), &data_dir));
+            if !recovery_mode {
+                match repository.recover_on_startup() {
+                    Ok(interrupted) if !interrupted.is_empty() => log::warn!(
+                        "{} interrupted repository operation(s) require recovery",
+                        interrupted.len()
+                    ),
+                    Ok(_) => {}
+                    Err(error) => {
+                        log::warn!("repository recovery inspection skipped: {}", error.message)
+                    }
+                }
+            }
             // Rehydrate detached-window bookkeeping from persisted placements. Best-effort:
             // a stale placement must never stop the app from opening.
             if let Err(error) = windows.hydrate_from_disk() {
@@ -349,6 +364,7 @@ pub fn run() {
                 detector,
                 terminals,
                 restoration,
+                repository,
                 windows,
                 log_directory,
                 app_data_directory: data_dir.clone(),
@@ -456,6 +472,23 @@ pub fn run() {
             commands::stage_pane_file,
             commands::restore_pane_file,
             commands::create_isolated_pane_worktree,
+            commands::inspect_repository,
+            commands::list_repository_branches,
+            commands::get_repository_diff,
+            commands::execute_repository_operation,
+            commands::cancel_repository_operation,
+            commands::get_repository_operation,
+            commands::get_repository_policy,
+            commands::save_repository_policy,
+            commands::list_repository_approvals,
+            commands::decide_repository_approval,
+            commands::list_repository_worktree_leases,
+            commands::get_worktree_conflict_risks,
+            commands::get_github_provider_status,
+            commands::refresh_repository_remote_projection,
+            commands::get_repository_workflow_run_detail,
+            commands::get_repository_pull_request_detail,
+            commands::evaluate_merge_readiness,
             commands::get_settings,
             commands::save_settings,
             commands::get_diagnostics,

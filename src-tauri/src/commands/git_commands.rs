@@ -1,5 +1,9 @@
 use crate::errors::{AppError, AppResult};
-use crate::models::{GitChangedFile, IsolatedWorktreeResult, PaneGitReview, Workspace};
+use crate::models::{
+    ApprovalDecisionRequest, GitChangedFile, IsolatedWorktreeResult, PaneGitReview,
+    RepositoryActor, RepositoryActorKind, RepositoryApprovalRequest, RepositoryOperation,
+    RepositoryOperationContext, RepositoryOperationRequest, RepositoryOperationStatus, Workspace,
+};
 use crate::AppState;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -91,11 +95,22 @@ pub fn stage_pane_file(
     let workspace = state.database.get_workspace(&workspace_id)?;
     let pane = pane(&workspace, &pane_id)?;
     let working_directory = Path::new(&pane.working_directory);
-    let repository = git_root(working_directory)?;
+    let repository = git_root(Path::new(&project_root(&state, &workspace)?))?;
+    let worktree = git_root(working_directory)?;
     let scope = git_scope(working_directory)?;
     let relative = sanitize_repo_relative_path(&path)?;
     ensure_path_in_scope(&relative, &scope)?;
-    git_status(&repository, &["add", "--", &relative])?;
+    run_pane_operation(
+        &state,
+        &workspace.project_id,
+        &repository,
+        &worktree,
+        window.label(),
+        RepositoryOperation::StagePaths {
+            paths: vec![relative],
+        },
+        false,
+    )?;
     get_pane_git_review(workspace_id, pane_id, window, state)
 }
 
@@ -122,11 +137,22 @@ pub fn restore_pane_file(
     let workspace = state.database.get_workspace(&workspace_id)?;
     let pane = pane(&workspace, &pane_id)?;
     let working_directory = Path::new(&pane.working_directory);
-    let repository = git_root(working_directory)?;
+    let repository = git_root(Path::new(&project_root(&state, &workspace)?))?;
+    let worktree = git_root(working_directory)?;
     let scope = git_scope(working_directory)?;
     let relative = sanitize_repo_relative_path(&path)?;
     ensure_path_in_scope(&relative, &scope)?;
-    discard_repo_path(&repository, &relative)?;
+    run_pane_operation(
+        &state,
+        &workspace.project_id,
+        &repository,
+        &worktree,
+        window.label(),
+        RepositoryOperation::RestorePaths {
+            paths: vec![relative],
+        },
+        true,
+    )?;
     get_pane_git_review(workspace_id, pane_id, window, state)
 }
 
@@ -143,44 +169,49 @@ pub fn create_isolated_pane_worktree(
     let mut workspace = state.database.get_workspace(&workspace_id)?;
     let project = state.database.get_project(&workspace.project_id)?;
     let pane = pane(&workspace, &pane_id)?.clone();
-    let repository = git_root(Path::new(&pane.working_directory))?;
-    let base_ref = git_stdout(&repository, &["rev-parse", "HEAD"])?
+    let repository = git_root(Path::new(&project.root_path))?;
+    let current_worktree = git_root(Path::new(&pane.working_directory))?;
+    let base_ref = git_stdout(&current_worktree, &["rev-parse", "HEAD"])?
         .trim()
         .to_owned();
     let slug = slug(&format!("{}-{}", workspace.name, pane.title));
-    let base = state
-        .database
-        .path()
-        .and_then(Path::parent)
+    let branch_name = unique_worktree_branch(&repository, &slug)?;
+    let scope = git_scope(Path::new(&pane.working_directory))?;
+    let record = run_pane_operation(
+        &state,
+        &project.id,
+        &repository,
+        &current_worktree,
+        window.label(),
+        RepositoryOperation::CreateAgentWorktree {
+            branch: branch_name.clone(),
+            base_commit: base_ref.clone(),
+            agent_id: format!("pane:{pane_id}"),
+            task_id: format!("workspace:{workspace_id}"),
+            file_scope: if scope == "." {
+                Vec::new()
+            } else {
+                vec![scope]
+            },
+            expires_at: None,
+        },
+        false,
+    )?;
+    let lease = record
+        .result
+        .as_ref()
+        .and_then(|result| result.get("lease"))
+        .cloned()
         .ok_or_else(|| {
             AppError::new(
-                "worktree_unavailable",
-                "The PARALITH data directory is unavailable.",
-                true,
+                "worktree_creation_failed",
+                "PARALITH did not return the created worktree lease.",
+                false,
             )
-        })?
-        .join("worktrees")
-        .join(&project.id);
-    std::fs::create_dir_all(&base).map_err(|error| {
-        AppError::new(
-            "worktree_unavailable",
-            "PARALITH could not create its managed worktree directory.",
-            true,
-        )
-        .detail(error.to_string())
-    })?;
-    let (branch_name, worktree_path) = unique_worktree_target(&repository, &base, &slug)?;
-    git_status(
-        &repository,
-        &[
-            "worktree",
-            "add",
-            "-b",
-            &branch_name,
-            worktree_path.to_string_lossy().as_ref(),
-            &base_ref,
-        ],
-    )?;
+        })?;
+    let lease: crate::models::RepositoryWorktreeLease =
+        serde_json::from_value(lease).map_err(AppError::database)?;
+    let worktree_path = PathBuf::from(&lease.worktree_path);
     for item in &mut workspace.panes {
         if item.id == pane_id {
             item.working_directory = worktree_path.to_string_lossy().into_owned();
@@ -283,10 +314,6 @@ fn git_stdout(directory: &Path, args: &[&str]) -> AppResult<String> {
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
-fn git_status(directory: &Path, args: &[&str]) -> AppResult<()> {
-    git_stdout(directory, args).map(|_| ())
-}
-
 fn git_success(directory: &Path, args: &[&str]) -> AppResult<bool> {
     let output = Command::new("git")
         .current_dir(directory)
@@ -299,15 +326,10 @@ fn git_success(directory: &Path, args: &[&str]) -> AppResult<bool> {
     Ok(output.status.success())
 }
 
-fn unique_worktree_target(
-    repository: &Path,
-    base: &Path,
-    slug: &str,
-) -> AppResult<(String, PathBuf)> {
+fn unique_worktree_branch(repository: &Path, slug: &str) -> AppResult<String> {
     for _ in 0..10 {
         let suffix = Uuid::new_v4().to_string();
         let branch_name = format!("paralith/{slug}-{suffix}");
-        let worktree_path = base.join(format!("{slug}-{suffix}"));
         let branch_exists = git_success(
             repository,
             &[
@@ -317,8 +339,8 @@ fn unique_worktree_target(
                 &format!("refs/heads/{branch_name}"),
             ],
         )?;
-        if !branch_exists && !worktree_path.exists() {
-            return Ok((branch_name, worktree_path));
+        if !branch_exists {
+            return Ok(branch_name);
         }
     }
     Err(AppError::new(
@@ -326,6 +348,84 @@ fn unique_worktree_target(
         "PARALITH could not allocate a unique managed worktree path.",
         true,
     ))
+}
+
+fn project_root(state: &AppState, workspace: &Workspace) -> AppResult<String> {
+    Ok(state.database.get_project(&workspace.project_id)?.root_path)
+}
+
+fn run_pane_operation(
+    state: &AppState,
+    project_id: &str,
+    repository: &Path,
+    worktree: &Path,
+    window_label: &str,
+    operation: RepositoryOperation,
+    confirmed: bool,
+) -> AppResult<crate::models::RepositoryOperationRecord> {
+    let snapshot = state.repository.inspect(
+        project_id,
+        Some(repository.to_string_lossy().as_ref()),
+        Some(worktree.to_string_lossy().as_ref()),
+    )?;
+    let request = RepositoryOperationRequest {
+        context: RepositoryOperationContext {
+            project_id: project_id.to_owned(),
+            repository_path: Some(repository.to_string_lossy().into_owned()),
+            worktree_path: Some(worktree.to_string_lossy().into_owned()),
+            actor: RepositoryActor {
+                kind: RepositoryActorKind::Human,
+                id: format!("local-window:{window_label}"),
+                display_name: "Local PARALITH user".into(),
+                agent_run_id: None,
+                model: None,
+                task_id: None,
+            },
+            base_commit: Some(snapshot.head_sha.clone()),
+            expected_branch: snapshot.branch.clone(),
+            approval_id: None,
+            idempotency_key: Uuid::new_v4().to_string(),
+            timeout_seconds: Some(120),
+        },
+        operation,
+    };
+    let mut record = state.repository.execute(request, |_| {})?;
+    if record.status == RepositoryOperationStatus::AwaitingApproval {
+        if !confirmed {
+            return Err(AppError::new(
+                "repository_approval_required",
+                "Repository policy requires approval before this pane operation can run.",
+                true,
+            )
+            .entity(record.id));
+        }
+        let approval: RepositoryApprovalRequest =
+            serde_json::from_value(record.result.clone().ok_or_else(|| {
+                AppError::new(
+                    "repository_approval_missing",
+                    "PARALITH did not persist the required approval request.",
+                    false,
+                )
+            })?)
+            .map_err(AppError::database)?;
+        state.repository.decide_approval(&ApprovalDecisionRequest {
+            project_id: project_id.to_owned(),
+            approval_id: approval.id.clone(),
+            approved: true,
+            human_id: format!("local-window:{window_label}"),
+            reason: Some("Confirmed in the pane repository review.".into()),
+        })?;
+        record = state.repository.execute_approved(&approval.id, |_| {})?;
+    }
+    if record.status != RepositoryOperationStatus::Succeeded {
+        return Err(AppError::new(
+            "repository_operation_incomplete",
+            "The pane repository operation did not complete.",
+            true,
+        )
+        .entity(record.id));
+    }
+    Ok(record)
 }
 
 fn parse_status(status: &str) -> Vec<GitChangedFile> {
@@ -356,102 +456,6 @@ fn parse_status(status: &str) -> Vec<GitChangedFile> {
             })
         })
         .collect()
-}
-
-fn discard_repo_path(repository: &Path, relative: &str) -> AppResult<()> {
-    let status = git_stdout(repository, &["status", "--porcelain=v1", "--", relative])?;
-    let entries = parse_status(&status);
-    if entries.is_empty() {
-        return Ok(());
-    }
-    if entries.len() > 1 || entries.iter().any(|entry| entry.path != relative) {
-        return Err(AppError::new(
-            "ambiguous_git_discard",
-            "PARALITH refused to discard because git reported more than the selected path.",
-            true,
-        )
-        .entity(relative));
-    }
-    let entry = &entries[0];
-    if entry.index_status == "?" && entry.worktree_status == "?" {
-        remove_untracked_path(repository, relative)?;
-        return Ok(());
-    }
-    if entry.index_status == "A" {
-        let _ = git_status(repository, &["restore", "--staged", "--", relative]);
-        remove_untracked_path(repository, relative)?;
-        return Ok(());
-    }
-    git_status(
-        repository,
-        &[
-            "restore",
-            "--source=HEAD",
-            "--staged",
-            "--worktree",
-            "--",
-            relative,
-        ],
-    )
-}
-
-fn remove_untracked_path(repository: &Path, relative: &str) -> AppResult<()> {
-    let target = repository.join(relative.replace('/', std::path::MAIN_SEPARATOR_STR));
-    let repository = repository.canonicalize().map_err(|error| {
-        AppError::new(
-            "git_discard_failed",
-            "The repository path could not be validated.",
-            true,
-        )
-        .detail(error.to_string())
-    })?;
-    let parent = target.parent().ok_or_else(|| {
-        AppError::new(
-            "invalid_git_path",
-            "The selected git path has no parent directory.",
-            true,
-        )
-        .entity(relative)
-    })?;
-    let parent = parent.canonicalize().map_err(|error| {
-        AppError::new(
-            "git_discard_failed",
-            "The selected file parent could not be validated.",
-            true,
-        )
-        .detail(error.to_string())
-        .entity(relative)
-    })?;
-    if !parent.starts_with(&repository) {
-        return Err(AppError::new(
-            "invalid_git_path",
-            "The selected git path resolves outside the repository.",
-            true,
-        )
-        .entity(relative));
-    }
-    if target.is_dir() {
-        std::fs::remove_dir_all(&target).map_err(|error| {
-            AppError::new(
-                "git_discard_failed",
-                "PARALITH could not remove the selected untracked directory.",
-                true,
-            )
-            .detail(error.to_string())
-            .entity(relative)
-        })?;
-    } else if target.exists() {
-        std::fs::remove_file(&target).map_err(|error| {
-            AppError::new(
-                "git_discard_failed",
-                "PARALITH could not remove the selected untracked file.",
-                true,
-            )
-            .detail(error.to_string())
-            .entity(relative)
-        })?;
-    }
-    Ok(())
 }
 
 fn ensure_path_in_scope(relative: &str, scope: &str) -> AppResult<()> {
@@ -558,35 +562,10 @@ mod tests {
     }
 
     #[test]
-    fn discard_tracked_staged_and_untracked_paths_without_reset_or_clean() {
-        let root = temp_repo("discard");
-        write_file(&root.join("pane").join("owned.txt"), "changed\n");
-        git_raw(&root, &["add", "pane/owned.txt"]).unwrap();
-        write_file(&root.join("pane").join("scratch.txt"), "scratch\n");
-
-        discard_repo_path(&root, "pane/owned.txt").unwrap();
-        discard_repo_path(&root, "pane/scratch.txt").unwrap();
-
-        assert_eq!(
-            fs::read_to_string(root.join("pane").join("owned.txt"))
-                .unwrap()
-                .replace("\r\n", "\n"),
-            "owned\n"
-        );
-        assert!(!root.join("pane").join("scratch.txt").exists());
-        let status = git_stdout(&root, &["status", "--porcelain=v1", "--", "pane"]).unwrap();
-        assert!(status.trim().is_empty(), "{status}");
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn unique_worktree_target_avoids_existing_branch_and_path() {
+    fn unique_worktree_branch_avoids_existing_branch() {
         let root = temp_repo("collision");
-        let base = root.join(".paralith-worktrees");
-        fs::create_dir_all(&base).unwrap();
-        let (branch, path) = unique_worktree_target(&root, &base, "pane").unwrap();
+        let branch = unique_worktree_branch(&root, "pane").unwrap();
         assert!(branch.starts_with("paralith/pane-"));
-        assert!(path.starts_with(&base));
         fs::remove_dir_all(root).unwrap();
     }
 }

@@ -835,6 +835,7 @@ export function WorkspaceScreen() {
     onRefreshProjectById: (id) => void refreshProjectById(id),
     onOpenLauncher: () => navigate('/'),
     onOpenSettings: () => navigate('/settings'),
+    onOpenRepository: () => { if (project) navigate(`/repository/${project.id}`) },
     onToggleCollapse: toggleCollapse,
     onResizeCommit: commitSidebarWidth,
     onOpenInNewWindow: (id) => void openInNewWindow(id),
@@ -842,7 +843,7 @@ export function WorkspaceScreen() {
     onFocusWorkspaceWindow: (id) => void focusOrReopen(id),
     onMoveToMonitor: (id) => setMonitorPicker(id),
     onCloseWorkspaceWindow: (id) => void runHandoff(id, 'close-window'),
-  }), [switchWorkspace, openFresh, newWorkspace, renameWorkspaceById, reconfigureWorkspaceById, duplicateWorkspace, restartWorkspaceById, stopWorkspaceById, moveWorkspace, reorderWorkspaces, removeFromRecents, deleteWorkspaceById, openProjectFolder, locateFolder, refreshProject, navigate, toggleCollapse, commitSidebarWidth, openInNewWindow, runHandoff, focusOrReopen, selectProject, closeProject, openProjectFromSelection, revealProjectById, refreshProjectById])
+  }), [switchWorkspace, openFresh, newWorkspace, renameWorkspaceById, reconfigureWorkspaceById, duplicateWorkspace, restartWorkspaceById, stopWorkspaceById, moveWorkspace, reorderWorkspaces, removeFromRecents, deleteWorkspaceById, openProjectFolder, locateFolder, refreshProject, navigate, toggleCollapse, commitSidebarWidth, openInNewWindow, runHandoff, focusOrReopen, selectProject, closeProject, openProjectFromSelection, revealProjectById, refreshProjectById, project])
 
   const sidebarWorkspaces: SidebarWorkspace[] = useMemo(() => {
     const grouped = groupSessionsByWorkspace(liveSessionsSnapshot)
@@ -900,6 +901,7 @@ export function WorkspaceScreen() {
       if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'w') { event.preventDefault(); void closePane(activePaneId) }
       if (event.ctrlKey && event.shiftKey && event.key === 'Enter') { event.preventDefault(); useCanvasStore.getState().toggleMaximize(activePaneId) }
       if (event.ctrlKey && event.key === ',') { event.preventDefault(); navigate('/settings') }
+      if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'g') { event.preventDefault(); if (project) navigate(`/repository/${project.id}`) }
       if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'o') { event.preventDefault(); navigate('/') }
       if (event.ctrlKey && (event.key === 'PageDown' || event.key === 'PageUp')) {
         event.preventDefault(); const ids = paneIds(workspace.layout); const index = ids.indexOf(activePaneId); const delta = event.key === 'PageDown' ? 1 : -1; setActivePane(ids[(index + delta + ids.length) % ids.length]);

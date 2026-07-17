@@ -97,6 +97,8 @@ export interface SidebarActions {
   onRevealProject?: (projectId: string) => void
   onRefreshProjectById?: (projectId: string) => void
   onOpenSettings: () => void
+  /** Open the Repository Command Center for the active project. */
+  onOpenRepository?: () => void
   onToggleCollapse: () => void
   onResizeCommit: (width: number) => void
   // ---- Multi-monitor Workspace placement (optional; present only in the main window) ------

@@ -889,7 +889,12 @@ fn buffered_agent_signal(
 ) -> Option<AgentSignal> {
     buffer.push_str(&String::from_utf8_lossy(data));
     if buffer.len() > 4096 {
-        let drain_to = buffer.len() - 4096;
+        let mut drain_to = buffer.len() - 4096;
+        // `String::drain` operates on byte offsets, while PTY output can contain multibyte
+        // Unicode. Retain at most the requested tail without slicing through a code point.
+        while drain_to < buffer.len() && !buffer.is_char_boundary(drain_to) {
+            drain_to += 1;
+        }
         buffer.drain(..drain_to);
     }
     let signal = adapter.parse_signal(buffer.as_bytes());
@@ -1005,6 +1010,16 @@ mod tests {
             buffer.is_empty(),
             "matched prompt buffer should not become stale"
         );
+    }
+
+    #[test]
+    fn agent_signal_buffer_trims_unicode_at_a_character_boundary() {
+        let adapter = ProviderAdapter(AgentProvider::Claude);
+        let mut buffer = format!("é{}", "x".repeat(4094));
+        // Appending one byte makes the old `len - 4096` offset point inside `é`.
+        let _ = buffered_agent_signal(&adapter, &mut buffer, b"x");
+        assert!(buffer.len() <= 4096);
+        assert!(buffer.is_char_boundary(0));
     }
 
     #[test]

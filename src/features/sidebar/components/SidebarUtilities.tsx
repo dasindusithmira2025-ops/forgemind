@@ -1,12 +1,18 @@
-import { Activity, PanelLeftClose, Settings } from 'lucide-react'
+import { Activity, FolderGit2, PanelLeftClose, Settings } from 'lucide-react'
 import { useSidebarStore } from '../sidebarStore'
 import type { SidebarActions } from '../sidebarTypes'
 
-/** Bottom utility rows: Settings, Diagnostics, and the Collapse control. */
+/** Bottom utility rows: Repository, Settings, Diagnostics, and the Collapse control. */
 export function SidebarUtilities({ actions }: { actions: SidebarActions }) {
   const setDiagnostics = useSidebarStore((state) => state.setDiagnosticsOpen)
   return (
     <div className="sidebar-utilities">
+      {actions.onOpenRepository && (
+        <button type="button" className="sidebar-util" onClick={actions.onOpenRepository}>
+          <FolderGit2 size={16} />
+          <span>Repository</span>
+        </button>
+      )}
       <button type="button" className="sidebar-util" onClick={actions.onOpenSettings}>
         <Settings size={16} />
         <span>Settings</span>
