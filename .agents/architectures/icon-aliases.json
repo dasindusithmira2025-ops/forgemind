@@ -1,0 +1,152 @@
+{
+  "kind": "architecture_icon_alias_reference",
+  "version": 1,
+  "preferredSyntax": "icon: alias or icon: namespace:name",
+  "notes": [
+    "Use simple aliases first. The renderer resolves LikeC4 icons, styled-icons simple-icons, and semantic fallbacks.",
+    "When a node or container title names a real provider, product, framework, cloud service, database, or company, prefer that exact lowercase slug as the icon alias.",
+    "If an exact logo is unknown, use a semantic fallback such as api, server, database, storage, queue, worker, external, or service. The renderer also tries to infer installed package icons from titles when a generic fallback is used.",
+    "Architecture graphs are general system graphs. Use group intent, node role, edge role, api-corridor overlay props, and one-line run targets to preserve meaning across agent edits and visual saves."
+  ],
+  "semanticSchema": {
+    "groupIntents": ["architecture", "api-pathway", "api-corridor", "data-flow", "control-graph", "state-machine", "dependency-graph", "deployment", "runtime", "subsystem"],
+    "nodeRoles": ["actor", "service", "api", "endpoint", "controller", "worker", "queue", "datastore", "cache", "file", "external", "state", "decision", "action", "event", "timer", "terminal", "dependency", "package"],
+    "nodeLifecycle": ["start", "normal", "error", "retry", "terminal", "fallback"],
+    "edgeRoles": ["calls", "request", "response", "redirect", "callback", "reads", "writes", "publishes", "subscribes", "transitions", "guards", "depends-on", "emits", "retries", "fails-to", "resolves-to"]
+  },
+  "apiCorridors": {
+    "purpose": "Opt-in overlay containers for important ordered API procedures across existing graph nodes or groups.",
+    "syntax": "OAuth Login [intent: api-corridor, display: overlay, from: Browser, to: API Server, anchor: Auth API, orient: shortest-path] { Browser > API Server: GET /auth/start [step: 1, role: request, method: GET, path: /auth/start] }",
+    "guardrails": [
+      "Use for auth, checkout, webhooks, task dispatch, uploads, token refresh, async jobs, destructive mutations, and external integrations.",
+      "Do not create API corridors for ordinary CRUD routes unless order, security, side effects, retries, or external integrations matter.",
+      "Message endpoints should reference existing graph nodes or groups; create/update normal architecture topology first.",
+      "Keep corridors concise, usually 3-9 meaningful steps. Use status: uncertain when the flow is not evidence-backed."
+    ]
+  },
+  "runTargets": {
+    "purpose": "One-line launch metadata for Architecture-tab buttons that queue an agent to operate from the selected graph.",
+    "syntax": "run \"Deploy\" [action: deploy, envs: \"local,staging,production\", modes: \"plan,apply,verify,rollback\", defaultEnv: staging, scope: \"Deployment\"]",
+    "guardrails": [
+      "Use only for graph-level operations a human would intentionally trigger.",
+      "Run targets describe intent and guardrails, not shell commands.",
+      "Keep each target to one line with semantic action, envs, modes, defaultEnv, and scope.",
+      "Agents must inspect the repo and plan from evidence before applying, especially for production or destructive work."
+    ]
+  },
+  "packageResolution": {
+    "likec4": "Any installed @likec4/icons slug in aws, azure, gcp, tech, or bootstrap can be used, for example appwrite, appwrite-icon, aws:s3, gcp:cloud-run, or azure:functions.",
+    "styledSimpleIcons": "Any installed @styled-icons/simple-icons brand/component can be used by simple slug, for example appwrite, cockroachlabs, vercel, react, stripe, or supabase.",
+    "titleInference": "If icon is missing or generic, the renderer also checks the node/container title and strips common suffixes such as SDK, API, Service, App, Client, Server, Database, Queue, and Worker before falling back."
+  },
+  "semantic": [
+    "ai",
+    "api",
+    "auth",
+    "browser",
+    "cache",
+    "client",
+    "cloud",
+    "database",
+    "external",
+    "file",
+    "flow",
+    "folder",
+    "group",
+    "decision",
+    "dependency",
+    "event",
+    "queue",
+    "router",
+    "schema",
+    "security",
+    "server",
+    "service",
+    "settings",
+    "state",
+    "storage",
+    "subscription",
+    "terminal",
+    "users",
+    "webhook",
+    "worker"
+  ],
+  "aws": [
+    "aws:api-gateway",
+    "aws:cloudfront",
+    "aws:cloudwatch",
+    "aws:dynamodb",
+    "aws:ec2",
+    "aws:ecr",
+    "aws:ecs",
+    "aws:eks",
+    "aws:eventbridge",
+    "aws:iam",
+    "aws:kinesis",
+    "aws:kms",
+    "aws:lambda",
+    "aws:rds",
+    "aws:route53",
+    "aws:s3",
+    "aws:secrets-manager",
+    "aws:sns",
+    "aws:sqs",
+    "aws:vpc"
+  ],
+  "gcp": [
+    "gcp:bigquery",
+    "gcp:cloud-run",
+    "gcp:cloud-sql",
+    "gcp:cloud-storage",
+    "gcp:gke",
+    "gcp:pubsub"
+  ],
+  "azure": [
+    "azure:aks",
+    "azure:blob-storage",
+    "azure:cosmosdb",
+    "azure:functions",
+    "azure:postgresql",
+    "azure:redis",
+    "azure:service-bus",
+    "azure:sql",
+    "azure:storage"
+  ],
+  "techAndCompany": [
+    "anthropic",
+    "appwrite",
+    "auth0",
+    "cloudflare",
+    "cockroachdb",
+    "docker",
+    "github",
+    "github-actions",
+    "kubernetes",
+    "mongodb",
+    "nextjs",
+    "nginx",
+    "nodejs",
+    "openai",
+    "postgres",
+    "react",
+    "redis",
+    "stripe",
+    "supabase",
+    "typescript",
+    "vercel"
+  ],
+  "examples": [
+    "User [icon: users, role: actor, display: compact]",
+    "AI Agent [icon: ai, role: actor, display: compact]",
+    "Appwrite [icon: appwrite, desc: Backend-as-a-service platform]",
+    "API Pathway [icon: api, intent: api-pathway] { ... }",
+    "Decision [icon: router, role: decision, desc: Branch condition]",
+    "Idle [icon: flow, role: state, lifecycle: start]",
+    "Done [icon: security, role: terminal, lifecycle: terminal]",
+    "API > Store: persist [role: writes]",
+    "Decision > Retry: retry [role: guards, condition: recoverable]",
+    "Object Store [icon: aws:s3, role: datastore, desc: Stores uploads]",
+    "CockroachDB [icon: cockroachdb, role: datastore, desc: Durable SQL state]",
+    "GitHub Actions [icon: github-actions, role: service, desc: CI pipeline]"
+  ]
+}
