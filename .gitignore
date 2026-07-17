@@ -58,3 +58,4 @@ tmp/
 *.njsproj
 *.sln
 *.sw?
+.agents/
