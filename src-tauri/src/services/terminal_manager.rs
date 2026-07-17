@@ -2,8 +2,8 @@ use crate::agents::{AgentAdapter, ProviderAdapter};
 use crate::database::DatabaseService;
 use crate::errors::{AppError, AppResult};
 use crate::models::{
-    CreateTerminalRequest, TerminalExitEvent, TerminalOutputEvent, TerminalSession,
-    TerminalStatusEvent,
+    AgentActivityState, AgentSignal, AgentStateEvent, AgentStateSource, CreateTerminalRequest,
+    TerminalExitEvent, TerminalOutputEvent, TerminalSession, TerminalStatusEvent,
 };
 #[cfg(windows)]
 use crate::services::process_util::background_command;
@@ -61,6 +61,10 @@ impl TerminalLog {
 
 struct TerminalHandle {
     metadata: RwLock<TerminalSession>,
+    agent_adapter: Option<ProviderAdapter>,
+    agent_state: Mutex<Option<AgentStateEvent>>,
+    last_agent_output: Mutex<Option<Instant>>,
+    agent_signal_buffer: Mutex<String>,
     master: Mutex<Box<dyn MasterPty + Send>>,
     writer: Mutex<Box<dyn Write + Send>>,
     child: Mutex<Box<dyn Child + Send + Sync>>,
@@ -239,6 +243,12 @@ impl TerminalManager {
         };
         let handle = Arc::new(TerminalHandle {
             metadata: RwLock::new(session.clone()),
+            agent_adapter: is_coding_agent(&session.provider).then_some(adapter.clone()),
+            agent_state: Mutex::new(None),
+            last_agent_output: Mutex::new(
+                is_coding_agent(&session.provider).then_some(Instant::now()),
+            ),
+            agent_signal_buffer: Mutex::new(String::new()),
             master: Mutex::new(pair.master),
             writer: Mutex::new(writer),
             child: Mutex::new(child),
@@ -283,12 +293,23 @@ impl TerminalManager {
                 event,
             );
         }
+        transition_agent_state(
+            &self.app_handle,
+            &self.database,
+            &handle,
+            AgentSignal {
+                state: AgentActivityState::Working,
+                source: AgentStateSource::Heuristic,
+                reason: "session started".into(),
+            },
+        );
         // If either worker thread cannot be created the session would be a zombie: a live
         // child with no output pump and no exit reaping. Tear it down and surface the
         // failure instead of leaving it stuck.
         if let Err(error) = self
             .spawn_output_reader(handle.clone(), reader)
             .and_then(|_| self.spawn_exit_watcher(handle.clone()))
+            .and_then(|_| self.spawn_agent_state_watcher(handle.clone()))
         {
             let _ = handle.child.lock().kill();
             self.sessions.write().remove(&session.id);
@@ -353,6 +374,7 @@ impl TerminalManager {
         mut reader: Box<dyn Read + Send>,
     ) -> std::io::Result<()> {
         let app = self.app_handle.clone();
+        let database = self.database.clone();
         let emitter_handle = handle.clone();
         let (sender, receiver) = sync_channel::<Vec<u8>>(OUTPUT_QUEUE_DEPTH);
         thread::Builder::new()
@@ -393,7 +415,11 @@ impl TerminalManager {
                         }
                     }
                     let sequence = append_and_sequence(&emitter_handle, &data);
+                    let signal = parse_agent_signal(&emitter_handle, &data);
                     emit_output(&app, &emitter_handle, sequence, data);
+                    if let Some(signal) = signal {
+                        transition_agent_state(&app, &database, &emitter_handle, signal);
+                    }
                     if disconnected && pending.is_none() {
                         break;
                     }
@@ -488,7 +514,67 @@ impl TerminalManager {
                     let _=app.emit_to(crate::services::MAIN_WINDOW_LABEL,"terminal-exit",exit_event.clone());
                     let _=app.emit_to(&detached,"terminal-exit",exit_event);
                 }
+                let final_signal = if status == "exited" && exit_code.unwrap_or(0) == 0 {
+                    AgentSignal {
+                        state: AgentActivityState::Finished,
+                        source: AgentStateSource::ProcessExit,
+                        reason: "agent process exited successfully".into(),
+                    }
+                } else {
+                    AgentSignal {
+                        state: AgentActivityState::Failed,
+                        source: AgentStateSource::ProcessExit,
+                        reason: "agent process exited before reporting success".into(),
+                    }
+                };
+                transition_agent_state(&app, &database, &handle, final_signal);
                 sessions.write().remove(&session_id);
+            })
+            .map(drop)
+    }
+
+    fn spawn_agent_state_watcher(&self, handle: Arc<TerminalHandle>) -> std::io::Result<()> {
+        if handle.agent_adapter.is_none() {
+            return Ok(());
+        }
+        let app = self.app_handle.clone();
+        let database = self.database.clone();
+        thread::Builder::new()
+            .name(format!(
+                "forgemind-agent-state-{}",
+                handle.metadata.read().id
+            ))
+            .spawn(move || loop {
+                thread::sleep(Duration::from_secs(5));
+                if handle.cancelled.load(Ordering::Acquire) {
+                    break;
+                }
+                if handle.metadata.read().status != "running" {
+                    break;
+                }
+                let quiet_for = handle
+                    .last_agent_output
+                    .lock()
+                    .as_ref()
+                    .map(Instant::elapsed)
+                    .unwrap_or_default();
+                let current = handle.agent_state.lock().clone();
+                if quiet_for >= Duration::from_secs(60)
+                    && current
+                        .as_ref()
+                        .is_some_and(|state| state.state == AgentActivityState::Working)
+                {
+                    transition_agent_state(
+                        &app,
+                        &database,
+                        &handle,
+                        AgentSignal {
+                            state: AgentActivityState::Idle,
+                            source: AgentStateSource::Heuristic,
+                            reason: "no agent output for 60 seconds".into(),
+                        },
+                    );
+                }
             })
             .map(drop)
     }
@@ -499,7 +585,7 @@ impl TerminalManager {
             let mut writer = handle.writer.lock();
             writer.write_all(data).and_then(|_| writer.flush())
         };
-        result.map_err(|error| {
+        let result = result.map_err(|error| {
             AppError::new(
                 "terminal_write_failed",
                 "Input could not be delivered to the selected terminal.",
@@ -507,7 +593,21 @@ impl TerminalManager {
             )
             .detail(error.to_string())
             .entity(session_id)
-        })
+        });
+        if result.is_ok() && handle.agent_adapter.is_some() {
+            handle.agent_signal_buffer.lock().clear();
+            transition_agent_state(
+                &self.app_handle,
+                &self.database,
+                &handle,
+                AgentSignal {
+                    state: AgentActivityState::Working,
+                    source: AgentStateSource::Heuristic,
+                    reason: "input delivered to agent".into(),
+                },
+            );
+        }
+        result
     }
 
     pub fn resize_session(&self, session_id: &str, cols: u16, rows: u16) -> AppResult<()> {
@@ -766,6 +866,101 @@ fn emit_output(app: &Option<AppHandle>, handle: &TerminalHandle, sequence: u64, 
     }
 }
 
+fn is_coding_agent(provider: &crate::models::AgentProvider) -> bool {
+    matches!(
+        provider,
+        crate::models::AgentProvider::Claude
+            | crate::models::AgentProvider::Codex
+            | crate::models::AgentProvider::Opencode
+    )
+}
+
+fn parse_agent_signal(handle: &TerminalHandle, data: &[u8]) -> Option<AgentSignal> {
+    let adapter = handle.agent_adapter.as_ref()?;
+    *handle.last_agent_output.lock() = Some(Instant::now());
+    let mut buffer = handle.agent_signal_buffer.lock();
+    buffered_agent_signal(adapter, &mut buffer, data)
+}
+
+fn buffered_agent_signal(
+    adapter: &ProviderAdapter,
+    buffer: &mut String,
+    data: &[u8],
+) -> Option<AgentSignal> {
+    buffer.push_str(&String::from_utf8_lossy(data));
+    if buffer.len() > 4096 {
+        let drain_to = buffer.len() - 4096;
+        buffer.drain(..drain_to);
+    }
+    let signal = adapter.parse_signal(buffer.as_bytes());
+    if signal.is_some() {
+        buffer.clear();
+    }
+    signal
+}
+
+fn transition_agent_state(
+    app: &Option<AppHandle>,
+    database: &Option<Arc<DatabaseService>>,
+    handle: &TerminalHandle,
+    signal: AgentSignal,
+) {
+    if handle.agent_adapter.is_none() {
+        return;
+    }
+    let metadata = handle.metadata.read();
+    let now = Utc::now().to_rfc3339();
+    let previous = handle.agent_state.lock().clone();
+    if previous.as_ref().is_some_and(|state| {
+        state.state == signal.state
+            && state.source == signal.source
+            && state.reason == signal.reason
+    }) {
+        return;
+    }
+    let attention_since = if signal.state.requires_attention() {
+        previous
+            .as_ref()
+            .filter(|state| state.state.requires_attention())
+            .and_then(|state| state.attention_since.clone())
+            .or_else(|| Some(now.clone()))
+    } else {
+        None
+    };
+    let event = AgentStateEvent {
+        terminal_session_id: metadata.id.clone(),
+        project_id: metadata.project_id.clone(),
+        workspace_id: metadata.workspace_id.clone(),
+        pane_id: metadata.pane_id.clone(),
+        provider: metadata.provider.clone(),
+        state: signal.state,
+        source: signal.source,
+        reason: signal.reason,
+        attention_since,
+        updated_at: now,
+    };
+    let workspace_id = event.workspace_id.clone();
+    drop(metadata);
+    *handle.agent_state.lock() = Some(event.clone());
+    if let Some(database) = database {
+        if let Err(error) = database.update_agent_state(&event) {
+            log::warn!("agent state persistence failed: {}", error.code);
+        }
+    }
+    if let Some(app) = app {
+        let _ = app.emit_to(
+            crate::services::MAIN_WINDOW_LABEL,
+            "agent-state",
+            event.clone(),
+        );
+        let _ = app.emit_to(
+            crate::services::detached_label(&workspace_id),
+            "agent-state",
+            event,
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -796,6 +991,20 @@ mod tests {
             rows: 24,
             restoration_attempt: false,
         }
+    }
+
+    #[test]
+    fn agent_signal_parser_handles_partial_ansi_chunks_and_clears_after_match() {
+        let adapter = ProviderAdapter(AgentProvider::Claude);
+        let mut buffer = String::new();
+        assert!(buffered_agent_signal(&adapter, &mut buffer, b"\x1b[33mDo you want").is_none());
+        let signal = buffered_agent_signal(&adapter, &mut buffer, b" to continue?\x1b[0m")
+            .expect("split prompt should be reconstructed");
+        assert_eq!(signal.state, AgentActivityState::NeedsInput);
+        assert!(
+            buffer.is_empty(),
+            "matched prompt buffer should not become stale"
+        );
     }
 
     #[test]

@@ -6,7 +6,7 @@ import { useAppStore } from '../stores/appStore'
 import { useSidebarStore } from '../features/sidebar/sidebarStore'
 import type { Project, TerminalSession, Workspace, WorkspaceSaveRequest } from '../native/types'
 
-const runtime = vi.hoisted(() => ({ sessions: [] as TerminalSession[], hydrate: vi.fn(), upsert: vi.fn(), remove: vi.fn(), clearWorkspace: vi.fn() }))
+const runtime = vi.hoisted(() => ({ sessions: [] as TerminalSession[], hydrate: vi.fn(), upsert: vi.fn(), remove: vi.fn(), clearWorkspace: vi.fn(), agentStateForSession: vi.fn(() => undefined) }))
 const restoreWorkspace = vi.fn()
 const saveSettings = vi.fn()
 const getWorkspace = vi.fn()
@@ -34,6 +34,7 @@ vi.mock('../native/commands', () => ({
     detectAgents: vi.fn().mockResolvedValue([]), detectShells: vi.fn().mockResolvedValue([{ id: 'shell', name: 'PowerShell', executablePath: 'C:\\pwsh.exe', args: [], available: true, source: 'detected' }]),
     listLiveSessions: vi.fn().mockResolvedValue([]), restoreWorkspaceSessions: (...args: unknown[]) => restoreWorkspace(...args),
     createTerminalSession: vi.fn(), terminateTerminalSession: vi.fn(), terminateWorkspaceSessions: (...args: unknown[]) => terminateWorkspace(...args),
+    getPaneGitReview: vi.fn(), stagePaneFile: vi.fn(), restorePaneFile: vi.fn(), createIsolatedPaneWorktree: vi.fn(),
     removeLayoutPane: vi.fn(), splitLayoutPane: vi.fn(), validateWorkingDirectory: vi.fn(),
     getDiagnostics: vi.fn(), runHealthCheck: vi.fn(),
     saveSettings: (...args: unknown[]) => saveSettings(...args),
