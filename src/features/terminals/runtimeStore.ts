@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react'
-import { onTerminalExit, onTerminalOutput, onTerminalStatus } from '../../native/events'
-import type { TerminalOutputEvent, TerminalSession } from '../../native/types'
+import { onAgentState, onTerminalExit, onTerminalOutput, onTerminalStatus } from '../../native/events'
+import type { AgentStateEvent, TerminalOutputEvent, TerminalSession } from '../../native/types'
 
 interface SessionSnapshot {
   session?: TerminalSession
@@ -8,6 +8,7 @@ interface SessionSnapshot {
   outputVersion: number
   pendingBytes: number
   droppedThroughSequence?: number
+  agentState?: AgentStateEvent
 }
 
 const EMPTY: SessionSnapshot = { session: undefined, chunks: [], outputVersion: 0, pendingBytes: 0 }
@@ -33,6 +34,7 @@ export class TerminalRuntimeStore {
     pending = Promise.all([
       onTerminalOutput((event) => this.ingestOutput(event)),
       onTerminalStatus((event) => this.upsert(event.session)),
+      onAgentState((event) => this.ingestAgentState(event)),
       onTerminalExit((event) => {
         const current = this.snapshots.get(event.sessionId)?.session
         if (current) this.upsert({ ...current, status: 'exited', exitCode: event.exitCode, endedAt: event.timestamp, processId: undefined })
@@ -79,6 +81,7 @@ export class TerminalRuntimeStore {
       outputVersion: current?.outputVersion ?? 0,
       pendingBytes: current?.pendingBytes ?? 0,
       droppedThroughSequence: current?.droppedThroughSequence,
+      agentState: current?.agentState,
     })
     if (notify) {
       this.sessionListeners.get(session.id)?.forEach((listener) => listener())
@@ -133,6 +136,20 @@ export class TerminalRuntimeStore {
   }
 
   getWorkspaceSnapshot = (workspaceId: string) => this.workspaceSnapshots.get(workspaceId) ?? EMPTY_SESSIONS
+
+  agentStateForSession(sessionId: string) {
+    return this.snapshots.get(sessionId)?.agentState
+  }
+
+  ingestAgentState(event: AgentStateEvent) {
+    const current = this.snapshots.get(event.terminalSessionId) ?? EMPTY
+    this.snapshots.set(event.terminalSessionId, {
+      ...current,
+      agentState: event,
+    })
+    this.sessionListeners.get(event.terminalSessionId)?.forEach((listener) => listener())
+    this.publishWorkspace(event.workspaceId)
+  }
 
   acknowledge(sessionId: string, throughSequence: number) {
     const current = this.snapshots.get(sessionId)

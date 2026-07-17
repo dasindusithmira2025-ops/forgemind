@@ -7,6 +7,20 @@ export type AgentProvider =
   | 'wsl'
   | 'custom_shell'
 
+export type AgentActivityState =
+  | 'working'
+  | 'needs_input'
+  | 'needs_permission'
+  | 'idle'
+  | 'finished'
+  | 'failed'
+
+export type AgentStateSource =
+  | 'heuristic'
+  | 'shell_integration'
+  | 'provider_hook'
+  | 'process_exit'
+
 export type SplitDirection = 'horizontal' | 'vertical'
 
 export type LayoutNode =
@@ -199,8 +213,51 @@ export interface AgentSession {
   providerSessionId?: string
   transcriptPath?: string
   status: string
+  agentState: AgentActivityState
+  agentStateSource: AgentStateSource
+  agentStateReason: string
+  agentAttentionSince?: string
+  agentStateUpdatedAt: string
   createdAt: string
   updatedAt: string
+}
+
+export interface AgentStateEvent {
+  terminalSessionId: string
+  projectId: string
+  workspaceId: string
+  paneId: string
+  provider: AgentProvider
+  state: AgentActivityState
+  source: AgentStateSource
+  reason: string
+  attentionSince?: string
+  updatedAt: string
+}
+
+export interface GitChangedFile {
+  path: string
+  indexStatus: string
+  worktreeStatus: string
+  conflicted: boolean
+}
+
+export interface PaneGitReview {
+  repositoryPath: string
+  workingDirectory: string
+  branch: string
+  files: GitChangedFile[]
+  diff: string
+  diffTruncated: boolean
+  conflicts: string[]
+}
+
+export interface IsolatedWorktreeResult {
+  workspace: Workspace
+  repositoryPath: string
+  worktreePath: string
+  branchName: string
+  baseRef: string
 }
 
 export interface HealthReport {

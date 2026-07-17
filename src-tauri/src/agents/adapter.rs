@@ -1,5 +1,5 @@
 use crate::errors::{AppError, AppResult};
-use crate::models::AgentProvider;
+use crate::models::{AgentActivityState, AgentProvider, AgentSignal, AgentStateSource};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone)]
@@ -19,6 +19,7 @@ pub trait AgentAdapter: Send + Sync {
         working_directory: &Path,
         arguments: &[String],
     ) -> AppResult<AgentLaunchSpec>;
+    fn parse_signal(&self, output: &[u8]) -> Option<AgentSignal>;
 }
 
 /// Wrap Windows script shims so a ConPTY can launch them. PowerShell is used for
@@ -81,6 +82,7 @@ fn quote_powershell_literal(value: &str) -> String {
     format!("'{}'", value.replace('\'', "''"))
 }
 
+#[derive(Debug, Clone)]
 pub struct ProviderAdapter(pub AgentProvider);
 
 impl AgentAdapter for ProviderAdapter {
@@ -134,6 +136,103 @@ impl AgentAdapter for ProviderAdapter {
             display_name,
         })
     }
+
+    fn parse_signal(&self, output: &[u8]) -> Option<AgentSignal> {
+        parse_agent_output(&self.0, output)
+    }
+}
+
+fn parse_agent_output(provider: &AgentProvider, output: &[u8]) -> Option<AgentSignal> {
+    let raw = String::from_utf8_lossy(output);
+    let lower_raw = raw.to_ascii_lowercase();
+    let text = clean_terminal_text(&raw).to_ascii_lowercase();
+    if lower_raw.contains("\u{1b}]133;c") {
+        return Some(AgentSignal {
+            state: AgentActivityState::Working,
+            source: AgentStateSource::ShellIntegration,
+            reason: "shell command started".into(),
+        });
+    }
+    if lower_raw.contains("\u{1b}]133;a") {
+        return Some(AgentSignal {
+            state: AgentActivityState::NeedsInput,
+            source: AgentStateSource::ShellIntegration,
+            reason: "shell prompt boundary observed".into(),
+        });
+    }
+    if text.contains("permission")
+        && (text.contains("allow") || text.contains("approve") || text.contains("deny"))
+    {
+        return Some(AgentSignal {
+            state: AgentActivityState::NeedsPermission,
+            source: AgentStateSource::Heuristic,
+            reason: "permission prompt detected in terminal output".into(),
+        });
+    }
+    if text.contains("do you want to")
+        || text.contains("continue?")
+        || text.contains("(y/n)")
+        || text.contains("[y/n]")
+        || text.contains("press enter")
+        || text.contains("waiting for")
+    {
+        return Some(AgentSignal {
+            state: AgentActivityState::NeedsInput,
+            source: AgentStateSource::Heuristic,
+            reason: "interactive prompt detected in terminal output".into(),
+        });
+    }
+    if text.contains("do you want") || text.contains("permission") {
+        return None;
+    }
+    if matches!(
+        provider,
+        AgentProvider::Claude | AgentProvider::Codex | AgentProvider::Opencode
+    ) && !text.trim().is_empty()
+    {
+        return Some(AgentSignal {
+            state: AgentActivityState::Working,
+            source: AgentStateSource::Heuristic,
+            reason: "agent output received".into(),
+        });
+    }
+    None
+}
+
+fn clean_terminal_text(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\u{1b}' {
+            match chars.peek().copied() {
+                Some('[') => {
+                    chars.next();
+                    for next in chars.by_ref() {
+                        if ('@'..='~').contains(&next) {
+                            break;
+                        }
+                    }
+                }
+                Some(']') => {
+                    chars.next();
+                    let mut previous = '\0';
+                    for next in chars.by_ref() {
+                        if next == '\u{7}' || (previous == '\u{1b}' && next == '\\') {
+                            break;
+                        }
+                        previous = next;
+                    }
+                }
+                _ => {}
+            }
+            continue;
+        }
+        if ch.is_control() && ch != '\n' && ch != '\r' && ch != '\t' {
+            continue;
+        }
+        out.push(ch);
+    }
+    out
 }
 
 #[cfg(all(test, windows))]
@@ -202,5 +301,44 @@ mod tests {
         let (executable, arguments) = wrap_script_shim(original.clone(), vec!["--version".into()]);
         assert_eq!(executable, original);
         assert_eq!(arguments, vec!["--version".to_string()]);
+    }
+}
+
+#[cfg(test)]
+mod signal_tests {
+    use super::*;
+
+    #[test]
+    fn permission_prompt_maps_to_attention_state() {
+        let adapter = ProviderAdapter(AgentProvider::Claude);
+        let signal = adapter
+            .parse_signal(b"Claude needs permission. Allow this command? [y/n]")
+            .unwrap();
+        assert_eq!(signal.state, AgentActivityState::NeedsPermission);
+        assert_eq!(signal.source, AgentStateSource::Heuristic);
+    }
+
+    #[test]
+    fn shell_prompt_boundary_maps_to_needs_input() {
+        let adapter = ProviderAdapter(AgentProvider::Codex);
+        let signal = adapter.parse_signal(b"\x1b]133;A\x07").unwrap();
+        assert_eq!(signal.state, AgentActivityState::NeedsInput);
+        assert_eq!(signal.source, AgentStateSource::ShellIntegration);
+    }
+
+    #[test]
+    fn coding_agent_output_maps_to_working() {
+        let adapter = ProviderAdapter(AgentProvider::Opencode);
+        let signal = adapter.parse_signal(b"editing src/main.rs").unwrap();
+        assert_eq!(signal.state, AgentActivityState::Working);
+    }
+
+    #[test]
+    fn ansi_decorated_prompt_is_parsed_from_clean_text() {
+        let adapter = ProviderAdapter(AgentProvider::Claude);
+        let signal = adapter
+            .parse_signal(b"\x1b[33mDo you want to continue?\x1b[0m")
+            .unwrap();
+        assert_eq!(signal.state, AgentActivityState::NeedsInput);
     }
 }

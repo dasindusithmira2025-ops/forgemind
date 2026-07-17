@@ -180,7 +180,7 @@ h1, h2, h3, p { margin: 0; }
 .terminal-pane.active { border-color: #416a9d; }.terminal-pane.bell { border-color: var(--warning); }
 .terminal-pane.maximized { position: fixed; inset: var(--header-height) 0 var(--status-height) 0; z-index: 40; }
 .terminal-header { min-width: 0; padding: 0 5px 0 8px; display: flex; align-items: center; gap: 7px; background: #12161d; border-bottom: 1px solid #242a34; }
-.terminal-status { width: 7px; height: 7px; flex: 0 0 auto; border-radius: 50%; background: var(--faint); }.status-running { background: var(--success); }.status-exited, .status-terminated, .status-failed { background: var(--danger); }.status-loading, .status-waiting { background: var(--warning); }
+.terminal-status { width: 7px; height: 7px; flex: 0 0 auto; border-radius: 50%; background: var(--faint); }.status-running, .status-working { background: var(--success); }.status-idle { background: var(--muted); }.status-needs_input, .status-needs_permission { background: var(--warning); }.status-exited, .status-terminated, .status-failed, .status-finished { background: var(--danger); }.status-loading, .status-waiting { background: var(--warning); }
 .terminal-title { min-width: 0; display: flex; align-items: baseline; gap: 7px; }.terminal-title strong { max-width: 130px; overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }.terminal-title span { color: var(--muted); font-size: 9px; white-space: nowrap; }
 .terminal-path { min-width: 30px; overflow: hidden; color: var(--faint); font: 9px Consolas, monospace; text-overflow: ellipsis; white-space: nowrap; }.terminal-controls { margin-left: auto; display: flex; }.terminal-controls .button { min-width: 25px; min-height: 24px; padding: 0; }
 .xterm-host { min-width: 0; min-height: 0; padding: 5px 4px 1px 7px; overflow: hidden; }.xterm-host .xterm { height: 100%; }.xterm-host .xterm-viewport { scrollbar-color: #343c4a transparent; scrollbar-width: thin; }
@@ -760,6 +760,25 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 .pane-window.maximized { box-shadow: none; border-radius: 0; }
 .terminal-header.draggable { cursor: grab; }
 .pane-window.dragging .terminal-header.draggable { cursor: grabbing; }
+.agent-attention-badge, .attention-chip { border: 1px solid rgba(217, 191, 118, .45); background: rgba(217, 191, 118, .12); color: #f1d48a; }
+.agent-attention-badge { max-width: 92px; padding: 2px 6px; overflow: hidden; border-radius: 999px; font-size: 10px; white-space: nowrap; text-overflow: ellipsis; }
+.attention-chip { min-height: 24px; padding: 0 9px; border-radius: 999px; font-size: 11px; cursor: pointer; }
+.attention-chip:hover { background: rgba(217, 191, 118, .2); }
+.terminal-pane.agent-needs_input, .terminal-pane.agent-needs_permission { box-shadow: inset 0 0 0 1px rgba(217, 191, 118, .5); }
+.terminal-pane.agent-failed { box-shadow: inset 0 0 0 1px rgba(239, 125, 125, .58); }
+.pane-review { width: min(980px, 82vw); max-height: 76vh; display: grid; grid-template-rows: auto auto minmax(90px, auto) minmax(220px, 1fr); gap: 10px; }
+.pane-review-meta { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 11px; }
+.pane-review-meta span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pane-review-meta em { color: var(--warning); font-style: normal; }
+.pane-review-files { max-height: 180px; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius); }
+.pane-review-files > div { min-height: 32px; padding: 0 8px; display: grid; grid-template-columns: 42px minmax(0, 1fr) auto auto; align-items: center; gap: 8px; border-bottom: 1px solid var(--border); }
+.pane-review-files > div:last-child { border-bottom: 0; }
+.pane-review-files .conflicted { background: rgba(239, 125, 125, .1); }
+.pane-review-files code { color: var(--muted); font-size: 11px; }
+.pane-review-files span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pane-review-files button { min-height: 24px; padding: 0 8px; border: 1px solid var(--border); border-radius: 5px; background: var(--surface-2); color: var(--text); cursor: pointer; }
+.pane-review-files button:disabled { opacity: .55; cursor: wait; }
+.pane-review-diff { min-height: 0; margin: 0; padding: 10px; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius); background: #080a0e; color: #d8dde7; font: 11px/1.45 Consolas, 'SFMono-Regular', monospace; white-space: pre; }
 
 .pane-resize-handle { position: absolute; z-index: 6; touch-action: none; }
 .pane-resize-handle.top { top: -3px; left: 10px; right: 10px; height: 7px; cursor: ns-resize; }

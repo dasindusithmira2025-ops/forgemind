@@ -5,6 +5,7 @@ const checkOnly = process.argv.includes('--check')
 const root = new URL('../../', import.meta.url)
 const readJson = async (path) => JSON.parse(await readFile(new URL(path, root), 'utf8'))
 const stableJson = (value) => `${JSON.stringify(value, null, 2)}\n`
+const normalizeNewlines = (value) => value.replace(/\r\n/g, '\n')
 
 const canonical = await readJson('release/version.json')
 if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(canonical.version)) {
@@ -56,7 +57,7 @@ let drift = false
 for (const [path, expected] of outputs) {
   const url = new URL(path, root)
   const actual = await readFile(url, 'utf8')
-  if (actual === expected) continue
+  if (normalizeNewlines(actual) === normalizeNewlines(expected)) continue
   drift = true
   if (!checkOnly) await writeFile(url, expected)
   else console.error(`Generated release metadata is stale: ${path}`)

@@ -6,7 +6,7 @@ const eventHarness = vi.hoisted(() => ({ resolvers: [] as Array<(unlisten: () =>
 
 vi.mock('../../native/events', () => {
   const delayedListener = () => new Promise<() => void>((resolve) => eventHarness.resolvers.push(resolve))
-  return { onTerminalOutput: delayedListener, onTerminalStatus: delayedListener, onTerminalExit: delayedListener }
+  return { onTerminalOutput: delayedListener, onTerminalStatus: delayedListener, onTerminalExit: delayedListener, onAgentState: delayedListener }
 })
 
 const session = (id: string, paneId: string): TerminalSession => ({
@@ -27,7 +27,7 @@ describe('terminal runtime external store', () => {
     const staleUnlisten = vi.fn()
     for (const resolve of eventHarness.resolvers) resolve(staleUnlisten)
     await pending
-    expect(staleUnlisten).toHaveBeenCalledTimes(3)
+    expect(staleUnlisten).toHaveBeenCalledTimes(4)
   })
 
   it('notifies only the Terminal Session receiving output and coalesces a burst', () => {

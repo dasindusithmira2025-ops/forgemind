@@ -11,7 +11,7 @@ import { ErrorNotice } from '../components/ui/ErrorNotice'
 import { Modal } from '../components/ui/Modal'
 import { TextPromptDialog } from '../components/ui/TextPromptDialog'
 import { asNativeError, native } from '../native/commands'
-import type { AgentProvider, MonitorInfo, PaneAssignment, Project, ShellProfile, SplitDirection, TerminalSession, Workspace, WorkspacePlacement } from '../native/types'
+import type { AgentProvider, AgentStateEvent, MonitorInfo, PaneAssignment, PaneGitReview, Project, ShellProfile, SplitDirection, TerminalSession, Workspace, WorkspacePlacement } from '../native/types'
 import { handoffController } from '../features/workspace-windows/handoffController'
 import { MonitorRecoveryWatcher } from '../features/workspace-windows/MonitorRecoveryWatcher'
 import { monitorLabel } from '../features/workspace-windows/placementSelectors'
@@ -78,6 +78,8 @@ export function WorkspaceScreen() {
   const [placements, setPlacements] = useState<WorkspacePlacement[]>([])
   const [monitors, setMonitors] = useState<MonitorInfo[]>([])
   const [monitorPicker, setMonitorPicker] = useState<string>()
+  const [gitReview, setGitReview] = useState<{ paneId: string; review: PaneGitReview }>()
+  const [gitReviewBusy, setGitReviewBusy] = useState(false)
   // Project switching is passive navigation: it must never summon WebView2's native confirm
   // dialog (and its system alert sound) just to restore the selected Project's last Workspace.
   const quietRestoreWorkspaceId = useRef<string | undefined>(undefined)
@@ -87,6 +89,21 @@ export function WorkspaceScreen() {
   const openProjectSessions = useSessionStore((state) => state.openProjects)
   const projectCache = useSessionStore((state) => state.projects)
   const paneSession = useCallback((paneId: string) => sessions.find((session) => session.paneId === paneId), [sessions])
+  const attentionQueue = useMemo(() => sessions
+    .map((session): { session: TerminalSession; state: AgentStateEvent } | undefined => {
+      const state = terminalRuntime.agentStateForSession(session.id)
+      if (!state?.attentionSince) return undefined
+      return { session, state }
+    })
+    .filter((item): item is { session: TerminalSession; state: AgentStateEvent } => Boolean(item))
+    .sort((a, b) => (a.state.attentionSince ?? '').localeCompare(b.state.attentionSince ?? '')), [sessions])
+
+  const focusNextAttention = useCallback(() => {
+    const target = attentionQueue[0]
+    if (!target) return
+    setActivePane(target.session.paneId)
+    dispatchTerminalAction(target.session.paneId, 'focus')
+  }, [attentionQueue, setActivePane])
 
   const scanProviders = useCallback(async () => {
     const customPaths = [
@@ -572,6 +589,58 @@ export function WorkspaceScreen() {
     } catch (caught) { setPaneErrors((current) => ({ ...current, [paneId]: asNativeError(caught).message })) }
   }
 
+  const isolatePaneWorktree = async (paneId: string) => {
+    if (!workspace) return
+    const session = paneSession(paneId)
+    if (session?.status === 'running' && !window.confirm('Create an isolated git worktree for this pane and restart its terminal there?')) return
+    try {
+      if (session?.status === 'running') await native.terminateTerminalSession(session.id)
+      if (session) terminalRuntime.remove(session.id)
+      const result = await native.createIsolatedPaneWorktree(workspace.id, paneId)
+      setLocalWorkspace(result.workspace)
+      setWorkspace(result.workspace)
+      setProjectWorkspaces((items) => items.map((item) => item.id === result.workspace.id ? result.workspace : item))
+      const pane = result.workspace.panes.find((item) => item.id === paneId)
+      if (pane) await launchPane(pane, result.workspace)
+    } catch (caught) {
+      setPaneErrors((current) => ({ ...current, [paneId]: asNativeError(caught).message }))
+    }
+  }
+
+  const openPaneReview = async (paneId: string) => {
+    if (!workspace) return
+    setGitReviewBusy(true)
+    try {
+      const review = await native.getPaneGitReview(workspace.id, paneId)
+      setGitReview({ paneId, review })
+    } catch (caught) {
+      setPaneErrors((current) => ({ ...current, [paneId]: asNativeError(caught).message }))
+    } finally {
+      setGitReviewBusy(false)
+    }
+  }
+
+  const stageReviewFile = async (path: string) => {
+    if (!workspace || !gitReview) return
+    setGitReviewBusy(true)
+    try {
+      const review = await native.stagePaneFile(workspace.id, gitReview.paneId, path)
+      setGitReview({ paneId: gitReview.paneId, review })
+    } catch (caught) { setError(asNativeError(caught).message) }
+    finally { setGitReviewBusy(false) }
+  }
+
+  const restoreReviewFile = async (path: string) => {
+    if (!workspace || !gitReview) return
+    if (!window.confirm(`Discard staged, unstaged, conflicted, or untracked changes for ${path}? This only affects the selected repository path.`)) return
+    setGitReviewBusy(true)
+    try {
+      const review = await native.restorePaneFile(workspace.id, gitReview.paneId, path, true)
+      setGitReview({ paneId: gitReview.paneId, review })
+    } catch (caught) { setError(asNativeError(caught).message) }
+    finally { setGitReviewBusy(false) }
+  }
+
   const restartPaneFromWorkspace = async (paneId: string, source: Workspace) => {
     const session = paneSession(paneId)
     if (session?.status === 'running') await native.terminateTerminalSession(session.id).catch(() => undefined)
@@ -819,7 +888,7 @@ export function WorkspaceScreen() {
       if (!workspace) return
       if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'b') { event.preventDefault(); toggleCollapse(); return }
       if (event.ctrlKey && event.key.toLowerCase() === 'b' && !event.shiftKey) { event.preventDefault(); toggleCollapse(); return }
-      if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'p') { event.preventDefault(); return }
+      if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'p') { event.preventDefault(); focusNextAttention(); return }
       if (event.ctrlKey && event.altKey && /^[1-9]$/.test(event.key)) {
         event.preventDefault(); const target = projectWorkspaces[Number(event.key) - 1]; if (target && target.id !== workspace.id) void switchWorkspace(target.id); return
       }
@@ -840,7 +909,7 @@ export function WorkspaceScreen() {
     return () => window.removeEventListener('keydown', handle)
   // closePane reads current state and is intentionally rebound with the other workspace values.
   // oxlint-disable-next-line react-hooks/exhaustive-deps
-  }, [activePaneId, navigate, setActivePane, workspace, projectWorkspaces, switchWorkspace, toggleCollapse])
+  }, [activePaneId, focusNextAttention, navigate, setActivePane, workspace, projectWorkspaces, switchWorkspace, toggleCollapse])
 
   // Render one terminal for a pane inside its canvas window. The docking canvas owns geometry,
   // placement and the header drag handle; this only wires the terminal + its pane actions. The
@@ -866,15 +935,16 @@ export function WorkspaceScreen() {
   const activePane = workspace.panes.find((pane) => pane.id === activePaneId)
 
   return <AppShell className={`workspace-shell ${switchingWorkspaceId ? 'workspace-switching' : ''}`} sidebarOpen={!maximizedPaneId}
-    titleBar={<><div className="workspace-heading"><strong>{activePane?.title || workspace.name}</strong>{project.gitBranch && <span className="branch-label">{project.gitBranch}</span>}</div><div className="titlebar-spacer" /><span className="compact-count">{running}/{workspace.panes.length} running</span><div className="workspace-menu-wrap"><Button variant="ghost" icon={<ChevronDown size={14} />} aria-expanded={workspaceMenu} aria-haspopup="menu" onClick={() => setWorkspaceMenu((value) => !value)}>Workspace</Button>{workspaceMenu && <><button className="context-scrim" aria-label="Close workspace menu" onClick={() => setWorkspaceMenu(false)} /><div className="context-popover workspace-popover" role="menu"><button role="menuitem" onClick={() => { setWorkspaceMenu(false); renameWorkspaceById(workspace.id) }}>Rename workspace</button><button role="menuitem" onClick={reconfigureWorkspace}>Reconfigure workspace</button><button role="menuitem" onClick={() => navigate(`/setup/${project.id}`)}>New workspace for this project</button><span className="menu-separator" /><button role="menuitem" onClick={() => void restartAll()}><RotateCcw size={14} />Restart all terminals</button><button role="menuitem" onClick={() => void stopAll()}><CircleStop size={14} />Stop all terminals</button><button role="menuitem" onClick={openLauncher}><FolderOpen size={14} />Project launcher</button><button role="menuitem" className="danger-item" onClick={() => void closeWorkspace()}>Close workspace</button></div></>}</div></>}
+    titleBar={<><div className="workspace-heading"><strong>{activePane?.title || workspace.name}</strong>{project.gitBranch && <span className="branch-label">{project.gitBranch}</span>}</div><div className="titlebar-spacer" />{attentionQueue.length > 0 && <button className="attention-chip" onClick={focusNextAttention} title="Ctrl+Shift+P focuses the oldest agent needing attention">{attentionQueue.length} agent{attentionQueue.length === 1 ? '' : 's'} waiting</button>}<span className="compact-count">{running}/{workspace.panes.length} running</span><div className="workspace-menu-wrap"><Button variant="ghost" icon={<ChevronDown size={14} />} aria-expanded={workspaceMenu} aria-haspopup="menu" onClick={() => setWorkspaceMenu((value) => !value)}>Workspace</Button>{workspaceMenu && <><button className="context-scrim" aria-label="Close workspace menu" onClick={() => setWorkspaceMenu(false)} /><div className="context-popover workspace-popover" role="menu"><button role="menuitem" onClick={() => { setWorkspaceMenu(false); renameWorkspaceById(workspace.id) }}>Rename workspace</button><button role="menuitem" onClick={reconfigureWorkspace}>Reconfigure workspace</button><button role="menuitem" onClick={() => navigate(`/setup/${project.id}`)}>New workspace for this project</button><span className="menu-separator" /><button role="menuitem" onClick={() => void restartAll()}><RotateCcw size={14} />Restart all terminals</button><button role="menuitem" onClick={() => void stopAll()}><CircleStop size={14} />Stop all terminals</button><button role="menuitem" onClick={openLauncher}><FolderOpen size={14} />Project launcher</button><button role="menuitem" className="danger-item" onClick={() => void closeWorkspace()}>Close workspace</button></div></>}</div></>}
     sidebar={<ForgeSpaceSidebar project={project} activeWorkspaceId={workspace.id} workspaces={sidebarWorkspaces} recents={recentWorkspaces} collapsed={collapsed} width={sidebarWidth} switchingWorkspaceId={switchingWorkspaceId} projectFolderMissing={projectFolderMissing} loadingWorkspaces={projectWorkspaces.length === 0 && loading} actions={sidebarActions} placements={placements} monitors={monitors} openProjects={sidebarOpenProjects} />}
     canvas={<>{error && <div className="workspace-error"><ErrorNotice message={error} onRetry={() => void restartAll()} /></div>}<MonitorRecoveryWatcher monitors={monitors} onChanged={handleMonitorChanged} /><section className="terminal-canvas"><WorkspaceCanvas reducedMotion={reducedMotion} persist={persistCanvas} onFocusPane={setActivePane} renderPane={renderPane} /></section></>}
-    statusBar={<><span>{project.gitBranch || 'No branch'}</span><span className="status-path" title={project.rootPath}>{project.name}</span><span>{running}/{workspace.panes.length} running</span><span>{activePane?.title || 'No active pane'}</span>{Object.keys(paneErrors).some((id) => paneErrors[id]) && <span className="status-alert">Needs attention</span>}</>}
+    statusBar={<><span>{project.gitBranch || 'No branch'}</span><span className="status-path" title={project.rootPath}>{project.name}</span><span>{running}/{workspace.panes.length} running</span><span>{activePane?.title || 'No active pane'}</span>{attentionQueue.length > 0 && <span className="status-alert">{attentionQueue.length} agent attention</span>}{Object.keys(paneErrors).some((id) => paneErrors[id]) && <span className="status-alert">Pane error</span>}</>}
   >
     {pendingInsert && <Modal title={pendingInsert.replace ? 'Replace terminal' : 'Choose terminal'} onClose={() => setPendingInsert(undefined)}><div className="provider-picker">{choices.length === 0 ? <ErrorNotice message="No available agents or shells were detected." onRetry={() => void scanProviders()} /> : choices.map((choice) => <button key={`${choice.provider}:${choice.name}`} onClick={() => void insertOrReplace(choice)}><TerminalSquare size={18} /><div><strong>{choice.name}</strong><span>Available · {providerLabel(choice.provider)}</span></div></button>)}</div></Modal>}
     {renameTarget && <TextPromptDialog title={renameTarget.kind === 'workspace' ? 'Rename workspace' : 'Rename terminal'} label={renameTarget.kind === 'workspace' ? 'Workspace name' : 'Terminal title'} initialValue={renameTarget.initialValue} confirmLabel="Rename" onClose={() => setRenameTarget(undefined)} onConfirm={(value) => void confirmRename(value)} />}
     {monitorPicker && <Modal title="Move workspace to monitor" onClose={() => setMonitorPicker(undefined)}><div className="provider-picker">{monitors.length === 0 ? <ErrorNotice message="No additional monitors were detected." /> : monitors.map((monitor) => <button key={monitor.id} onClick={() => void chooseMonitor(monitor.id)}><TerminalSquare size={18} /><div><strong>{monitorLabel(monitor)}{monitor.isPrimary ? ' · Primary' : ''}</strong><span>{monitor.bounds.width}×{monitor.bounds.height} · {Math.round(monitor.scaleFactor * 100)}% · {monitor.windowCount} window{monitor.windowCount === 1 ? '' : 's'}</span></div></button>)}</div></Modal>}
-    {paneMenu && <PaneMenu menu={paneMenu} onClose={() => setPaneMenu(undefined)} onAction={(action) => { const paneId = paneMenu.paneId; setPaneMenu(undefined); if (action === 'rename') void renamePane(paneId); if (action === 'split_right') setPendingInsert({ targetPaneId: paneId, direction: 'vertical' }); if (action === 'split_down') setPendingInsert({ targetPaneId: paneId, direction: 'horizontal' }); if (action === 'duplicate') { const pane = workspace.panes.find((item) => item.id === paneId); if (pane) setPendingInsert({ targetPaneId: paneId, direction: 'vertical', duplicate: pane }) } if (action === 'replace') setPendingInsert({ targetPaneId: paneId, direction: 'vertical', replace: true }); if (action === 'directory') void changeDirectory(paneId); if (action === 'restart') void restartPane(paneId); if (action === 'stop') void stopPane(paneId); if (action === 'close') void closePane(paneId); if (['search','copy','paste','select_all','clear','focus'].includes(action)) dispatchTerminalAction(paneId, action as Parameters<typeof dispatchTerminalAction>[1]) }} />}
+    {gitReview && <Modal title="Pane review" onClose={() => setGitReview(undefined)}><div className="pane-review"><div className="pane-review-meta"><strong>{gitReview.review.branch || 'detached'}</strong><span title={gitReview.review.workingDirectory}>{gitReview.review.workingDirectory}</span>{gitReview.review.diffTruncated && <em>Diff truncated</em>}</div>{gitReview.review.conflicts.length > 0 && <ErrorNotice message={`${gitReview.review.conflicts.length} conflicted file(s): ${gitReview.review.conflicts.join(', ')}`} />}{gitReview.review.files.length === 0 ? <p className="empty-copy">No git changes for this pane.</p> : <div className="pane-review-files">{gitReview.review.files.map((file) => <div key={file.path} className={file.conflicted ? 'conflicted' : ''}><code>{file.indexStatus}{file.worktreeStatus}</code><span title={file.path}>{file.path}</span><button disabled={gitReviewBusy} onClick={() => void stageReviewFile(file.path)}>Stage</button><button disabled={gitReviewBusy} onClick={() => void restoreReviewFile(file.path)}>Discard</button></div>)}</div>}<pre className="pane-review-diff">{gitReview.review.diff || 'No unstaged or staged diff output.'}</pre></div></Modal>}
+    {paneMenu && <PaneMenu menu={paneMenu} onClose={() => setPaneMenu(undefined)} onAction={(action) => { const paneId = paneMenu.paneId; setPaneMenu(undefined); if (action === 'rename') void renamePane(paneId); if (action === 'split_right') setPendingInsert({ targetPaneId: paneId, direction: 'vertical' }); if (action === 'split_down') setPendingInsert({ targetPaneId: paneId, direction: 'horizontal' }); if (action === 'duplicate') { const pane = workspace.panes.find((item) => item.id === paneId); if (pane) setPendingInsert({ targetPaneId: paneId, direction: 'vertical', duplicate: pane }) } if (action === 'replace') setPendingInsert({ targetPaneId: paneId, direction: 'vertical', replace: true }); if (action === 'directory') void changeDirectory(paneId); if (action === 'isolate_worktree') void isolatePaneWorktree(paneId); if (action === 'review_changes') void openPaneReview(paneId); if (action === 'restart') void restartPane(paneId); if (action === 'stop') void stopPane(paneId); if (action === 'close') void closePane(paneId); if (['search','copy','paste','select_all','clear','focus'].includes(action)) dispatchTerminalAction(paneId, action as Parameters<typeof dispatchTerminalAction>[1]) }} />}
   </AppShell>
 }
 

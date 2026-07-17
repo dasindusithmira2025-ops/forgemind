@@ -1,5 +1,5 @@
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
-import type { RestorationProgress, TerminalExitEvent, TerminalOutputEvent, TerminalStatusEvent } from './types'
+import type { AgentStateEvent, RestorationProgress, TerminalExitEvent, TerminalOutputEvent, TerminalStatusEvent } from './types'
 
 type TerminalOutputWireEvent = Omit<TerminalOutputEvent, 'data'> & { data: string }
 
@@ -11,6 +11,9 @@ export const onTerminalExit = (handler: (event: TerminalExitEvent) => void): Pro
 
 export const onTerminalStatus = (handler: (event: TerminalStatusEvent) => void): Promise<UnlistenFn> =>
   listen<TerminalStatusEvent>('terminal-status', (event) => handler(event.payload))
+
+export const onAgentState = (handler: (event: AgentStateEvent) => void): Promise<UnlistenFn> =>
+  listen<AgentStateEvent>('agent-state', (event) => handler(event.payload))
 
 export const onRestorationProgress = (handler: (event: RestorationProgress) => void): Promise<UnlistenFn> =>
   listen<RestorationProgress>('restoration-progress', (event) => handler(event.payload))

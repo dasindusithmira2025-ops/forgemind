@@ -1,7 +1,7 @@
 use crate::errors::{AppError, AppResult};
 use rusqlite::{params, Connection};
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 11;
+pub const CURRENT_SCHEMA_VERSION: i64 = 12;
 
 const MIGRATION_1: &str = r#"
 CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
@@ -822,6 +822,12 @@ pub fn apply(connection: &Connection) -> AppResult<()> {
     if current < 11 || !table_exists(connection, "usage_snapshots")? {
         migrate_v11(connection)?;
     }
+    if current < 12
+        || !column_exists(connection, "agent_sessions", "agent_state")?
+        || !table_exists(connection, "pane_worktrees")?
+    {
+        migrate_v12(connection)?;
+    }
     Ok(())
 }
 
@@ -837,7 +843,9 @@ pub fn requires_migration(connection: &Connection) -> AppResult<bool> {
         || !table_exists(connection, "usage_snapshots")?
         || !column_exists(connection, "workspaces", "system_kind")?
         || !column_exists(connection, "missions", "origin_workspace_id")?
-        || !column_exists(connection, "workspace_placements", "preferred_monitor_id")?)
+        || !column_exists(connection, "workspace_placements", "preferred_monitor_id")?
+        || !column_exists(connection, "agent_sessions", "agent_state")?
+        || !table_exists(connection, "pane_worktrees")?)
 }
 
 fn table_exists(connection: &Connection, table: &str) -> AppResult<bool> {
@@ -999,6 +1007,68 @@ fn migrate_v11(connection: &Connection) -> AppResult<()> {
         record_migration(connection, 11)
     })();
     finish_migration_transaction(connection, result, 11)
+}
+
+fn migrate_v12(connection: &Connection) -> AppResult<()> {
+    connection
+        .execute_batch("BEGIN IMMEDIATE;")
+        .map_err(AppError::database)?;
+    let result = (|| {
+        add_column_if_missing(
+            connection,
+            "agent_sessions",
+            "agent_state",
+            "TEXT NOT NULL DEFAULT 'working'",
+        )?;
+        add_column_if_missing(
+            connection,
+            "agent_sessions",
+            "agent_state_source",
+            "TEXT NOT NULL DEFAULT 'heuristic'",
+        )?;
+        add_column_if_missing(
+            connection,
+            "agent_sessions",
+            "agent_state_reason",
+            "TEXT NOT NULL DEFAULT 'session started'",
+        )?;
+        add_column_if_missing(
+            connection,
+            "agent_sessions",
+            "agent_attention_since",
+            "TEXT",
+        )?;
+        add_column_if_missing(
+            connection,
+            "agent_sessions",
+            "agent_state_updated_at",
+            "TEXT NOT NULL DEFAULT ''",
+        )?;
+        connection.execute("UPDATE agent_sessions SET agent_state_updated_at=updated_at WHERE agent_state_updated_at=''", []).map_err(AppError::database)?;
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_agent_sessions_state ON agent_sessions(workspace_id,agent_state,agent_state_updated_at DESC)", []).map_err(AppError::database)?;
+        connection
+            .execute_batch(
+                r#"
+CREATE TABLE IF NOT EXISTS pane_worktrees(
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  pane_id TEXT NOT NULL REFERENCES workspace_panes(id) ON DELETE CASCADE,
+  repository_path TEXT NOT NULL,
+  worktree_path TEXT NOT NULL UNIQUE,
+  branch_name TEXT NOT NULL,
+  base_ref TEXT NOT NULL,
+  status TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_pane_worktrees_pane ON pane_worktrees(workspace_id,pane_id,status);
+"#,
+            )
+            .map_err(AppError::database)?;
+        record_migration(connection, 12)
+    })();
+    finish_migration_transaction(connection, result, 12)
 }
 
 fn record_migration(connection: &Connection, version: i64) -> AppResult<()> {

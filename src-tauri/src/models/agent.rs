@@ -87,6 +87,85 @@ pub struct AgentSession {
     pub provider_session_id: Option<String>,
     pub transcript_path: Option<String>,
     pub status: String,
+    pub agent_state: String,
+    pub agent_state_source: String,
+    pub agent_state_reason: String,
+    pub agent_attention_since: Option<String>,
+    pub agent_state_updated_at: String,
     pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentActivityState {
+    Working,
+    NeedsInput,
+    NeedsPermission,
+    Idle,
+    Finished,
+    Failed,
+}
+
+impl AgentActivityState {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Working => "working",
+            Self::NeedsInput => "needs_input",
+            Self::NeedsPermission => "needs_permission",
+            Self::Idle => "idle",
+            Self::Finished => "finished",
+            Self::Failed => "failed",
+        }
+    }
+
+    pub fn requires_attention(&self) -> bool {
+        matches!(
+            self,
+            Self::NeedsInput | Self::NeedsPermission | Self::Finished | Self::Failed
+        )
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentStateSource {
+    Heuristic,
+    ShellIntegration,
+    ProviderHook,
+    ProcessExit,
+}
+
+impl AgentStateSource {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Heuristic => "heuristic",
+            Self::ShellIntegration => "shell_integration",
+            Self::ProviderHook => "provider_hook",
+            Self::ProcessExit => "process_exit",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentSignal {
+    pub state: AgentActivityState,
+    pub source: AgentStateSource,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentStateEvent {
+    pub terminal_session_id: String,
+    pub project_id: String,
+    pub workspace_id: String,
+    pub pane_id: String,
+    pub provider: AgentProvider,
+    pub state: AgentActivityState,
+    pub source: AgentStateSource,
+    pub reason: String,
+    pub attention_since: Option<String>,
     pub updated_at: String,
 }
