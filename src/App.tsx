@@ -13,6 +13,7 @@ const WorkspaceSetup = lazy(() => import('./screens/WorkspaceSetup').then((modul
 const WorkspaceScreen = lazy(() => import('./screens/WorkspaceScreen').then((module) => ({ default: module.WorkspaceScreen })))
 const SettingsScreen = lazy(() => import('./screens/SettingsScreen').then((module) => ({ default: module.SettingsScreen })))
 const RepositoryScreen = lazy(() => import('./screens/RepositoryScreen').then((module) => ({ default: module.RepositoryScreen })))
+const SwarmsScreen = lazy(() => import('./screens/SwarmsScreen').then((module) => ({ default: module.SwarmsScreen })))
 const DetachedWorkspaceWindow = lazy(() => import('./screens/DetachedWorkspaceWindow').then((module) => ({ default: module.DetachedWorkspaceWindow })))
 
 function StartupWorkspaceRedirect() {
@@ -109,6 +110,8 @@ export default function App() {
         <Route path="/workspace/:workspaceId/configure" element={<WorkspaceSetup />} />
         <Route path="/workspace/:workspaceId" element={<WorkspaceScreen />} />
         <Route path="/repository/:projectId" element={<RepositoryScreen />} />
+        <Route path="/swarms/:projectId" element={<SwarmsScreen />} />
+        <Route path="/swarms/:projectId/:swarmId" element={<SwarmsScreen />} />
         <Route path="/settings" element={<SettingsScreen />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

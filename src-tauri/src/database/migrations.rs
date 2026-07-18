@@ -1,7 +1,7 @@
 use crate::errors::{AppError, AppResult};
 use rusqlite::{params, Connection};
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 14;
+pub const CURRENT_SCHEMA_VERSION: i64 = 15;
 
 const MIGRATION_1: &str = r#"
 CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
@@ -838,6 +838,12 @@ pub fn apply(connection: &Connection) -> AppResult<()> {
     {
         migrate_v14(connection)?;
     }
+    if current < 15
+        || !table_exists(connection, "swarms")?
+        || !column_exists(connection, "swarms", "project_root")?
+    {
+        migrate_v15(connection)?;
+    }
     Ok(())
 }
 
@@ -859,7 +865,9 @@ pub fn requires_migration(connection: &Connection) -> AppResult<bool> {
         || !table_exists(connection, "repository_operations")?
         || !column_exists(connection, "repository_sync_cursors", "error_message")?
         || !column_exists(connection, "repository_sync_cursors", "required_permission")?
-        || !column_exists(connection, "repository_sync_cursors", "recovery_action")?)
+        || !column_exists(connection, "repository_sync_cursors", "recovery_action")?
+        || !table_exists(connection, "swarms")?
+        || !column_exists(connection, "swarms", "project_root")?)
 }
 
 fn table_exists(connection: &Connection, table: &str) -> AppResult<bool> {
@@ -1330,6 +1338,181 @@ fn migrate_v14(connection: &Connection) -> AppResult<()> {
     finish_migration_transaction(connection, result, 14)
 }
 
+/// Paralith Swarms. Role-based multi-agent orchestration scoped to a Project. The backend owns
+/// every lifecycle transition and task-graph mutation; these tables persist Swarm identity,
+/// role assignments, live agent workers, the adaptive task graph with its dependencies, a
+/// bounded meaningful-event timeline, user role messages, and reusable team presets. The four
+/// built-in presets are seeded idempotently so the creation flow always has them.
+fn migrate_v15(connection: &Connection) -> AppResult<()> {
+    connection
+        .execute_batch("BEGIN IMMEDIATE;")
+        .map_err(AppError::database)?;
+    let result = (|| {
+        connection
+            .execute_batch(
+                r#"
+CREATE TABLE IF NOT EXISTS swarms(
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  project_root TEXT NOT NULL,
+  name TEXT NOT NULL,
+  mission TEXT NOT NULL,
+  lifecycle TEXT NOT NULL DEFAULT 'draft',
+  phase TEXT NOT NULL DEFAULT 'understanding',
+  team_preset TEXT NOT NULL DEFAULT 'auto',
+  max_parallel INTEGER NOT NULL DEFAULT 6,
+  instructions TEXT NOT NULL DEFAULT '',
+  progress REAL NOT NULL DEFAULT 0,
+  priority INTEGER NOT NULL DEFAULT 0,
+  decision_json TEXT,
+  summary_json TEXT,
+  review_verdict TEXT,
+  archived INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  started_at TEXT,
+  completed_at TEXT
+);
+CREATE TABLE IF NOT EXISTS swarm_roles(
+  id TEXT PRIMARY KEY,
+  swarm_id TEXT NOT NULL REFERENCES swarms(id) ON DELETE CASCADE,
+  role TEXT NOT NULL,
+  runtime TEXT NOT NULL DEFAULT 'auto',
+  desired_count INTEGER NOT NULL DEFAULT 1,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  UNIQUE(swarm_id, role)
+);
+CREATE TABLE IF NOT EXISTS swarm_agents(
+  id TEXT PRIMARY KEY,
+  swarm_id TEXT NOT NULL REFERENCES swarms(id) ON DELETE CASCADE,
+  role TEXT NOT NULL,
+  runtime TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'idle',
+  current_task_id TEXT,
+  terminal_session_id TEXT,
+  last_result TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS swarm_tasks(
+  id TEXT PRIMARY KEY,
+  swarm_id TEXT NOT NULL REFERENCES swarms(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  role TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  assigned_agent_id TEXT,
+  progress REAL NOT NULL DEFAULT 0,
+  files_json TEXT NOT NULL DEFAULT '[]',
+  result_json TEXT,
+  position INTEGER NOT NULL DEFAULT 0,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS swarm_task_deps(
+  task_id TEXT NOT NULL REFERENCES swarm_tasks(id) ON DELETE CASCADE,
+  depends_on TEXT NOT NULL REFERENCES swarm_tasks(id) ON DELETE CASCADE,
+  PRIMARY KEY(task_id, depends_on)
+);
+CREATE TABLE IF NOT EXISTS swarm_events(
+  id TEXT PRIMARY KEY,
+  swarm_id TEXT NOT NULL REFERENCES swarms(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL,
+  role TEXT,
+  agent_id TEXT,
+  task_id TEXT,
+  summary TEXT NOT NULL,
+  level TEXT NOT NULL DEFAULT 'info',
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS swarm_messages(
+  id TEXT PRIMARY KEY,
+  swarm_id TEXT NOT NULL REFERENCES swarms(id) ON DELETE CASCADE,
+  target TEXT NOT NULL,
+  body TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS swarm_presets(
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  builtin INTEGER NOT NULL DEFAULT 0,
+  is_default INTEGER NOT NULL DEFAULT 0,
+  max_parallel INTEGER NOT NULL DEFAULT 6,
+  instructions TEXT NOT NULL DEFAULT '',
+  config_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_swarms_project ON swarms(project_id, archived, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_swarm_agents_swarm ON swarm_agents(swarm_id, status);
+CREATE INDEX IF NOT EXISTS idx_swarm_tasks_swarm ON swarm_tasks(swarm_id, status, position);
+CREATE INDEX IF NOT EXISTS idx_swarm_events_swarm ON swarm_events(swarm_id, created_at DESC);
+"#,
+            )
+            .map_err(AppError::database)?;
+        // Development builds may already have created the v15 table before project_root became
+        // part of the contract. Upgrade that partial schema in place and backfill from Projects;
+        // never recreate the database or discard Swarm state.
+        if !column_exists(connection, "swarms", "project_root")? {
+            connection
+                .execute("ALTER TABLE swarms ADD COLUMN project_root TEXT", [])
+                .map_err(AppError::database)?;
+        }
+        connection
+            .execute(
+                "UPDATE swarms SET project_root=(SELECT canonical_root_path FROM projects WHERE projects.id=swarms.project_id) WHERE project_root IS NULL OR trim(project_root)=''",
+                [],
+            )
+            .map_err(AppError::database)?;
+        let unbound: i64 = connection
+            .query_row(
+                "SELECT count(*) FROM swarms WHERE project_root IS NULL OR trim(project_root)=''",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(AppError::database)?;
+        if unbound != 0 {
+            return Err(AppError::new(
+                "swarm_project_backfill_failed",
+                "A persisted Swarm no longer has an owning Project root.",
+                false,
+            ));
+        }
+        seed_builtin_presets(connection)?;
+        record_migration(connection, 15)
+    })();
+    finish_migration_transaction(connection, result, 15)
+}
+
+/// Insert the four built-in team presets. Idempotent: `INSERT OR IGNORE` keyed by the stable
+/// preset id keeps a user's edits to their own presets untouched while ensuring the built-ins
+/// always exist. `config_json` stores the ordered role configuration.
+fn seed_builtin_presets(connection: &Connection) -> AppResult<()> {
+    let now = chrono::Utc::now().to_rfc3339();
+    for (id, name, max_parallel, roles) in crate::models::swarm::builtin_presets() {
+        let config: Vec<serde_json::Value> = roles
+            .iter()
+            .map(|role| {
+                serde_json::json!({
+                    "role": role.role.as_str(),
+                    "runtime": role.runtime.as_str(),
+                    "desiredCount": role.desired_count,
+                    "enabled": role.enabled,
+                })
+            })
+            .collect();
+        let config_json = serde_json::to_string(&config).unwrap_or_else(|_| "[]".into());
+        let is_default = i64::from(id == "auto");
+        connection
+            .execute(
+                "INSERT OR IGNORE INTO swarm_presets(id,name,builtin,is_default,max_parallel,instructions,config_json,created_at,updated_at) VALUES(?1,?2,1,?3,?4,'',?5,?6,?6)",
+                params![id, name, is_default, max_parallel, config_json, now],
+            )
+            .map_err(AppError::database)?;
+    }
+    Ok(())
+}
+
 fn record_migration(connection: &Connection, version: i64) -> AppResult<()> {
     connection
         .execute(
@@ -1634,6 +1817,107 @@ mod tests {
         for column in ["error_message", "required_permission", "recovery_action"] {
             assert!(column_exists(&connection, "repository_sync_cursors", column).unwrap());
         }
+    }
+
+    #[test]
+    fn v15_creates_swarm_tables_and_seeds_builtin_presets() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", true)
+            .unwrap();
+        apply(&connection).unwrap();
+        for table in [
+            "swarms",
+            "swarm_roles",
+            "swarm_agents",
+            "swarm_tasks",
+            "swarm_task_deps",
+            "swarm_events",
+            "swarm_messages",
+            "swarm_presets",
+        ] {
+            assert!(table_exists(&connection, table).unwrap(), "missing {table}");
+        }
+        let builtin: i64 = connection
+            .query_row(
+                "SELECT count(*) FROM swarm_presets WHERE builtin=1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(builtin, 4, "the four built-in presets must be seeded");
+        let default: i64 = connection
+            .query_row(
+                "SELECT count(*) FROM swarm_presets WHERE is_default=1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(default, 1, "exactly one default preset");
+        assert!(column_exists(&connection, "swarms", "project_root").unwrap());
+    }
+
+    #[test]
+    fn v15_reseeds_builtin_presets_but_preserves_user_presets() {
+        // A partial v15 build could create the tables but skip seeding; re-running apply must
+        // restore the built-ins idempotently without disturbing a user-created preset.
+        let connection = Connection::open_in_memory().unwrap();
+        apply(&connection).unwrap();
+        connection
+            .execute(
+                "INSERT INTO swarm_presets(id,name,builtin,is_default,max_parallel,instructions,config_json,created_at,updated_at) VALUES('mine','My Team',0,0,4,'','[]','now','now')",
+                [],
+            )
+            .unwrap();
+        connection
+            .execute("DELETE FROM swarm_presets WHERE builtin=1", [])
+            .unwrap();
+        seed_builtin_presets(&connection).unwrap();
+        let builtin: i64 = connection
+            .query_row(
+                "SELECT count(*) FROM swarm_presets WHERE builtin=1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(builtin, 4);
+        let mine: i64 = connection
+            .query_row(
+                "SELECT count(*) FROM swarm_presets WHERE id='mine'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(mine, 1, "user preset must survive reseeding");
+    }
+
+    #[test]
+    fn v15_backfills_project_root_for_partial_swarm_schema_without_losing_rows() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", true)
+            .unwrap();
+        apply(&connection).unwrap();
+        connection.execute("INSERT INTO projects(id,name,root_path,canonical_root_path,major_languages_json,is_git_repository,has_package_json,has_lockfile,created_at,updated_at,last_opened_at) VALUES('p','Demo','C:/repo','c:/repo','[]',1,0,0,'t','t','t')",[]).unwrap();
+        connection
+            .execute("ALTER TABLE swarms DROP COLUMN project_root", [])
+            .unwrap();
+        connection.execute("INSERT INTO swarms(id,project_id,name,mission,lifecycle,phase,team_preset,max_parallel,instructions,progress,priority,archived,created_at,updated_at) VALUES('s','p','Existing','Keep me','draft','understanding','auto',2,'',0,0,0,'t','t')",[]).unwrap();
+
+        apply(&connection).unwrap();
+
+        let root: String = connection
+            .query_row("SELECT project_root FROM swarms WHERE id='s'", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(root, "c:/repo");
+        let count: i64 = connection
+            .query_row("SELECT count(*) FROM swarms WHERE id='s'", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(count, 1, "the existing Swarm must survive the backfill");
     }
 
     #[test]

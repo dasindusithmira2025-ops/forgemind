@@ -4,6 +4,7 @@ pub mod migrations;
 mod placement;
 mod repair;
 mod repository;
+pub(crate) mod swarm;
 
 pub(crate) use repository::NewRepositoryOperation;
 
@@ -350,6 +351,12 @@ impl DatabaseService {
         transaction.execute(
             "UPDATE projects SET root_path=?2,canonical_root_path=?3,git_branch=?4,detected_framework=?5,package_manager=?6,major_languages_json=?7,is_git_repository=?8,has_package_json=?9,has_lockfile=?10,updated_at=?11,is_recent=1 WHERE id=?1",
             params![project_id, new_project.root_path, new_project.canonical_root_path, new_project.git_branch, new_project.detected_framework, new_project.package_manager, serde_json::to_string(&new_project.major_languages).unwrap_or_default(), new_project.is_git_repository, new_project.has_package_json, new_project.has_lockfile, now],
+        )?;
+        // Swarm roots are part of the persisted security boundary. Relocation updates them in
+        // the same transaction as the Project and its project-relative Pane directories.
+        transaction.execute(
+            "UPDATE swarms SET project_root=?2,updated_at=?3 WHERE project_id=?1",
+            params![project_id, new_project.canonical_root_path, now],
         )?;
         // Repair project-root-relative pane directories in place.
         let repairs: Vec<(String, String)> = {
