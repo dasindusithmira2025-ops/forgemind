@@ -49,6 +49,13 @@ import type {
   RepositorySnapshot,
   RepositoryWorktreeLease,
   WorktreeConflictRisk,
+  Swarm,
+  SwarmListItem,
+  SwarmDetail,
+  SwarmPreset,
+  CreateSwarmRequest,
+  ProjectCloseSwarmBehavior,
+  SavePresetRequest,
 } from './types'
 
 export const native = {
@@ -152,7 +159,8 @@ export const native = {
   openProjectSession: (projectId: string, makeActive = true) =>
     invoke<OpenProjectSession[]>('open_project_session', { projectId, makeActive }),
   setActiveProject: (projectId: string) => invoke<OpenProjectSession[]>('set_active_project', { projectId }),
-  closeProjectSession: (projectId: string) => invoke<OpenProjectSession[]>('close_project_session', { projectId }),
+  closeProjectSession: (projectId: string, swarmBehavior?: ProjectCloseSwarmBehavior) =>
+    invoke<OpenProjectSession[]>('close_project_session', { projectId, swarmBehavior }),
   setProjectLastActive: (projectId: string, workspaceId?: string, paneId?: string) =>
     invoke<void>('set_project_last_active', { projectId, workspaceId, paneId }),
   setProjectExpanded: (projectId: string, expanded: boolean) =>
@@ -174,6 +182,27 @@ export const native = {
   recoverWorkspaceWindows: () => invoke<MonitorRecoveryReport>('recover_workspace_windows'),
   listMonitors: () => invoke<MonitorInfo[]>('list_monitors'),
   setMonitorAlias: (monitorKey: string, alias: string) => invoke<void>('set_monitor_alias', { monitorKey, alias }),
+
+  // ---- Paralith Swarms --------------------------------------------------------------------
+  listSwarmPresets: () => invoke<SwarmPreset[]>('list_swarm_presets'),
+  saveSwarmPreset: (request: SavePresetRequest) => invoke<SwarmPreset>('save_swarm_preset', { request }),
+  deleteSwarmPreset: (presetId: string) => invoke<void>('delete_swarm_preset', { presetId }),
+  createSwarm: (request: CreateSwarmRequest) => invoke<Swarm>('create_swarm', { request }),
+  listSwarms: (projectId: string, includeArchived = false) =>
+    invoke<SwarmListItem[]>('list_swarms', { projectId, includeArchived }),
+  getSwarmDetail: (projectId: string, swarmId: string) => invoke<SwarmDetail>('get_swarm_detail', { projectId, swarmId }),
+  renameSwarm: (projectId: string, swarmId: string, name: string) => invoke<Swarm>('rename_swarm', { projectId, swarmId, name }),
+  startSwarm: (projectId: string, swarmId: string) => invoke<void>('start_swarm', { projectId, swarmId }),
+  pauseSwarm: (projectId: string, swarmId: string) => invoke<void>('pause_swarm', { projectId, swarmId }),
+  resumeSwarm: (projectId: string, swarmId: string) => invoke<void>('resume_swarm', { projectId, swarmId }),
+  stopSwarm: (projectId: string, swarmId: string, hard = false) => invoke<void>('stop_swarm', { projectId, swarmId, hard }),
+  archiveSwarm: (projectId: string, swarmId: string, archived: boolean) => invoke<void>('archive_swarm', { projectId, swarmId, archived }),
+  deleteSwarm: (projectId: string, swarmId: string) => invoke<void>('delete_swarm', { projectId, swarmId }),
+  setSwarmPriority: (projectId: string, swarmId: string, priority: number) => invoke<void>('set_swarm_priority', { projectId, swarmId, priority }),
+  sendSwarmMessage: (projectId: string, swarmId: string, target: string, body: string) =>
+    invoke<void>('send_swarm_message', { projectId, request: { swarmId, target, body } }),
+  acceptSwarmResult: (projectId: string, swarmId: string) => invoke<void>('accept_swarm_result', { projectId, swarmId }),
+  addSwarmBuilder: (projectId: string, swarmId: string) => invoke<void>('add_swarm_builder', { projectId, swarmId }),
 }
 
 export function asNativeError(error: unknown): { code: string; message: string; affectedEntity?: string; recommendedAction?: string } {
