@@ -6,7 +6,7 @@
 use crate::errors::{AppError, AppResult};
 use crate::models::{
     HandoffTicket, MonitorInfo, MonitorRecoveryReport, MonitorRect, OpenProjectSession,
-    PlacementMode, WindowGeometry, WorkspacePlacement,
+    PlacementMode, ProjectCloseSwarmBehavior, WindowGeometry, WorkspacePlacement,
 };
 use crate::services::{detached_label, MAIN_WINDOW_LABEL};
 use crate::AppState;
@@ -53,10 +53,14 @@ pub fn set_active_project(
 #[tauri::command]
 pub fn close_project_session(
     project_id: String,
+    swarm_behavior: Option<ProjectCloseSwarmBehavior>,
     window: Window,
     state: State<'_, AppState>,
 ) -> AppResult<Vec<OpenProjectSession>> {
     crate::require_main_window(&window)?;
+    state
+        .swarms
+        .prepare_project_close(&project_id, swarm_behavior)?;
     state.windows.close_project(&project_id)?;
     state.windows.list_open_projects()
 }

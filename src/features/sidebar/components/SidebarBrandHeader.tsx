@@ -23,7 +23,7 @@ export function SidebarBrandHeader({ actions }: { actions: SidebarActions }) {
           aria-label="PARALITH menu"
           onClick={() => setMenuOpen(!menuOpen)}
         >
-          <Brand />
+          <Brand mono />
         </button>
         {menuOpen && (
           <>

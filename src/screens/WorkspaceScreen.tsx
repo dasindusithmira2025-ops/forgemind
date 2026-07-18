@@ -33,6 +33,7 @@ import { WORKSPACE_CANVAS_LAYOUT_VERSION } from '../features/workspace-canvas/ca
 import type { WorkspaceCanvasLayout } from '../features/workspace-canvas/canvasTypes'
 import { normalizeSplitTree, removePaneFromDockedTree } from '../features/workspace-canvas/layoutOperations'
 import { workspaceLayoutCommands, toSaveRequest } from '../native/workspaceLayoutCommands'
+import { isActiveLifecycle } from '../features/swarms/swarmPresentation'
 
 type ProviderChoice = { provider: AgentProvider; name: string; executablePath: string; args: string[]; shellProfileId?: string }
 type PendingInsert = { targetPaneId: string; direction: SplitDirection; replace?: boolean; duplicate?: PaneAssignment }
@@ -80,6 +81,8 @@ export function WorkspaceScreen() {
   const [monitorPicker, setMonitorPicker] = useState<string>()
   const [gitReview, setGitReview] = useState<{ paneId: string; review: PaneGitReview }>()
   const [gitReviewBusy, setGitReviewBusy] = useState(false)
+  const [projectClosePrompt, setProjectClosePrompt] = useState<{ projectId: string; projectName: string; activeSwarms: number }>()
+  const [projectCloseBusy, setProjectCloseBusy] = useState(false)
   // Project switching is passive navigation: it must never summon WebView2's native confirm
   // dialog (and its system alert sound) just to restore the selected Project's last Workspace.
   const quietRestoreWorkspaceId = useRef<string | undefined>(undefined)
@@ -356,9 +359,13 @@ export function WorkspaceScreen() {
     } catch (caught) { setError(asNativeError(caught).message) }
   },[navigate,openProjectSessions,selectProject])
 
-  // Close an open Project. Its background terminals are handled by the configured policy: stop
-  // (always), keep_running (never), or ask (confirm). Closing the active Project focuses another.
-  const closeProject = useCallback(async (projectId: string) => {
+  // Complete a Project close after the Swarm policy is explicit. The backend validates the
+  // Project/Swarm binding again and atomically refuses an omitted choice if active work exists.
+  const completeProjectClose = useCallback(async (
+    projectId: string,
+    swarmBehavior?: 'keep_running' | 'pause_and_close',
+  ) => {
+    setProjectCloseBusy(true)
     try {
       if (settings.inactiveWorkspaceProcesses !== 'keep_running') {
         const stop = settings.inactiveWorkspaceProcesses === 'stop'
@@ -368,7 +375,7 @@ export function WorkspaceScreen() {
           await Promise.all(projectWorkspaceList.map((item) => native.terminateWorkspaceSessions(item.id).catch(() => undefined)))
         }
       }
-      let list = await native.closeProjectSession(projectId)
+      let list = await native.closeProjectSession(projectId, swarmBehavior)
       const closedActive = projectId === project?.id
       if (closedActive && list.length > 0 && !list.some((session) => session.isActive)) {
         list = await native.setActiveProject(list[list.length - 1].projectId)
@@ -380,8 +387,29 @@ export function WorkspaceScreen() {
         if (nextWorkspaceId) { setSwitchingWorkspaceId(nextWorkspaceId); navigate(`/workspace/${nextWorkspaceId}`) }
         else navigate('/')
       }
+      setProjectClosePrompt(undefined)
     } catch (caught) { setError(asNativeError(caught).message) }
+    finally { setProjectCloseBusy(false) }
   }, [project?.id, navigate, settings.inactiveWorkspaceProcesses])
+
+  // Closing with active Swarms is always a three-way decision: keep running, pause-and-close,
+  // or cancel. The selected Project is already known; the dialog never asks for it again.
+  const closeProject = useCallback(async (projectId: string) => {
+    try {
+      const activeSwarms = (await native.listSwarms(projectId)).filter((item) =>
+        isActiveLifecycle(item.swarm.lifecycle),
+      ).length
+      if (activeSwarms > 0) {
+        setProjectClosePrompt({
+          projectId,
+          projectName: projectCache[projectId]?.name ?? (project?.id === projectId ? project.name : 'Project'),
+          activeSwarms,
+        })
+        return
+      }
+      await completeProjectClose(projectId)
+    } catch (caught) { setError(asNativeError(caught).message) }
+  }, [completeProjectClose, project?.id, project?.name, projectCache])
 
   // ---- Multi-monitor Workspace handoff (client guards; PTYs stay alive in Rust) -----------
   const runHandoff = useCallback(async (id: string, intent: WorkspaceWindowIntent, options?: { monitorId?: string }) => {
@@ -942,6 +970,7 @@ export function WorkspaceScreen() {
     canvas={<>{error && <div className="workspace-error"><ErrorNotice message={error} onRetry={() => void restartAll()} /></div>}<MonitorRecoveryWatcher monitors={monitors} onChanged={handleMonitorChanged} /><section className="terminal-canvas"><WorkspaceCanvas reducedMotion={reducedMotion} persist={persistCanvas} onFocusPane={setActivePane} renderPane={renderPane} /></section></>}
     statusBar={<><span>{project.gitBranch || 'No branch'}</span><span className="status-path" title={project.rootPath}>{project.name}</span><span>{running}/{workspace.panes.length} running</span><span>{activePane?.title || 'No active pane'}</span>{attentionQueue.length > 0 && <span className="status-alert">{attentionQueue.length} agent attention</span>}{Object.keys(paneErrors).some((id) => paneErrors[id]) && <span className="status-alert">Pane error</span>}</>}
   >
+    {projectClosePrompt && <Modal title={`Close ${projectClosePrompt.projectName}?`} onClose={() => { if (!projectCloseBusy) setProjectClosePrompt(undefined) }}><div className="restore-summary"><div><strong>{projectClosePrompt.activeSwarms} active Swarm{projectClosePrompt.activeSwarms === 1 ? '' : 's'}</strong><span>Swarm state remains bound to this Project.</span></div><p>Keep the Swarms running in the background, or pause them before closing the Project session.</p><div className="modal-actions"><Button variant="ghost" disabled={projectCloseBusy} onClick={() => setProjectClosePrompt(undefined)}>Cancel</Button><Button variant="secondary" data-autofocus disabled={projectCloseBusy} onClick={() => void completeProjectClose(projectClosePrompt.projectId, 'pause_and_close')}>Pause and close</Button><Button variant="primary" disabled={projectCloseBusy} onClick={() => void completeProjectClose(projectClosePrompt.projectId, 'keep_running')}>Keep running</Button></div></div></Modal>}
     {pendingInsert && <Modal title={pendingInsert.replace ? 'Replace terminal' : 'Choose terminal'} onClose={() => setPendingInsert(undefined)}><div className="provider-picker">{choices.length === 0 ? <ErrorNotice message="No available agents or shells were detected." onRetry={() => void scanProviders()} /> : choices.map((choice) => <button key={`${choice.provider}:${choice.name}`} onClick={() => void insertOrReplace(choice)}><TerminalSquare size={18} /><div><strong>{choice.name}</strong><span>Available · {providerLabel(choice.provider)}</span></div></button>)}</div></Modal>}
     {renameTarget && <TextPromptDialog title={renameTarget.kind === 'workspace' ? 'Rename workspace' : 'Rename terminal'} label={renameTarget.kind === 'workspace' ? 'Workspace name' : 'Terminal title'} initialValue={renameTarget.initialValue} confirmLabel="Rename" onClose={() => setRenameTarget(undefined)} onConfirm={(value) => void confirmRename(value)} />}
     {monitorPicker && <Modal title="Move workspace to monitor" onClose={() => setMonitorPicker(undefined)}><div className="provider-picker">{monitors.length === 0 ? <ErrorNotice message="No additional monitors were detected." /> : monitors.map((monitor) => <button key={monitor.id} onClick={() => void chooseMonitor(monitor.id)}><TerminalSquare size={18} /><div><strong>{monitorLabel(monitor)}{monitor.isPrimary ? ' · Primary' : ''}</strong><span>{monitor.bounds.width}×{monitor.bounds.height} · {Math.round(monitor.scaleFactor * 100)}% · {monitor.windowCount} window{monitor.windowCount === 1 ? '' : 's'}</span></div></button>)}</div></Modal>}

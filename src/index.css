@@ -733,11 +733,13 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 .brand { flex: 0 0 auto; gap: 0; line-height: 0; }
 .brand-logo { display: block; object-fit: contain; object-position: center; user-select: none; }
 .brand--compact .brand-logo { width: 28px; height: 28px; padding: 3px; border: 1px solid rgba(167, 192, 255, .28); border-radius: 8px; background: rgba(9, 13, 24, .6); box-shadow: 0 3px 12px rgba(34, 211, 238, .13); }
-/* Wordmark ratio 8.38:1, primary lockup ratio 3.89:1 — keep width/height locked to ratio so contain never letterboxes. */
+/* Wordmark ratio 8.38:1, primary lockup ratio 3.89:1, monochrome lockup ratio 4.22:1 — keep width/height locked to ratio so contain never letterboxes. */
 .brand--wordmark .brand-logo { width: 159px; height: 19px; }
 .brand--primary .brand-logo { width: 186px; height: 48px; }
+.brand--monochrome .brand-logo { width: 135px; height: 32px; }
 .sidebar-logo { padding: 3px 5px 3px 3px; }
 .sidebar-logo .brand--wordmark .brand-logo { width: 168px; height: 20px; }
+.sidebar-logo .brand--monochrome .brand-logo { width: 143px; height: 34px; }
 .sidebar-collapsed .brand { display: grid; place-items: center; }
 .sidebar-collapsed .brand--compact .brand-logo { width: 30px; height: 30px; }
 .collapsed-logo { padding: 0; }
@@ -1396,3 +1398,112 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 @media(max-width:1100px){.repo-overview-state{grid-template-columns:repeat(2,minmax(150px,1fr))}.repo-overview-state>div:nth-child(2){border-right:0}.repo-overview-state>div:nth-child(-n+2){border-bottom:1px solid var(--border)}.repo-pr-cockpit{grid-template-columns:minmax(160px,220px) minmax(330px,1fr)}.repo-pr-review-rail{grid-column:1/-1;border-left:0;border-top:1px solid var(--border);max-height:220px}.repo-security-capabilities{grid-template-columns:repeat(2,minmax(160px,1fr))}}
 @media(max-width:800px){.repo-actions-layout{grid-template-columns:1fr;overflow-y:auto}.repo-workflow-list{max-height:280px;border-right:0;border-bottom:1px solid var(--border)}.repo-workflow-runs{overflow:visible}.repo-overview-columns{grid-template-columns:1fr}.repo-clean-changes{grid-template-columns:1fr}.repo-clean-actions{grid-column:1}.repo-pr{grid-template-columns:1fr;overflow-y:auto}.repo-pr-list{max-height:260px;border-right:0;border-bottom:1px solid var(--border)}.repo-pr-detail{overflow:visible}.repo-pr-cockpit{grid-template-columns:minmax(150px,200px) minmax(320px,1fr);overflow-x:auto}.repo-branch-lane{align-items:flex-start;flex-direction:column}.repo-branch-lane-status{justify-content:flex-start}.repo-run-head{align-items:flex-start;flex-direction:column;padding:0 8px 8px}.repo-run-meta{padding-left:30px;flex-wrap:wrap}}
 @media(max-width:560px){.repo-header{align-items:flex-start}.repo-header-status{order:3;flex-basis:100%}.repo-overview-state{grid-template-columns:1fr}.repo-overview-state>div{border-right:0!important;border-bottom:1px solid var(--border)}.repo-next-actions{align-items:flex-start;flex-direction:column}.repo-security-capabilities{grid-template-columns:1fr}.repo-release-list{grid-template-columns:1fr}.repo-simple-list li{align-items:flex-start;flex-wrap:wrap}.repo-pr-cockpit{display:flex;flex-direction:column;overflow:visible}.repo-pr-file-list{max-height:180px;border-right:0;border-bottom:1px solid var(--border)}.repo-pr-diff{min-height:300px}.repo-pr-review-rail{max-height:none}.repo-changes{grid-template-columns:1fr;overflow-y:auto}.repo-changes-list{max-height:300px;border-right:0;border-bottom:1px solid var(--border)}.repo-changes-detail{min-height:500px}.repo-commit-actions{align-items:flex-start;flex-direction:column}.repo-run-toggle{flex-wrap:wrap}.repo-run-commit{flex-basis:100%;padding-left:35px}.repo-shell-project{max-width:110px}}
+
+/* ============================ Paralith Swarms ============================ */
+.tone-neutral { color: var(--muted); }
+.tone-blue { color: var(--accent-strong); }
+.tone-green { color: var(--success); }
+.tone-amber { color: var(--warning); }
+.tone-red { color: var(--danger); }
+.swarm-status-dot { width: 8px; height: 8px; flex: 0 0 auto; border-radius: 50%; background: currentColor; box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 16%, transparent); }
+.swarm-spin { animation: swarm-spin 1s linear infinite; }
+@keyframes swarm-spin { to { transform: rotate(360deg); } }
+
+.swarm-section .swarm-count { color: var(--faint); font-weight: 600; }
+.swarm-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.swarm-row-button { width: 100%; display: flex; align-items: flex-start; gap: 8px; padding: 7px 9px; background: none; border: 0; border-radius: var(--radius); color: var(--text); cursor: pointer; text-align: left; }
+.swarm-row-button:hover { background: var(--surface-2); }
+.swarm-row.is-active .swarm-row-button { background: var(--accent-soft); }
+.swarm-row-body { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 3px; }
+.swarm-row-name { font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.swarm-row-meta { display: flex; align-items: center; gap: 5px; color: var(--muted); font-size: 10px; }
+.swarm-row-percent { color: var(--accent-strong); font-variant-numeric: tabular-nums; }
+.swarm-row-agents { color: var(--faint); }
+.swarm-row-progress { height: 3px; border-radius: 2px; background: var(--surface-3); overflow: hidden; }
+.swarm-row-progress-fill { display: block; height: 100%; background: currentColor; transition: width .4s ease; }
+
+.swarm-shell { display: flex; flex-direction: column; }
+.swarm-workspace { flex: 1; min-height: 0; display: grid; grid-template-columns: 250px 1fr; }
+.swarm-list-col { border-right: 1px solid var(--border); background: var(--surface); overflow-y: auto; padding: 10px 8px; }
+.swarm-list-head { display: flex; align-items: center; justify-content: space-between; padding: 4px 6px 10px; }
+.swarm-list-item { width: 100%; display: flex; align-items: center; gap: 9px; padding: 8px 9px; background: none; border: 0; border-radius: var(--radius); color: var(--text); cursor: pointer; text-align: left; }
+.swarm-list-item:hover { background: var(--surface-2); }
+.swarm-list-item.is-active { background: var(--accent-soft); }
+.swarm-list-item-body { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.swarm-list-item-name { font-size: 12.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.swarm-list-item-meta { color: var(--muted); font-size: 10px; }
+.swarm-empty-hint { padding: 10px; color: var(--faint); font-size: 11px; }
+.swarm-main { min-width: 0; min-height: 0; overflow-y: auto; }
+.swarm-placeholder { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; color: var(--muted); }
+.swarm-error-bar { margin: 12px; padding: 9px 12px; display: flex; align-items: center; justify-content: space-between; gap: 12px; background: color-mix(in srgb, var(--danger) 12%, var(--surface)); border: 1px solid color-mix(in srgb, var(--danger) 40%, var(--border)); border-radius: var(--radius); color: var(--text); font-size: 12px; }
+.swarm-error-bar button { background: none; border: 0; color: var(--muted); cursor: pointer; }
+.swarm-error { color: var(--danger); font-size: 12px; }
+
+.swarm-create { max-width: 720px; margin: 0 auto; padding: 26px 24px 40px; display: flex; flex-direction: column; gap: 18px; }
+.swarm-create-head h2 { font-size: 18px; }
+.swarm-create-head p { margin-top: 5px; color: var(--muted); font-size: 12.5px; }
+.swarm-field { display: flex; flex-direction: column; gap: 8px; }
+.swarm-field-label { color: var(--muted); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+.swarm-mission-input, .swarm-instructions-input { width: 100%; padding: 10px 12px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--text); font: inherit; font-size: 13px; resize: vertical; }
+.swarm-mission-input:focus, .swarm-instructions-input:focus { outline: none; border-color: var(--accent); }
+.swarm-preset-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.swarm-preset-card { display: flex; flex-direction: column; gap: 4px; padding: 11px 12px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); cursor: pointer; text-align: left; }
+.swarm-preset-card:hover { border-color: var(--border-strong); }
+.swarm-preset-card.is-selected { border-color: var(--accent); background: var(--accent-soft); }
+.swarm-preset-name { font-size: 13px; font-weight: 650; }
+.swarm-preset-roles { color: var(--muted); font-size: 10.5px; line-height: 1.4; }
+.swarm-preset-summary { color: var(--muted); font-size: 11.5px; }
+.swarm-custom-roles { display: flex; flex-direction: column; gap: 6px; }
+.swarm-custom-role { display: grid; grid-template-columns: 1fr 64px 96px; gap: 8px; align-items: center; padding: 6px 8px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+.swarm-role-toggle { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
+.swarm-role-count, .swarm-role-runtime { padding: 5px 7px; background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: 4px; color: var(--text); font: inherit; font-size: 12px; }
+.swarm-parallel { display: flex; align-items: center; gap: 12px; }
+.swarm-parallel input[type="range"] { flex: 1; accent-color: var(--accent); }
+.swarm-parallel-value { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.swarm-disclosure { display: inline-flex; align-items: center; gap: 6px; background: none; border: 0; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; padding: 0; }
+.swarm-disclosure svg { transition: transform .15s ease; }
+.swarm-disclosure svg.is-open { transform: rotate(180deg); }
+.swarm-create-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 6px; }
+
+.swarm-overview { max-width: 860px; margin: 0 auto; padding: 22px 24px 40px; display: flex; flex-direction: column; gap: 18px; }
+.swarm-overview-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.swarm-overview-title { display: flex; align-items: flex-start; gap: 11px; min-width: 0; }
+.swarm-overview-title h2 { font-size: 17px; }
+.swarm-mission { margin-top: 4px; color: var(--muted); font-size: 12.5px; line-height: 1.5; }
+.swarm-overview-actions { display: flex; gap: 8px; flex: 0 0 auto; }
+.swarm-status-row { display: flex; align-items: center; gap: 12px; }
+.swarm-badge { padding: 3px 10px; border-radius: 999px; font-size: 11px; font-weight: 600; background: color-mix(in srgb, currentColor 14%, transparent); }
+.swarm-progress-bar { flex: 1; height: 6px; border-radius: 3px; background: var(--surface-3); overflow: hidden; }
+.swarm-progress-fill { display: block; height: 100%; background: currentColor; transition: width .4s ease; }
+.swarm-progress-value { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.swarm-banner { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: var(--radius); background: color-mix(in srgb, currentColor 10%, var(--surface)); border: 1px solid color-mix(in srgb, currentColor 34%, var(--border)); }
+.swarm-banner > div { flex: 1; display: flex; flex-direction: column; gap: 2px; color: var(--text); }
+.swarm-banner span { color: var(--muted); font-size: 12px; }
+.swarm-phases { list-style: none; margin: 0; padding: 0; display: flex; align-items: center; justify-content: space-between; gap: 4px; }
+.swarm-phase { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 6px; position: relative; color: var(--faint); font-size: 11px; }
+.swarm-phase:not(:last-child)::after { content: ""; position: absolute; top: 5px; left: 50%; width: 100%; height: 2px; background: var(--border); }
+.swarm-phase-dot { width: 12px; height: 12px; border-radius: 50%; background: var(--surface-3); border: 2px solid var(--border-strong); z-index: 1; }
+.swarm-phase.is-done { color: var(--muted); }
+.swarm-phase.is-done .swarm-phase-dot { background: var(--success); border-color: var(--success); }
+.swarm-phase.is-done:not(:last-child)::after { background: var(--success); }
+.swarm-phase.is-current { color: var(--accent-strong); }
+.swarm-phase.is-current .swarm-phase-dot { background: var(--accent); border-color: var(--accent-strong); }
+.swarm-overview-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.swarm-panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 13px 14px; }
+.swarm-panel-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.swarm-panel-head h3 { font-size: 12.5px; }
+.swarm-panel-sub { color: var(--faint); font-size: 11px; }
+.swarm-inline-action { display: inline-flex; align-items: center; gap: 5px; background: none; border: 0; color: var(--accent-strong); font: inherit; font-size: 11px; cursor: pointer; }
+.swarm-role-list, .swarm-results-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.swarm-role-row { display: flex; align-items: baseline; gap: 8px; font-size: 12px; }
+.swarm-role-name { font-weight: 600; min-width: 84px; }
+.swarm-role-count { color: var(--faint); font-variant-numeric: tabular-nums; }
+.swarm-role-purpose { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.swarm-result { display: flex; align-items: flex-start; gap: 8px; font-size: 12px; color: var(--text); }
+.swarm-result-dot { margin-top: 6px; width: 5px; height: 5px; flex: 0 0 auto; border-radius: 50%; background: var(--accent); }
+.swarm-result.level-error .swarm-result-dot { background: var(--danger); }
+.swarm-instruction-bar { display: flex; gap: 8px; padding: 10px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius-lg); position: sticky; bottom: 0; }
+.swarm-instruction-bar select, .swarm-instruction-bar input { padding: 7px 9px; background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--text); font: inherit; font-size: 12.5px; }
+.swarm-instruction-bar input { flex: 1; }
+.swarm-instruction-bar input:focus { outline: none; border-color: var(--accent); }
+@media (max-width: 720px) { .swarm-overview-grid { grid-template-columns: 1fr; } .swarm-workspace { grid-template-columns: 200px 1fr; } }

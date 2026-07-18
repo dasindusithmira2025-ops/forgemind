@@ -14,6 +14,8 @@ const listRecentWorkspaces = vi.fn()
 const listWorkspacesForProject = vi.fn()
 const terminateWorkspace = vi.fn()
 const reorderWorkspaces = vi.fn()
+const listSwarms = vi.fn()
+const closeProjectSession = vi.fn()
 
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn() }))
 vi.mock('@tauri-apps/plugin-opener', () => ({ openPath: vi.fn() }))
@@ -37,6 +39,11 @@ vi.mock('../native/commands', () => ({
     getPaneGitReview: vi.fn(), stagePaneFile: vi.fn(), restorePaneFile: vi.fn(), createIsolatedPaneWorktree: vi.fn(),
     removeLayoutPane: vi.fn(), splitLayoutPane: vi.fn(), validateWorkingDirectory: vi.fn(),
     getDiagnostics: vi.fn(), runHealthCheck: vi.fn(),
+    listSwarms: (...args: unknown[]) => listSwarms(...args),
+    openProjectSession: vi.fn(async () => [{ projectId: 'project', isActive: true, expanded: true, openedAt: '', updatedAt: '' }]),
+    closeProjectSession: (...args: unknown[]) => closeProjectSession(...args),
+    listWorkspacePlacements: vi.fn(async () => []), listMonitors: vi.fn(async () => []),
+    setProjectLastActive: vi.fn(async () => undefined),
     saveSettings: (...args: unknown[]) => saveSettings(...args),
   },
 }))
@@ -56,6 +63,8 @@ describe('Workspace screen', () => {
     saveSettings.mockImplementation(async (value) => value); getWorkspace.mockResolvedValue(secondWorkspace)
     listRecentWorkspaces.mockResolvedValue([workspace, secondWorkspace].map((item) => ({ workspace: item, projectName: project.name, projectPath: project.rootPath, projectMissing: false })))
     listWorkspacesForProject.mockResolvedValue([workspace, secondWorkspace])
+    listSwarms.mockResolvedValue([])
+    closeProjectSession.mockResolvedValue([])
     useAppStore.setState({ project, workspace, recentWorkspaces: [], activePaneId: 'pane', settings: { ...useAppStore.getState().settings, sidebarOpen: true, sidebarWidth: 300, restoreBehavior: 'restart_agents' } })
   })
 
@@ -74,7 +83,10 @@ describe('Workspace screen', () => {
     expect(screen.getByRole('button', { name: /^Fixture/ })).toBeInTheDocument()
     expect(screen.getByText('Workspaces — This Window')).toBeInTheDocument()
     expect(screen.getByText('Workspaces — Other Monitors')).toBeInTheDocument()
-    expect(screen.getAllByRole('region')).toHaveLength(4)
+    // The project-scoped SWARMS section is a first-class sidebar entity alongside Workspaces.
+    expect(screen.getByRole('region', { name: 'Swarms' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'New swarm' })).toBeInTheDocument()
+    expect(screen.getAllByRole('region')).toHaveLength(5)
     expect(screen.getByRole('button', { name: 'New workspace' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Settings' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Diagnostics' })).toBeInTheDocument()
@@ -82,6 +94,19 @@ describe('Workspace screen', () => {
     for (const name of ['Agents', 'Files', 'Source Control', 'Preview', 'Terminal Grid', 'Workspace overview']) {
       expect(screen.queryByRole('button', { name })).not.toBeInTheDocument()
     }
+  })
+
+  it('offers keep-running, pause-and-close, or cancel for active Project Swarms', async () => {
+    listSwarms.mockResolvedValue([{ swarm: { id: 'swarm', projectId: 'project', projectRoot: 'c:\\fixture', name: 'Active', lifecycle: 'running', progress: 0.2 }, activity: {} }])
+    renderWorkspace(); await screen.findByTestId('terminal-pane')
+    fireEvent.click(screen.getByRole('button', { name: 'Close project Fixture' }))
+    expect(await screen.findByText('1 active Swarm')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Keep running' })).toBeInTheDocument()
+    expect(closeProjectSession).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Pause and close' }))
+    await waitFor(() => expect(closeProjectSession).toHaveBeenCalledWith('project', 'pause_and_close'))
   })
 
   it('marks the active Workspace and derives runtime status from real sessions', async () => {

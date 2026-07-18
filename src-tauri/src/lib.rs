@@ -23,6 +23,7 @@ pub struct AppState {
     terminals: TerminalManager,
     restoration: RestorationScheduler,
     repository: Arc<RepositoryService>,
+    swarms: services::SwarmService,
     /// Authoritative runtime layer for open-Project sessions, Workspace placement, exclusive
     /// interactive leases, handoff coordination, and monitor state.
     windows: WindowRegistry,
@@ -330,6 +331,9 @@ pub fn run() {
             );
             let windows = WindowRegistry::new(database.clone());
             let repository = Arc::new(RepositoryService::new(database.clone(), &data_dir));
+            // The Swarm engine owns its own background scheduler thread; it starts here so
+            // active Swarms keep progressing regardless of which window/view is focused.
+            let swarms = services::SwarmService::new(database.clone(), app.handle().clone());
             if !recovery_mode {
                 match repository.recover_on_startup() {
                     Ok(interrupted) if !interrupted.is_empty() => log::warn!(
@@ -365,6 +369,7 @@ pub fn run() {
                 terminals,
                 restoration,
                 repository,
+                swarms,
                 windows,
                 log_directory,
                 app_data_directory: data_dir.clone(),
@@ -491,6 +496,23 @@ pub fn run() {
             commands::evaluate_merge_readiness,
             commands::get_settings,
             commands::save_settings,
+            commands::list_swarm_presets,
+            commands::save_swarm_preset,
+            commands::delete_swarm_preset,
+            commands::create_swarm,
+            commands::list_swarms,
+            commands::get_swarm_detail,
+            commands::rename_swarm,
+            commands::start_swarm,
+            commands::pause_swarm,
+            commands::resume_swarm,
+            commands::stop_swarm,
+            commands::archive_swarm,
+            commands::delete_swarm,
+            commands::set_swarm_priority,
+            commands::send_swarm_message,
+            commands::accept_swarm_result,
+            commands::add_swarm_builder,
             commands::get_diagnostics,
             commands::run_health_check,
             commands::repair_database_metadata,

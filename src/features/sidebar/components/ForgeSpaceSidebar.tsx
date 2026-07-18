@@ -3,6 +3,7 @@ import { SIDEBAR_COLLAPSED_WIDTH } from '../sidebarPreferences'
 import type { ForgeSpaceSidebarProps } from '../sidebarTypes'
 import { SidebarBrandHeader } from './SidebarBrandHeader'
 import { CurrentProjectsSection } from './CurrentProjectsSection'
+import { SwarmsSidebarSection } from '../../swarms/SwarmsSidebarSection'
 import { WorkspacesSection } from './WorkspacesSection'
 import { WorkspacesOtherMonitorsSection } from './WorkspacesOtherMonitorsSection'
 import { ProjectSelectionSection } from './ProjectSelectionSection'
@@ -74,6 +75,7 @@ export function ForgeSpaceSidebar(props: ForgeSpaceSidebarProps) {
           <SidebarBrandHeader actions={actions} />
           <ProjectSelectionSection recents={props.recents} openProjectIds={new Set(currentProjects.map((entry)=>entry.project.id))} actions={actions}/>
           <CurrentProjectsSection openProjects={currentProjects} actions={actions} />
+          <SwarmsSidebarSection projectId={project.id} />
           <WorkspacesSection
             workspaces={attachedWorkspaces}
             activeWorkspaceId={activeWorkspaceId}

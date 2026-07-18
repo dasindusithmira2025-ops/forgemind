@@ -660,3 +660,175 @@ export interface MonitorRecoveryReport {
   recovered: RecoveredWindow[]
   reconnectable: ReconnectOffer[]
 }
+
+// ---- Paralith Swarms ----------------------------------------------------------------------
+// The backend is the authority for every field here; the frontend only renders these.
+
+export type SwarmLifecycle =
+  | 'draft' | 'preparing' | 'understanding' | 'planning' | 'running' | 'verifying'
+  | 'decision_needed' | 'paused' | 'stopping' | 'reviewing' | 'ready' | 'completed'
+  | 'failed' | 'cancelled' | 'recovering' | 'archived'
+
+export type SwarmPhase = 'understanding' | 'planning' | 'building' | 'verifying' | 'ready'
+
+export type SwarmRole = 'coordinator' | 'scout' | 'builder' | 'debugger' | 'reviewer' | 'integrator'
+
+export type SwarmRuntimeKind = 'auto' | 'claude' | 'codex'
+
+export type SwarmAgentStatus =
+  | 'idle' | 'activating' | 'working' | 'waiting' | 'paused' | 'failed' | 'stopped'
+
+export type SwarmTaskStatus =
+  | 'pending' | 'ready' | 'assigned' | 'running' | 'blocked' | 'verifying' | 'review'
+  | 'done' | 'failed' | 'cancelled'
+
+export interface SwarmRoleConfig {
+  role: SwarmRole
+  runtime: SwarmRuntimeKind
+  desiredCount: number
+  enabled: boolean
+}
+
+export interface SwarmAgent {
+  id: string
+  swarmId: string
+  role: SwarmRole
+  runtime: SwarmRuntimeKind
+  status: SwarmAgentStatus
+  currentTaskId?: string | null
+  terminalSessionId?: string | null
+  lastResult?: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface SwarmTask {
+  id: string
+  swarmId: string
+  title: string
+  role: SwarmRole
+  status: SwarmTaskStatus
+  assignedAgentId?: string | null
+  progress: number
+  files: string[]
+  dependsOn: string[]
+  attempts: number
+  result?: string | null
+  position: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface SwarmEvent {
+  id: string
+  swarmId: string
+  kind: string
+  role?: SwarmRole | null
+  agentId?: string | null
+  taskId?: string | null
+  summary: string
+  level: string
+  createdAt: string
+}
+
+export interface SwarmDecision {
+  problem: string
+  reason: string
+  recommended: string
+  recommendationReasons: string[]
+  alternative: string
+  raisedAt: string
+}
+
+export interface SwarmSummary {
+  outcome: string
+  filesChanged: number
+  testsPassed: number
+  scenariosVerified: number
+  unresolvedConflicts: number
+  notes: string[]
+  teamUsed: string[]
+  durationSeconds: number
+}
+
+export interface Swarm {
+  id: string
+  projectId: string
+  projectRoot: string
+  name: string
+  mission: string
+  lifecycle: SwarmLifecycle
+  phase: SwarmPhase
+  teamPreset: string
+  maxParallel: number
+  instructions: string
+  progress: number
+  priority: number
+  archived: boolean
+  decision?: SwarmDecision | null
+  summary?: SwarmSummary | null
+  reviewVerdict?: string | null
+  roles: SwarmRoleConfig[]
+  createdAt: string
+  updatedAt: string
+  startedAt?: string | null
+  completedAt?: string | null
+}
+
+export interface SwarmActivity {
+  activeAgents: number
+  totalAgents: number
+  tasksTotal: number
+  tasksDone: number
+  tasksRunning: number
+}
+
+export interface SwarmListItem {
+  swarm: Swarm
+  activity: SwarmActivity
+}
+
+export interface SwarmDetail {
+  swarm: Swarm
+  activity: SwarmActivity
+  agents: SwarmAgent[]
+  tasks: SwarmTask[]
+  events: SwarmEvent[]
+}
+
+export interface SwarmPreset {
+  id: string
+  name: string
+  builtin: boolean
+  isDefault: boolean
+  maxParallel: number
+  instructions: string
+  roles: SwarmRoleConfig[]
+  createdAt: string
+  updatedAt: string
+}
+
+export interface CreateSwarmRequest {
+  projectId: string
+  mission: string
+  name?: string
+  presetId: string
+  maxParallel?: number
+  instructions?: string
+  roles?: SwarmRoleConfig[]
+}
+
+export type ProjectCloseSwarmBehavior = 'keep_running' | 'pause_and_close'
+
+export interface SwarmChangedEvent {
+  projectId: string
+  swarmId: string
+}
+
+export interface SavePresetRequest {
+  id?: string
+  name: string
+  maxParallel: number
+  instructions: string
+  roles: SwarmRoleConfig[]
+}
