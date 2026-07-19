@@ -1,4 +1,10 @@
-import type { SwarmLifecycle, SwarmPhase, SwarmRole } from '../../native/types'
+import type {
+  SwarmLifecycle,
+  SwarmPhase,
+  SwarmRole,
+  SwarmRoleConfig,
+  SwarmRuntimeKind,
+} from '../../native/types'
 
 /** The five simplified stages shown in the Overview, in order. */
 export const SWARM_PHASES: { key: SwarmPhase; label: string }[] = [
@@ -81,4 +87,48 @@ export function roleLabel(role: SwarmRole): string {
 
 export function progressPercent(progress: number): number {
   return Math.round(Math.max(0, Math.min(1, progress)) * 100)
+}
+
+/** All selectable agent runtimes, in display order. */
+export const RUNTIME_OPTIONS: { value: SwarmRuntimeKind; label: string }[] = [
+  { value: 'auto', label: 'Auto' },
+  { value: 'claude', label: 'Claude' },
+  { value: 'codex', label: 'Codex' },
+]
+
+export function runtimeLabel(runtime: SwarmRuntimeKind): string {
+  return RUNTIME_OPTIONS.find((option) => option.value === runtime)?.label ?? runtime
+}
+
+/** Total workers a role staffs across all its allocations (zero when the role is disabled). */
+export function roleTotal(role: SwarmRoleConfig): number {
+  if (!role.enabled) return 0
+  return role.allocations.reduce((sum, allocation) => sum + Math.max(0, allocation.count), 0)
+}
+
+/** Total staffed agents across every role — the whole team's capacity. */
+export function teamCapacity(roles: SwarmRoleConfig[]): number {
+  return roles.reduce((sum, role) => sum + roleTotal(role), 0)
+}
+
+/** Runtimes still available to add to a role (each runtime may appear at most once). */
+export function availableRuntimes(role: SwarmRoleConfig): SwarmRuntimeKind[] {
+  const used = new Set(role.allocations.map((allocation) => allocation.runtime))
+  return RUNTIME_OPTIONS.map((option) => option.value).filter((runtime) => !used.has(runtime))
+}
+
+/** Compact collapsed summary of a role's allocations, e.g. "Claude ×2 + Codex ×1". */
+export function describeAllocations(role: SwarmRoleConfig): string {
+  const parts = role.allocations
+    .filter((allocation) => allocation.count > 0)
+    .map((allocation) => `${runtimeLabel(allocation.runtime)} ×${allocation.count}`)
+  return parts.length > 0 ? parts.join(' + ') : 'No agents'
+}
+
+/** One-line team summary across roles, e.g. "Coordinator ×1 · Builders ×3 · Reviewer ×1". */
+export function describeTeam(roles: SwarmRoleConfig[]): string {
+  return roles
+    .filter((role) => roleTotal(role) > 0)
+    .map((role) => `${roleLabel(role.role)} ×${roleTotal(role)}`)
+    .join(' · ')
 }

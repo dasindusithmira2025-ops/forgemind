@@ -1,7 +1,7 @@
 use crate::errors::{AppError, AppResult};
 use rusqlite::{params, Connection};
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 15;
+pub const CURRENT_SCHEMA_VERSION: i64 = 16;
 
 const MIGRATION_1: &str = r#"
 CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
@@ -844,6 +844,12 @@ pub fn apply(connection: &Connection) -> AppResult<()> {
     {
         migrate_v15(connection)?;
     }
+    if current < 16
+        || !table_exists(connection, "swarm_role_allocations")?
+        || !column_exists(connection, "swarm_agents", "allocation_id")?
+    {
+        migrate_v16(connection)?;
+    }
     Ok(())
 }
 
@@ -867,7 +873,9 @@ pub fn requires_migration(connection: &Connection) -> AppResult<bool> {
         || !column_exists(connection, "repository_sync_cursors", "required_permission")?
         || !column_exists(connection, "repository_sync_cursors", "recovery_action")?
         || !table_exists(connection, "swarms")?
-        || !column_exists(connection, "swarms", "project_root")?)
+        || !column_exists(connection, "swarms", "project_root")?
+        || !table_exists(connection, "swarm_role_allocations")?
+        || !column_exists(connection, "swarm_agents", "allocation_id")?)
 }
 
 fn table_exists(connection: &Connection, table: &str) -> AppResult<bool> {
@@ -1484,24 +1492,174 @@ CREATE INDEX IF NOT EXISTS idx_swarm_events_swarm ON swarm_events(swarm_id, crea
     finish_migration_transaction(connection, result, 15)
 }
 
-/// Insert the four built-in team presets. Idempotent: `INSERT OR IGNORE` keyed by the stable
-/// preset id keeps a user's edits to their own presets untouched while ensuring the built-ins
-/// always exist. `config_json` stores the ordered role configuration.
+/// Role allocations (spec: role pools). Migrate the one-agent-per-role model to a role-pool model
+/// where each role holds an ordered list of `(runtime, count)` allocations with stable ids. Safe
+/// and idempotent: it backfills allocation rows from the legacy `swarm_roles` columns, adds the
+/// worker↔allocation link and role ordering, upgrades every stored preset's `config_json` to the
+/// allocation shape, and refreshes the built-in presets to their canonical mixed composition.
+/// Existing Swarm drafts, presets, and stored configurations are preserved.
+fn migrate_v16(connection: &Connection) -> AppResult<()> {
+    connection
+        .execute_batch("BEGIN IMMEDIATE;")
+        .map_err(AppError::database)?;
+    let result = (|| {
+        connection
+            .execute_batch(
+                r#"
+CREATE TABLE IF NOT EXISTS swarm_role_allocations(
+  id TEXT PRIMARY KEY,
+  swarm_id TEXT NOT NULL REFERENCES swarms(id) ON DELETE CASCADE,
+  role TEXT NOT NULL,
+  runtime TEXT NOT NULL DEFAULT 'auto',
+  count INTEGER NOT NULL DEFAULT 1,
+  position INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_swarm_role_allocations ON swarm_role_allocations(swarm_id, role, position);
+"#,
+            )
+            .map_err(AppError::database)?;
+        // Per-role display/scheduling order on the pool row, and the worker↔allocation link so a
+        // recovered worker keeps its allocation (and therefore provider) identity.
+        if !column_exists(connection, "swarm_roles", "position")? {
+            connection
+                .execute(
+                    "ALTER TABLE swarm_roles ADD COLUMN position INTEGER NOT NULL DEFAULT 0",
+                    [],
+                )
+                .map_err(AppError::database)?;
+        }
+        if !column_exists(connection, "swarm_agents", "allocation_id")? {
+            connection
+                .execute("ALTER TABLE swarm_agents ADD COLUMN allocation_id TEXT", [])
+                .map_err(AppError::database)?;
+        }
+        // Backfill one allocation per existing role from its legacy runtime + desired_count. Only
+        // for roles that do not already have allocations, so re-running is a no-op.
+        connection
+            .execute(
+                "INSERT INTO swarm_role_allocations(id,swarm_id,role,runtime,count,position) \
+                 SELECT lower(hex(randomblob(16))), r.swarm_id, r.role, \
+                        COALESCE(r.runtime,'auto'), COALESCE(r.desired_count,1), 0 \
+                 FROM swarm_roles r \
+                 WHERE NOT EXISTS (SELECT 1 FROM swarm_role_allocations a \
+                                   WHERE a.swarm_id=r.swarm_id AND a.role=r.role)",
+                [],
+            )
+            .map_err(AppError::database)?;
+        connection
+            .execute(
+                "UPDATE swarm_agents AS agent SET allocation_id=COALESCE( \
+                   (SELECT allocation.id FROM swarm_role_allocations allocation \
+                    WHERE allocation.swarm_id=agent.swarm_id AND allocation.role=agent.role \
+                      AND allocation.runtime=agent.runtime ORDER BY allocation.position LIMIT 1), \
+                   (SELECT allocation.id FROM swarm_role_allocations allocation \
+                    WHERE allocation.swarm_id=agent.swarm_id AND allocation.role=agent.role \
+                    ORDER BY allocation.position LIMIT 1) \
+                 ) WHERE agent.allocation_id IS NULL OR trim(agent.allocation_id)=''",
+                [],
+            )
+            .map_err(AppError::database)?;
+        upgrade_preset_configs(connection)?;
+        record_migration(connection, 16)
+    })();
+    finish_migration_transaction(connection, result, 16)
+}
+
+/// Rewrite every stored preset's `config_json` into the role-pool allocation shape. User presets
+/// are upgraded in place (no data loss); built-in presets are refreshed to the canonical
+/// composition from [`crate::models::swarm::builtin_presets`], which is where the Feature Team and
+/// Deep Engineering builders gain their mixed Claude + Codex allocations.
+fn upgrade_preset_configs(connection: &Connection) -> AppResult<()> {
+    let rows: Vec<(String, bool, String)> = {
+        let mut statement = connection
+            .prepare("SELECT id, builtin, config_json FROM swarm_presets")
+            .map_err(AppError::database)?;
+        let mapped = statement
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, bool>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })
+            .map_err(AppError::database)?;
+        mapped
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(AppError::database)?
+    };
+    let now = chrono::Utc::now().to_rfc3339();
+    let builtin_canonical = crate::models::swarm::builtin_presets();
+    for (id, builtin, config_json) in rows {
+        let upgraded = if builtin {
+            builtin_canonical
+                .iter()
+                .find(|(builtin_id, ..)| *builtin_id == id)
+                .map(|(.., roles)| roles.clone())
+        } else {
+            None
+        }
+        .map(Ok)
+        .unwrap_or_else(|| upgrade_saved_preset_config(&id, &config_json))?;
+        let serialized = serde_json::to_string(&upgraded).map_err(AppError::database)?;
+        connection
+            .execute(
+                "UPDATE swarm_presets SET config_json=?2, updated_at=?3 WHERE id=?1",
+                params![id, serialized, now],
+            )
+            .map_err(AppError::database)?;
+    }
+    Ok(())
+}
+
+fn upgrade_saved_preset_config(
+    preset_id: &str,
+    config_json: &str,
+) -> AppResult<Vec<crate::models::swarm::SwarmRoleConfig>> {
+    let value: serde_json::Value = serde_json::from_str(config_json).map_err(|error| {
+        preset_migration_error(preset_id, format!("Invalid preset JSON: {error}"))
+    })?;
+    let source_roles = value.as_array().ok_or_else(|| {
+        preset_migration_error(preset_id, "Preset configuration is not a role array.")
+    })?;
+    let upgraded = crate::models::swarm::upgrade_role_configs_json(&value).ok_or_else(|| {
+        preset_migration_error(preset_id, "Preset configuration could not be upgraded.")
+    })?;
+    if upgraded.len() != source_roles.len()
+        || source_roles.iter().zip(&upgraded).any(|(source, role)| {
+            source
+                .get("allocations")
+                .or_else(|| source.get("agents"))
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|allocations| allocations.len() != role.allocations.len())
+        })
+    {
+        return Err(preset_migration_error(
+            preset_id,
+            "Preset roles or allocations contain unsupported values.",
+        ));
+    }
+    Ok(upgraded)
+}
+
+fn preset_migration_error(preset_id: &str, detail: impl Into<String>) -> AppError {
+    AppError::new(
+        "swarm_preset_migration_failed",
+        "A saved Swarm preset could not be migrated without losing configuration.",
+        false,
+    )
+    .detail(detail)
+    .entity(preset_id)
+    .action("Restore or repair this preset configuration before retrying the upgrade.")
+    .layer("persistence")
+}
+
+/// Insert the built-in team presets. Idempotent: `INSERT OR IGNORE` keyed by the stable preset id
+/// keeps a user's edits to their own presets untouched while ensuring the built-ins always exist.
+/// `config_json` stores the ordered role-pool configuration (roles with their allocations).
 fn seed_builtin_presets(connection: &Connection) -> AppResult<()> {
     let now = chrono::Utc::now().to_rfc3339();
     for (id, name, max_parallel, roles) in crate::models::swarm::builtin_presets() {
-        let config: Vec<serde_json::Value> = roles
-            .iter()
-            .map(|role| {
-                serde_json::json!({
-                    "role": role.role.as_str(),
-                    "runtime": role.runtime.as_str(),
-                    "desiredCount": role.desired_count,
-                    "enabled": role.enabled,
-                })
-            })
-            .collect();
-        let config_json = serde_json::to_string(&config).unwrap_or_else(|_| "[]".into());
+        let config_json = serde_json::to_string(&roles).unwrap_or_else(|_| "[]".into());
         let is_default = i64::from(id == "auto");
         connection
             .execute(
@@ -1918,6 +2076,146 @@ mod tests {
             })
             .unwrap();
         assert_eq!(count, 1, "the existing Swarm must survive the backfill");
+    }
+
+    #[test]
+    fn v16_creates_allocation_schema_and_builtin_presets_use_mixed_agents() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", true)
+            .unwrap();
+        apply(&connection).unwrap();
+        assert!(table_exists(&connection, "swarm_role_allocations").unwrap());
+        assert!(column_exists(&connection, "swarm_agents", "allocation_id").unwrap());
+        assert!(column_exists(&connection, "swarm_roles", "position").unwrap());
+
+        // Feature Team's Builders must carry both Claude and Codex allocations.
+        let config: String = connection
+            .query_row(
+                "SELECT config_json FROM swarm_presets WHERE id='feature_team'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let roles: Vec<crate::models::swarm::SwarmRoleConfig> =
+            serde_json::from_str(&config).unwrap();
+        let builders = roles
+            .iter()
+            .find(|role| role.role == crate::models::swarm::SwarmRole::Builder)
+            .expect("Feature Team has a Builder role");
+        let runtimes: Vec<_> = builders
+            .allocations
+            .iter()
+            .map(|allocation| allocation.runtime)
+            .collect();
+        assert!(runtimes.contains(&crate::models::swarm::SwarmRuntimeKind::Claude));
+        assert!(runtimes.contains(&crate::models::swarm::SwarmRuntimeKind::Codex));
+        assert_eq!(builders.total_count(), 3);
+    }
+
+    #[test]
+    fn v16_upgrades_legacy_single_agent_roles_and_user_presets_without_loss() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", true)
+            .unwrap();
+        apply(&connection).unwrap();
+        // Simulate a pre-v16 world: a Swarm whose role pool exists only as a legacy swarm_roles
+        // row (runtime + desired_count) with no allocation rows, and a user preset stored in the
+        // old one-agent-per-role JSON shape.
+        connection.execute("INSERT INTO projects(id,name,root_path,canonical_root_path,major_languages_json,is_git_repository,has_package_json,has_lockfile,created_at,updated_at,last_opened_at) VALUES('p','Demo','C:/repo','c:/repo','[]',1,0,0,'t','t','t')",[]).unwrap();
+        connection.execute("INSERT INTO swarms(id,project_id,project_root,name,mission,lifecycle,phase,team_preset,max_parallel,instructions,progress,priority,archived,created_at,updated_at) VALUES('s','p','c:/repo','Legacy','Keep me','draft','understanding','auto',2,'',0,0,0,'t','t')",[]).unwrap();
+        connection
+            .execute(
+                "INSERT INTO swarm_roles(id,swarm_id,role,runtime,desired_count,enabled) VALUES('rr','s','builder','codex',3,1)",
+                [],
+            )
+            .unwrap();
+        connection.execute("INSERT INTO swarm_agents(id,swarm_id,role,runtime,status,created_at,updated_at) VALUES('aa','s','builder','codex','idle','t','t')", []).unwrap();
+        connection
+            .execute("DELETE FROM swarm_role_allocations WHERE swarm_id='s'", [])
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO swarm_presets(id,name,builtin,is_default,max_parallel,instructions,config_json,created_at,updated_at) VALUES('mine','My Team',0,0,4,'','[{\"role\":\"builder\",\"runtime\":\"claude\",\"desiredCount\":2,\"enabled\":true}]','t','t')",
+                [],
+            )
+            .unwrap();
+
+        // Re-running the migration is idempotent and performs the backfill + JSON upgrade.
+        migrate_v16(&connection).unwrap();
+
+        let (runtime, count, allocation_id): (String, i64, String) = connection
+            .query_row(
+                "SELECT runtime, count, id FROM swarm_role_allocations WHERE swarm_id='s' AND role='builder'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(runtime, "codex");
+        assert_eq!(
+            count, 3,
+            "legacy desired_count is preserved as the allocation count"
+        );
+        let agent_allocation: Option<String> = connection
+            .query_row(
+                "SELECT allocation_id FROM swarm_agents WHERE id='aa'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(agent_allocation.as_deref(), Some(allocation_id.as_str()));
+
+        let config: String = connection
+            .query_row(
+                "SELECT config_json FROM swarm_presets WHERE id='mine'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let roles: Vec<crate::models::swarm::SwarmRoleConfig> =
+            serde_json::from_str(&config).unwrap();
+        assert_eq!(roles.len(), 1);
+        assert_eq!(roles[0].allocations.len(), 1);
+        assert_eq!(
+            roles[0].allocations[0].runtime,
+            crate::models::swarm::SwarmRuntimeKind::Claude
+        );
+        assert_eq!(roles[0].allocations[0].count, 2);
+        assert!(
+            !roles[0].allocations[0].id.is_empty(),
+            "allocation gains a stable id"
+        );
+    }
+
+    #[test]
+    fn v16_rolls_back_instead_of_erasing_a_malformed_user_preset() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", true)
+            .unwrap();
+        apply(&connection).unwrap();
+        connection
+            .execute(
+                "INSERT INTO swarm_presets(id,name,builtin,is_default,max_parallel,instructions,config_json,created_at,updated_at) VALUES('broken','Broken',0,0,1,'','{not-json','t','t')",
+                [],
+            )
+            .unwrap();
+
+        let error = migrate_v16(&connection).unwrap_err();
+        assert_eq!(error.code, "migration_error");
+        assert!(error
+            .detail
+            .as_deref()
+            .is_some_and(|detail| detail.contains("swarm_preset_migration_failed")));
+        let stored: String = connection
+            .query_row(
+                "SELECT config_json FROM swarm_presets WHERE id='broken'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(stored, "{not-json");
     }
 
     #[test]

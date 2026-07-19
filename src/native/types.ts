@@ -683,11 +683,18 @@ export type SwarmTaskStatus =
   | 'pending' | 'ready' | 'assigned' | 'running' | 'blocked' | 'verifying' | 'review'
   | 'done' | 'failed' | 'cancelled'
 
+export interface SwarmRoleAllocation {
+  /** Stable allocation identity, preserved across edits and preset duplication. */
+  id: string
+  runtime: SwarmRuntimeKind
+  count: number
+}
+
 export interface SwarmRoleConfig {
   role: SwarmRole
-  runtime: SwarmRuntimeKind
-  desiredCount: number
   enabled: boolean
+  /** Ordered agent-runtime allocations forming this role's schedulable pool. */
+  allocations: SwarmRoleAllocation[]
 }
 
 export interface SwarmAgent {
@@ -695,6 +702,8 @@ export interface SwarmAgent {
   swarmId: string
   role: SwarmRole
   runtime: SwarmRuntimeKind
+  /** The configured allocation this worker was staffed from, when applicable. */
+  allocationId?: string | null
   status: SwarmAgentStatus
   currentTaskId?: string | null
   terminalSessionId?: string | null

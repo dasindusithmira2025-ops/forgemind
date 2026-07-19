@@ -353,12 +353,13 @@ impl DatabaseService {
     pub fn insert_swarm_agent(&self, agent: &SwarmAgent) -> AppResult<()> {
         let now = Utc::now().to_rfc3339();
         self.connection.lock().execute(
-            "INSERT INTO swarm_agents(id,swarm_id,role,runtime,status,current_task_id,terminal_session_id,last_result,created_at,updated_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?9)",
+            "INSERT INTO swarm_agents(id,swarm_id,role,runtime,allocation_id,status,current_task_id,terminal_session_id,last_result,created_at,updated_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?10)",
             params![
                 agent.id,
                 agent.swarm_id,
                 agent.role.as_str(),
                 agent.runtime.as_str(),
+                agent.allocation_id,
                 agent.status.as_str(),
                 agent.current_task_id,
                 agent.terminal_session_id,
@@ -571,41 +572,88 @@ fn row_to_preset(row: &Row<'_>) -> rusqlite::Result<SwarmPreset> {
     })
 }
 
+/// Persist a Swarm's role pools and their allocations. Each role is one `swarm_roles` row
+/// (identity + enabled + order); each allocation under it is one `swarm_role_allocations` row
+/// carrying its stable id, runtime, count, and order. Allocations with a blank id are assigned a
+/// fresh stable one so callers may add rows without pre-generating ids.
 fn write_roles(
     connection: &Connection,
     swarm_id: &str,
     roles: &[SwarmRoleConfig],
 ) -> rusqlite::Result<()> {
     connection.execute("DELETE FROM swarm_roles WHERE swarm_id=?1", [swarm_id])?;
-    for role in roles {
+    connection.execute(
+        "DELETE FROM swarm_role_allocations WHERE swarm_id=?1",
+        [swarm_id],
+    )?;
+    for (position, role) in roles.iter().enumerate() {
         connection.execute(
-            "INSERT INTO swarm_roles(id,swarm_id,role,runtime,desired_count,enabled) VALUES(?1,?2,?3,?4,?5,?6)",
+            "INSERT INTO swarm_roles(id,swarm_id,role,enabled,position) VALUES(?1,?2,?3,?4,?5)",
             params![
                 Uuid::new_v4().to_string(),
                 swarm_id,
                 role.role.as_str(),
-                role.runtime.as_str(),
-                role.desired_count,
                 i64::from(role.enabled),
+                position as i64,
             ],
         )?;
+        for (allocation_position, allocation) in role.allocations.iter().enumerate() {
+            let allocation_id = if allocation.id.trim().is_empty() {
+                Uuid::new_v4().to_string()
+            } else {
+                allocation.id.clone()
+            };
+            connection.execute(
+                "INSERT INTO swarm_role_allocations(id,swarm_id,role,runtime,count,position) VALUES(?1,?2,?3,?4,?5,?6)",
+                params![
+                    allocation_id,
+                    swarm_id,
+                    role.role.as_str(),
+                    allocation.runtime.as_str(),
+                    allocation.count,
+                    allocation_position as i64,
+                ],
+            )?;
+        }
     }
     Ok(())
 }
 
 fn load_roles(connection: &Connection, swarm_id: &str) -> AppResult<Vec<SwarmRoleConfig>> {
+    let mut allocation_statement = connection.prepare(
+        "SELECT id,role,runtime,count FROM swarm_role_allocations WHERE swarm_id=?1 ORDER BY position, id",
+    )?;
+    let allocation_rows = allocation_statement
+        .query_map([swarm_id], |row| {
+            let role_raw: String = row.get(1)?;
+            let runtime_raw: String = row.get(2)?;
+            Ok((
+                SwarmRole::from_db(&role_raw).unwrap_or(SwarmRole::Builder),
+                SwarmRoleAllocation::new(
+                    row.get::<_, String>(0)?,
+                    SwarmRuntimeKind::from_db(&runtime_raw).unwrap_or(SwarmRuntimeKind::Auto),
+                    row.get::<_, i64>(3)?,
+                ),
+            ))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+
     let mut statement = connection.prepare(
-        "SELECT role,runtime,desired_count,enabled FROM swarm_roles WHERE swarm_id=?1 ORDER BY role",
+        "SELECT role,enabled FROM swarm_roles WHERE swarm_id=?1 ORDER BY position, role",
     )?;
     let roles = statement
         .query_map([swarm_id], |row| {
             let role_raw: String = row.get(0)?;
-            let runtime_raw: String = row.get(1)?;
+            let role = SwarmRole::from_db(&role_raw).unwrap_or(SwarmRole::Builder);
+            let allocations = allocation_rows
+                .iter()
+                .filter(|(allocation_role, _)| *allocation_role == role)
+                .map(|(_, allocation)| allocation.clone())
+                .collect();
             Ok(SwarmRoleConfig {
-                role: SwarmRole::from_db(&role_raw).unwrap_or(SwarmRole::Builder),
-                runtime: SwarmRuntimeKind::from_db(&runtime_raw).unwrap_or(SwarmRuntimeKind::Auto),
-                desired_count: row.get(2)?,
-                enabled: row.get(3)?,
+                role,
+                enabled: row.get(1)?,
+                allocations,
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
@@ -614,24 +662,25 @@ fn load_roles(connection: &Connection, swarm_id: &str) -> AppResult<Vec<SwarmRol
 
 fn load_agents(connection: &Connection, swarm_id: &str) -> AppResult<Vec<SwarmAgent>> {
     let mut statement = connection.prepare(
-        "SELECT id,swarm_id,role,runtime,status,current_task_id,terminal_session_id,last_result,created_at,updated_at FROM swarm_agents WHERE swarm_id=?1 ORDER BY created_at",
+        "SELECT id,swarm_id,role,runtime,allocation_id,status,current_task_id,terminal_session_id,last_result,created_at,updated_at FROM swarm_agents WHERE swarm_id=?1 ORDER BY created_at",
     )?;
     let agents = statement
         .query_map([swarm_id], |row| {
             let role_raw: String = row.get(2)?;
             let runtime_raw: String = row.get(3)?;
-            let status_raw: String = row.get(4)?;
+            let status_raw: String = row.get(5)?;
             Ok(SwarmAgent {
                 id: row.get(0)?,
                 swarm_id: row.get(1)?,
                 role: SwarmRole::from_db(&role_raw).unwrap_or(SwarmRole::Builder),
                 runtime: SwarmRuntimeKind::from_db(&runtime_raw).unwrap_or(SwarmRuntimeKind::Auto),
+                allocation_id: row.get(4)?,
                 status: SwarmAgentStatus::from_db(&status_raw).unwrap_or(SwarmAgentStatus::Idle),
-                current_task_id: row.get(5)?,
-                terminal_session_id: row.get(6)?,
-                last_result: row.get(7)?,
-                created_at: row.get(8)?,
-                updated_at: row.get(9)?,
+                current_task_id: row.get(6)?,
+                terminal_session_id: row.get(7)?,
+                last_result: row.get(8)?,
+                created_at: row.get(9)?,
+                updated_at: row.get(10)?,
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;

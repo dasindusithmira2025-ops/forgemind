@@ -186,7 +186,7 @@ impl SwarmRole {
 
 /// How a role (or a specific agent) is backed at runtime. `Auto` lets the engine choose an
 /// available provider; the engine always resolves this to a concrete provider before launch.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
 pub enum SwarmRuntimeKind {
     Auto,
@@ -312,14 +312,126 @@ impl SwarmTaskStatus {
     }
 }
 
-/// A saved role configuration for one role inside a preset or a live Swarm.
+/// One agent-runtime allocation inside a role pool: a concrete runtime and how many workers of
+/// it the role should staff. A role holds a list of these so a single role can back several
+/// runtimes at once — e.g. Builders = Claude ×2 + Codex ×1. This is the unit the scheduler turns
+/// into individual agent workers; its [`id`](Self::id) is the stable allocation identity carried
+/// through persistence, runtime events, and task assignments.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SwarmRoleAllocation {
+    /// Stable allocation identity, preserved across edits and preset duplication. When a caller
+    /// leaves it blank the persistence layer fills a fresh one before storing.
+    #[serde(default)]
+    pub id: String,
+    pub runtime: SwarmRuntimeKind,
+    pub count: i64,
+}
+
+impl SwarmRoleAllocation {
+    pub fn new(id: impl Into<String>, runtime: SwarmRuntimeKind, count: i64) -> Self {
+        Self {
+            id: id.into(),
+            runtime,
+            count,
+        }
+    }
+}
+
+/// A saved role configuration for one role inside a preset or a live Swarm. A role is a
+/// *capability pool*: when enabled it staffs the union of its allocations, each with its own
+/// runtime and count. The scheduler treats every allocation under a role as one schedulable pool.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SwarmRoleConfig {
     pub role: SwarmRole,
-    pub runtime: SwarmRuntimeKind,
-    pub desired_count: i64,
     pub enabled: bool,
+    /// Ordered agent-runtime allocations. Order is preserved for display and duplication.
+    #[serde(default, alias = "agents")]
+    pub allocations: Vec<SwarmRoleAllocation>,
+}
+
+impl SwarmRoleConfig {
+    /// Build a single-runtime role pool. The common case, and the shape every legacy
+    /// one-agent-per-role record migrates into.
+    pub fn single(role: SwarmRole, runtime: SwarmRuntimeKind, count: i64) -> Self {
+        Self {
+            role,
+            enabled: true,
+            allocations: vec![SwarmRoleAllocation::new(
+                format!("{}-{}", role.as_str(), runtime.as_str()),
+                runtime,
+                count,
+            )],
+        }
+    }
+
+    /// Total workers this role staffs across all its allocations. A disabled role staffs none,
+    /// so capacity math and the scheduler agree that a disabled role is empty.
+    pub fn total_count(&self) -> i64 {
+        if !self.enabled {
+            return 0;
+        }
+        self.allocations
+            .iter()
+            .map(|allocation| allocation.count.max(0))
+            .sum()
+    }
+
+    pub fn is_staffed(&self) -> bool {
+        self.total_count() > 0
+    }
+}
+
+/// Structural validation shared by preset saving and Swarm creation. Enforces the role-pool
+/// invariants independent of any UI: no duplicate runtime within a role, no negative counts, an
+/// enabled role must staff at least one worker, and the whole team must fit a sane capacity.
+///
+/// Runtime *availability* (is Claude/Codex installed & authenticated) is deliberately not checked
+/// here — an unavailable runtime may be saved into a preset and is only gated at launch.
+pub fn validate_role_configs(roles: &[SwarmRoleConfig]) -> Result<(), RoleConfigError> {
+    let mut total = 0i64;
+    for config in roles {
+        let mut seen = std::collections::HashSet::new();
+        for allocation in &config.allocations {
+            if allocation.count < 0 {
+                return Err(RoleConfigError::NegativeCount(config.role));
+            }
+            if !seen.insert(allocation.runtime) {
+                return Err(RoleConfigError::DuplicateRuntime(
+                    config.role,
+                    allocation.runtime,
+                ));
+            }
+        }
+        if config.enabled && config.total_count() == 0 {
+            return Err(RoleConfigError::EmptyEnabledRole(config.role));
+        }
+        total += config.total_count();
+    }
+    if total == 0 {
+        return Err(RoleConfigError::EmptyTeam);
+    }
+    // A hard ceiling on total staffed workers. `max_parallel` bounds concurrency; this bounds the
+    // pool itself so an absurd count can never be persisted.
+    if total > MAX_TEAM_CAPACITY {
+        return Err(RoleConfigError::CapacityExceeded(total));
+    }
+    Ok(())
+}
+
+/// Upper bound on total staffed agents across a whole team.
+pub const MAX_TEAM_CAPACITY: i64 = 64;
+
+/// The specific ways a role-pool configuration can be invalid. The service layer maps each to a
+/// user-facing [`crate::errors::AppError`] with a clear, actionable message.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RoleConfigError {
+    DuplicateRuntime(SwarmRole, SwarmRuntimeKind),
+    NegativeCount(SwarmRole),
+    EmptyEnabledRole(SwarmRole),
+    EmptyTeam,
+    CapacityExceeded(i64),
 }
 
 /// A live agent worker inside a Swarm.
@@ -330,6 +442,10 @@ pub struct SwarmAgent {
     pub swarm_id: String,
     pub role: SwarmRole,
     pub runtime: SwarmRuntimeKind,
+    /// The role-pool allocation this worker was staffed from, when it came from a configured
+    /// allocation. Dynamically added workers (e.g. an escalated Debugger) have `None`. Exposing
+    /// it lets events and task assignments name the exact allocation identity a worker belongs to.
+    pub allocation_id: Option<String>,
     pub status: SwarmAgentStatus,
     pub current_task_id: Option<String>,
     pub terminal_session_id: Option<String>,
@@ -533,12 +649,8 @@ pub struct SavePresetRequest {
 /// The default team compositions the creation flow offers. Kept in the domain layer so both
 /// the seeding migration and tests agree on the canonical shape.
 pub fn builtin_presets() -> Vec<(&'static str, &'static str, i64, Vec<SwarmRoleConfig>)> {
-    let role = |role: SwarmRole, count: i64| SwarmRoleConfig {
-        role,
-        runtime: SwarmRuntimeKind::Auto,
-        desired_count: count,
-        enabled: true,
-    };
+    let role =
+        |role: SwarmRole, count: i64| SwarmRoleConfig::single(role, SwarmRuntimeKind::Auto, count);
     vec![
         (
             "auto",
@@ -568,7 +680,16 @@ pub fn builtin_presets() -> Vec<(&'static str, &'static str, i64, Vec<SwarmRoleC
             vec![
                 role(SwarmRole::Coordinator, 1),
                 role(SwarmRole::Scout, 1),
-                role(SwarmRole::Builder, 3),
+                // Builders demonstrate the mixed-allocation model: Claude ×2 alongside Codex ×1,
+                // scheduled as one Builder pool.
+                SwarmRoleConfig {
+                    role: SwarmRole::Builder,
+                    enabled: true,
+                    allocations: vec![
+                        SwarmRoleAllocation::new("builder-claude", SwarmRuntimeKind::Claude, 2),
+                        SwarmRoleAllocation::new("builder-codex", SwarmRuntimeKind::Codex, 1),
+                    ],
+                },
                 role(SwarmRole::Reviewer, 1),
             ],
         ),
@@ -579,11 +700,89 @@ pub fn builtin_presets() -> Vec<(&'static str, &'static str, i64, Vec<SwarmRoleC
             vec![
                 role(SwarmRole::Coordinator, 1),
                 role(SwarmRole::Scout, 2),
-                role(SwarmRole::Builder, 3),
+                SwarmRoleConfig {
+                    role: SwarmRole::Builder,
+                    enabled: true,
+                    allocations: vec![
+                        SwarmRoleAllocation::new("builder-claude", SwarmRuntimeKind::Claude, 2),
+                        SwarmRoleAllocation::new("builder-codex", SwarmRuntimeKind::Codex, 1),
+                    ],
+                },
                 role(SwarmRole::Debugger, 1),
                 role(SwarmRole::Reviewer, 1),
                 role(SwarmRole::Integrator, 1),
             ],
         ),
     ]
+}
+
+/// Convert a possibly-legacy JSON role array (one runtime + `desiredCount` per role) into the
+/// current role-pool shape. Tolerant on purpose: it is the one place that upgrades stored preset
+/// `config_json` and any externally supplied config, so the migration and the wire layer share a
+/// single, tested transform. Returns `None` only when the value is not a JSON array.
+pub fn upgrade_role_configs_json(value: &serde_json::Value) -> Option<Vec<SwarmRoleConfig>> {
+    let array = value.as_array()?;
+    let mut roles = Vec::with_capacity(array.len());
+    for entry in array {
+        let Some(role_str) = entry.get("role").and_then(|value| value.as_str()) else {
+            continue;
+        };
+        let Some(role) = SwarmRole::from_db(role_str) else {
+            continue;
+        };
+        let enabled = entry
+            .get("enabled")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(true);
+        // Preferred new shape: an explicit `allocations` (or legacy `agents`) array.
+        let allocation_source = entry
+            .get("allocations")
+            .or_else(|| entry.get("agents"))
+            .and_then(serde_json::Value::as_array);
+        let allocations = if let Some(items) = allocation_source {
+            items
+                .iter()
+                .filter_map(|item| {
+                    let runtime = item
+                        .get("runtime")
+                        .and_then(serde_json::Value::as_str)
+                        .and_then(SwarmRuntimeKind::from_db)?;
+                    let count = item
+                        .get("count")
+                        .or_else(|| item.get("desiredCount"))
+                        .and_then(serde_json::Value::as_i64)
+                        .unwrap_or(1);
+                    let id = item
+                        .get("id")
+                        .and_then(serde_json::Value::as_str)
+                        .filter(|value| !value.is_empty())
+                        .map(str::to_string)
+                        .unwrap_or_else(|| format!("{}-{}", role.as_str(), runtime.as_str()));
+                    Some(SwarmRoleAllocation::new(id, runtime, count))
+                })
+                .collect()
+        } else {
+            // Legacy one-agent-per-role shape: `{ runtime, desiredCount }`.
+            let runtime = entry
+                .get("runtime")
+                .and_then(serde_json::Value::as_str)
+                .and_then(SwarmRuntimeKind::from_db)
+                .unwrap_or(SwarmRuntimeKind::Auto);
+            let count = entry
+                .get("desiredCount")
+                .and_then(serde_json::Value::as_i64)
+                .unwrap_or(1);
+            vec![SwarmRoleAllocation::new(
+                format!("{}-{}", role.as_str(), runtime.as_str()),
+                runtime,
+                count,
+            )]
+        };
+        roles.push(SwarmRoleConfig {
+            role,
+            enabled,
+            allocations,
+        });
+    }
+    Some(roles)
 }

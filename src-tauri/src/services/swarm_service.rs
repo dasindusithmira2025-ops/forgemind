@@ -20,7 +20,8 @@ use crate::database::swarm::NewSwarmTask;
 use crate::database::DatabaseService;
 use crate::errors::{AppError, AppResult};
 use crate::models::swarm::*;
-use crate::models::Project;
+use crate::models::{AgentProvider, Project};
+use crate::services::AgentDetector;
 use chrono::Utc;
 #[cfg(test)]
 use parking_lot::Mutex;
@@ -163,6 +164,10 @@ struct SwarmInner {
     database: Arc<DatabaseService>,
     app_handle: Option<AppHandle>,
     runtime: Arc<dyn SwarmRuntime>,
+    /// Detects whether the concrete agent runtimes (Claude/Codex) an allocation names are actually
+    /// installable/launchable. Used only to gate launch — presets may be saved with an
+    /// unavailable runtime. `None` in tests/headless, where launch is not runtime-gated.
+    detector: Option<Arc<AgentDetector>>,
     /// Ceiling on total simultaneously-working agents across every Swarm (spec §12).
     global_active_limit: usize,
     scheduler_running: AtomicBool,
@@ -176,12 +181,17 @@ pub struct SwarmService {
 
 impl SwarmService {
     /// Production constructor. Uses the real agent runtime and starts the background scheduler.
-    pub fn new(database: Arc<DatabaseService>, app_handle: AppHandle) -> Self {
+    pub fn new(
+        database: Arc<DatabaseService>,
+        detector: Arc<AgentDetector>,
+        app_handle: AppHandle,
+    ) -> Self {
         let service = Self {
             inner: Arc::new(SwarmInner {
                 database,
                 app_handle: Some(app_handle),
                 runtime: Arc::new(RealAgentRuntime),
+                detector: Some(detector),
                 global_active_limit: 8,
                 scheduler_running: AtomicBool::new(true),
             }),
@@ -199,6 +209,7 @@ impl SwarmService {
                 database,
                 app_handle: None,
                 runtime,
+                detector: None,
                 global_active_limit: 8,
                 scheduler_running: AtomicBool::new(false),
             }),
@@ -460,7 +471,12 @@ impl SwarmService {
     }
 
     pub fn save_preset(&self, request: &SavePresetRequest) -> AppResult<SwarmPreset> {
-        self.db().save_swarm_preset(request)
+        // Normalize + validate the role pools before persisting. An unavailable runtime is allowed
+        // in a saved preset (it is only gated at launch), but the structural invariants must hold.
+        let mut normalized = request.clone();
+        normalize_allocation_ids(&mut normalized.roles);
+        validate_role_configs(&normalized.roles).map_err(role_config_error)?;
+        self.db().save_swarm_preset(&normalized)
     }
 
     pub fn delete_preset(&self, id: &str) -> AppResult<()> {
@@ -482,19 +498,20 @@ impl SwarmService {
         let project = self.project_record(&request.project_id)?;
         self.live_project_root(&project)?;
         let preset = self.db().get_swarm_preset(&request.preset_id)?;
-        let roles = request
+        let mut roles = request
             .roles
             .clone()
             .unwrap_or_else(|| preset.roles.clone());
-        if roles
-            .iter()
-            .all(|role| !role.enabled || role.desired_count <= 0)
-        {
-            return Err(AppError::new(
-                "empty_team",
-                "A Swarm needs at least one enabled role.",
-                true,
-            ));
+        // Enforce the role-pool invariants (no duplicate runtime per role, no negative counts,
+        // every enabled role staffs at least one worker), then mint a fresh id for every
+        // allocation. The Swarm is an immutable snapshot with its own allocation identities — it
+        // must not share ids with the source preset (whose ids may repeat across presets) nor with
+        // any other Swarm.
+        validate_role_configs(&roles).map_err(role_config_error)?;
+        for role in roles.iter_mut() {
+            for allocation in role.allocations.iter_mut() {
+                allocation.id = Uuid::new_v4().to_string();
+            }
         }
         let name = request
             .name
@@ -572,6 +589,10 @@ impl SwarmService {
         // Only decompose once. Resuming a paused Swarm keeps its existing graph and agents.
         let existing_tasks = self.db().list_swarm_tasks(id)?;
         if existing_tasks.is_empty() {
+            // Launch gate: every concrete runtime named by an enabled allocation must be available.
+            // A preset may be saved with an unavailable runtime, but it cannot be launched until the
+            // runtime is installed/authenticated or the allocation is replaced.
+            self.check_runtime_availability(&swarm)?;
             let tasks = decompose(&swarm);
             self.db().insert_swarm_tasks(id, &tasks)?;
             self.spawn_agents(&swarm)?;
@@ -1137,8 +1158,23 @@ impl SwarmService {
         let team_used = swarm
             .roles
             .iter()
-            .filter(|role| role.enabled && role.desired_count > 0)
-            .map(|role| format!("{} ×{}", role.role.as_str(), role.desired_count))
+            .filter(|role| role.is_staffed())
+            .map(|role| {
+                let breakdown = role
+                    .allocations
+                    .iter()
+                    .filter(|allocation| allocation.count > 0)
+                    .map(|allocation| {
+                        format!(
+                            "{} ×{}",
+                            runtime_label(allocation.runtime),
+                            allocation.count
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" + ");
+                format!("{}: {breakdown}", role_label(role.role))
+            })
             .collect();
         let duration = swarm
             .started_at
@@ -1172,14 +1208,26 @@ impl SwarmService {
 
     // ---- Agents --------------------------------------------------------------------------
 
+    /// Materialize the configured role pools into individual agent workers. Every allocation under
+    /// an enabled role contributes `count` workers of its runtime; all allocations of one role form
+    /// a single schedulable pool, so a Builder role backed by Claude ×2 + Codex ×1 becomes three
+    /// Builder workers spread across the two providers. Each worker carries its originating
+    /// allocation id so its provider identity survives restart and recovery.
     fn spawn_agents(&self, swarm: &Swarm) -> AppResult<()> {
         for role in &swarm.roles {
-            if !role.enabled || role.desired_count <= 0 {
+            if !role.enabled {
                 continue;
             }
-            let count = role.desired_count.min(8);
-            for _ in 0..count {
-                self.insert_agent(&swarm.id, role.role, role.runtime)?;
+            for allocation in &role.allocations {
+                let count = allocation.count.clamp(0, 16);
+                for _ in 0..count {
+                    self.insert_agent(
+                        &swarm.id,
+                        role.role,
+                        allocation.runtime,
+                        Some(allocation.id.as_str()),
+                    )?;
+                }
             }
         }
         Ok(())
@@ -1190,6 +1238,7 @@ impl SwarmService {
         swarm_id: &str,
         role: SwarmRole,
         runtime: SwarmRuntimeKind,
+        allocation_id: Option<&str>,
     ) -> AppResult<()> {
         // Resolve `auto` to a concrete provider deterministically: Reviewer independence favours
         // Codex, everything else favours Claude. Any explicit runtime is honoured as-is.
@@ -1204,6 +1253,7 @@ impl SwarmService {
             swarm_id: swarm_id.to_string(),
             role,
             runtime: resolved,
+            allocation_id: allocation_id.map(str::to_string),
             status: SwarmAgentStatus::Idle,
             current_task_id: None,
             terminal_session_id: None,
@@ -1219,13 +1269,65 @@ impl SwarmService {
         if agents.iter().any(|agent| agent.role == role) {
             return Ok(());
         }
-        self.insert_agent(swarm_id, role, SwarmRuntimeKind::Auto)
+        self.insert_agent(swarm_id, role, SwarmRuntimeKind::Auto, None)
+    }
+
+    /// Confirm every concrete runtime an enabled allocation names is available before launch.
+    /// `Auto` allocations are never gated — the engine adapts them to whatever is available.
+    fn check_runtime_availability(&self, swarm: &Swarm) -> AppResult<()> {
+        let Some(detector) = self.inner.detector.as_ref() else {
+            return Ok(());
+        };
+        let mut needed: Vec<SwarmRuntimeKind> = swarm
+            .roles
+            .iter()
+            .filter(|role| role.enabled)
+            .flat_map(|role| role.allocations.iter())
+            .filter(|allocation| {
+                allocation.count > 0 && allocation.runtime != SwarmRuntimeKind::Auto
+            })
+            .map(|allocation| allocation.runtime)
+            .collect();
+        needed.sort_by_key(|runtime| runtime.as_str());
+        needed.dedup();
+
+        let mut unavailable = Vec::new();
+        for runtime in needed {
+            let provider = match runtime {
+                SwarmRuntimeKind::Claude => AgentProvider::Claude,
+                SwarmRuntimeKind::Codex => AgentProvider::Codex,
+                SwarmRuntimeKind::Auto => continue,
+            };
+            let result = detector.detect(provider, None, false);
+            if !result.available {
+                let reason = result
+                    .error_message
+                    .or(result.error_code)
+                    .unwrap_or_else(|| "not available".to_string());
+                unavailable.push(format!("{} ({reason})", runtime_label(runtime)));
+            }
+        }
+        if unavailable.is_empty() {
+            return Ok(());
+        }
+        Err(AppError::new(
+            "swarm_runtime_unavailable",
+            format!(
+                "This Swarm cannot launch until these runtimes are ready: {}.",
+                unavailable.join("; ")
+            ),
+            true,
+        )
+        .entity(&swarm.id)
+        .action(
+            "Install or authenticate the runtime, or replace the allocation, then start again.",
+        ))
     }
 
     /// Add another Builder to a running Swarm (spec §6 — scale during execution).
     pub fn add_builder(&self, project_id: &str, swarm_id: &str) -> AppResult<()> {
         self.swarm_for_project(project_id, swarm_id)?;
-        self.insert_agent(swarm_id, SwarmRole::Builder, SwarmRuntimeKind::Auto)?;
+        self.insert_agent(swarm_id, SwarmRole::Builder, SwarmRuntimeKind::Auto, None)?;
         self.event(
             swarm_id,
             "agent_added",
@@ -1349,6 +1451,77 @@ fn role_from_target(target: &str) -> Option<SwarmRole> {
     SwarmRole::from_db(cleaned)
 }
 
+/// Assign a stable id to any allocation that arrived without one (e.g. a freshly added UI row).
+fn normalize_allocation_ids(roles: &mut [SwarmRoleConfig]) {
+    for role in roles.iter_mut() {
+        for allocation in role.allocations.iter_mut() {
+            if allocation.id.trim().is_empty() {
+                allocation.id = Uuid::new_v4().to_string();
+            }
+        }
+    }
+}
+
+/// Map a structural role-pool validation failure to a user-facing, actionable error.
+fn role_config_error(error: RoleConfigError) -> AppError {
+    match error {
+        RoleConfigError::DuplicateRuntime(role, runtime) => AppError::new(
+            "duplicate_runtime_allocation",
+            format!(
+                "{} already has a {} allocation. Increase its count instead of adding it twice.",
+                role_label(role),
+                runtime_label(runtime)
+            ),
+            true,
+        ),
+        RoleConfigError::NegativeCount(role) => AppError::new(
+            "invalid_allocation_count",
+            format!(
+                "{} has an allocation with a negative count.",
+                role_label(role)
+            ),
+            true,
+        ),
+        RoleConfigError::EmptyEnabledRole(role) => AppError::new(
+            "empty_role_pool",
+            format!(
+                "{} is enabled but has no agents. Add an agent type or turn the role off.",
+                role_label(role)
+            ),
+            true,
+        ),
+        RoleConfigError::EmptyTeam => AppError::new(
+            "empty_team",
+            "A Swarm needs at least one enabled role with an agent.",
+            true,
+        ),
+        RoleConfigError::CapacityExceeded(total) => AppError::new(
+            "capacity_exceeded",
+            format!("The team requests {total} agents, above the maximum of {MAX_TEAM_CAPACITY}."),
+            true,
+        ),
+    }
+}
+
+fn role_label(role: SwarmRole) -> &'static str {
+    match role {
+        SwarmRole::Coordinator => "Coordinator",
+        SwarmRole::Scout => "Scout",
+        SwarmRole::Builder => "Builders",
+        SwarmRole::Debugger => "Debugger",
+        SwarmRole::Reviewer => "Reviewer",
+        SwarmRole::Integrator => "Integrator",
+    }
+}
+
+fn runtime_label(runtime: SwarmRuntimeKind) -> &'static str {
+    match runtime {
+        SwarmRuntimeKind::Auto => "Auto",
+        SwarmRuntimeKind::Claude => "Claude",
+        SwarmRuntimeKind::Codex => "Codex",
+    }
+}
+
 fn compute_progress(tasks: &[SwarmTask]) -> f64 {
     if tasks.is_empty() {
         return 0.0;
@@ -1373,7 +1546,7 @@ fn decompose(swarm: &Swarm) -> Vec<NewSwarmTask> {
             .roles
             .iter()
             .find(|config| config.role == role && config.enabled)
-            .map(|config| config.desired_count.max(0))
+            .map(SwarmRoleConfig::total_count)
             .unwrap_or(0)
     };
     let mut tasks = Vec::new();
@@ -1892,5 +2065,256 @@ mod tests {
         assert!(!is_safe_project_relative("../other-project/secret.rs"));
         assert!(!is_safe_project_relative("C:\\other-project\\secret.rs"));
         assert!(!is_safe_project_relative("/other-project/secret.rs"));
+    }
+
+    fn mixed_builder_roles() -> Vec<SwarmRoleConfig> {
+        vec![
+            SwarmRoleConfig::single(SwarmRole::Coordinator, SwarmRuntimeKind::Auto, 1),
+            SwarmRoleConfig {
+                role: SwarmRole::Builder,
+                enabled: true,
+                allocations: vec![
+                    // Deliberately blank ids: the engine must assign stable ones.
+                    SwarmRoleAllocation::new("", SwarmRuntimeKind::Claude, 2),
+                    SwarmRoleAllocation::new("", SwarmRuntimeKind::Codex, 1),
+                ],
+            },
+            SwarmRoleConfig::single(SwarmRole::Reviewer, SwarmRuntimeKind::Auto, 1),
+        ]
+    }
+
+    fn create_with_roles(
+        service: &SwarmService,
+        project_id: &str,
+        roles: Vec<SwarmRoleConfig>,
+    ) -> AppResult<Swarm> {
+        service.create_swarm(&CreateSwarmRequest {
+            project_id: project_id.to_string(),
+            mission: "Ship the mixed-runtime feature".into(),
+            name: None,
+            preset_id: "quick_fix".into(),
+            max_parallel: Some(4),
+            instructions: None,
+            roles: Some(roles),
+        })
+    }
+
+    #[test]
+    fn builder_pool_spawns_workers_across_mixed_runtimes() {
+        // Feature Team's Builders are Claude ×2 + Codex ×1 — one pool, three workers.
+        let (service, _db, project) = service_with(Arc::new(SimulatedRuntime::default()));
+        let swarm = create(&service, &project, "feature_team");
+        service.start_swarm(&project, &swarm.id).unwrap();
+        let agents = service.db().list_swarm_agents(&swarm.id).unwrap();
+        let claude = agents
+            .iter()
+            .filter(|a| a.role == SwarmRole::Builder && a.runtime == SwarmRuntimeKind::Claude)
+            .count();
+        let codex = agents
+            .iter()
+            .filter(|a| a.role == SwarmRole::Builder && a.runtime == SwarmRuntimeKind::Codex)
+            .count();
+        assert_eq!(claude, 2, "Claude ×2 builders");
+        assert_eq!(codex, 1, "Codex ×1 builder");
+        // Every configured worker exposes its allocation identity.
+        assert!(agents
+            .iter()
+            .filter(|a| a.role == SwarmRole::Builder)
+            .all(|a| a.allocation_id.is_some()));
+    }
+
+    #[test]
+    fn custom_mixed_allocations_persist_and_schedule_across_providers() {
+        let (service, database, project) = service_with(Arc::new(SimulatedRuntime::new(1.0)));
+        let swarm = create_with_roles(&service, &project, mixed_builder_roles()).unwrap();
+
+        // Persistence: both allocations survive with stable ids and their counts.
+        let reloaded = database.get_swarm(&swarm.id).unwrap();
+        let builder = reloaded
+            .roles
+            .iter()
+            .find(|r| r.role == SwarmRole::Builder)
+            .unwrap();
+        assert_eq!(builder.allocations.len(), 2);
+        assert_eq!(builder.total_count(), 3);
+        assert!(builder.allocations.iter().all(|a| !a.id.is_empty()));
+
+        service.start_swarm(&project, &swarm.id).unwrap();
+        run_to_quiescence(&service, &swarm.id);
+        let detail = service.get_detail(&project, &swarm.id).unwrap();
+        // Builder tasks were leased to workers of both providers — one role-capability pool.
+        let runtimes: HashSet<_> = detail
+            .tasks
+            .iter()
+            .filter(|t| t.role == SwarmRole::Builder)
+            .filter_map(|t| t.assigned_agent_id.as_ref())
+            .filter_map(|id| detail.agents.iter().find(|a| &a.id == id))
+            .map(|a| a.runtime)
+            .collect();
+        assert!(runtimes.contains(&SwarmRuntimeKind::Claude));
+        assert!(runtimes.contains(&SwarmRuntimeKind::Codex));
+    }
+
+    #[test]
+    fn total_role_and_team_counts_are_computed() {
+        let roles = mixed_builder_roles();
+        let team: i64 = roles.iter().map(SwarmRoleConfig::total_count).sum();
+        assert_eq!(team, 5); // coordinator 1 + builders 3 + reviewer 1
+        let builders = roles.iter().find(|r| r.role == SwarmRole::Builder).unwrap();
+        assert_eq!(builders.total_count(), 3);
+        // A disabled role contributes nothing.
+        let disabled = SwarmRoleConfig {
+            role: SwarmRole::Scout,
+            enabled: false,
+            allocations: vec![SwarmRoleAllocation::new("x", SwarmRuntimeKind::Claude, 4)],
+        };
+        assert_eq!(disabled.total_count(), 0);
+    }
+
+    #[test]
+    fn duplicate_runtime_within_a_role_is_rejected() {
+        let (service, _db, project) = service_with(Arc::new(SimulatedRuntime::default()));
+        let roles = vec![SwarmRoleConfig {
+            role: SwarmRole::Builder,
+            enabled: true,
+            allocations: vec![
+                SwarmRoleAllocation::new("a", SwarmRuntimeKind::Claude, 1),
+                SwarmRoleAllocation::new("b", SwarmRuntimeKind::Claude, 2),
+            ],
+        }];
+        let error = create_with_roles(&service, &project, roles).unwrap_err();
+        assert_eq!(error.code, "duplicate_runtime_allocation");
+    }
+
+    #[test]
+    fn enabled_role_without_any_agents_is_rejected() {
+        let (service, _db, project) = service_with(Arc::new(SimulatedRuntime::default()));
+        let roles = vec![
+            SwarmRoleConfig::single(SwarmRole::Coordinator, SwarmRuntimeKind::Auto, 1),
+            SwarmRoleConfig {
+                role: SwarmRole::Builder,
+                enabled: true,
+                allocations: vec![],
+            },
+        ];
+        let error = create_with_roles(&service, &project, roles).unwrap_err();
+        assert_eq!(error.code, "empty_role_pool");
+    }
+
+    #[test]
+    fn launched_snapshot_is_immutable_when_its_preset_is_edited() {
+        let (service, database, project) = service_with(Arc::new(SimulatedRuntime::default()));
+        let preset = service
+            .save_preset(&SavePresetRequest {
+                id: None,
+                name: "Mine".into(),
+                max_parallel: 4,
+                instructions: String::new(),
+                roles: vec![
+                    SwarmRoleConfig::single(SwarmRole::Coordinator, SwarmRuntimeKind::Auto, 1),
+                    SwarmRoleConfig::single(SwarmRole::Builder, SwarmRuntimeKind::Claude, 1),
+                    SwarmRoleConfig::single(SwarmRole::Reviewer, SwarmRuntimeKind::Auto, 1),
+                ],
+            })
+            .unwrap();
+        let swarm = service
+            .create_swarm(&CreateSwarmRequest {
+                project_id: project.clone(),
+                mission: "Snapshot test".into(),
+                name: None,
+                preset_id: preset.id.clone(),
+                max_parallel: None,
+                instructions: None,
+                roles: None,
+            })
+            .unwrap();
+        let snapshot = swarm.roles.clone();
+
+        // Edit the source preset to a completely different composition.
+        service
+            .save_preset(&SavePresetRequest {
+                id: Some(preset.id.clone()),
+                name: "Mine".into(),
+                max_parallel: 4,
+                instructions: String::new(),
+                roles: vec![
+                    SwarmRoleConfig::single(SwarmRole::Coordinator, SwarmRuntimeKind::Auto, 1),
+                    SwarmRoleConfig::single(SwarmRole::Builder, SwarmRuntimeKind::Codex, 3),
+                    SwarmRoleConfig::single(SwarmRole::Reviewer, SwarmRuntimeKind::Auto, 1),
+                ],
+            })
+            .unwrap();
+
+        let reloaded = database.get_swarm(&swarm.id).unwrap();
+        assert_eq!(
+            reloaded.roles, snapshot,
+            "the running Swarm keeps its launch-time team snapshot"
+        );
+    }
+
+    #[test]
+    fn recovered_workers_preserve_runtime_and_allocation_identity() {
+        let (service, database, project) = service_with(Arc::new(SimulatedRuntime::default()));
+        let swarm = create(&service, &project, "feature_team");
+        service.start_swarm(&project, &swarm.id).unwrap();
+        let before: Vec<_> = database
+            .list_swarm_agents(&swarm.id)
+            .unwrap()
+            .into_iter()
+            .map(|a| (a.id, a.role, a.runtime, a.allocation_id))
+            .collect();
+
+        // Simulate an app restart: a fresh engine over the same persisted database.
+        let recovered =
+            SwarmService::for_tests(Arc::clone(&database), Arc::new(SimulatedRuntime::default()));
+        let after: Vec<_> = recovered
+            .db()
+            .list_swarm_agents(&swarm.id)
+            .unwrap()
+            .into_iter()
+            .map(|a| (a.id, a.role, a.runtime, a.allocation_id))
+            .collect();
+        assert_eq!(
+            before, after,
+            "provider + allocation identity survives restart"
+        );
+    }
+
+    #[test]
+    fn no_extra_workers_are_spawned_beyond_the_configured_pool() {
+        // The engine leases idle workers; it never fabricates more than the configured allocations.
+        let (service, database, project) = service_with(Arc::new(SimulatedRuntime::new(1.0)));
+        let swarm = create_with_roles(&service, &project, mixed_builder_roles()).unwrap();
+        service.start_swarm(&project, &swarm.id).unwrap();
+        run_to_quiescence(&service, &swarm.id);
+        let builders = database
+            .list_swarm_agents(&swarm.id)
+            .unwrap()
+            .into_iter()
+            .filter(|a| a.role == SwarmRole::Builder)
+            .count();
+        assert_eq!(
+            builders, 3,
+            "exactly the configured Builder pool, no phantom workers"
+        );
+    }
+
+    #[test]
+    fn legacy_single_runtime_configuration_still_works_end_to_end() {
+        // A classic one-agent-per-role team (built with the single-allocation helper) plans, runs,
+        // and reaches Ready exactly as before the pool model.
+        let (service, _db, project) = service_with(Arc::new(SimulatedRuntime::default()));
+        let swarm = create(&service, &project, "quick_fix");
+        assert!(swarm.roles.iter().all(|role| role.allocations.len() == 1));
+        service.start_swarm(&project, &swarm.id).unwrap();
+        run_to_quiescence(&service, &swarm.id);
+        assert_eq!(
+            service
+                .get_detail(&project, &swarm.id)
+                .unwrap()
+                .swarm
+                .lifecycle,
+            SwarmLifecycle::Ready
+        );
     }
 }

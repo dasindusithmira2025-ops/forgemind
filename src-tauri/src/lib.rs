@@ -333,7 +333,11 @@ pub fn run() {
             let repository = Arc::new(RepositoryService::new(database.clone(), &data_dir));
             // The Swarm engine owns its own background scheduler thread; it starts here so
             // active Swarms keep progressing regardless of which window/view is focused.
-            let swarms = services::SwarmService::new(database.clone(), app.handle().clone());
+            let swarms = services::SwarmService::new(
+                database.clone(),
+                detector.clone(),
+                app.handle().clone(),
+            );
             if !recovery_mode {
                 match repository.recover_on_startup() {
                     Ok(interrupted) if !interrupted.is_empty() => log::warn!(

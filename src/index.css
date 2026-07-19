@@ -1312,10 +1312,45 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .swarm-preset-name { font-size: var(--text-md); font-weight: 650; }
 .swarm-preset-roles { color: var(--muted); font-size: var(--text-xs); line-height: 1.45; }
 .swarm-preset-summary { color: var(--muted); font-size: var(--text-sm); }
-.swarm-custom-roles { display: flex; flex-direction: column; gap: 6px; }
-.swarm-custom-role { display: grid; grid-template-columns: 1fr 64px 100px; gap: 8px; align-items: center; padding: 7px 9px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
-.swarm-role-toggle { display: flex; align-items: center; gap: 8px; font-size: var(--text-sm); }
-.swarm-role-count, .swarm-role-runtime { padding: 5px 7px; background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); color: var(--text); font: inherit; font-size: var(--text-sm); }
+.swarm-preset-detail { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.swarm-field-labelrow { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.swarm-linkbtn { display: inline-flex; align-items: center; gap: 5px; background: none; border: 0; color: var(--accent-strong); font: inherit; font-size: var(--text-sm); cursor: pointer; padding: 2px 0; }
+.swarm-linkbtn:hover { text-decoration: underline; }
+.swarm-linkbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-sm); }
+.swarm-role-toggle { display: flex; align-items: center; gap: 8px; font-size: var(--text-sm); cursor: pointer; }
+
+/* Role-pool editor: one clean card per role, each holding a list of agent allocations. */
+.swarm-roles-editor { display: flex; flex-direction: column; gap: 10px; }
+.swarm-role-cards { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.swarm-role-card { display: flex; flex-direction: column; gap: 8px; padding: 11px 12px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+.swarm-role-card.is-off { opacity: .7; }
+.swarm-role-card.is-invalid { border-color: color-mix(in srgb, var(--danger) 55%, var(--border)); }
+.swarm-role-card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.swarm-role-count-badge { color: var(--muted); font-size: var(--text-xs); font-variant-numeric: tabular-nums; }
+.swarm-role-off-hint { color: var(--faint); font-size: var(--text-xs); text-transform: uppercase; letter-spacing: .05em; }
+.swarm-role-summary { color: var(--muted); font-size: var(--text-sm); }
+.swarm-alloc-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.swarm-alloc-row { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; align-items: center; padding: 6px 8px; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.swarm-alloc-runtime { font-size: var(--text-sm); font-weight: 600; }
+.swarm-alloc-empty { color: var(--faint); font-size: var(--text-sm); font-style: italic; }
+.swarm-alloc-stepper { display: inline-flex; align-items: center; gap: 4px; }
+.swarm-alloc-step { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); color: var(--text); cursor: pointer; }
+.swarm-alloc-step:hover:not(:disabled) { border-color: var(--accent); }
+.swarm-alloc-step:disabled { opacity: .4; cursor: default; }
+.swarm-alloc-step:focus-visible, .swarm-alloc-remove:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.swarm-alloc-count { width: 44px; text-align: center; padding: 4px 4px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); color: var(--text); font: inherit; font-size: var(--text-sm); font-variant-numeric: tabular-nums; }
+.swarm-alloc-count:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px rgba(139, 124, 246, .18); }
+.swarm-alloc-remove { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; background: none; border: 1px solid transparent; border-radius: var(--radius-sm); color: var(--faint); cursor: pointer; }
+.swarm-alloc-remove:hover { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, var(--border)); }
+.swarm-alloc-add { align-self: flex-start; padding: 5px 9px; background: var(--surface-2); border: 1px dashed var(--border-strong); border-radius: var(--radius-sm); color: var(--text); font: inherit; font-size: var(--text-sm); cursor: pointer; }
+.swarm-alloc-add:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px rgba(139, 124, 246, .18); }
+.swarm-role-error { color: var(--danger); font-size: var(--text-sm); }
+.swarm-team-total { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius); font-size: var(--text-sm); color: var(--muted); }
+.swarm-team-total strong { color: var(--text); font-variant-numeric: tabular-nums; }
+.swarm-save-preset { display: flex; gap: 8px; margin-top: 8px; }
+.swarm-preset-name-input { flex: 1; padding: 6px 10px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); color: var(--text); font: inherit; font-size: var(--text-sm); }
+.swarm-preset-name-input:focus-visible { outline: none; border-color: var(--accent); }
+.swarm-notice { color: var(--success); font-size: var(--text-sm); }
 .swarm-parallel { display: flex; align-items: center; gap: 12px; }
 .swarm-parallel input[type="range"] { flex: 1; accent-color: var(--accent); }
 .swarm-parallel-value { color: var(--muted); font-size: var(--text-sm); white-space: nowrap; }
