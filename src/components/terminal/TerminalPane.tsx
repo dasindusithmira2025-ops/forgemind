@@ -257,7 +257,7 @@ export function TerminalPane({ assignment, session, deferred = false, active, ma
     {searchOpen && <div className="terminal-search"><input autoFocus aria-label="Search terminal scrollback" value={searchTerm} onChange={(event) => { setSearchTerm(event.target.value); searchRef.current?.findNext(event.target.value, { caseSensitive }) }} onKeyDown={(event) => { if (event.key === 'Enter') searchRef.current?.findNext(searchTerm, { caseSensitive }); if (event.key === 'Escape') setSearchOpen(false) }} placeholder="Find in terminal" /><button className={caseSensitive ? 'enabled' : ''} title="Case sensitive" onClick={() => setCaseSensitive((value) => !value)}>Aa</button><Button variant="ghost" icon={<ChevronDown className="rotate-180" size={14} />} aria-label="Previous match" onClick={() => searchRef.current?.findPrevious(searchTerm, { caseSensitive })} /><Button variant="ghost" icon={<ChevronDown size={14} />} aria-label="Next match" onClick={() => searchRef.current?.findNext(searchTerm, { caseSensitive })} /><Button variant="ghost" icon={<X size={14} />} aria-label="Close search" onClick={() => setSearchOpen(false)} /></div>}
     <div className="xterm-host" ref={containerRef} />
     {!currentSession && !deferred && <div className="terminal-recovery compact"><span>Starting terminal…</span></div>}
-    {!currentSession && deferred && <div className="terminal-recovery"><strong>Deferred by restoration budget</strong><span>The Pane remains in the saved layout and can be resumed when needed.</span><button onClick={onRestart}><RotateCw size={12} />Resume Pane</button></div>}
+    {!currentSession && deferred && <div className="terminal-recovery"><strong>Terminal paused to reduce resource usage</strong><span>Its place in the saved layout is kept. Resume it whenever you need it.</span><button onClick={onRestart}><RotateCw size={12} />Resume terminal</button></div>}
     {currentSession && currentSession.status !== 'running' && <div className="terminal-recovery"><strong>{terminalStateTitle(currentSession)}</strong><span>{terminalStateDetail(currentSession)}</span><button onClick={onRestart}><RotateCw size={12} />Open fresh session</button></div>}
   </article>
 }
@@ -268,7 +268,7 @@ function agentStateLabel(state: AgentActivityState) {
   return state[0].toUpperCase() + state.slice(1)
 }
 
-const terminalTheme = { background: '#0a0c10', foreground: '#d8dde7', cursor: '#72a7ff', cursorAccent: '#0a0c10', selectionBackground: '#315f9b78', black: '#161a22', red: '#ef7d7d', green: '#82c99a', yellow: '#d9bf76', blue: '#72a7ff', magenta: '#b99af7', cyan: '#70c4c9', white: '#d8dde7', brightBlack: '#6f7889', brightWhite: '#f2f5fa' }
+const terminalTheme = { background: '#0a0c10', foreground: '#d8dde7', cursor: '#a89bfa', cursorAccent: '#0a0c10', selectionBackground: '#8b7cf64d', black: '#161a22', red: '#ef7d7d', green: '#82c99a', yellow: '#d9bf76', blue: '#72a7ff', magenta: '#b99af7', cyan: '#70c4c9', white: '#d8dde7', brightBlack: '#6f7889', brightWhite: '#f2f5fa' }
 
 async function pasteIntoTerminal(terminal: Terminal, confirmMultiline: boolean) {
   const text = await navigator.clipboard.readText()

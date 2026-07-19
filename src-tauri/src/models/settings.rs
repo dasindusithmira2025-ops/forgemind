@@ -7,6 +7,8 @@ pub struct AppSettings {
     #[serde(default = "default_sidebar_width")]
     pub sidebar_width: u16,
     pub ui_scale: f64,
+    #[serde(default = "default_ui_density")]
+    pub ui_density: String,
     pub terminal_font_size: u16,
     pub terminal_font_family: String,
     pub terminal_line_height: f64,
@@ -37,6 +39,7 @@ impl Default for AppSettings {
             sidebar_open: true,
             sidebar_width: default_sidebar_width(),
             ui_scale: 1.0,
+            ui_density: default_ui_density(),
             terminal_font_size: 13,
             terminal_font_family: "Cascadia Mono, Consolas, monospace".into(),
             terminal_line_height: 1.15,
@@ -67,4 +70,10 @@ impl Default for AppSettings {
 /// `save_settings` and the `SidebarResizeHandle` bounds on the renderer side.
 fn default_sidebar_width() -> u16 {
     300
+}
+
+/// Interface density: settings saved before this field existed deserialize as "standard",
+/// which matches the pre-density chrome metrics.
+fn default_ui_density() -> String {
+    "standard".into()
 }

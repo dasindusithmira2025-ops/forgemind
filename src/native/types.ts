@@ -537,6 +537,7 @@ export interface AppSettings {
   sidebarOpen: boolean
   sidebarWidth: number
   uiScale: number
+  uiDensity: 'comfortable' | 'standard' | 'compact'
   terminalFontSize: number
   terminalFontFamily: string
   terminalLineHeight: number

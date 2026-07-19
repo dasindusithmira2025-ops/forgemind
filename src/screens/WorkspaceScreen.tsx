@@ -555,7 +555,7 @@ export function WorkspaceScreen() {
 
   // Budget-deferred Panes stay in the layout but idle. Resume one the moment it becomes active
   // (click/focus/keyboard nav) so it comes alive on interaction instead of stranding the user on
-  // the "Deferred by restoration budget" card. restartPane drops the id from deferredPaneIds, so
+  // the "Terminal paused to reduce resource usage" card. restartPane drops the id from deferredPaneIds, so
   // this fires once per Pane and never loops.
   useEffect(() => {
     if (activePaneId && deferredPaneIds.includes(activePaneId)) void restartPane(activePaneId)
