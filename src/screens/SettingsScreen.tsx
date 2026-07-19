@@ -48,6 +48,11 @@ export function SettingsScreen() {
   }, [settings.uiScale, stored.uiScale])
 
   useEffect(() => {
+    document.documentElement.dataset.density = settings.uiDensity
+    return () => { document.documentElement.dataset.density = stored.uiDensity }
+  }, [settings.uiDensity, stored.uiDensity])
+
+  useEffect(() => {
     void Promise.all([native.detectShells(), native.listAgentProfiles(), native.getDiagnostics(), native.getUpdateStatus()])
       .then(([nextShells, nextProfiles, nextDiagnostics, nextUpdateStatus]) => {
         setShells(nextShells); setProfiles(nextProfiles); setDiagnostics(nextDiagnostics); setUpdateStatus(nextUpdateStatus)
@@ -133,6 +138,7 @@ export function SettingsScreen() {
       <section className="settings-panel">{error && <ErrorNotice message={error} />}
         {section === 'appearance' && <SettingsSection title="Appearance" description="Density and terminal rendering update immediately.">
           <SettingRow label="UI scale" detail="Scale the entire desktop interface."><input aria-label="UI scale" type="range" min="0.8" max="1.5" step="0.05" value={settings.uiScale} onChange={(event) => update('uiScale', Number(event.target.value))} /><output>{Math.round(settings.uiScale * 100)}%</output></SettingRow>
+          <SettingRow label="Interface density" detail="Control heights, list rows, and pane chrome. Terminal text is unaffected."><select aria-label="Interface density" value={settings.uiDensity} onChange={(event) => update('uiDensity', event.target.value as AppSettings['uiDensity'])}><option value="comfortable">Comfortable</option><option value="standard">Standard</option><option value="compact">Compact</option></select></SettingRow>
           <SettingRow label="Terminal font"><input aria-label="Terminal font" value={settings.terminalFontFamily} onChange={(event) => update('terminalFontFamily', event.target.value)} /></SettingRow>
           <SettingRow label="Font size"><input aria-label="Terminal font size" type="number" min="9" max="30" value={settings.terminalFontSize} onChange={(event) => update('terminalFontSize', Number(event.target.value))} onBlur={(event) => update('terminalFontSize', clamp(Math.round(Number(event.target.value)), 9, 30))} /></SettingRow>
           <SettingRow label="Line height"><input aria-label="Terminal line height" type="range" min="0.9" max="2" step="0.05" value={settings.terminalLineHeight} onChange={(event) => update('terminalLineHeight', Number(event.target.value))} /><output>{settings.terminalLineHeight.toFixed(2)}</output></SettingRow>
@@ -201,7 +207,7 @@ export function SettingsScreen() {
           {diagnostics?.backupPath && <SettingRow label="Latest recovery backup"><code title={diagnostics.backupPath}>{diagnostics.backupPath}</code></SettingRow>}
           {diagnostics?.legacyMigrationBackup && <SettingRow label="Legacy migration backup"><code title={diagnostics.legacyMigrationBackup}>{diagnostics.legacyMigrationBackup}</code></SettingRow>}
           {diagnostics?.readiness && <div className="update-notes"><strong>{diagnostics.readiness.firstRun ? 'First-run readiness' : 'Daily-use readiness'} · {diagnostics.readiness.ready ? 'ready' : 'attention required'}</strong><p>{diagnostics.readiness.checks.map((check) => `${check.status.toUpperCase()} · ${check.label}: ${check.detail}${check.action ? ` Action: ${check.action}` : ''}`).join('\n')}</p></div>}
-          <div className="diagnostic-actions"><Button icon={<Stethoscope size={14} />} onClick={() => void refreshDiagnostics()}>Run health check</Button><Button icon={<Wrench size={14} />} onClick={() => void repair()}>Repair database metadata</Button><Button icon={<FolderOpen size={14} />} onClick={() => diagnostics && void openPath(diagnostics.backupDirectory)}>Open backups</Button><Button icon={<FolderOpen size={14} />} onClick={() => diagnostics && void openPath(diagnostics.updateDataDirectory)}>Open update-data folder</Button><Button icon={<Copy size={14} />} onClick={() => void exportSupport()}>Export redacted support bundle</Button><Button onClick={() => void native.startInSafeMode()}>Start in safe mode</Button><Button variant="ghost" onClick={() => { update('sidebarOpen', true); update('uiScale', 1) }}>Reset UI layout only</Button></div>
+          <div className="diagnostic-actions"><Button icon={<Stethoscope size={14} />} onClick={() => void refreshDiagnostics()}>Run health check</Button><Button icon={<Wrench size={14} />} onClick={() => void repair()}>Repair database metadata</Button><Button icon={<FolderOpen size={14} />} onClick={() => diagnostics && void openPath(diagnostics.backupDirectory)}>Open backups</Button><Button icon={<FolderOpen size={14} />} onClick={() => diagnostics && void openPath(diagnostics.updateDataDirectory)}>Open update-data folder</Button><Button icon={<Copy size={14} />} onClick={() => void exportSupport()}>Export redacted support bundle</Button><Button onClick={() => void native.startInSafeMode()}>Start in safe mode</Button><Button variant="ghost" onClick={() => { update('sidebarOpen', true); update('uiScale', 1); update('uiDensity', 'standard') }}>Reset UI layout only</Button></div>
           {diagnostics?.updateLogEntries.length ? <div className="update-notes"><strong>Update log</strong><p>{diagnostics.updateLogEntries.join('\n')}</p></div> : null}
         </SettingsSection>}
       </section>

@@ -5,6 +5,7 @@ export const defaultSettings: AppSettings = {
   sidebarOpen: true,
   sidebarWidth: 300,
   uiScale: 1,
+  uiDensity: 'standard',
   terminalFontSize: 13,
   terminalFontFamily: 'Cascadia Mono, Consolas, monospace',
   terminalLineHeight: 1.15,

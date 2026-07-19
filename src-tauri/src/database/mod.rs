@@ -892,6 +892,10 @@ impl DatabaseService {
                 "block" | "underline" | "bar"
             )
             || !matches!(
+                settings.ui_density.as_str(),
+                "comfortable" | "standard" | "compact"
+            )
+            || !matches!(
                 settings.restore_behavior.as_str(),
                 "ask" | "restart_agents" | "fresh_shells"
             )

@@ -50,6 +50,7 @@ function WorkspaceHandoffListener(){
 export default function App() {
   const setSettings = useAppStore((state) => state.setSettings)
   const uiScale = useAppStore((state) => state.settings.uiScale)
+  const uiDensity = useAppStore((state) => state.settings.uiDensity)
   const [startup, setStartup] = useState<StartupStatus | null>()
   const [whatsNew, setWhatsNew] = useState<UpdateStatus>()
 
@@ -83,6 +84,10 @@ export default function App() {
   useEffect(() => {
     document.documentElement.style.setProperty('--ui-scale', String(uiScale))
   }, [uiScale])
+
+  useEffect(() => {
+    document.documentElement.dataset.density = uiDensity
+  }, [uiDensity])
 
   // A detached Workspace window (label `ws-<id>`) renders the compact single-Workspace shell
   // instead of the full router — no Project launcher, no global sidebar. Terminal runtime +

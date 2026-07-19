@@ -6,13 +6,15 @@
     "Project-scoped Repository Command Center backend with typed Git and GitHub operations",
     "Isolated agent branch and worktree leases with backend policy enforcement",
     "Durable approvals, operation recovery, remote projections, and merge-readiness evaluation",
-    "Project-scoped Swarms with durable missions, role sessions, tasks, evidence, and review state"
+    "Project-scoped Swarms with durable missions, role sessions, tasks, evidence, and review state",
+    "A unified semantic design system with comfortable, standard, and compact interface density"
   ],
   "fixes": [
     "Reject stale pushes, merges, approvals, and queued mutations after repository state changes",
     "Bound and redact Git and GitHub process output while preserving user hooks, signing, SSH, LFS, and credential helpers",
     "Prevent agent mutations outside the assigned Project, branch, worktree, task, and file scope",
-    "Prevent Swarm creation, execution, memory access, worktree reuse, and evidence association outside the owning Project"
+    "Prevent Swarm creation, execution, memory access, worktree reuse, and evidence association outside the owning Project",
+    "Clarify paused terminal recovery and keep density preferences consistent across attached and detached windows"
   ],
   "databaseChanges": [
     "Add forward-only schema 13 for repository connections, policies, worktree leases, operations, approvals, remote cache, synchronization cursors, webhook deduplication, and recovery checkpoints",
