@@ -16,16 +16,19 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "snake_case")]
 pub enum SwarmLifecycle {
     Draft,
+    Validating,
     Preparing,
     Understanding,
     Planning,
-    Running,
+    Building,
     Verifying,
-    DecisionNeeded,
+    DecisionRequired,
+    Pausing,
     Paused,
+    Resuming,
     Stopping,
     Reviewing,
-    Ready,
+    ReadyForReview,
     Completed,
     Failed,
     Cancelled,
@@ -37,16 +40,19 @@ impl SwarmLifecycle {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Draft => "draft",
+            Self::Validating => "validating",
             Self::Preparing => "preparing",
             Self::Understanding => "understanding",
             Self::Planning => "planning",
-            Self::Running => "running",
+            Self::Building => "building",
             Self::Verifying => "verifying",
-            Self::DecisionNeeded => "decision_needed",
+            Self::DecisionRequired => "decision_required",
+            Self::Pausing => "pausing",
             Self::Paused => "paused",
+            Self::Resuming => "resuming",
             Self::Stopping => "stopping",
             Self::Reviewing => "reviewing",
-            Self::Ready => "ready",
+            Self::ReadyForReview => "ready_for_review",
             Self::Completed => "completed",
             Self::Failed => "failed",
             Self::Cancelled => "cancelled",
@@ -58,16 +64,19 @@ impl SwarmLifecycle {
     pub fn from_db(value: &str) -> Option<Self> {
         Some(match value {
             "draft" => Self::Draft,
+            "validating" => Self::Validating,
             "preparing" => Self::Preparing,
             "understanding" => Self::Understanding,
             "planning" => Self::Planning,
-            "running" => Self::Running,
+            "building" | "running" => Self::Building,
             "verifying" => Self::Verifying,
-            "decision_needed" => Self::DecisionNeeded,
+            "decision_required" | "decision_needed" => Self::DecisionRequired,
+            "pausing" => Self::Pausing,
             "paused" => Self::Paused,
+            "resuming" => Self::Resuming,
             "stopping" => Self::Stopping,
             "reviewing" => Self::Reviewing,
-            "ready" => Self::Ready,
+            "ready_for_review" | "ready" => Self::ReadyForReview,
             "completed" => Self::Completed,
             "failed" => Self::Failed,
             "cancelled" => Self::Cancelled,
@@ -82,10 +91,11 @@ impl SwarmLifecycle {
     pub fn is_schedulable(self) -> bool {
         matches!(
             self,
-            Self::Preparing
+            Self::Validating
+                | Self::Preparing
                 | Self::Understanding
                 | Self::Planning
-                | Self::Running
+                | Self::Building
                 | Self::Verifying
                 | Self::Reviewing
                 | Self::Recovering
@@ -99,20 +109,143 @@ impl SwarmLifecycle {
         )
     }
 
+    pub fn can_transition_to(self, next: Self) -> bool {
+        if self == next {
+            return true;
+        }
+        match self {
+            Self::Draft => matches!(
+                next,
+                Self::Validating | Self::Preparing | Self::Understanding | Self::Cancelled
+            ),
+            Self::Validating => matches!(
+                next,
+                Self::Draft | Self::Preparing | Self::Failed | Self::Cancelled
+            ),
+            Self::Preparing => matches!(
+                next,
+                Self::Understanding | Self::Pausing | Self::Paused | Self::Stopping | Self::Failed
+            ),
+            Self::Understanding => matches!(
+                next,
+                Self::Planning
+                    | Self::Building
+                    | Self::Verifying
+                    | Self::Reviewing
+                    | Self::ReadyForReview
+                    | Self::Pausing
+                    | Self::Paused
+                    | Self::Stopping
+                    | Self::Recovering
+                    | Self::Failed
+            ),
+            Self::Planning => matches!(
+                next,
+                Self::Building
+                    | Self::Pausing
+                    | Self::Paused
+                    | Self::DecisionRequired
+                    | Self::Stopping
+                    | Self::Recovering
+                    | Self::Failed
+            ),
+            Self::Building => matches!(
+                next,
+                Self::Verifying
+                    | Self::Reviewing
+                    | Self::ReadyForReview
+                    | Self::Pausing
+                    | Self::Paused
+                    | Self::DecisionRequired
+                    | Self::Stopping
+                    | Self::Recovering
+                    | Self::Failed
+            ),
+            Self::Verifying => matches!(
+                next,
+                Self::Building
+                    | Self::Reviewing
+                    | Self::ReadyForReview
+                    | Self::Pausing
+                    | Self::Paused
+                    | Self::DecisionRequired
+                    | Self::Stopping
+                    | Self::Recovering
+                    | Self::Failed
+            ),
+            Self::Reviewing => matches!(
+                next,
+                Self::Building
+                    | Self::ReadyForReview
+                    | Self::Pausing
+                    | Self::Paused
+                    | Self::DecisionRequired
+                    | Self::Stopping
+                    | Self::Recovering
+                    | Self::Failed
+            ),
+            Self::DecisionRequired => matches!(
+                next,
+                Self::Building | Self::Verifying | Self::Paused | Self::Stopping | Self::Cancelled
+            ),
+            Self::Pausing => matches!(
+                next,
+                Self::Paused | Self::Resuming | Self::Building | Self::Stopping | Self::Failed
+            ),
+            Self::Paused => matches!(
+                next,
+                Self::Resuming
+                    | Self::Recovering
+                    | Self::Understanding
+                    | Self::Building
+                    | Self::Planning
+                    | Self::Stopping
+                    | Self::Cancelled
+            ),
+            Self::Resuming => matches!(
+                next,
+                Self::Recovering
+                    | Self::Understanding
+                    | Self::Building
+                    | Self::Planning
+                    | Self::Failed
+            ),
+            Self::Recovering => matches!(
+                next,
+                Self::Planning | Self::Building | Self::Paused | Self::Stopping | Self::Failed
+            ),
+            Self::ReadyForReview => {
+                matches!(next, Self::Building | Self::Completed | Self::Archived)
+            }
+            Self::Completed | Self::Failed | Self::Cancelled => {
+                matches!(next, Self::Recovering | Self::Archived)
+            }
+            Self::Stopping => matches!(next, Self::Cancelled | Self::Failed),
+            Self::Archived => false,
+        }
+    }
+
     /// Collapse the fine lifecycle into the five stages the Overview shows.
     pub fn phase(self) -> SwarmPhase {
         match self {
-            Self::Draft | Self::Preparing | Self::Understanding | Self::Recovering => {
-                SwarmPhase::Understanding
-            }
+            Self::Draft
+            | Self::Validating
+            | Self::Preparing
+            | Self::Understanding
+            | Self::Recovering => SwarmPhase::Understanding,
             Self::Planning => SwarmPhase::Planning,
-            Self::Running | Self::Paused | Self::Stopping | Self::DecisionNeeded => {
-                SwarmPhase::Building
-            }
+            Self::Building
+            | Self::Pausing
+            | Self::Paused
+            | Self::Resuming
+            | Self::Stopping
+            | Self::DecisionRequired => SwarmPhase::Building,
             Self::Verifying | Self::Reviewing => SwarmPhase::Verifying,
-            Self::Ready | Self::Completed | Self::Failed | Self::Cancelled | Self::Archived => {
-                SwarmPhase::Ready
-            }
+            Self::ReadyForReview
+            | Self::Completed
+            | Self::Failed
+            | Self::Cancelled
+            | Self::Archived => SwarmPhase::Ready,
         }
     }
 }
@@ -217,37 +350,49 @@ impl SwarmRuntimeKind {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum SwarmAgentStatus {
+    Starting,
+    Active,
     Idle,
-    Activating,
-    Working,
+    Queued,
     Waiting,
+    Blocked,
+    Reviewing,
     Paused,
     Failed,
-    Stopped,
+    Recovering,
+    Completed,
 }
 
 impl SwarmAgentStatus {
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::Starting => "starting",
+            Self::Active => "active",
             Self::Idle => "idle",
-            Self::Activating => "activating",
-            Self::Working => "working",
+            Self::Queued => "queued",
             Self::Waiting => "waiting",
+            Self::Blocked => "blocked",
+            Self::Reviewing => "reviewing",
             Self::Paused => "paused",
             Self::Failed => "failed",
-            Self::Stopped => "stopped",
+            Self::Recovering => "recovering",
+            Self::Completed => "completed",
         }
     }
 
     pub fn from_db(value: &str) -> Option<Self> {
         Some(match value {
+            "starting" | "activating" => Self::Starting,
+            "active" | "working" => Self::Active,
             "idle" => Self::Idle,
-            "activating" => Self::Activating,
-            "working" => Self::Working,
+            "queued" => Self::Queued,
             "waiting" => Self::Waiting,
+            "blocked" => Self::Blocked,
+            "reviewing" => Self::Reviewing,
             "paused" => Self::Paused,
             "failed" => Self::Failed,
-            "stopped" => Self::Stopped,
+            "recovering" => Self::Recovering,
+            "completed" | "stopped" => Self::Completed,
             _ => return None,
         })
     }
@@ -257,20 +402,20 @@ impl SwarmAgentStatus {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum SwarmTaskStatus {
-    /// Created but dependencies are not yet satisfied.
-    Pending,
+    Proposed,
     /// Dependencies satisfied; awaiting an agent.
     Ready,
-    /// Leased to an agent.
-    Assigned,
+    Queued,
+    Claimed,
     Running,
     /// Cannot proceed (conflict / needs decision).
     Blocked,
+    Waiting,
     /// Under verification.
     Verifying,
     /// Awaiting independent review.
-    Review,
-    Done,
+    Reviewing,
+    Completed,
     Failed,
     Cancelled,
 }
@@ -278,14 +423,16 @@ pub enum SwarmTaskStatus {
 impl SwarmTaskStatus {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::Pending => "pending",
+            Self::Proposed => "proposed",
             Self::Ready => "ready",
-            Self::Assigned => "assigned",
+            Self::Queued => "queued",
+            Self::Claimed => "claimed",
             Self::Running => "running",
             Self::Blocked => "blocked",
+            Self::Waiting => "waiting",
             Self::Verifying => "verifying",
-            Self::Review => "review",
-            Self::Done => "done",
+            Self::Reviewing => "reviewing",
+            Self::Completed => "completed",
             Self::Failed => "failed",
             Self::Cancelled => "cancelled",
         }
@@ -293,14 +440,16 @@ impl SwarmTaskStatus {
 
     pub fn from_db(value: &str) -> Option<Self> {
         Some(match value {
-            "pending" => Self::Pending,
+            "proposed" | "pending" => Self::Proposed,
             "ready" => Self::Ready,
-            "assigned" => Self::Assigned,
+            "queued" => Self::Queued,
+            "claimed" | "assigned" => Self::Claimed,
             "running" => Self::Running,
             "blocked" => Self::Blocked,
+            "waiting" => Self::Waiting,
             "verifying" => Self::Verifying,
-            "review" => Self::Review,
-            "done" => Self::Done,
+            "reviewing" | "review" => Self::Reviewing,
+            "completed" | "done" => Self::Completed,
             "failed" => Self::Failed,
             "cancelled" => Self::Cancelled,
             _ => return None,
@@ -308,7 +457,7 @@ impl SwarmTaskStatus {
     }
 
     pub fn is_complete(self) -> bool {
-        matches!(self, Self::Done | Self::Cancelled)
+        matches!(self, Self::Completed | Self::Cancelled)
     }
 }
 
@@ -446,10 +595,20 @@ pub struct SwarmAgent {
     /// allocation. Dynamically added workers (e.g. an escalated Debugger) have `None`. Exposing
     /// it lets events and task assignments name the exact allocation identity a worker belongs to.
     pub allocation_id: Option<String>,
+    pub display_name: String,
     pub status: SwarmAgentStatus,
     pub current_task_id: Option<String>,
     pub terminal_session_id: Option<String>,
     pub last_result: Option<String>,
+    pub runtime_session_state: String,
+    pub working_directory: Option<String>,
+    pub worktree: Option<String>,
+    pub permissions: Vec<String>,
+    pub changed_files: Vec<String>,
+    pub test_progress: SwarmTestProgress,
+    pub last_message: Option<String>,
+    pub current_blocker: Option<String>,
+    pub recovery_state: String,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -465,10 +624,20 @@ pub struct SwarmTask {
     pub status: SwarmTaskStatus,
     pub assigned_agent_id: Option<String>,
     pub progress: f64,
+    pub progress_determinate: bool,
     pub files: Vec<String>,
     pub depends_on: Vec<String>,
     pub attempts: i64,
     pub result: Option<String>,
+    pub required_runtime: Option<SwarmRuntimeKind>,
+    pub blocker: Option<String>,
+    pub evidence_ids: Vec<String>,
+    pub test_ids: Vec<String>,
+    pub lease_until: Option<String>,
+    pub verification_required: bool,
+    /// The failed task this bounded Debugger task repairs. The link is persisted so recovery and
+    /// restart never have to infer orchestration state from a generated title.
+    pub repair_for_task_id: Option<String>,
     pub position: i64,
     pub created_at: String,
     pub updated_at: String,
@@ -484,8 +653,12 @@ pub struct SwarmEvent {
     pub role: Option<SwarmRole>,
     pub agent_id: Option<String>,
     pub task_id: Option<String>,
+    pub destination_agent_id: Option<String>,
+    pub destination_role: Option<SwarmRole>,
+    pub evidence_id: Option<String>,
     pub summary: String,
     pub level: String,
+    pub metadata: serde_json::Value,
     pub created_at: String,
 }
 
@@ -493,12 +666,172 @@ pub struct SwarmEvent {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SwarmDecision {
+    #[serde(default)]
+    pub id: String,
     pub problem: String,
     pub reason: String,
     pub recommended: String,
     pub recommendation_reasons: Vec<String>,
     pub alternative: String,
     pub raised_at: String,
+    #[serde(default)]
+    pub status: String,
+    #[serde(default)]
+    pub choice: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SwarmTestProgress {
+    pub running: i64,
+    pub passed: i64,
+    pub failed: i64,
+    pub skipped: i64,
+    pub pending: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SwarmSafeguard {
+    pub code: String,
+    pub label: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SwarmMessage {
+    pub id: String,
+    pub swarm_id: String,
+    pub category: String,
+    pub sender_kind: String,
+    pub source_agent_id: Option<String>,
+    pub target: String,
+    pub body: String,
+    pub task_id: Option<String>,
+    pub links: Vec<String>,
+    pub delivery_state: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SwarmConnectionEvent {
+    pub id: String,
+    pub swarm_id: String,
+    pub source_agent_id: String,
+    pub destination_agent_id: Option<String>,
+    pub destination_role: Option<SwarmRole>,
+    pub event_type: String,
+    pub task_id: Option<String>,
+    pub summary: String,
+    pub evidence_id: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SwarmWorktreeRecord {
+    pub id: String,
+    pub swarm_id: String,
+    pub task_id: String,
+    pub agent_id: String,
+    pub root_path: String,
+    pub branch: String,
+    pub base_revision: String,
+    pub state: String,
+    pub created_at: String,
+    pub released_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SwarmLifecycleTransition {
+    pub id: String,
+    pub swarm_id: String,
+    pub from_state: Option<SwarmLifecycle>,
+    pub to_state: SwarmLifecycle,
+    pub reason: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SwarmRuntimeSession {
+    pub id: String,
+    pub swarm_id: String,
+    pub project_id: String,
+    pub agent_id: String,
+    pub task_id: Option<String>,
+    pub runtime: SwarmRuntimeKind,
+    pub provider_session_id: Option<String>,
+    pub terminal_session_id: Option<String>,
+    pub state: String,
+    pub resumable: bool,
+    pub working_directory: String,
+    pub usage: serde_json::Value,
+    pub failure_class: Option<String>,
+    pub started_at: String,
+    pub updated_at: String,
+    pub ended_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SwarmEvidence {
+    pub id: String,
+    pub swarm_id: String,
+    pub task_id: Option<String>,
+    pub agent_id: Option<String>,
+    pub criterion: String,
+    pub evidence_type: String,
+    pub title: String,
+    pub summary: String,
+    pub source_uri: Option<String>,
+    pub verified: bool,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SwarmTestRecord {
+    pub id: String,
+    pub swarm_id: String,
+    pub task_id: Option<String>,
+    pub agent_id: Option<String>,
+    pub name: String,
+    pub command: Option<String>,
+    pub status: String,
+    pub summary: String,
+    pub log_uri: Option<String>,
+    pub started_at: Option<String>,
+    pub completed_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SwarmReviewRecord {
+    pub id: String,
+    pub swarm_id: String,
+    pub task_id: Option<String>,
+    pub reviewer_agent_id: String,
+    pub subject_agent_id: Option<String>,
+    pub verdict: String,
+    pub risk_level: String,
+    pub notes: String,
+    pub evidence_ids: Vec<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SwarmRuntimeReadiness {
+    pub runtime: SwarmRuntimeKind,
+    pub installed: bool,
+    pub authenticated: bool,
+    pub available: bool,
+    pub version: Option<String>,
+    pub message: String,
 }
 
 /// The concise final delivery summary produced on completion.
@@ -537,6 +870,11 @@ pub struct Swarm {
     pub decision: Option<SwarmDecision>,
     pub summary: Option<SwarmSummary>,
     pub review_verdict: Option<String>,
+    pub repository_identity: Option<String>,
+    pub git_state: serde_json::Value,
+    pub safeguards: Vec<SwarmSafeguard>,
+    pub attachments: Vec<String>,
+    pub current_milestone: Option<String>,
     pub roles: Vec<SwarmRoleConfig>,
     pub created_at: String,
     pub updated_at: String,
@@ -587,6 +925,14 @@ pub struct SwarmDetail {
     pub agents: Vec<SwarmAgent>,
     pub tasks: Vec<SwarmTask>,
     pub events: Vec<SwarmEvent>,
+    pub messages: Vec<SwarmMessage>,
+    pub connections: Vec<SwarmConnectionEvent>,
+    pub lifecycle_history: Vec<SwarmLifecycleTransition>,
+    pub runtime_sessions: Vec<SwarmRuntimeSession>,
+    pub evidence: Vec<SwarmEvidence>,
+    pub tests: Vec<SwarmTestRecord>,
+    pub memories: Vec<SwarmMemoryContext>,
+    pub reviews: Vec<SwarmReviewRecord>,
 }
 
 /// Project-close policy when the Project still owns actively progressing Swarms. Cancellation
@@ -623,6 +969,24 @@ pub struct CreateSwarmRequest {
     /// Optional per-role runtime overrides (Custom Team).
     #[serde(default)]
     pub roles: Option<Vec<SwarmRoleConfig>>,
+    #[serde(default)]
+    pub attachments: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SwarmLaunchPreview {
+    pub name: String,
+    pub project_id: String,
+    pub project_root: String,
+    pub roles: Vec<SwarmRoleConfig>,
+    pub total_agents: i64,
+    pub max_parallel: i64,
+    pub safeguards: Vec<SwarmSafeguard>,
+    pub attachments: Vec<String>,
+    pub runtime_readiness: Vec<SwarmRuntimeReadiness>,
+    pub warnings: Vec<String>,
+    pub can_launch: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -636,6 +1000,36 @@ pub struct SwarmMessageRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct SwarmCommandDraft {
+    pub swarm_id: String,
+    pub target: String,
+    pub body: String,
+    pub updated_at: String,
+}
+
+/// A project Memory revision deliberately loaded into one agent's task context. This projection
+/// preserves the trace from Swarm to task/agent to immutable Memory revision and its sources.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SwarmMemoryContext {
+    pub id: String,
+    pub swarm_id: String,
+    pub task_id: String,
+    pub agent_id: String,
+    pub memory_item_id: String,
+    pub revision_id: String,
+    pub title: String,
+    pub memory_type: String,
+    pub state: String,
+    pub summary: String,
+    pub context: String,
+    pub confidence: f64,
+    pub source_uris: Vec<String>,
+    pub loaded_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SavePresetRequest {
     #[serde(default)]
     pub id: Option<String>,
@@ -643,6 +1037,10 @@ pub struct SavePresetRequest {
     pub max_parallel: i64,
     #[serde(default)]
     pub instructions: String,
+    /// When true this custom preset becomes the creation flow default. Exactly one preset is
+    /// kept as default transactionally; built-ins remain immutable team definitions.
+    #[serde(default)]
+    pub is_default: bool,
     pub roles: Vec<SwarmRoleConfig>,
 }
 
@@ -654,8 +1052,8 @@ pub fn builtin_presets() -> Vec<(&'static str, &'static str, i64, Vec<SwarmRoleC
     vec![
         (
             "auto",
-            "Auto Team",
-            6,
+            "Auto",
+            5,
             vec![
                 role(SwarmRole::Coordinator, 1),
                 role(SwarmRole::Scout, 1),
@@ -665,38 +1063,36 @@ pub fn builtin_presets() -> Vec<(&'static str, &'static str, i64, Vec<SwarmRoleC
         ),
         (
             "quick_fix",
-            "Quick Fix",
+            "Focused",
             3,
             vec![
-                role(SwarmRole::Coordinator, 1),
-                role(SwarmRole::Builder, 1),
-                role(SwarmRole::Reviewer, 1),
+                SwarmRoleConfig::single(SwarmRole::Coordinator, SwarmRuntimeKind::Claude, 1),
+                SwarmRoleConfig::single(SwarmRole::Builder, SwarmRuntimeKind::Claude, 1),
+                SwarmRoleConfig::single(SwarmRole::Reviewer, SwarmRuntimeKind::Codex, 1),
             ],
         ),
         (
             "feature_team",
-            "Feature Team",
-            6,
+            "Standard",
+            4,
             vec![
-                role(SwarmRole::Coordinator, 1),
-                role(SwarmRole::Scout, 1),
-                // Builders demonstrate the mixed-allocation model: Claude ×2 alongside Codex ×1,
-                // scheduled as one Builder pool.
+                SwarmRoleConfig::single(SwarmRole::Coordinator, SwarmRuntimeKind::Claude, 1),
+                SwarmRoleConfig::single(SwarmRole::Scout, SwarmRuntimeKind::Claude, 1),
                 SwarmRoleConfig {
                     role: SwarmRole::Builder,
                     enabled: true,
                     allocations: vec![
-                        SwarmRoleAllocation::new("builder-claude", SwarmRuntimeKind::Claude, 2),
+                        SwarmRoleAllocation::new("builder-claude", SwarmRuntimeKind::Claude, 1),
                         SwarmRoleAllocation::new("builder-codex", SwarmRuntimeKind::Codex, 1),
                     ],
                 },
-                role(SwarmRole::Reviewer, 1),
+                SwarmRoleConfig::single(SwarmRole::Reviewer, SwarmRuntimeKind::Codex, 1),
             ],
         ),
         (
             "deep_engineering",
-            "Deep Engineering",
-            8,
+            "Parallel",
+            6,
             vec![
                 role(SwarmRole::Coordinator, 1),
                 role(SwarmRole::Scout, 2),
@@ -711,6 +1107,26 @@ pub fn builtin_presets() -> Vec<(&'static str, &'static str, i64, Vec<SwarmRoleC
                 role(SwarmRole::Debugger, 1),
                 role(SwarmRole::Reviewer, 1),
                 role(SwarmRole::Integrator, 1),
+            ],
+        ),
+        (
+            "large",
+            "Large",
+            8,
+            vec![
+                SwarmRoleConfig::single(SwarmRole::Coordinator, SwarmRuntimeKind::Claude, 1),
+                SwarmRoleConfig::single(SwarmRole::Scout, SwarmRuntimeKind::Claude, 2),
+                SwarmRoleConfig {
+                    role: SwarmRole::Builder,
+                    enabled: true,
+                    allocations: vec![
+                        SwarmRoleAllocation::new("builder-claude", SwarmRuntimeKind::Claude, 3),
+                        SwarmRoleAllocation::new("builder-codex", SwarmRuntimeKind::Codex, 3),
+                    ],
+                },
+                SwarmRoleConfig::single(SwarmRole::Debugger, SwarmRuntimeKind::Codex, 1),
+                SwarmRoleConfig::single(SwarmRole::Reviewer, SwarmRuntimeKind::Codex, 2),
+                SwarmRoleConfig::single(SwarmRole::Integrator, SwarmRuntimeKind::Claude, 1),
             ],
         ),
     ]

@@ -14,11 +14,11 @@ const createSwarm = vi.fn(async (request: { projectId: string; mission: string }
   return swarm
 })
 const startSwarm = vi.fn(async (_projectId: string, _swarmId: string) => {
-  state.swarms = state.swarms.map((item) => ({ ...item, swarm: { ...item.swarm, lifecycle: 'running', progress: 0.2 } }))
+  state.swarms = state.swarms.map((item) => ({ ...item, swarm: { ...item.swarm, lifecycle: 'building', progress: 0.2 } }))
 })
 const getSwarmDetail = vi.fn(async (projectId: string, id: string) => ({
-  swarm: { id, projectId, name: 'S', lifecycle: 'running', progress: 0.2 },
-  activity: {}, agents: [], tasks: [], events: [],
+  swarm: { id, projectId, name: 'S', lifecycle: 'building', progress: 0.2 },
+  activity: {}, agents: [], tasks: [], events: [], messages: [], connections: [], lifecycleHistory: [], runtimeSessions: [], evidence: [], tests: [], memories: [], reviews: [],
 }))
 const deleteSwarm = vi.fn(async (_projectId: string, _swarmId: string) => { state.swarms = [] })
 
@@ -54,7 +54,7 @@ describe('swarmStore (backend-authoritative)', () => {
 
   it('loads detail and mirrors backend state without mutating it locally', async () => {
     const detail = await useSwarmStore.getState().loadDetail('p1', 's1')
-    expect(detail?.swarm.lifecycle).toBe('running')
+    expect(detail?.swarm.lifecycle).toBe('building')
     expect(useSwarmStore.getState().detailById.s1?.swarm.progress).toBe(0.2)
   })
 
@@ -64,7 +64,7 @@ describe('swarmStore (backend-authoritative)', () => {
     await useSwarmStore.getState().start('s1')
     expect(startSwarm).toHaveBeenCalledWith('p1', 's1')
     // Progress reflects the backend response, not a local increment.
-    expect(useSwarmStore.getState().itemsByProject.p1[0].swarm.lifecycle).toBe('running')
+    expect(useSwarmStore.getState().itemsByProject.p1[0].swarm.lifecycle).toBe('building')
   })
 
   it('surfaces native errors instead of throwing them unhandled for lifecycle actions', async () => {

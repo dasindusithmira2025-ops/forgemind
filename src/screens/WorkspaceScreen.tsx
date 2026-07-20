@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { open } from '@tauri-apps/plugin-dialog'
+import { confirm, open } from '@tauri-apps/plugin-dialog'
 import { openPath } from '@tauri-apps/plugin-opener'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { ChevronDown, CircleStop, FolderOpen, RotateCcw, TerminalSquare } from 'lucide-react'
@@ -141,7 +141,7 @@ export function WorkspaceScreen() {
     terminalRuntime.clearWorkspace(currentWorkspace.id)
     const configuredBehavior = currentWorkspace.restoreBehavior === 'inherit' ? settings.restoreBehavior : currentWorkspace.restoreBehavior
     if (configuredBehavior === 'ask' && !fresh && allowRestorePrompt) {
-      const restore = window.confirm('Restore the saved Pane assignments now? Choose Cancel to keep every Pane deferred until you resume it.')
+      const restore = await confirm('Restore the saved Pane assignments now? Choose Cancel to keep every Pane deferred until you resume it.', { title: 'Restore Workspace', kind: 'info' })
       if (!restore) {
         setDeferredPaneIds(currentWorkspace.panes.map((pane) => pane.id))
         setActivePane(currentWorkspace.activePaneId ?? currentWorkspace.panes[0]?.id)
@@ -163,7 +163,10 @@ export function WorkspaceScreen() {
     let live = true
     void (async () => {
       try {
-        const loadedWorkspace = storedWorkspace?.id === workspaceId ? storedWorkspace : await native.getWorkspace(workspaceId)
+        // Workspace records can gain backend-owned panes while another route is open (notably
+        // Swarm agent terminals). Always re-read the authoritative record on route entry; using
+        // the same-id store snapshot strands newly created panes and focuses the wrong agent.
+        const loadedWorkspace = await native.getWorkspace(workspaceId)
         const loadedProject = project?.id === loadedWorkspace.projectId ? project : await native.getProject(loadedWorkspace.projectId)
         if (!live) return
         setLocalWorkspace(loadedWorkspace); setWorkspace(loadedWorkspace)

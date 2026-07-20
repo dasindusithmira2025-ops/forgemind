@@ -56,6 +56,9 @@ import type {
   CreateSwarmRequest,
   ProjectCloseSwarmBehavior,
   SavePresetRequest,
+  SwarmRuntimeReadiness,
+  SwarmLaunchPreview,
+  SwarmCommandDraft,
 } from './types'
 
 export const native = {
@@ -185,6 +188,8 @@ export const native = {
 
   // ---- Paralith Swarms --------------------------------------------------------------------
   listSwarmPresets: () => invoke<SwarmPreset[]>('list_swarm_presets'),
+  listSwarmRuntimeReadiness: () => invoke<SwarmRuntimeReadiness[]>('list_swarm_runtime_readiness'),
+  previewSwarmLaunch: (request: CreateSwarmRequest) => invoke<SwarmLaunchPreview>('preview_swarm_launch', { request }),
   saveSwarmPreset: (request: SavePresetRequest) => invoke<SwarmPreset>('save_swarm_preset', { request }),
   deleteSwarmPreset: (presetId: string) => invoke<void>('delete_swarm_preset', { presetId }),
   createSwarm: (request: CreateSwarmRequest) => invoke<Swarm>('create_swarm', { request }),
@@ -198,10 +203,17 @@ export const native = {
   stopSwarm: (projectId: string, swarmId: string, hard = false) => invoke<void>('stop_swarm', { projectId, swarmId, hard }),
   archiveSwarm: (projectId: string, swarmId: string, archived: boolean) => invoke<void>('archive_swarm', { projectId, swarmId, archived }),
   deleteSwarm: (projectId: string, swarmId: string) => invoke<void>('delete_swarm', { projectId, swarmId }),
+  exportSwarmReport: (projectId: string, swarmId: string, destination: string) => invoke<void>('export_swarm_report', { projectId, swarmId, destination }),
   setSwarmPriority: (projectId: string, swarmId: string, priority: number) => invoke<void>('set_swarm_priority', { projectId, swarmId, priority }),
+  focusSwarmAgentTerminal: (projectId: string, swarmId: string, agentId: string) => invoke<string>('focus_swarm_agent_terminal', { projectId, swarmId, agentId }),
   sendSwarmMessage: (projectId: string, swarmId: string, target: string, body: string) =>
     invoke<void>('send_swarm_message', { projectId, request: { swarmId, target, body } }),
+  retrySwarmTest: (projectId: string, swarmId: string, testId: string) => invoke<void>('retry_swarm_test', { projectId, swarmId, testId }),
+  generateSwarmFixTask: (projectId: string, swarmId: string, testId: string) => invoke<void>('generate_swarm_fix_task', { projectId, swarmId, testId }),
+  getSwarmCommandDraft: (projectId: string, swarmId: string) => invoke<SwarmCommandDraft | null>('get_swarm_command_draft', { projectId, swarmId }),
+  saveSwarmCommandDraft: (projectId: string, swarmId: string, target: string, body: string) => invoke<void>('save_swarm_command_draft', { projectId, swarmId, target, body }),
   acceptSwarmResult: (projectId: string, swarmId: string) => invoke<void>('accept_swarm_result', { projectId, swarmId }),
+  resolveSwarmDecision: (projectId: string, swarmId: string, choice: 'recommended' | 'alternative' | 'stop') => invoke<void>('resolve_swarm_decision', { projectId, swarmId, choice }),
   addSwarmBuilder: (projectId: string, swarmId: string) => invoke<void>('add_swarm_builder', { projectId, swarmId }),
 }
 

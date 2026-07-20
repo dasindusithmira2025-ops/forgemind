@@ -13,8 +13,8 @@
     "Preserve immutable launch-time team snapshots when source presets are edited later"
   ],
   "databaseChanges": [
-    "Add forward-only schema 16 for ordered role allocations and worker-to-allocation identity",
-    "Backfill existing single-runtime roles and upgrade saved preset configurations without deleting user data"
+    "Add forward-only schemas 16-20 for role allocations, lifecycle history, runtime sessions, evidence, reviews, recovery, worktrees, file ownership, tests, command drafts, project Memory context, repair lineage, and idempotent runtime-event receipts",
+    "Backfill existing single-runtime roles and upgrade saved preset and Swarm configurations without deleting user data"
   ],
   "knownIssues": [
     "GitHub App installation-token exchange and public webhook ingress require the separately deployed Corelith backend service",

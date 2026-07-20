@@ -666,9 +666,9 @@ export interface MonitorRecoveryReport {
 // The backend is the authority for every field here; the frontend only renders these.
 
 export type SwarmLifecycle =
-  | 'draft' | 'preparing' | 'understanding' | 'planning' | 'running' | 'verifying'
-  | 'decision_needed' | 'paused' | 'stopping' | 'reviewing' | 'ready' | 'completed'
-  | 'failed' | 'cancelled' | 'recovering' | 'archived'
+  | 'draft' | 'validating' | 'preparing' | 'understanding' | 'planning' | 'building'
+  | 'verifying' | 'decision_required' | 'pausing' | 'paused' | 'resuming' | 'recovering'
+  | 'reviewing' | 'ready_for_review' | 'completed' | 'failed' | 'stopping' | 'cancelled' | 'archived'
 
 export type SwarmPhase = 'understanding' | 'planning' | 'building' | 'verifying' | 'ready'
 
@@ -677,11 +677,12 @@ export type SwarmRole = 'coordinator' | 'scout' | 'builder' | 'debugger' | 'revi
 export type SwarmRuntimeKind = 'auto' | 'claude' | 'codex'
 
 export type SwarmAgentStatus =
-  | 'idle' | 'activating' | 'working' | 'waiting' | 'paused' | 'failed' | 'stopped'
+  | 'starting' | 'active' | 'idle' | 'queued' | 'waiting' | 'blocked' | 'reviewing'
+  | 'paused' | 'failed' | 'recovering' | 'completed'
 
 export type SwarmTaskStatus =
-  | 'pending' | 'ready' | 'assigned' | 'running' | 'blocked' | 'verifying' | 'review'
-  | 'done' | 'failed' | 'cancelled'
+  | 'proposed' | 'ready' | 'queued' | 'claimed' | 'running' | 'blocked' | 'waiting'
+  | 'verifying' | 'reviewing' | 'failed' | 'cancelled' | 'completed'
 
 export interface SwarmRoleAllocation {
   /** Stable allocation identity, preserved across edits and preset duplication. */
@@ -704,10 +705,20 @@ export interface SwarmAgent {
   runtime: SwarmRuntimeKind
   /** The configured allocation this worker was staffed from, when applicable. */
   allocationId?: string | null
+  displayName: string
   status: SwarmAgentStatus
   currentTaskId?: string | null
   terminalSessionId?: string | null
   lastResult?: string | null
+  runtimeSessionState: string
+  workingDirectory?: string | null
+  worktree?: string | null
+  permissions: string[]
+  changedFiles: string[]
+  testProgress: SwarmTestProgress
+  lastMessage?: string | null
+  currentBlocker?: string | null
+  recoveryState: string
   createdAt: string
   updatedAt: string
 }
@@ -720,10 +731,18 @@ export interface SwarmTask {
   status: SwarmTaskStatus
   assignedAgentId?: string | null
   progress: number
+  progressDeterminate: boolean
   files: string[]
   dependsOn: string[]
   attempts: number
   result?: string | null
+  requiredRuntime?: SwarmRuntimeKind | null
+  blocker?: string | null
+  evidenceIds: string[]
+  testIds: string[]
+  leaseUntil?: string | null
+  verificationRequired: boolean
+  repairForTaskId?: string | null
   position: number
   createdAt: string
   updatedAt: string
@@ -736,18 +755,74 @@ export interface SwarmEvent {
   role?: SwarmRole | null
   agentId?: string | null
   taskId?: string | null
+  destinationAgentId?: string | null
+  destinationRole?: SwarmRole | null
+  evidenceId?: string | null
   summary: string
   level: string
+  metadata: Record<string, unknown>
   createdAt: string
 }
 
 export interface SwarmDecision {
+  id: string
   problem: string
   reason: string
   recommended: string
   recommendationReasons: string[]
   alternative: string
   raisedAt: string
+  status: string
+  choice?: string | null
+}
+
+export interface SwarmTestProgress { running: number; passed: number; failed: number; skipped: number; pending: number }
+export interface SwarmSafeguard { code: string; label: string; reason: string }
+export interface SwarmMessage {
+  id: string; swarmId: string; category: string; senderKind: string; sourceAgentId?: string | null
+  target: string; body: string; taskId?: string | null; links: string[]; deliveryState: string; createdAt: string
+}
+export interface SwarmCommandDraft { swarmId: string; target: string; body: string; updatedAt: string }
+export interface SwarmConnectionEvent {
+  id: string; swarmId: string; sourceAgentId: string; destinationAgentId?: string | null
+  destinationRole?: SwarmRole | null; eventType: string; taskId?: string | null; summary: string
+  evidenceId?: string | null; createdAt: string
+}
+export interface SwarmLifecycleTransition {
+  id: string; swarmId: string; fromState?: SwarmLifecycle | null; toState: SwarmLifecycle; reason: string; createdAt: string
+}
+export interface SwarmRuntimeSession {
+  id: string; swarmId: string; projectId: string; agentId: string; taskId?: string | null
+  runtime: SwarmRuntimeKind; providerSessionId?: string | null; terminalSessionId?: string | null
+  state: string; resumable: boolean; workingDirectory: string; usage: Record<string, unknown>
+  failureClass?: string | null; startedAt: string; updatedAt: string; endedAt?: string | null
+}
+export interface SwarmEvidence {
+  id: string; swarmId: string; taskId?: string | null; agentId?: string | null; criterion: string
+  evidenceType: string; title: string; summary: string; sourceUri?: string | null; verified: boolean; createdAt: string
+}
+export interface SwarmTestRecord {
+  id: string; swarmId: string; taskId?: string | null; agentId?: string | null; name: string
+  command?: string | null; status: string; summary: string; logUri?: string | null
+  startedAt?: string | null; completedAt?: string | null
+}
+export interface SwarmMemoryContext {
+  id: string; swarmId: string; taskId: string; agentId: string; memoryItemId: string; revisionId: string
+  title: string; memoryType: string; state: string; summary: string; context: string; confidence: number
+  sourceUris: string[]; loadedAt: string
+}
+export interface SwarmReviewRecord {
+  id: string; swarmId: string; taskId?: string | null; reviewerAgentId: string; subjectAgentId?: string | null
+  verdict: string; riskLevel: string; notes: string; evidenceIds: string[]; createdAt: string
+}
+export interface SwarmRuntimeReadiness {
+  runtime: SwarmRuntimeKind; installed: boolean; authenticated: boolean; available: boolean
+  version?: string | null; message: string
+}
+export interface SwarmLaunchPreview {
+  name: string; projectId: string; projectRoot: string; roles: SwarmRoleConfig[]; totalAgents: number
+  maxParallel: number; safeguards: SwarmSafeguard[]; attachments: string[]
+  runtimeReadiness: SwarmRuntimeReadiness[]; warnings: string[]; canLaunch: boolean
 }
 
 export interface SwarmSummary {
@@ -778,6 +853,11 @@ export interface Swarm {
   decision?: SwarmDecision | null
   summary?: SwarmSummary | null
   reviewVerdict?: string | null
+  repositoryIdentity?: string | null
+  gitState: Record<string, unknown>
+  safeguards: SwarmSafeguard[]
+  attachments: string[]
+  currentMilestone?: string | null
   roles: SwarmRoleConfig[]
   createdAt: string
   updatedAt: string
@@ -804,6 +884,14 @@ export interface SwarmDetail {
   agents: SwarmAgent[]
   tasks: SwarmTask[]
   events: SwarmEvent[]
+  messages: SwarmMessage[]
+  connections: SwarmConnectionEvent[]
+  lifecycleHistory: SwarmLifecycleTransition[]
+  runtimeSessions: SwarmRuntimeSession[]
+  evidence: SwarmEvidence[]
+  tests: SwarmTestRecord[]
+  memories: SwarmMemoryContext[]
+  reviews: SwarmReviewRecord[]
 }
 
 export interface SwarmPreset {
@@ -826,6 +914,7 @@ export interface CreateSwarmRequest {
   maxParallel?: number
   instructions?: string
   roles?: SwarmRoleConfig[]
+  attachments?: string[]
 }
 
 export type ProjectCloseSwarmBehavior = 'keep_running' | 'pause_and_close'
@@ -840,5 +929,6 @@ export interface SavePresetRequest {
   name: string
   maxParallel: number
   instructions: string
+  isDefault?: boolean
   roles: SwarmRoleConfig[]
 }

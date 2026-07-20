@@ -24,19 +24,20 @@ export function phaseIndex(phase: SwarmPhase): number {
 /** Short human label for a lifecycle state. */
 export function lifecycleLabel(state: SwarmLifecycle): string {
   switch (state) {
-    case 'decision_needed':
-      return 'Decision needed'
-    case 'ready':
+    case 'decision_required':
+      return 'Decision required'
+    case 'ready_for_review':
       return 'Ready for review'
     default:
-      return state.charAt(0).toUpperCase() + state.slice(1)
+      return state.split('_').map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(' ')
   }
 }
 
 /** Accent tone for a lifecycle, mapped to the design system's status colors. */
 export function lifecycleTone(state: SwarmLifecycle): 'neutral' | 'blue' | 'green' | 'amber' | 'red' {
   switch (state) {
-    case 'running':
+    case 'building':
+    case 'validating':
     case 'understanding':
     case 'planning':
     case 'preparing':
@@ -44,11 +45,13 @@ export function lifecycleTone(state: SwarmLifecycle): 'neutral' | 'blue' | 'gree
     case 'reviewing':
     case 'recovering':
       return 'blue'
-    case 'ready':
+    case 'ready_for_review':
     case 'completed':
       return 'green'
-    case 'decision_needed':
+    case 'decision_required':
+    case 'pausing':
     case 'paused':
+    case 'resuming':
     case 'stopping':
       return 'amber'
     case 'failed':
@@ -64,9 +67,15 @@ export function isActiveLifecycle(state: SwarmLifecycle): boolean {
     'preparing',
     'understanding',
     'planning',
+    'building',
+    // Compatibility for list projections cached by pre-V2 windows during a rolling restart.
     'running',
+    'validating',
     'verifying',
+    'decision_required',
     'decision_needed',
+    'pausing',
+    'resuming',
     'stopping',
     'reviewing',
     'recovering',

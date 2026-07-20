@@ -1,50 +1,57 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import type { SwarmPreset } from '../../native/types'
+import type { CreateSwarmRequest, SwarmLaunchPreview, SwarmPreset } from '../../native/types'
 
 const presets: SwarmPreset[] = [
   {
-    id: 'auto', name: 'Auto Team', builtin: true, isDefault: true, maxParallel: 6, instructions: '',
+    id: 'auto', name: 'Auto', builtin: true, isDefault: true, maxParallel: 4, instructions: '',
     roles: [
-      { role: 'coordinator', enabled: true, allocations: [{ id: 'c1', runtime: 'auto', count: 1 }] },
-      { role: 'builder', enabled: true, allocations: [{ id: 'b1', runtime: 'auto', count: 2 }] },
-    ],
-    createdAt: '', updatedAt: '',
+      { role: 'coordinator', enabled: true, allocations: [{ id: 'c', runtime: 'claude', count: 1 }] },
+      { role: 'builder', enabled: true, allocations: [{ id: 'b', runtime: 'claude', count: 2 }] },
+    ], createdAt: '', updatedAt: '',
   },
   {
-    id: 'feature_team', name: 'Feature Team', builtin: true, isDefault: false, maxParallel: 6, instructions: '',
+    id: 'feature_team', name: 'Standard', builtin: true, isDefault: false, maxParallel: 4, instructions: '',
     roles: [
-      { role: 'coordinator', enabled: true, allocations: [{ id: 'c2', runtime: 'auto', count: 1 }] },
-      {
-        role: 'builder', enabled: true,
-        allocations: [
-          { id: 'bc', runtime: 'claude', count: 2 },
-          { id: 'bx', runtime: 'codex', count: 1 },
-        ],
-      },
-      { role: 'reviewer', enabled: true, allocations: [{ id: 'r2', runtime: 'auto', count: 1 }] },
-    ],
-    createdAt: '', updatedAt: '',
+      { role: 'coordinator', enabled: true, allocations: [{ id: 'c2', runtime: 'claude', count: 1 }] },
+      { role: 'scout', enabled: true, allocations: [{ id: 's2', runtime: 'claude', count: 1 }] },
+      { role: 'builder', enabled: true, allocations: [{ id: 'bc', runtime: 'claude', count: 1 }, { id: 'bx', runtime: 'codex', count: 1 }] },
+      { role: 'reviewer', enabled: true, allocations: [{ id: 'r2', runtime: 'codex', count: 1 }] },
+    ], createdAt: '', updatedAt: '',
   },
 ]
 
-type CreateRequest = { projectId: string; mission: string; presetId: string; roles?: unknown }
-let createdSwarm: { id: string; projectId: string; name: string; lifecycle: string; progress: number } | undefined
-let lastCreateRequest: CreateRequest | undefined
-const createSwarm = vi.fn(async (request: CreateRequest) => {
-  lastCreateRequest = request
-  createdSwarm = { id: 'new-swarm', projectId: request.projectId, name: request.mission, lifecycle: 'draft', progress: 0 }
-  return createdSwarm
+let blockLaunch = false
+let created: Record<string, unknown> | undefined
+const createSwarm = vi.fn(async (request: CreateSwarmRequest) => {
+  created = { id: 'new-swarm', projectId: request.projectId, name: 'Generated', lifecycle: 'draft', progress: 0 }
+  return created
 })
 const startSwarm = vi.fn(async (_projectId: string, _swarmId: string) => undefined)
+const previewSwarmLaunch = vi.fn(async (request: CreateSwarmRequest): Promise<SwarmLaunchPreview> => ({
+  name: 'Repair Notifications', projectId: request.projectId, projectRoot: 'C:\\project', roles: request.roles ?? [],
+  totalAgents: request.roles?.flatMap((role) => role.allocations).reduce((sum, allocation) => sum + allocation.count, 0) ?? 0,
+  maxParallel: request.maxParallel ?? 4,
+  safeguards: [{ code: 'scope', label: 'Stay inside the Project', reason: 'Project isolation is enforced.' }],
+  attachments: request.attachments ?? [],
+  runtimeReadiness: [
+    { runtime: 'claude', installed: true, authenticated: true, available: true, version: '2', message: 'Authenticated and ready.' },
+    { runtime: 'codex', installed: true, authenticated: !blockLaunch, available: !blockLaunch, version: '1', message: blockLaunch ? 'Authentication is required.' : 'Authenticated and ready.' },
+  ],
+  warnings: blockLaunch ? ['Codex: Authentication is required.'] : [],
+  canLaunch: !blockLaunch,
+}))
 
+vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn(async () => null) }))
 vi.mock('../../native/commands', () => ({
-  asNativeError: (error: unknown) => ({ message: String(error) }),
+  asNativeError: (error: unknown) => ({ message: error instanceof Error ? error.message : String(error) }),
   native: {
+    getProject: vi.fn(async () => ({ id: 'p1', name: 'Paralith', rootPath: 'C:\\project' })),
     listSwarmPresets: vi.fn(async () => presets),
-    listSwarms: vi.fn(async () => (createdSwarm ? [{ swarm: createdSwarm, activity: {} }] : [])),
-    createSwarm: (...args: unknown[]) => createSwarm(...(args as [CreateRequest])),
+    listSwarms: vi.fn(async () => created ? [{ swarm: created, activity: {} }] : []),
+    previewSwarmLaunch: (...args: unknown[]) => previewSwarmLaunch(...(args as [CreateSwarmRequest])),
+    createSwarm: (...args: unknown[]) => createSwarm(...(args as [CreateSwarmRequest])),
     startSwarm: (...args: unknown[]) => startSwarm(...(args as [string, string])),
   },
 }))
@@ -52,100 +59,58 @@ vi.mock('../../native/commands', () => ({
 import { SwarmCreatePanel } from './SwarmCreatePanel'
 import { useSwarmStore } from './swarmStore'
 
-describe('SwarmCreatePanel', () => {
+describe('SwarmCreatePanel V2', () => {
   beforeEach(() => {
+    blockLaunch = false
+    created = undefined
     vi.clearAllMocks()
-    createdSwarm = undefined
-    lastCreateRequest = undefined
     useSwarmStore.setState({ presets: [], itemsByProject: {}, detailById: {}, error: undefined })
   })
 
-  it('loads presets and requires a mission before starting', async () => {
+  it('uses the required Team, Mission, Review and Launch sequence', async () => {
     render(<SwarmCreatePanel projectId="p1" onCreated={vi.fn()} onCancel={() => {}} />)
-    await waitFor(() => expect(screen.getByText('Auto Team')).toBeInTheDocument())
-
-    await userEvent.click(screen.getByRole('button', { name: /Start Swarm/i }))
-    expect(await screen.findByText(/Describe what you want/i)).toBeInTheDocument()
-    expect(createSwarm).not.toHaveBeenCalled()
+    await screen.findByText('Auto')
+    expect(screen.getByRole('button', { name: /01Team/i })).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: /Continue to mission/i }))
+    await userEvent.click(screen.getByRole('button', { name: /Review launch/i }))
+    expect(await screen.findByText(/Describe the engineering outcome/i)).toBeInTheDocument()
+    expect(previewSwarmLaunch).not.toHaveBeenCalled()
   })
 
-  it('creates and starts a real swarm with the chosen preset', async () => {
+  it('shows mixed Claude and Codex agents as individual identities', async () => {
+    render(<SwarmCreatePanel projectId="p1" onCreated={vi.fn()} onCancel={() => {}} />)
+    await userEvent.click(await screen.findByText('Standard'))
+    expect(screen.getByText('Builder 1')).toBeInTheDocument()
+    expect(screen.getByText('Builder 2')).toBeInTheDocument()
+    expect(screen.getAllByText('Claude').length).toBeGreaterThan(1)
+    expect(screen.getAllByText('Codex').length).toBeGreaterThan(0)
+  })
+
+  it('validates with the backend before creating and launching', async () => {
     const onCreated = vi.fn()
     render(<SwarmCreatePanel projectId="p1" onCreated={onCreated} onCancel={() => {}} />)
-    await waitFor(() => expect(screen.getByText('Feature Team')).toBeInTheDocument())
-
-    await userEvent.type(screen.getByPlaceholderText(/Fix multi-window/i), 'Repair the notification system')
-    await userEvent.click(screen.getByText('Feature Team'))
-    await userEvent.click(screen.getByRole('button', { name: /Start Swarm/i }))
-
-    await waitFor(() => expect(createSwarm).toHaveBeenCalledOnce())
-    expect(createSwarm).toHaveBeenCalledWith(
-      expect.objectContaining({ projectId: 'p1', mission: 'Repair the notification system', presetId: 'feature_team' }),
-    )
+    await userEvent.click(await screen.findByText('Standard'))
+    await userEvent.click(screen.getByRole('button', { name: /Continue to mission/i }))
+    await userEvent.type(screen.getByPlaceholderText(/What should this team/i), 'Repair the notification delivery pipeline')
+    await userEvent.click(screen.getByRole('button', { name: /Review launch/i }))
+    expect(await screen.findByText('Repair Notifications')).toBeInTheDocument()
+    expect(screen.getByText('Stay inside the Project')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: /Launch Swarm/i }))
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith('new-swarm'))
+    expect(previewSwarmLaunch).toHaveBeenCalledBefore(createSwarm)
     expect(startSwarm).toHaveBeenCalledWith('p1', 'new-swarm')
     expect(onCreated).toHaveBeenCalledWith('new-swarm')
   })
 
-  it("shows a preset's mixed-agent summary", async () => {
+  it('blocks launch when a configured runtime is unauthenticated', async () => {
+    blockLaunch = true
     render(<SwarmCreatePanel projectId="p1" onCreated={vi.fn()} onCancel={() => {}} />)
-    await waitFor(() => expect(screen.getByText('Feature Team')).toBeInTheDocument())
-    // Feature Team card summarises its team; Builders total 3 across Claude + Codex.
-    expect(screen.getByText(/Builders ×3/)).toBeInTheDocument()
-  })
-
-  it('edits Builder allocations: add a runtime, prevent duplicates, change count, and total updates', async () => {
-    render(<SwarmCreatePanel projectId="p1" onCreated={vi.fn()} onCancel={() => {}} />)
-    await waitFor(() => expect(screen.getByText('Custom Team')).toBeInTheDocument())
-    await userEvent.click(screen.getByText('Custom Team'))
-
-    // The default Builders pool is Auto ×2 → total 2.
-    expect(screen.getByLabelText('Builders total agents')).toHaveTextContent('2 agents')
-
-    // Add a Claude allocation to Builders.
-    const addBuilders = screen.getByLabelText('Add agent type to Builders')
-    await userEvent.selectOptions(addBuilders, 'claude')
-    expect(screen.getByLabelText('Claude count in Builders')).toBeInTheDocument()
-    expect(screen.getByLabelText('Builders total agents')).toHaveTextContent('3 agents')
-
-    // Duplicate prevention: Claude is no longer offered as an addable agent type.
-    expect(within(addBuilders as HTMLSelectElement).queryByRole('option', { name: 'Claude' })).toBeNull()
-
-    // Increase Claude count → total rises; collapsed summary reflects the mix.
-    await userEvent.click(screen.getByLabelText('Increase Claude in Builders'))
-    expect(screen.getByLabelText('Claude count in Builders')).toHaveValue(2)
-    expect(screen.getByLabelText('Builders summary')).toHaveTextContent('Auto ×2 + Claude ×2')
-    // Whole team: coordinator 1 + scout 1 + builders 4 + reviewer 1 = 7.
-    expect(screen.getByText('Team capacity').closest('.swarm-team-total')).toHaveTextContent('7 agents')
-
-    // Remove the Claude allocation.
-    await userEvent.click(screen.getByLabelText('Remove Claude from Builders'))
-    expect(screen.queryByLabelText('Claude count in Builders')).toBeNull()
-    expect(screen.getByLabelText('Builders total agents')).toHaveTextContent('2 agents')
-  })
-
-  it('persists mixed Builder allocations through the create request', async () => {
-    render(<SwarmCreatePanel projectId="p1" onCreated={vi.fn()} onCancel={() => {}} />)
-    await waitFor(() => expect(screen.getByText('Custom Team')).toBeInTheDocument())
-    await userEvent.click(screen.getByText('Custom Team'))
-    await userEvent.type(screen.getByPlaceholderText(/Fix multi-window/i), 'Build the mixed feature')
-    await userEvent.selectOptions(screen.getByLabelText('Add agent type to Builders'), 'codex')
-    await userEvent.click(screen.getByRole('button', { name: /Start Swarm/i }))
-
-    await waitFor(() => expect(createSwarm).toHaveBeenCalledOnce())
-    const roles = (lastCreateRequest?.roles ?? []) as { role: string; allocations: { runtime: string; count: number }[] }[]
-    const builders = roles.find((role) => role.role === 'builder')
-    expect(builders?.allocations.map((a) => a.runtime)).toEqual(['auto', 'codex'])
-  })
-
-  it('lets a preset be duplicated into the editor, preserving mixed allocations', async () => {
-    render(<SwarmCreatePanel projectId="p1" onCreated={vi.fn()} onCancel={() => {}} />)
-    await waitFor(() => expect(screen.getByText('Feature Team')).toBeInTheDocument())
-    await userEvent.click(screen.getByText('Feature Team'))
-    await userEvent.click(screen.getByRole('button', { name: /Customize/i }))
-
-    // The Builders pool arrives with both Claude ×2 and Codex ×1 preserved.
-    expect(screen.getByLabelText('Claude count in Builders')).toHaveValue(2)
-    expect(screen.getByLabelText('Codex count in Builders')).toHaveValue(1)
-    expect(screen.getByLabelText('Builders total agents')).toHaveTextContent('3 agents')
+    await userEvent.click(await screen.findByText('Standard'))
+    await userEvent.click(screen.getByRole('button', { name: /Continue to mission/i }))
+    await userEvent.type(screen.getByPlaceholderText(/What should this team/i), 'Repair the notification delivery pipeline')
+    await userEvent.click(screen.getByRole('button', { name: /Review launch/i }))
+    expect(await screen.findByText('Launch is blocked')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Launch Swarm/i })).toBeDisabled()
+    expect(createSwarm).not.toHaveBeenCalled()
   })
 })

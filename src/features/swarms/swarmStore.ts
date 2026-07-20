@@ -40,6 +40,7 @@ interface SwarmState {
   remove: (swarmId: string) => Promise<void>
   rename: (swarmId: string, name: string) => Promise<void>
   accept: (swarmId: string) => Promise<void>
+  resolveDecision: (swarmId: string, choice: 'recommended' | 'alternative' | 'stop') => Promise<void>
   addBuilder: (swarmId: string) => Promise<void>
   message: (swarmId: string, target: string, body: string) => Promise<void>
   savePreset: (request: SavePresetRequest) => Promise<void>
@@ -121,6 +122,7 @@ export const useSwarmStore = create<SwarmState>((set, get) => ({
   archive: async (swarmId, archived) => runAction(set, get, swarmId, (projectId) => native.archiveSwarm(projectId, swarmId, archived)),
   rename: async (swarmId, name) => runAction(set, get, swarmId, (projectId) => native.renameSwarm(projectId, swarmId, name)),
   accept: async (swarmId) => runAction(set, get, swarmId, (projectId) => native.acceptSwarmResult(projectId, swarmId)),
+  resolveDecision: async (swarmId, choice) => runAction(set, get, swarmId, (projectId) => native.resolveSwarmDecision(projectId, swarmId, choice)),
   addBuilder: async (swarmId) => runAction(set, get, swarmId, (projectId) => native.addSwarmBuilder(projectId, swarmId)),
   message: async (swarmId, target, body) =>
     runAction(set, get, swarmId, (projectId) => native.sendSwarmMessage(projectId, swarmId, target, body)),

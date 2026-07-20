@@ -1,7 +1,7 @@
 use crate::errors::{AppError, AppResult};
 use rusqlite::{params, Connection};
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 16;
+pub const CURRENT_SCHEMA_VERSION: i64 = 20;
 
 const MIGRATION_1: &str = r#"
 CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
@@ -850,6 +850,22 @@ pub fn apply(connection: &Connection) -> AppResult<()> {
     {
         migrate_v16(connection)?;
     }
+    if current < 17
+        || !table_exists(connection, "swarm_runtime_sessions")?
+        || !table_exists(connection, "swarm_canvas_connections")?
+        || !column_exists(connection, "swarm_agents", "display_name")?
+    {
+        migrate_v17(connection)?;
+    }
+    if current < 18 || !table_exists(connection, "swarm_context_packs")? {
+        migrate_v18(connection)?;
+    }
+    if current < 19 || !column_exists(connection, "swarm_tasks", "repair_for_task_id")? {
+        migrate_v19(connection)?;
+    }
+    if current < 20 || !table_exists(connection, "swarm_runtime_event_receipts")? {
+        migrate_v20(connection)?;
+    }
     Ok(())
 }
 
@@ -875,7 +891,13 @@ pub fn requires_migration(connection: &Connection) -> AppResult<bool> {
         || !table_exists(connection, "swarms")?
         || !column_exists(connection, "swarms", "project_root")?
         || !table_exists(connection, "swarm_role_allocations")?
-        || !column_exists(connection, "swarm_agents", "allocation_id")?)
+        || !column_exists(connection, "swarm_agents", "allocation_id")?
+        || !table_exists(connection, "swarm_runtime_sessions")?
+        || !table_exists(connection, "swarm_canvas_connections")?
+        || !column_exists(connection, "swarm_agents", "display_name")?
+        || !table_exists(connection, "swarm_context_packs")?
+        || !column_exists(connection, "swarm_tasks", "repair_for_task_id")?
+        || !table_exists(connection, "swarm_runtime_event_receipts")?)
 }
 
 fn table_exists(connection: &Connection, table: &str) -> AppResult<bool> {
@@ -1565,6 +1587,366 @@ CREATE INDEX IF NOT EXISTS idx_swarm_role_allocations ON swarm_role_allocations(
     finish_migration_transaction(connection, result, 16)
 }
 
+/// Swarm V2 stores the observable engineering run, not merely the top-level task graph. The
+/// additive columns keep v15/v16 records readable while the normalized tables give runtime
+/// sessions, lifecycle transitions, communication edges, decisions, verification and recovery
+/// durable identities. State-token rewrites are compatibility migrations only; no row is
+/// deleted and legacy readers remain able to treat the new values as opaque strings.
+fn migrate_v17(connection: &Connection) -> AppResult<()> {
+    connection
+        .execute_batch("BEGIN IMMEDIATE;")
+        .map_err(AppError::database)?;
+    let result = (|| {
+        for (table, column, definition) in [
+            ("swarms", "repository_identity", "TEXT"),
+            ("swarms", "git_state_json", "TEXT NOT NULL DEFAULT '{}'"),
+            ("swarms", "safeguards_json", "TEXT NOT NULL DEFAULT '[]'"),
+            ("swarms", "attachments_json", "TEXT NOT NULL DEFAULT '[]'"),
+            ("swarms", "current_milestone", "TEXT"),
+            ("swarm_agents", "display_name", "TEXT"),
+            (
+                "swarm_agents",
+                "runtime_session_state",
+                "TEXT NOT NULL DEFAULT 'not_started'",
+            ),
+            ("swarm_agents", "working_directory", "TEXT"),
+            ("swarm_agents", "worktree", "TEXT"),
+            (
+                "swarm_agents",
+                "permissions_json",
+                "TEXT NOT NULL DEFAULT '[]'",
+            ),
+            (
+                "swarm_agents",
+                "changed_files_json",
+                "TEXT NOT NULL DEFAULT '[]'",
+            ),
+            (
+                "swarm_agents",
+                "test_progress_json",
+                "TEXT NOT NULL DEFAULT '{}'",
+            ),
+            ("swarm_agents", "last_message", "TEXT"),
+            ("swarm_agents", "current_blocker", "TEXT"),
+            (
+                "swarm_agents",
+                "recovery_state",
+                "TEXT NOT NULL DEFAULT 'none'",
+            ),
+            ("swarm_tasks", "required_runtime", "TEXT"),
+            (
+                "swarm_tasks",
+                "progress_determinate",
+                "INTEGER NOT NULL DEFAULT 0",
+            ),
+            ("swarm_tasks", "blocker", "TEXT"),
+            ("swarm_tasks", "evidence_json", "TEXT NOT NULL DEFAULT '[]'"),
+            ("swarm_tasks", "tests_json", "TEXT NOT NULL DEFAULT '[]'"),
+            ("swarm_tasks", "lease_until", "TEXT"),
+            (
+                "swarm_tasks",
+                "verification_required",
+                "INTEGER NOT NULL DEFAULT 1",
+            ),
+            (
+                "swarm_messages",
+                "category",
+                "TEXT NOT NULL DEFAULT 'update'",
+            ),
+            (
+                "swarm_messages",
+                "sender_kind",
+                "TEXT NOT NULL DEFAULT 'user'",
+            ),
+            ("swarm_messages", "source_agent_id", "TEXT"),
+            ("swarm_messages", "task_id", "TEXT"),
+            ("swarm_messages", "links_json", "TEXT NOT NULL DEFAULT '[]'"),
+            (
+                "swarm_messages",
+                "delivery_state",
+                "TEXT NOT NULL DEFAULT 'queued'",
+            ),
+            ("swarm_events", "destination_agent_id", "TEXT"),
+            ("swarm_events", "destination_role", "TEXT"),
+            ("swarm_events", "evidence_id", "TEXT"),
+            (
+                "swarm_events",
+                "metadata_json",
+                "TEXT NOT NULL DEFAULT '{}'",
+            ),
+        ] {
+            add_column_if_missing(connection, table, column, definition)?;
+        }
+
+        connection.execute_batch(
+            r#"
+CREATE TABLE IF NOT EXISTS swarm_lifecycle_history(
+  id TEXT PRIMARY KEY,
+  swarm_id TEXT NOT NULL REFERENCES swarms(id) ON DELETE CASCADE,
+  from_state TEXT,
+  to_state TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS swarm_runtime_sessions(
+  id TEXT PRIMARY KEY,
+  swarm_id TEXT NOT NULL REFERENCES swarms(id) ON DELETE CASCADE,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  agent_id TEXT NOT NULL REFERENCES swarm_agents(id) ON DELETE CASCADE,
+  task_id TEXT REFERENCES swarm_tasks(id) ON DELETE SET NULL,
+  runtime TEXT NOT NULL,
+  provider_session_id TEXT,
+  terminal_session_id TEXT,
+  state TEXT NOT NULL,
+  resumable INTEGER NOT NULL DEFAULT 0,
+  working_directory TEXT NOT NULL,
+  instruction_hash TEXT NOT NULL,
+  usage_json TEXT NOT NULL DEFAULT '{}',
+  failure_class TEXT,
+  started_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  ended_at TEXT
+);
+CREATE TABLE IF NOT EXISTS swarm_canvas_connections(
+  id TEXT PRIMARY KEY,
+  swarm_id TEXT NOT NULL REFERENCES swarms(id) ON DELETE CASCADE,
+  source_agent_id TEXT NOT NULL REFERENCES swarm_agents(id) ON DELETE CASCADE,
+  destination_agent_id TEXT REFERENCES swarm_agents(id) ON DELETE SET NULL,
+  destination_role TEXT,
+  event_type TEXT NOT NULL,
+  task_id TEXT REFERENCES swarm_tasks(id) ON DELETE SET NULL,
+  summary TEXT NOT NULL,
+  evidence_id TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS swarm_decisions(
+  id TEXT PRIMARY KEY,
+  swarm_id TEXT NOT NULL REFERENCES swarms(id) ON DELETE CASCADE,
+  problem TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  options_json TEXT NOT NULL,
+  recommendation TEXT NOT NULL,
+  evidence_json TEXT NOT NULL DEFAULT '[]',
+  choice TEXT,
+  affected_tasks_json TEXT NOT NULL DEFAULT '[]',
+  status TEXT NOT NULL DEFAULT 'open',
+  created_at TEXT NOT NULL,
+  resolved_at TEXT
+);
+CREATE TABLE IF NOT EXISTS swarm_evidence(
+  id TEXT PRIMARY KEY,
+  swarm_id TEXT NOT NULL REFERENCES swarms(id) ON DELETE CASCADE,
+  task_id TEXT REFERENCES swarm_tasks(id) ON DELETE SET NULL,
+  agent_id TEXT REFERENCES swarm_agents(id) ON DELETE SET NULL,
+  criterion TEXT NOT NULL,
+  evidence_type TEXT NOT NULL,
+  title TEXT NOT NULL,
+  summary TEXT NOT NULL,
+  source_uri TEXT,
+  payload_json TEXT NOT NULL DEFAULT '{}',
+  verified INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS swarm_reviews(
+  id TEXT PRIMARY KEY,
+  swarm_id TEXT NOT NULL REFERENCES swarms(id) ON DELETE CASCADE,
+  task_id TEXT REFERENCES swarm_tasks(id) ON DELETE SET NULL,
+  reviewer_agent_id TEXT NOT NULL REFERENCES swarm_agents(id) ON DELETE RESTRICT,
+  subject_agent_id TEXT REFERENCES swarm_agents(id) ON DELETE SET NULL,
+  verdict TEXT NOT NULL,
+  risk_level TEXT NOT NULL,
+  notes TEXT NOT NULL,
+  evidence_json TEXT NOT NULL DEFAULT '[]',
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS swarm_recovery_states(
+  id TEXT PRIMARY KEY,
+  swarm_id TEXT NOT NULL REFERENCES swarms(id) ON DELETE CASCADE,
+  agent_id TEXT REFERENCES swarm_agents(id) ON DELETE CASCADE,
+  state TEXT NOT NULL,
+  summary TEXT NOT NULL,
+  checkpoint_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL,
+  resolved_at TEXT
+);
+CREATE TABLE IF NOT EXISTS swarm_worktrees(
+  id TEXT PRIMARY KEY,
+  swarm_id TEXT NOT NULL REFERENCES swarms(id) ON DELETE CASCADE,
+  task_id TEXT REFERENCES swarm_tasks(id) ON DELETE SET NULL,
+  agent_id TEXT REFERENCES swarm_agents(id) ON DELETE SET NULL,
+  root_path TEXT NOT NULL,
+  branch TEXT,
+  base_revision TEXT,
+  state TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  released_at TEXT
+);
+CREATE TABLE IF NOT EXISTS swarm_file_ownership(
+  id TEXT PRIMARY KEY,
+  swarm_id TEXT NOT NULL REFERENCES swarms(id) ON DELETE CASCADE,
+  task_id TEXT REFERENCES swarm_tasks(id) ON DELETE CASCADE,
+  agent_id TEXT REFERENCES swarm_agents(id) ON DELETE CASCADE,
+  path TEXT NOT NULL,
+  symbol TEXT,
+  ownership_kind TEXT NOT NULL,
+  read_hash TEXT,
+  acquired_at TEXT NOT NULL,
+  released_at TEXT
+);
+CREATE TABLE IF NOT EXISTS swarm_test_records(
+  id TEXT PRIMARY KEY,
+  swarm_id TEXT NOT NULL REFERENCES swarms(id) ON DELETE CASCADE,
+  task_id TEXT REFERENCES swarm_tasks(id) ON DELETE SET NULL,
+  agent_id TEXT REFERENCES swarm_agents(id) ON DELETE SET NULL,
+  name TEXT NOT NULL,
+  command TEXT,
+  status TEXT NOT NULL,
+  summary TEXT NOT NULL,
+  log_uri TEXT,
+  started_at TEXT,
+  completed_at TEXT
+);
+CREATE TABLE IF NOT EXISTS swarm_command_drafts(
+  swarm_id TEXT PRIMARY KEY REFERENCES swarms(id) ON DELETE CASCADE,
+  target TEXT NOT NULL DEFAULT '@swarm',
+  body TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_swarm_lifecycle_history ON swarm_lifecycle_history(swarm_id,created_at);
+CREATE INDEX IF NOT EXISTS idx_swarm_runtime_sessions ON swarm_runtime_sessions(swarm_id,agent_id,updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_swarm_connections ON swarm_canvas_connections(swarm_id,created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_swarm_decisions_open ON swarm_decisions(swarm_id,status,created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_swarm_evidence_task ON swarm_evidence(swarm_id,task_id,created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_swarm_reviews_task ON swarm_reviews(swarm_id,task_id,created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_swarm_recovery_open ON swarm_recovery_states(swarm_id,resolved_at);
+CREATE INDEX IF NOT EXISTS idx_swarm_file_owner ON swarm_file_ownership(swarm_id,path,released_at);
+CREATE INDEX IF NOT EXISTS idx_swarm_tests_task ON swarm_test_records(swarm_id,task_id,started_at DESC);
+"#,
+        ).map_err(AppError::database)?;
+
+        connection.execute_batch(
+            r#"
+UPDATE swarms SET lifecycle='building' WHERE lifecycle='running';
+UPDATE swarms SET lifecycle='decision_required' WHERE lifecycle='decision_needed';
+UPDATE swarms SET lifecycle='ready_for_review' WHERE lifecycle='ready';
+UPDATE swarm_agents SET status='starting' WHERE status='activating';
+UPDATE swarm_agents SET status='active' WHERE status='working';
+UPDATE swarm_agents SET status='completed' WHERE status='stopped';
+UPDATE swarm_tasks SET status='proposed' WHERE status='pending';
+UPDATE swarm_tasks SET status='claimed' WHERE status='assigned';
+UPDATE swarm_tasks SET status='reviewing' WHERE status='review';
+UPDATE swarm_tasks SET status='completed' WHERE status='done';
+UPDATE swarm_agents
+SET display_name=upper(substr(role,1,1)) || substr(role,2) || ' ' ||
+  (SELECT count(*) FROM swarm_agents earlier
+   WHERE earlier.swarm_id=swarm_agents.swarm_id AND earlier.role=swarm_agents.role
+     AND (earlier.created_at < swarm_agents.created_at OR
+          (earlier.created_at=swarm_agents.created_at AND earlier.id <= swarm_agents.id)))
+WHERE display_name IS NULL OR trim(display_name)='';
+INSERT INTO swarm_lifecycle_history(id,swarm_id,from_state,to_state,reason,created_at)
+SELECT lower(hex(randomblob(16))),s.id,NULL,s.lifecycle,'Migrated existing Swarm into V2 lifecycle history',s.updated_at
+FROM swarms s
+WHERE NOT EXISTS(SELECT 1 FROM swarm_lifecycle_history h WHERE h.swarm_id=s.id);
+"#,
+        ).map_err(AppError::database)?;
+        seed_builtin_presets(connection)?;
+        refresh_builtin_presets(connection)?;
+        record_migration(connection, 17)
+    })();
+    finish_migration_transaction(connection, result, 17)
+}
+
+/// Connect Swarms to the existing project Memory ledger without copying or mutating canonical
+/// Memory records. Each row is an immutable-at-load context-pack projection for one task/agent.
+fn migrate_v18(connection: &Connection) -> AppResult<()> {
+    connection
+        .execute_batch("BEGIN IMMEDIATE;")
+        .map_err(AppError::database)?;
+    let result = (|| {
+        connection
+            .execute_batch(
+                r#"
+CREATE TABLE IF NOT EXISTS swarm_context_packs(
+  id TEXT PRIMARY KEY,
+  swarm_id TEXT NOT NULL REFERENCES swarms(id) ON DELETE CASCADE,
+  task_id TEXT NOT NULL REFERENCES swarm_tasks(id) ON DELETE CASCADE,
+  agent_id TEXT NOT NULL REFERENCES swarm_agents(id) ON DELETE CASCADE,
+  memory_item_id TEXT NOT NULL REFERENCES memory_items(id) ON DELETE RESTRICT,
+  revision_id TEXT NOT NULL REFERENCES memory_revisions(id) ON DELETE RESTRICT,
+  title TEXT NOT NULL,
+  memory_type TEXT NOT NULL,
+  memory_state TEXT NOT NULL,
+  summary TEXT NOT NULL,
+  context TEXT NOT NULL,
+  confidence REAL NOT NULL,
+  source_uris_json TEXT NOT NULL DEFAULT '[]',
+  loaded_at TEXT NOT NULL,
+  UNIQUE(swarm_id,task_id,agent_id,memory_item_id,revision_id)
+);
+CREATE INDEX IF NOT EXISTS idx_swarm_context_task ON swarm_context_packs(swarm_id,task_id,agent_id,loaded_at);
+CREATE INDEX IF NOT EXISTS idx_swarm_context_memory ON swarm_context_packs(memory_item_id,revision_id);
+"#,
+            )
+            .map_err(AppError::database)?;
+        record_migration(connection, 18)
+    })();
+    finish_migration_transaction(connection, result, 18)
+}
+
+/// Persist the exact relationship between a bounded Debugger task and the failed task it repairs.
+/// Older Swarms remain valid: their existing tasks simply have no repair link.
+fn migrate_v19(connection: &Connection) -> AppResult<()> {
+    connection
+        .execute_batch("BEGIN IMMEDIATE;")
+        .map_err(AppError::database)?;
+    let result = (|| {
+        if !column_exists(connection, "swarm_tasks", "repair_for_task_id")? {
+            connection
+                .execute(
+                    "ALTER TABLE swarm_tasks ADD COLUMN repair_for_task_id TEXT REFERENCES swarm_tasks(id) ON DELETE SET NULL",
+                    [],
+                )
+                .map_err(AppError::database)?;
+        }
+        connection
+            .execute(
+                "CREATE INDEX IF NOT EXISTS idx_swarm_tasks_repair_for ON swarm_tasks(swarm_id,repair_for_task_id)",
+                [],
+            )
+            .map_err(AppError::database)?;
+        record_migration(connection, 19)
+    })();
+    finish_migration_transaction(connection, result, 19)
+}
+
+/// Deduplicate provider JSONL while a PTY is live and after restart. Terminal tails are bounded
+/// and replayed when a renderer or scheduler reconnects, so cursor-only bookkeeping would either
+/// duplicate canonical activity or lose events after tail rotation. A stable hash of each
+/// provider event is claimed transactionally before any Swarm side effect is recorded.
+fn migrate_v20(connection: &Connection) -> AppResult<()> {
+    connection
+        .execute_batch("BEGIN IMMEDIATE;")
+        .map_err(AppError::database)?;
+    let result = (|| {
+        connection
+            .execute_batch(
+                r#"
+CREATE TABLE IF NOT EXISTS swarm_runtime_event_receipts(
+  terminal_session_id TEXT NOT NULL,
+  event_key TEXT NOT NULL,
+  observed_at TEXT NOT NULL,
+  PRIMARY KEY(terminal_session_id,event_key)
+);
+CREATE INDEX IF NOT EXISTS idx_swarm_runtime_event_receipts_session
+  ON swarm_runtime_event_receipts(terminal_session_id,observed_at);
+"#,
+            )
+            .map_err(AppError::database)?;
+        record_migration(connection, 20)
+    })();
+    finish_migration_transaction(connection, result, 20)
+}
+
 /// Rewrite every stored preset's `config_json` into the role-pool allocation shape. User presets
 /// are upgraded in place (no data loss); built-in presets are refreshed to the canonical
 /// composition from [`crate::models::swarm::builtin_presets`], which is where the Feature Team and
@@ -1667,6 +2049,18 @@ fn seed_builtin_presets(connection: &Connection) -> AppResult<()> {
                 params![id, name, is_default, max_parallel, config_json, now],
             )
             .map_err(AppError::database)?;
+    }
+    Ok(())
+}
+
+fn refresh_builtin_presets(connection: &Connection) -> AppResult<()> {
+    let now = chrono::Utc::now().to_rfc3339();
+    for (id, name, max_parallel, roles) in crate::models::swarm::builtin_presets() {
+        let config_json = serde_json::to_string(&roles).map_err(AppError::database)?;
+        connection.execute(
+            "UPDATE swarm_presets SET name=?2,max_parallel=?3,config_json=?4,updated_at=?5 WHERE id=?1 AND builtin=1",
+            params![id, name, max_parallel, config_json, now],
+        ).map_err(AppError::database)?;
     }
     Ok(())
 }
@@ -1975,6 +2369,8 @@ mod tests {
         for column in ["error_message", "required_permission", "recovery_action"] {
             assert!(column_exists(&connection, "repository_sync_cursors", column).unwrap());
         }
+        assert!(column_exists(&connection, "swarm_tasks", "repair_for_task_id").unwrap());
+        assert!(table_exists(&connection, "swarm_runtime_event_receipts").unwrap());
     }
 
     #[test]
@@ -2003,7 +2399,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(builtin, 4, "the four built-in presets must be seeded");
+        assert_eq!(builtin, 5, "the five built-in presets must be seeded");
         let default: i64 = connection
             .query_row(
                 "SELECT count(*) FROM swarm_presets WHERE is_default=1",
@@ -2038,7 +2434,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(builtin, 4);
+        assert_eq!(builtin, 5);
         let mine: i64 = connection
             .query_row(
                 "SELECT count(*) FROM swarm_presets WHERE id='mine'",
@@ -2089,7 +2485,7 @@ mod tests {
         assert!(column_exists(&connection, "swarm_agents", "allocation_id").unwrap());
         assert!(column_exists(&connection, "swarm_roles", "position").unwrap());
 
-        // Feature Team's Builders must carry both Claude and Codex allocations.
+        // Standard's Builders must carry both Claude and Codex allocations.
         let config: String = connection
             .query_row(
                 "SELECT config_json FROM swarm_presets WHERE id='feature_team'",
@@ -2102,7 +2498,7 @@ mod tests {
         let builders = roles
             .iter()
             .find(|role| role.role == crate::models::swarm::SwarmRole::Builder)
-            .expect("Feature Team has a Builder role");
+            .expect("Standard has a Builder role");
         let runtimes: Vec<_> = builders
             .allocations
             .iter()
@@ -2110,7 +2506,7 @@ mod tests {
             .collect();
         assert!(runtimes.contains(&crate::models::swarm::SwarmRuntimeKind::Claude));
         assert!(runtimes.contains(&crate::models::swarm::SwarmRuntimeKind::Codex));
-        assert_eq!(builders.total_count(), 3);
+        assert_eq!(builders.total_count(), 2);
     }
 
     #[test]
@@ -2572,6 +2968,50 @@ mod tests {
                 )
                 .unwrap(),
             1
+        );
+    }
+
+    #[test]
+    fn upgrades_v17_to_context_packs_without_losing_memory_or_presets() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", true)
+            .unwrap();
+        apply(&connection).unwrap();
+        connection.execute("INSERT INTO projects(id,name,root_path,canonical_root_path,major_languages_json,is_git_repository,has_package_json,has_lockfile,created_at,updated_at,last_opened_at) VALUES('p18','Preserved','/p18','/p18','[]',0,0,0,'t','t','t')", []).unwrap();
+        connection.execute("INSERT INTO memory_items(id,project_id,memory_type,dedup_key,title,state,visibility,pinned,created_at,updated_at) VALUES('mem18','p18','procedure','keep-v18','Keep memory','active','project_shared',0,'t','t')", []).unwrap();
+        connection.execute("INSERT INTO swarm_presets(id,name,builtin,is_default,max_parallel,instructions,config_json,created_at,updated_at) VALUES('preset18','Keep preset',0,0,2,'','[]','t','t')", []).unwrap();
+        connection.execute_batch("DROP TABLE swarm_context_packs; DELETE FROM schema_migrations WHERE version=18; PRAGMA user_version=17;").unwrap();
+
+        apply(&connection).unwrap();
+
+        assert!(table_exists(&connection, "swarm_context_packs").unwrap());
+        assert!(column_exists(&connection, "swarm_tasks", "repair_for_task_id").unwrap());
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT title FROM memory_items WHERE id='mem18'",
+                    [],
+                    |row| row.get::<_, String>(0)
+                )
+                .unwrap(),
+            "Keep memory"
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT name FROM swarm_presets WHERE id='preset18'",
+                    [],
+                    |row| row.get::<_, String>(0)
+                )
+                .unwrap(),
+            "Keep preset"
+        );
+        assert_eq!(
+            connection
+                .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            CURRENT_SCHEMA_VERSION
         );
     }
 }
