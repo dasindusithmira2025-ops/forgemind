@@ -1,5 +1,4 @@
 import { useSidebarStore } from '../sidebarStore'
-import { SIDEBAR_COLLAPSED_WIDTH } from '../sidebarPreferences'
 import type { ForgeSpaceSidebarProps } from '../sidebarTypes'
 import { SidebarBrandHeader } from './SidebarBrandHeader'
 import { CurrentProjectsSection } from './CurrentProjectsSection'
@@ -54,7 +53,7 @@ export function ForgeSpaceSidebar(props: ForgeSpaceSidebarProps) {
   const attachedWorkspaces = workspaces.filter((entry) => !detachedIds.has(entry.workspace.id))
   const detachedWorkspaces = workspaces.filter((entry) => detachedIds.has(entry.workspace.id))
 
-  const effectiveWidth = collapsed ? SIDEBAR_COLLAPSED_WIDTH : (draftWidth ?? width)
+  const effectiveWidth = collapsed ? undefined : (draftWidth ?? width)
 
   return (
     <nav
