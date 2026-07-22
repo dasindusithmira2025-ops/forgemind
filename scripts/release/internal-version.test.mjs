@@ -3,23 +3,23 @@ import { buildInternalChangelog, computeInternalVersion, parseSemver } from './i
 
 describe('computeInternalVersion', () => {
   it('leads the next unreleased patch of a shipped stable base', () => {
-    expect(computeInternalVersion('0.4.0', 101)).toBe('0.4.1-internal.101')
-    expect(computeInternalVersion('0.9.0', 101)).toBe('0.9.1-internal.101')
-    expect(computeInternalVersion('1.0.0', 1)).toBe('1.0.1-internal.1')
+    expect(computeInternalVersion('0.4.0', 101)).toBe('0.4.1-101')
+    expect(computeInternalVersion('0.9.0', 101)).toBe('0.9.1-101')
+    expect(computeInternalVersion('1.0.0', 1)).toBe('1.0.1-1')
   })
 
   it('produces monotonically increasing versions that sort correctly against stable', () => {
-    const order = ['0.4.1-internal.101', '0.4.1-internal.102', '0.4.1-internal.103']
+    const order = ['0.4.1-101', '0.4.1-102', '0.4.1-103']
     for (let i = 1; i < order.length; i += 1) {
       expect(compareSemver(order[i], order[i - 1])).toBeGreaterThan(0)
     }
     // Internal leads the current stable but trails the eventual stable release of that patch.
-    expect(compareSemver('0.4.1-internal.103', '0.4.0')).toBeGreaterThan(0)
-    expect(compareSemver('0.4.1-internal.103', '0.4.1')).toBeLessThan(0)
+    expect(compareSemver('0.4.1-103', '0.4.0')).toBeGreaterThan(0)
+    expect(compareSemver('0.4.1-103', '0.4.1')).toBeLessThan(0)
   })
 
   it('keeps the patch when the base is already a prerelease so it does not skip a line', () => {
-    expect(computeInternalVersion('0.5.0-preview.2', 55)).toBe('0.5.0-internal.55')
+    expect(computeInternalVersion('0.5.0-preview.2', 55)).toBe('0.5.0-55')
   })
 
   it('rejects non-positive or non-integer build numbers', () => {
@@ -27,6 +27,11 @@ describe('computeInternalVersion', () => {
     expect(() => computeInternalVersion('0.4.0', -1)).toThrow(/positive integer/)
     expect(() => computeInternalVersion('0.4.0', 1.5)).toThrow(/positive integer/)
     expect(() => computeInternalVersion('0.4.0', 'abc')).toThrow(/positive integer/)
+  })
+
+  it('rejects build numbers that Windows MSI cannot encode', () => {
+    expect(computeInternalVersion('0.4.0', 65535)).toBe('0.4.1-65535')
+    expect(() => computeInternalVersion('0.4.0', 65536)).toThrow(/MSI compatibility/)
   })
 
   it('rejects a malformed base version', () => {
@@ -47,8 +52,8 @@ describe('buildInternalChangelog', () => {
   }
 
   it('carries base notes onto a preview-channel prerelease entry that release:sync accepts', () => {
-    const entry = buildInternalChangelog(base, '0.4.1-internal.101', { date: '2026-07-22', commit: 'abc123' })
-    expect(entry.version).toBe('0.4.1-internal.101')
+    const entry = buildInternalChangelog(base, '0.4.1-101', { date: '2026-07-22', commit: 'abc123' })
+    expect(entry.version).toBe('0.4.1-101')
     // Preview channel + prerelease version is what sync-version.mjs requires.
     expect(entry.channel).toBe('preview')
     expect(entry.version.includes('-')).toBe(true)

@@ -7,9 +7,12 @@ import { fileURLToPath } from 'node:url'
 // unique, monotonically increasing SemVer prerelease derived from the GitHub Actions run number.
 //
 // Given a shipped stable base of `0.4.0`, successive internal builds are
-//   0.4.1-internal.101  <  0.4.1-internal.102  <  0.4.1-internal.103  <  0.4.1 (eventual stable)
+//   0.4.1-101  <  0.4.1-102  <  0.4.1-103  <  0.4.1 (eventual stable)
 // so each internal build is a valid upgrade over the previous one, sorts ABOVE the current stable
 // (internal leads development), and sorts BELOW the eventual stable release of that patch.
+//
+// The prerelease identifier is numeric-only because Tauri's Windows MSI bundler rejects named
+// prerelease identifiers such as `internal.101`.
 
 const SEMVER = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/
 
@@ -29,17 +32,20 @@ export function computeInternalVersion(baseVersion, buildNumber) {
   if (!Number.isInteger(build) || build <= 0) {
     throw new Error(`Internal build number must be a positive integer, received: ${buildNumber}`)
   }
+  if (build > 65535) {
+    throw new Error(`Internal build number must be <= 65535 for Windows MSI compatibility, received: ${buildNumber}`)
+  }
   const { major, minor, patch, prerelease } = parseSemver(baseVersion)
   // A clean stable base means the next unreleased patch line is internal's target. A base that is
   // already a prerelease keeps its patch so we don't skip an unreleased line.
   const targetPatch = prerelease ? patch : patch + 1
-  return `${major}.${minor}.${targetPatch}-internal.${build}`
+  return `${major}.${minor}.${targetPatch}-${build}`
 }
 
 /**
  * Build an ephemeral changelog entry for an internal build by carrying the base entry's notes.
  * The channel is `preview` (the recognized prerelease channel that backs the internal edition);
- * the internal prerelease identifier keeps `release:sync`'s "preview requires prerelease" gate happy.
+ * the numeric prerelease identifier keeps both `release:sync` and the MSI bundler happy.
  */
 export function buildInternalChangelog(baseChangelog, version, { date, commit }) {
   return {
