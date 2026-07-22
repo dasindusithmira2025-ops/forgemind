@@ -1118,7 +1118,8 @@ mod tests {
     fn swarm_runtime_workspaces_keep_a_stable_machine_protocol_surface() {
         assert!(is_machine_protocol_workspace("swarm-runtime-swarm-id"));
         assert!(!is_machine_protocol_workspace("normal-workspace"));
-        assert!(MACHINE_PROTOCOL_COLS > 1_000);
+        let protocol_columns = MACHINE_PROTOCOL_COLS;
+        assert!(protocol_columns > 1_000);
     }
 
     #[test]

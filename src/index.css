@@ -274,6 +274,15 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 
 .workspace-shell { display: grid; }
 .workspace-shell .terminal-canvas { width: 100%; height: 100%; }
+/* Docked-tool layout host: terminal fills by default; the tool panel (lazily loaded) adds its own
+ * grid tracks via workspaceToolPanel.css. Defined here so the terminal sizes correctly at cold
+ * startup, before the editor bundle/CSS is ever fetched. */
+.workspace-surface-host { position: relative; height: 100%; min-width: 0; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr); }
+.workspace-surface-host > .terminal-canvas { grid-column: 1; grid-row: 1; }
+.workspace-tool-panel-toggle { display: inline-flex; align-items: center; justify-content: center; width: var(--icon-btn); height: var(--icon-btn); color: var(--muted); background: transparent; border: 1px solid transparent; border-radius: var(--radius); cursor: pointer; }
+.workspace-tool-panel-toggle:hover { color: var(--text); background: var(--surface-2); border-color: var(--border); }
+.workspace-tool-panel-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.workspace-tool-panel-toggle.is-active { color: var(--text-strong); background: var(--surface-2); border-color: var(--border); }
 .workspace-heading { display: flex; align-items: center; gap: 9px; min-width: 0; }
 .workspace-heading strong { overflow: hidden; font-size: var(--text-md); font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
 .workspace-heading span { color: var(--faint); }

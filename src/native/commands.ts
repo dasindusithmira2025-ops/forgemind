@@ -2,6 +2,7 @@ import { invoke } from '@tauri-apps/api/core'
 import type {
   AgentDetectionResult,
   AppSettings,
+  BrowserBounds,
   DiagnosticsSnapshot,
   SafeRestartAssessment,
   SafeRestartClientState,
@@ -59,6 +60,12 @@ import type {
   SwarmRuntimeReadiness,
   SwarmLaunchPreview,
   SwarmCommandDraft,
+  DirectoryListing,
+  FileContents,
+  FileWriteResult,
+  FsEntryInfo,
+  FsPath,
+  ProjectFileIndex,
 } from './types'
 
 export const native = {
@@ -215,6 +222,43 @@ export const native = {
   acceptSwarmResult: (projectId: string, swarmId: string) => invoke<void>('accept_swarm_result', { projectId, swarmId }),
   resolveSwarmDecision: (projectId: string, swarmId: string, choice: 'recommended' | 'alternative' | 'stop') => invoke<void>('resolve_swarm_decision', { projectId, swarmId, choice }),
   addSwarmBuilder: (projectId: string, swarmId: string) => invoke<void>('add_swarm_builder', { projectId, swarmId }),
+
+  // ---- Code surface (project-scoped, path-guarded filesystem) -----------------------------
+  listProjectDirectory: (projectId: string, relativePath = '') =>
+    invoke<DirectoryListing>('list_project_directory', { projectId, relativePath }),
+  readProjectFile: (projectId: string, relativePath: string) =>
+    invoke<FileContents>('read_project_file', { projectId, relativePath }),
+  writeProjectFile: (projectId: string, relativePath: string, content: string, expectedSha256?: string) =>
+    invoke<FileWriteResult>('write_project_file', { projectId, relativePath, content, expectedSha256 }),
+  createProjectFile: (projectId: string, relativePath: string) =>
+    invoke<FsEntryInfo>('create_project_file', { projectId, relativePath }),
+  createProjectDirectory: (projectId: string, relativePath: string) =>
+    invoke<FsEntryInfo>('create_project_directory', { projectId, relativePath }),
+  renameProjectEntry: (projectId: string, from: string, to: string) =>
+    invoke<FsEntryInfo>('rename_project_entry', { projectId, from, to }),
+  copyProjectEntry: (projectId: string, from: string, to: string) =>
+    invoke<FsEntryInfo>('copy_project_entry', { projectId, from, to }),
+  deleteProjectEntry: (projectId: string, relativePath: string, recursive = false) =>
+    invoke<FsPath>('delete_project_entry', { projectId, relativePath, recursive }),
+  searchProjectFiles: (projectId: string, limit?: number) =>
+    invoke<ProjectFileIndex>('search_project_files', { projectId, limit }),
+  watchProjectFiles: (projectId: string) => invoke<void>('watch_project_files', { projectId }),
+  unwatchProjectFiles: (projectId: string) => invoke<void>('unwatch_project_files', { projectId }),
+
+  // Embedded development browser (isolated native child webview beside the terminal canvas).
+  openBrowserView: (workspaceId: string, bounds: BrowserBounds, url?: string) =>
+    invoke<void>('open_browser_view', { workspaceId, bounds, url }),
+  browserNavigate: (workspaceId: string, url: string) => invoke<void>('browser_navigate', { workspaceId, url }),
+  browserReload: (workspaceId: string) => invoke<void>('browser_reload', { workspaceId }),
+  browserStop: (workspaceId: string) => invoke<void>('browser_stop', { workspaceId }),
+  browserSetBounds: (workspaceId: string, bounds: BrowserBounds) =>
+    invoke<void>('browser_set_bounds', { workspaceId, bounds }),
+  browserSetVisible: (workspaceId: string, visible: boolean) =>
+    invoke<void>('browser_set_visible', { workspaceId, visible }),
+  browserSetZoom: (workspaceId: string, factor: number) => invoke<void>('browser_set_zoom', { workspaceId, factor }),
+  browserSetInspect: (workspaceId: string, enable: boolean) =>
+    invoke<void>('browser_set_inspect', { workspaceId, enable }),
+  closeBrowserView: (workspaceId: string) => invoke<void>('close_browser_view', { workspaceId }),
 }
 
 export function asNativeError(error: unknown): { code: string; message: string; affectedEntity?: string; recommendedAction?: string } {

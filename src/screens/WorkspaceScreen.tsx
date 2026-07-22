@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react'
 import { confirm, open } from '@tauri-apps/plugin-dialog'
 import { openPath } from '@tauri-apps/plugin-opener'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { ChevronDown, CircleStop, FolderOpen, RotateCcw, TerminalSquare } from 'lucide-react'
+import { ChevronDown, CircleStop, FolderOpen, PanelRightClose, PanelRightOpen, RotateCcw, TerminalSquare } from 'lucide-react'
 import { TerminalPane } from '../components/terminal/TerminalPane'
 import { PaneMenu } from '../components/terminal/PaneMenu'
 import { dispatchTerminalAction } from '../components/terminal/terminalActions'
@@ -34,6 +34,9 @@ import type { WorkspaceCanvasLayout } from '../features/workspace-canvas/canvasT
 import { normalizeSplitTree, removePaneFromDockedTree } from '../features/workspace-canvas/layoutOperations'
 import { workspaceLayoutCommands, toSaveRequest } from '../native/workspaceLayoutCommands'
 import { isActiveLifecycle } from '../features/swarms/swarmPresentation'
+import { WorkspaceToolPanel } from '../features/code-surface/WorkspaceToolPanel'
+import { useWorkspacePanelStore, clampPanelWidth, type WorkspaceTool } from '../features/code-surface/workspacePanelStore'
+import type { AgentContextPackage } from '../features/code-surface/browser/inspectContext'
 
 type ProviderChoice = { provider: AgentProvider; name: string; executablePath: string; args: string[]; shellProfileId?: string }
 type PendingInsert = { targetPaneId: string; direction: SplitDirection; replace?: boolean; duplicate?: PaneAssignment }
@@ -81,6 +84,15 @@ export function WorkspaceScreen() {
   const [monitorPicker, setMonitorPicker] = useState<string>()
   const [gitReview, setGitReview] = useState<{ paneId: string; review: PaneGitReview }>()
   const [gitReviewBusy, setGitReviewBusy] = useState(false)
+  // The docked workspace-tool panel (Files editor + future tools) lives in its own per-workspace
+  // store so opening/resizing it never remounts the terminal canvas and its state is decoupled
+  // from this component. The terminal canvas always stays mounted beside it.
+  const panelOpen = useWorkspacePanelStore((state) => state.open)
+  const panelMounted = useWorkspacePanelStore((state) => state.mounted)
+  const panelWidth = useWorkspacePanelStore((state) => state.width)
+  const panelMaximized = useWorkspacePanelStore((state) => state.maximized)
+  const panelTool = useWorkspacePanelStore((state) => state.tool)
+  const [panelResizing, setPanelResizing] = useState(false)
   const [projectClosePrompt, setProjectClosePrompt] = useState<{ projectId: string; projectName: string; activeSwarms: number }>()
   const [projectCloseBusy, setProjectCloseBusy] = useState(false)
   // Project switching is passive navigation: it must never summon WebView2's native confirm
@@ -259,6 +271,64 @@ export function WorkspaceScreen() {
     setSidebarWidth(clamped)
     void persistSidebar({ sidebarWidth: clamped })
   }, [persistSidebar])
+
+  // ---- Docked workspace-tool panel --------------------------------------------------------
+  // Restore this Workspace's own panel state (open/width/maximized/tool). init() no-ops when the
+  // id is unchanged, so a remount never clobbers live state.
+  useEffect(() => { useWorkspacePanelStore.getState().init(workspaceId) }, [workspaceId])
+
+  const togglePanel = useCallback((tool?: WorkspaceTool) => {
+    const store = useWorkspacePanelStore.getState()
+    if (store.open) store.closePanel()
+    else store.openPanel(tool)
+  }, [])
+
+  // "Send to Active Agent" from the Browser's Inspect mode: paste the focused, sanitized context
+  // package into the active pane's terminal so the user can review it and press Enter to submit.
+  // No trailing newline is written, so it can never auto-run in a plain shell.
+  const sendContextToAgent = useCallback(async (pkg: AgentContextPackage) => {
+    const session = activePaneId ? sessions.find((item) => item.paneId === activePaneId) : undefined
+    if (!session || session.status !== 'running') {
+      setError('Focus a running terminal to receive the selected element context.')
+      return
+    }
+    try {
+      await native.writeTerminalInput(session.id, Array.from(new TextEncoder().encode(pkg.prompt)))
+      dispatchTerminalAction(session.paneId, 'focus')
+    } catch (caught) {
+      setError(asNativeError(caught).message)
+    }
+  }, [activePaneId, sessions])
+
+  // Drag the divider between the terminal and the panel. Width updates are rAF-throttled and only
+  // mutate a CSS variable + the store — the layout tree is never rebuilt, so terminals never remount.
+  const startPanelResize = useCallback((event: ReactPointerEvent) => {
+    event.preventDefault()
+    const host = event.currentTarget.parentElement as HTMLElement | null
+    const startX = event.clientX
+    const startWidth = useWorkspacePanelStore.getState().width
+    setPanelResizing(true)
+    let frame = 0
+    const move = (moveEvent: PointerEvent) => {
+      if (frame) return
+      frame = requestAnimationFrame(() => {
+        frame = 0
+        // Dragging left (toward the terminal) widens the panel.
+        const delta = startX - moveEvent.clientX
+        const hostWidth = host?.clientWidth ?? window.innerWidth
+        const maxByHost = hostWidth - 226 // keep the terminal usable + the resize track
+        useWorkspacePanelStore.getState().setWidth(Math.max(240, Math.min(clampPanelWidth(startWidth + delta), maxByHost)))
+      })
+    }
+    const up = () => {
+      if (frame) cancelAnimationFrame(frame)
+      setPanelResizing(false)
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+  }, [])
 
   const refreshWorkspaces = useCallback(async (currentProjectId?: string) => {
     const projectId = currentProjectId ?? project?.id
@@ -920,11 +990,16 @@ export function WorkspaceScreen() {
       if (!workspace) return
       if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'b') { event.preventDefault(); toggleCollapse(); return }
       if (event.ctrlKey && event.key.toLowerCase() === 'b' && !event.shiftKey) { event.preventDefault(); toggleCollapse(); return }
+      // Toggle the docked Files panel. Works from either terminal or editor focus.
+      if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'e') { event.preventDefault(); togglePanel(); return }
       if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'p') { event.preventDefault(); focusNextAttention(); return }
       if (event.ctrlKey && event.altKey && /^[1-9]$/.test(event.key)) {
         event.preventDefault(); const target = projectWorkspaces[Number(event.key) - 1]; if (target && target.id !== workspace.id) void switchWorkspace(target.id); return
       }
       if (!activePaneId) return
+      // Terminal/pane shortcuts must never fire while Monaco (or anything in the tool panel) owns
+      // focus — otherwise editing would silently split panes, close terminals, etc.
+      if (document.activeElement?.closest('.workspace-tool-panel')) return
       if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'f') { event.preventDefault(); dispatchTerminalAction(activePaneId, 'search') }
       if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 't') { event.preventDefault(); setPendingInsert({ targetPaneId: activePaneId, direction: 'vertical' }) }
       if (event.ctrlKey && event.shiftKey && event.code === 'Backslash') { event.preventDefault(); setPendingInsert({ targetPaneId: activePaneId, direction: 'vertical' }) }
@@ -942,7 +1017,7 @@ export function WorkspaceScreen() {
     return () => window.removeEventListener('keydown', handle)
   // closePane reads current state and is intentionally rebound with the other workspace values.
   // oxlint-disable-next-line react-hooks/exhaustive-deps
-  }, [activePaneId, focusNextAttention, navigate, setActivePane, workspace, projectWorkspaces, switchWorkspace, toggleCollapse])
+  }, [activePaneId, focusNextAttention, navigate, setActivePane, workspace, projectWorkspaces, switchWorkspace, toggleCollapse, togglePanel])
 
   // Render one terminal for a pane inside its canvas window. The docking canvas owns geometry,
   // placement and the header drag handle; this only wires the terminal + its pane actions. The
@@ -968,9 +1043,9 @@ export function WorkspaceScreen() {
   const activePane = workspace.panes.find((pane) => pane.id === activePaneId)
 
   return <AppShell className={`workspace-shell ${switchingWorkspaceId ? 'workspace-switching' : ''}`} sidebarOpen={!maximizedPaneId}
-    titleBar={<><div className="workspace-heading"><strong>{activePane?.title || workspace.name}</strong>{project.gitBranch && <span className="branch-label">{project.gitBranch}</span>}</div><div className="titlebar-spacer" />{attentionQueue.length > 0 && <button className="attention-chip" onClick={focusNextAttention} title="Ctrl+Shift+P focuses the oldest agent needing attention">{attentionQueue.length} agent{attentionQueue.length === 1 ? '' : 's'} waiting</button>}<span className="compact-count">{running}/{workspace.panes.length} running</span><div className="workspace-menu-wrap"><Button variant="ghost" icon={<ChevronDown size={14} />} aria-expanded={workspaceMenu} aria-haspopup="menu" onClick={() => setWorkspaceMenu((value) => !value)}>Workspace</Button>{workspaceMenu && <><button className="context-scrim" aria-label="Close workspace menu" onClick={() => setWorkspaceMenu(false)} /><div className="context-popover workspace-popover" role="menu"><button role="menuitem" onClick={() => { setWorkspaceMenu(false); renameWorkspaceById(workspace.id) }}>Rename workspace</button><button role="menuitem" onClick={reconfigureWorkspace}>Reconfigure workspace</button><button role="menuitem" onClick={() => navigate(`/setup/${project.id}`)}>New workspace for this project</button><span className="menu-separator" /><button role="menuitem" onClick={() => void restartAll()}><RotateCcw size={14} />Restart all terminals</button><button role="menuitem" onClick={() => void stopAll()}><CircleStop size={14} />Stop all terminals</button><button role="menuitem" onClick={openLauncher}><FolderOpen size={14} />Project launcher</button><button role="menuitem" className="danger-item" onClick={() => void closeWorkspace()}>Close workspace</button></div></>}</div></>}
+    titleBar={<><div className="workspace-heading"><strong title={workspace.name}>{workspace.name}</strong>{project.gitBranch && <span className="branch-label" title={`Branch: ${project.gitBranch}`}>{project.gitBranch}</span>}</div><div className="titlebar-spacer" />{attentionQueue.length > 0 && <button className="attention-chip" onClick={focusNextAttention} title="Ctrl+Shift+P focuses the oldest agent needing attention">{attentionQueue.length} agent{attentionQueue.length === 1 ? '' : 's'} waiting</button>}<span className="compact-count">{running}/{workspace.panes.length} running</span><button className={`workspace-tool-panel-toggle ${panelOpen ? 'is-active' : ''}`} aria-pressed={panelOpen} aria-label={panelOpen ? 'Close workspace panel' : 'Open workspace panel'} title={`${panelOpen ? 'Close' : 'Open'} workspace panel (Ctrl+Shift+E)`} onClick={() => togglePanel()}>{panelOpen ? <PanelRightClose size={15} /> : <PanelRightOpen size={15} />}</button><div className="workspace-menu-wrap"><Button variant="ghost" icon={<ChevronDown size={14} />} aria-expanded={workspaceMenu} aria-haspopup="menu" onClick={() => setWorkspaceMenu((value) => !value)}>Workspace</Button>{workspaceMenu && <><button className="context-scrim" aria-label="Close workspace menu" onClick={() => setWorkspaceMenu(false)} /><div className="context-popover workspace-popover" role="menu"><button role="menuitem" onClick={() => { setWorkspaceMenu(false); renameWorkspaceById(workspace.id) }}>Rename workspace</button><button role="menuitem" onClick={reconfigureWorkspace}>Reconfigure workspace</button><button role="menuitem" onClick={() => navigate(`/setup/${project.id}`)}>New workspace for this project</button><span className="menu-separator" /><button role="menuitem" onClick={() => void restartAll()}><RotateCcw size={14} />Restart all terminals</button><button role="menuitem" onClick={() => void stopAll()}><CircleStop size={14} />Stop all terminals</button><button role="menuitem" onClick={openLauncher}><FolderOpen size={14} />Project launcher</button><button role="menuitem" className="danger-item" onClick={() => void closeWorkspace()}>Close workspace</button></div></>}</div></>}
     sidebar={<ForgeSpaceSidebar project={project} activeWorkspaceId={workspace.id} workspaces={sidebarWorkspaces} recents={recentWorkspaces} collapsed={collapsed} width={sidebarWidth} switchingWorkspaceId={switchingWorkspaceId} projectFolderMissing={projectFolderMissing} loadingWorkspaces={projectWorkspaces.length === 0 && loading} actions={sidebarActions} placements={placements} monitors={monitors} openProjects={sidebarOpenProjects} />}
-    canvas={<>{error && <div className="workspace-error"><ErrorNotice message={error} onRetry={() => void restartAll()} /></div>}<MonitorRecoveryWatcher monitors={monitors} onChanged={handleMonitorChanged} /><section className="terminal-canvas"><WorkspaceCanvas reducedMotion={reducedMotion} persist={persistCanvas} onFocusPane={setActivePane} renderPane={renderPane} /></section></>}
+    canvas={<>{error && <div className="workspace-error"><ErrorNotice message={error} onRetry={() => void restartAll()} /></div>}<MonitorRecoveryWatcher monitors={monitors} onChanged={handleMonitorChanged} /><div className={`workspace-surface-host${panelOpen && !panelMaximized ? ' has-panel' : ''}${panelOpen && panelMaximized ? ' is-panel-max' : ''}${panelResizing ? ' is-resizing' : ''}`} style={{ '--tool-panel-width': `${panelWidth}px` } as CSSProperties}><section className="terminal-canvas"><WorkspaceCanvas reducedMotion={reducedMotion} persist={persistCanvas} onFocusPane={setActivePane} renderPane={renderPane} /></section>{panelOpen && !panelMaximized && <div className="tool-panel-resizer" role="separator" aria-orientation="vertical" aria-label="Resize workspace panel" onPointerDown={startPanelResize} />}{panelMounted && <WorkspaceToolPanel projectId={project.id} projectRootPath={project.rootPath} workspaceId={workspace.id} visible={panelOpen} maximized={panelMaximized} tool={panelTool} browserContext={{ workspaceId: workspace.id, workspaceName: workspace.name, projectId: project.id, projectName: project.name, worktree: project.gitBranch ?? undefined, agentLabel: activePane?.title }} onSendToAgent={sendContextToAgent} onToolChange={(tool) => useWorkspacePanelStore.getState().setTool(tool)} onToggleMaximize={() => useWorkspacePanelStore.getState().toggleMaximized()} onClose={() => useWorkspacePanelStore.getState().closePanel()} />}</div></>}
     statusBar={<><span>{project.gitBranch || 'No branch'}</span><span className="status-path" title={project.rootPath}>{project.name}</span><span>{running}/{workspace.panes.length} running</span><span>{activePane?.title || 'No active pane'}</span>{attentionQueue.length > 0 && <span className="status-alert">{attentionQueue.length} agent attention</span>}{Object.keys(paneErrors).some((id) => paneErrors[id]) && <span className="status-alert">Pane error</span>}</>}
   >
     {projectClosePrompt && <Modal title={`Close ${projectClosePrompt.projectName}?`} onClose={() => { if (!projectCloseBusy) setProjectClosePrompt(undefined) }}><div className="restore-summary"><div><strong>{projectClosePrompt.activeSwarms} active Swarm{projectClosePrompt.activeSwarms === 1 ? '' : 's'}</strong><span>Swarm state remains bound to this Project.</span></div><p>Keep the Swarms running in the background, or pause them before closing the Project session.</p><div className="modal-actions"><Button variant="ghost" disabled={projectCloseBusy} onClick={() => setProjectClosePrompt(undefined)}>Cancel</Button><Button variant="secondary" data-autofocus disabled={projectCloseBusy} onClick={() => void completeProjectClose(projectClosePrompt.projectId, 'pause_and_close')}>Pause and close</Button><Button variant="primary" disabled={projectCloseBusy} onClick={() => void completeProjectClose(projectClosePrompt.projectId, 'keep_running')}>Keep running</Button></div></div></Modal>}

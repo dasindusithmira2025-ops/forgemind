@@ -1,5 +1,5 @@
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
-import type { AgentStateEvent, RemoteProjection, RepositoryApprovalRequest, RepositoryOperationEvent, RepositoryOperationRecord, RestorationProgress, SwarmChangedEvent, TerminalExitEvent, TerminalOutputEvent, TerminalStatusEvent } from './types'
+import type { AgentStateEvent, BrowserEvent, ProjectFileChangeBatch, RemoteProjection, RepositoryApprovalRequest, RepositoryOperationEvent, RepositoryOperationRecord, RestorationProgress, SwarmChangedEvent, TerminalExitEvent, TerminalOutputEvent, TerminalStatusEvent } from './types'
 
 type TerminalOutputWireEvent = Omit<TerminalOutputEvent, 'data'> & { data: string }
 
@@ -33,9 +33,18 @@ export const onRepositoryStateChanged = (handler: (projectId: string) => void): 
 export const onRepositorySyncHealth = (handler: (projection: RemoteProjection) => void): Promise<UnlistenFn> =>
   listen<RemoteProjection>('repository-sync-health', (event) => handler(event.payload))
 
+/** Debounced, coalesced filesystem changes for a Project the current window is watching. */
+export const onProjectFileChanged = (handler: (batch: ProjectFileChangeBatch) => void): Promise<UnlistenFn> =>
+  listen<ProjectFileChangeBatch>('project-file-changed', (event) => handler(event.payload))
+
 /** Fired when a Swarm changes; the owning Project id prevents cross-project cache refreshes. */
 export const onSwarmChanged = (handler: (event: SwarmChangedEvent) => void): Promise<UnlistenFn> =>
   listen<SwarmChangedEvent>('swarm-changed', (event) => handler(event.payload))
+
+/** Lifecycle + security events from an embedded browser view (load, title, blocked nav, inspection).
+ * Payloads originate in Rust hooks — never the page — but are still re-validated before use. */
+export const onBrowserEvent = (handler: (event: BrowserEvent) => void): Promise<UnlistenFn> =>
+  listen<BrowserEvent>('browser-event', (event) => handler(event.payload))
 
 function decodeBase64(encoded: string): Uint8Array {
   const binary = atob(encoded)

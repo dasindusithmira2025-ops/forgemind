@@ -932,3 +932,96 @@ export interface SavePresetRequest {
   isDefault?: boolean
   roles: SwarmRoleConfig[]
 }
+
+// ---- Code surface / filesystem -----------------------------------------------------------
+export type FileKind = 'file' | 'directory' | 'symlink'
+export type FileEncoding = 'utf8' | 'utf8_bom' | 'binary'
+export type LineEnding = 'lf' | 'crlf' | 'mixed' | 'none'
+export type FileChangeKind = 'created' | 'modified' | 'deleted'
+
+export interface DirectoryEntry {
+  name: string
+  relativePath: string
+  kind: FileKind
+  size: number
+  modifiedMs: number | null
+  isSymlink: boolean
+  symlinkBroken: boolean
+  isHidden: boolean
+  readonly: boolean
+}
+
+export interface DirectoryListing {
+  projectId: string
+  relativePath: string
+  entries: DirectoryEntry[]
+  truncated: boolean
+  totalEntries: number
+}
+
+export interface FileContents {
+  projectId: string
+  relativePath: string
+  content: string | null
+  sha256: string
+  size: number
+  encoding: FileEncoding
+  lineEnding: LineEnding
+  binary: boolean
+  readonly: boolean
+}
+
+export interface FileWriteResult {
+  projectId: string
+  relativePath: string
+  sha256: string
+  size: number
+  modifiedMs: number | null
+}
+
+export interface FsEntryInfo {
+  projectId: string
+  relativePath: string
+  name: string
+  kind: FileKind
+  size: number
+  modifiedMs: number | null
+}
+
+export interface FsPath {
+  projectId: string
+  relativePath: string
+}
+
+export interface ProjectFileIndex {
+  projectId: string
+  files: string[]
+  truncated: boolean
+}
+
+export interface ProjectFileChange {
+  relativePath: string
+  kind: FileChangeKind
+}
+
+export interface ProjectFileChangeBatch {
+  projectId: string
+  changes: ProjectFileChange[]
+}
+
+/** Geometry (CSS/logical pixels, relative to the window content area) for the embedded browser view. */
+export interface BrowserBounds {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+/** Lifecycle + security events emitted by an embedded browser view. `payload` on `inspect-selected`
+ * is an opaque base64url string that the frontend decodes and re-sanitizes before use. */
+export type BrowserEvent =
+  | { kind: 'load-started'; workspaceId: string; url: string }
+  | { kind: 'load-finished'; workspaceId: string; url: string }
+  | { kind: 'title-changed'; workspaceId: string; title: string }
+  | { kind: 'nav-blocked'; workspaceId: string; url: string; scheme: string }
+  | { kind: 'inspect-selected'; workspaceId: string; payload: string }

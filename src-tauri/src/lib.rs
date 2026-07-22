@@ -8,8 +8,8 @@ mod services;
 
 use database::DatabaseService;
 use services::{
-    AgentDetector, RepositoryService, RestorationScheduler, TerminalManager, UpdateService,
-    WindowRegistry,
+    AgentDetector, FileSystemService, FileWatchService, RepositoryService, RestorationScheduler,
+    SelfWriteLedger, TerminalManager, UpdateService, WindowRegistry,
 };
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -23,6 +23,13 @@ pub struct AppState {
     terminals: TerminalManager,
     restoration: RestorationScheduler,
     repository: Arc<RepositoryService>,
+    /// Project-scoped, path-guarded filesystem access for the Code surface.
+    filesystem: FileSystemService,
+    /// Centralized per-Project filesystem watcher feeding the Code surface's external-change and
+    /// conflict detection.
+    file_watch: FileWatchService,
+    /// Owns the isolated embedded development-browser child webviews (one per Workspace).
+    browser: services::BrowserService,
     swarms: services::SwarmService,
     /// Authoritative runtime layer for open-Project sessions, Workspace placement, exclusive
     /// interactive leases, handoff coordination, and monitor state.
@@ -331,6 +338,13 @@ pub fn run() {
             );
             let windows = WindowRegistry::new(database.clone());
             let repository = Arc::new(RepositoryService::new(database.clone(), &data_dir));
+            // The editor's writes and the watcher share one ledger so PARALITH's own saves are not
+            // reported back to the editor as external changes.
+            let self_write_ledger = SelfWriteLedger::default();
+            let filesystem = FileSystemService::new(database.clone(), self_write_ledger.clone());
+            let file_watch =
+                FileWatchService::new(database.clone(), app.handle().clone(), self_write_ledger);
+            let browser = services::BrowserService::new(app.handle().clone());
             // The Swarm engine owns its own background scheduler thread; it starts here so
             // active Swarms keep progressing regardless of which window/view is focused.
             let swarms = services::SwarmService::new(
@@ -375,6 +389,9 @@ pub fn run() {
                 terminals,
                 restoration,
                 repository,
+                filesystem,
+                file_watch,
+                browser,
                 swarms,
                 windows,
                 log_directory,
@@ -483,6 +500,26 @@ pub fn run() {
             commands::stage_pane_file,
             commands::restore_pane_file,
             commands::create_isolated_pane_worktree,
+            commands::list_project_directory,
+            commands::read_project_file,
+            commands::write_project_file,
+            commands::create_project_file,
+            commands::create_project_directory,
+            commands::rename_project_entry,
+            commands::copy_project_entry,
+            commands::delete_project_entry,
+            commands::search_project_files,
+            commands::watch_project_files,
+            commands::unwatch_project_files,
+            commands::open_browser_view,
+            commands::browser_navigate,
+            commands::browser_reload,
+            commands::browser_stop,
+            commands::browser_set_bounds,
+            commands::browser_set_visible,
+            commands::browser_set_zoom,
+            commands::browser_set_inspect,
+            commands::close_browser_view,
             commands::inspect_repository,
             commands::list_repository_branches,
             commands::get_repository_diff,
@@ -623,6 +660,10 @@ pub fn run() {
             } => {
                 if let Some(state) = app_handle.try_state::<AppState>() {
                     state.windows.forget_window(&label);
+                    state.file_watch.forget_window(&label);
+                    // Tear down any embedded browser webviews owned by the closing window so no
+                    // orphan child webview leaks after its host window is gone.
+                    state.browser.close_for_window(&label);
                 }
             }
             _ => {}

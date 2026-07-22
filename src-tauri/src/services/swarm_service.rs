@@ -163,6 +163,7 @@ impl AgentRuntime for SimAdapter {
 
 pub trait ProviderRuntimeAdapter: Send + Sync {
     fn provider(&self) -> AgentProvider;
+    #[allow(clippy::too_many_arguments)]
     fn arguments(
         &self,
         scope: &SwarmRuntimeScope,
@@ -687,7 +688,7 @@ impl ProductionAgentRuntime {
             .list_swarm_agents(&swarm.id)?
             .iter()
             .any(|candidate| candidate.role == SwarmRole::Integrator);
-        if !swarm.repository_identity.is_some()
+        if swarm.repository_identity.is_none()
             || agent.role != SwarmRole::Builder
             || !isolated_integration
         {
@@ -1205,10 +1206,7 @@ fn normalized_event_paths(value: &serde_json::Value) -> Vec<String> {
     paths
 }
 
-fn provider_session_id<'a>(
-    runtime: SwarmRuntimeKind,
-    value: &'a serde_json::Value,
-) -> Option<&'a str> {
+fn provider_session_id(runtime: SwarmRuntimeKind, value: &serde_json::Value) -> Option<&str> {
     match runtime {
         SwarmRuntimeKind::Claude => value.get("session_id").and_then(serde_json::Value::as_str),
         SwarmRuntimeKind::Codex => value.get("thread_id").and_then(serde_json::Value::as_str),
@@ -2495,7 +2493,7 @@ impl SwarmService {
         if destination
             .extension()
             .and_then(|value| value.to_str())
-            .is_none_or(|extension| !extension.eq_ignore_ascii_case("md"))
+            .map_or(true, |extension| !extension.eq_ignore_ascii_case("md"))
         {
             return Err(AppError::new(
                 "invalid_swarm_report_path",
@@ -2503,7 +2501,7 @@ impl SwarmService {
                 true,
             ));
         }
-        if destination.parent().is_none_or(|parent| !parent.is_dir()) {
+        if destination.parent().map_or(true, |parent| !parent.is_dir()) {
             return Err(AppError::new(
                 "swarm_report_folder_unavailable",
                 "The selected report folder is unavailable.",
@@ -2987,7 +2985,7 @@ impl SwarmService {
                         && role_can_execute(agent.role, task.role)
                         && task
                             .required_runtime
-                            .is_none_or(|runtime| agent.runtime == runtime)
+                            .map_or(true, |runtime| agent.runtime == runtime)
                 })
                 // Prefer a configured identity that has not run yet. This consumes mixed runtime
                 // pools fairly before reusing a compatible warm worker.

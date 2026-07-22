@@ -2094,16 +2094,15 @@ impl RepositoryService {
         project: &Project,
         requested: Option<&str>,
     ) -> AppResult<PathBuf> {
-        let project_root = git_canonicalize(Path::new(&project.root_path))
-            .map_err(|error| {
-                AppError::new(
-                    "project_folder_missing",
-                    "The Project folder is unavailable.",
-                    true,
-                )
-                .detail(error.to_string())
-                .entity(&project.id)
-            })?;
+        let project_root = git_canonicalize(Path::new(&project.root_path)).map_err(|error| {
+            AppError::new(
+                "project_folder_missing",
+                "The Project folder is unavailable.",
+                true,
+            )
+            .detail(error.to_string())
+            .entity(&project.id)
+        })?;
         let candidate = git_canonicalize(Path::new(requested.unwrap_or(&project.root_path)))
             .map_err(|error| {
                 AppError::new(
@@ -2172,7 +2171,8 @@ impl RepositoryService {
                 base.join(value)
             }
         };
-        let actual = git_canonicalize(&resolve_common(&path, &actual_common)).map_err(AppError::from)?;
+        let actual =
+            git_canonicalize(&resolve_common(&path, &actual_common)).map_err(AppError::from)?;
         let expected =
             git_canonicalize(&resolve_common(repository, &repo_common)).map_err(AppError::from)?;
         if actual != expected {
