@@ -1,0 +1,143 @@
+/* Docked workspace-tool panel. Tokens only — no hardcoded colors/sizes — per the design system.
+ * The base .workspace-surface-host grid lives in index.css so the terminal fills correctly before
+ * this (lazily-loaded) stylesheet arrives; these rules only add the panel/resizer tracks. */
+
+/* Three-track split: terminal | resize handle | panel. The terminal keeps a real min width so a
+ * wide panel can never crush it to nothing. */
+.workspace-surface-host.has-panel {
+  grid-template-columns: minmax(220px, 1fr) 6px var(--tool-panel-width, 520px);
+}
+/* Maximized: single track; the panel overlays the still-mounted, full-size terminal canvas. */
+.workspace-surface-host.is-panel-max {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.tool-panel-resizer {
+  grid-column: 2;
+  position: relative;
+  cursor: col-resize;
+  background: var(--border);
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.tool-panel-resizer::after {
+  content: '';
+  position: absolute;
+  inset: 0 -3px;
+}
+.tool-panel-resizer:hover,
+.workspace-surface-host.is-resizing .tool-panel-resizer {
+  background: var(--accent);
+}
+
+.workspace-tool-panel {
+  grid-column: 3;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  border-left: 1px solid var(--border);
+}
+.workspace-surface-host.is-panel-max .workspace-tool-panel {
+  grid-column: 1;
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  border-left: 0;
+}
+
+/* Panel content column: compact tool bar + active tool surface */
+.tool-panel-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Compact top tool switcher (Browser | Editor). Scrolls horizontally rather than wrapping so it
+ * degrades gracefully on a narrow panel. */
+.tool-switcher {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.tool-switcher::-webkit-scrollbar { display: none; }
+.tool-switch-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-3);
+  height: var(--pane-header-height);
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  font-size: var(--text-xs);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out);
+}
+.tool-switch-btn:hover { color: var(--text); background: var(--surface-hover); }
+.tool-switch-btn.is-active { color: var(--text-strong); border-bottom-color: var(--accent-edge); }
+.tool-switch-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.tool-switch-btn:disabled { opacity: .5; cursor: default; }
+
+.tool-panel-spacer { flex: 0 0 auto; }
+
+/* Surface host keeps the (display-toggled) Editor filling the body while inactive. */
+.tool-surface-host {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+}
+.tool-panel-header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: var(--pane-header-height);
+  padding: 0 4px 0 var(--space-3);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.tool-panel-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--faint);
+}
+.tool-panel-actions { display: inline-flex; align-items: center; gap: 2px; }
+.tool-panel-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--icon-btn);
+  height: var(--icon-btn);
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.tool-panel-actions button:hover { color: var(--text); background: var(--surface-hover); }
+.tool-panel-actions button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+.tool-panel-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  background: var(--canvas);
+}

@@ -1,5 +1,7 @@
 pub mod agent_commands;
+pub mod browser_commands;
 pub mod diagnostics_commands;
+pub mod filesystem_commands;
 pub mod git_commands;
 pub mod project_commands;
 pub mod repository_commands;
@@ -11,7 +13,9 @@ pub mod window_commands;
 pub mod workspace_commands;
 
 pub use agent_commands::*;
+pub use browser_commands::*;
 pub use diagnostics_commands::*;
+pub use filesystem_commands::*;
 pub use git_commands::*;
 pub use project_commands::*;
 pub use repository_commands::*;

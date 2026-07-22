@@ -28,6 +28,67 @@ impl Default for AgentDetector {
 }
 
 impl AgentDetector {
+    /// Check provider authentication without returning or logging account identifiers or tokens.
+    /// The executable has already passed the normal version/path probe.
+    pub fn authenticated(&self, provider: AgentProvider, executable: &Path) -> (bool, String) {
+        let arguments: &[&str] = match provider {
+            AgentProvider::Claude => &["auth", "status"],
+            AgentProvider::Codex => &["login", "status"],
+            _ => {
+                return (
+                    false,
+                    "Authentication is not supported for this runtime.".into(),
+                )
+            }
+        };
+        let mut child = match background_command(executable)
+            .args(arguments)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+        {
+            Ok(child) => child,
+            Err(_) => return (false, "The authentication check could not start.".into()),
+        };
+        match child.wait_timeout(DETECTION_TIMEOUT) {
+            Ok(Some(status)) => {
+                let mut bytes = Vec::new();
+                if let Some(stdout) = child.stdout.take() {
+                    let _ = stdout.take(OUTPUT_LIMIT as u64).read_to_end(&mut bytes);
+                }
+                if let Some(stderr) = child.stderr.take() {
+                    let _ = stderr
+                        .take(OUTPUT_LIMIT.saturating_sub(bytes.len()) as u64)
+                        .read_to_end(&mut bytes);
+                }
+                let output = String::from_utf8_lossy(&bytes);
+                let authenticated = status.success()
+                    && match provider {
+                        AgentProvider::Claude => serde_json::from_str::<serde_json::Value>(&output)
+                            .ok()
+                            .and_then(|value| {
+                                value.get("loggedIn").and_then(|value| value.as_bool())
+                            })
+                            .unwrap_or(false),
+                        AgentProvider::Codex => output.to_ascii_lowercase().contains("logged in"),
+                        _ => false,
+                    };
+                if authenticated {
+                    (true, "Authenticated and ready.".into())
+                } else {
+                    (false, "Authentication is required.".into())
+                }
+            }
+            Ok(None) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                (false, "The authentication check timed out.".into())
+            }
+            Err(_) => (false, "The authentication check failed.".into()),
+        }
+    }
+
     pub fn detect_all(
         &self,
         force: bool,

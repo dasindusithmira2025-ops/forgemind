@@ -1,25 +1,33 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ChevronDown, Rocket } from 'lucide-react'
+import { confirm, open } from '@tauri-apps/plugin-dialog'
+import { AlertTriangle, ArrowDown, ArrowUp, ChevronDown, ChevronRight, Copy, FilePlus2, Plus, Rocket, Save, Trash2 } from 'lucide-react'
+import { native } from '../../native/commands'
+import type {
+  CreateSwarmRequest,
+  Project,
+  SwarmLaunchPreview,
+  SwarmPreset,
+  SwarmRole,
+  SwarmRoleConfig,
+  SwarmRuntimeKind,
+} from '../../native/types'
 import { useSwarmStore } from './swarmStore'
-import { roleLabel } from './swarmPresentation'
-import type { SwarmPreset, SwarmRoleConfig, SwarmRuntimeKind } from '../../native/types'
+import { roleLabel, runtimeLabel } from './swarmPresentation'
 
-const RUNTIME_OPTIONS: { value: SwarmRuntimeKind; label: string }[] = [
-  { value: 'auto', label: 'Auto' },
-  { value: 'claude', label: 'Claude' },
-  { value: 'codex', label: 'Codex' },
-]
+type Step = 'team' | 'mission' | 'review'
+interface RosterAgent { id: string; role: SwarmRole; runtime: Exclude<SwarmRuntimeKind, 'auto'> }
 
-/**
- * The Swarm creation experience: mission, team preset, parallel capacity, optional constraints,
- * and one primary Start action. Custom Team reveals per-role runtime assignment. Everything is
- * validated and then persisted by the backend `create_swarm` command — no local Swarm state.
- */
-export function SwarmCreatePanel({
-  projectId,
-  onCreated,
-  onCancel,
-}: {
+const ROLES: SwarmRole[] = ['coordinator', 'scout', 'builder', 'debugger', 'reviewer', 'integrator']
+const RESPONSIBILITY: Record<SwarmRole, string> = {
+  coordinator: 'Plans the mission, delegates runnable work, and maintains shared context.',
+  scout: 'Inspects the repository and submits read-only architecture findings.',
+  builder: 'Implements assigned work inside the project or an isolated worktree.',
+  debugger: 'Diagnoses failed verification and owns bounded repair tasks.',
+  reviewer: 'Reviews independently and cannot approve work from its own session.',
+  integrator: 'Combines verified work through the controlled integration queue.',
+}
+
+export function SwarmCreatePanel({ projectId, onCreated, onCancel }: {
   projectId: string
   onCreated: (swarmId: string) => void
   onCancel: () => void
@@ -28,235 +36,313 @@ export function SwarmCreatePanel({
   const loadPresets = useSwarmStore((state) => state.loadPresets)
   const create = useSwarmStore((state) => state.create)
   const start = useSwarmStore((state) => state.start)
-
-  const [mission, setMission] = useState('')
+  const savePreset = useSwarmStore((state) => state.savePreset)
+  const deletePreset = useSwarmStore((state) => state.deletePreset)
+  const [step, setStep] = useState<Step>('team')
+  const [project, setProject] = useState<Project>()
   const [presetId, setPresetId] = useState('')
-  const [maxParallel, setMaxParallel] = useState<number>(6)
+  const [customPresetId, setCustomPresetId] = useState<string>()
+  const [presetName, setPresetName] = useState('Custom team')
+  const [presetDefault, setPresetDefault] = useState(false)
+  const [roster, setRoster] = useState<RosterAgent[]>([])
+  const [expanded, setExpanded] = useState<string>()
+  const [maxParallel, setMaxParallel] = useState(4)
+  const [mission, setMission] = useState('')
   const [instructions, setInstructions] = useState('')
-  const [showInstructions, setShowInstructions] = useState(false)
-  const [customRoles, setCustomRoles] = useState<SwarmRoleConfig[] | undefined>(undefined)
+  const [attachments, setAttachments] = useState<string[]>([])
+  const [preview, setPreview] = useState<SwarmLaunchPreview>()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
+  useEffect(() => { if (presets.length === 0) void loadPresets() }, [loadPresets, presets.length])
   useEffect(() => {
-    if (presets.length === 0) void loadPresets()
-  }, [presets.length, loadPresets])
-
-  // Pick the default preset once presets load.
+    const load = native.getProject?.(projectId)
+    void load?.then(setProject).catch(() => undefined)
+  }, [projectId])
   useEffect(() => {
-    if (!presetId && presets.length > 0) {
-      const def = presets.find((preset) => preset.isDefault) ?? presets[0]
-      setPresetId(def.id)
-      setMaxParallel(def.maxParallel)
-    }
-  }, [presets, presetId])
+    if (presetId || presets.length === 0) return
+    const selected = presets.find((item) => item.isDefault) ?? presets[0]
+    selectPreset(selected)
+  // Selecting the initial backend default exactly once is intentional.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [presetId, presets])
 
-  const selectedPreset = useMemo(
-    () => presets.find((preset) => preset.id === presetId),
-    [presets, presetId],
-  )
-  const isCustom = presetId === '__custom__'
-  const effectiveRoles = isCustom ? customRoles ?? defaultCustomRoles() : selectedPreset?.roles ?? []
+  const roles = useMemo(() => rosterToRoles(roster), [roster])
+  const roleCounts = useMemo(() => ROLES.map((role) => ({ role, count: roster.filter((agent) => agent.role === role).length })).filter((item) => item.count > 0), [roster])
+  const duplicateNames = new Set(roster.map((agent) => agent.id)).size !== roster.length
+  const runtimeWarnings = preview?.warnings ?? []
 
-  const selectPreset = (id: string, preset?: SwarmPreset) => {
-    setPresetId(id)
-    if (id === '__custom__') {
-      setCustomRoles(customRoles ?? defaultCustomRoles())
-    } else if (preset) {
-      setMaxParallel(preset.maxParallel)
-    }
+  function selectPreset(preset: SwarmPreset) {
+    setPresetId(preset.id)
+    setCustomPresetId(preset.builtin ? undefined : preset.id)
+    setPresetName(preset.builtin ? `${preset.name} copy` : preset.name)
+    setPresetDefault(preset.isDefault)
+    setRoster(expandRoster(preset.roles))
+    setMaxParallel(preset.maxParallel)
+    setPreview(undefined)
+    setError('')
   }
 
-  const submit = async () => {
-    setError('')
-    if (mission.trim().length < 4) {
-      setError('Describe what you want the Swarm to build, fix, or investigate.')
+  function updateAgent(id: string, patch: Partial<RosterAgent>) {
+    setRoster((current) => current.map((agent) => agent.id === id ? { ...agent, ...patch } : agent))
+    setPresetId('__custom__')
+  }
+
+  function moveAgent(id: string, direction: -1 | 1) {
+    setRoster((current) => {
+      const index = current.findIndex((agent) => agent.id === id)
+      const destination = index + direction
+      if (index < 0 || destination < 0 || destination >= current.length) return current
+      const next = [...current]
+      ;[next[index], next[destination]] = [next[destination], next[index]]
+      return next
+    })
+    setPresetId('__custom__')
+  }
+
+  async function persistPreset(duplicate = false) {
+    const name = presetName.trim()
+    if (!name) {
+      setError('Enter a name for the custom team preset.')
       return
     }
     setBusy(true)
+    setError('')
+    await savePreset({ id: duplicate ? undefined : customPresetId, name, maxParallel, instructions, isDefault: presetDefault, roles })
+    await loadPresets()
+    const saved = useSwarmStore.getState().presets.find((item) => !item.builtin && item.name === name)
+    if (saved) selectPreset(saved)
+    setBusy(false)
+  }
+
+  async function removePreset() {
+    if (!customPresetId) return
+    const approved = await confirm(`Delete the custom preset “${presetName}”?`, {
+      title: 'Delete team preset',
+      kind: 'warning',
+    })
+    if (!approved) return
+    setBusy(true)
+    await deletePreset(customPresetId)
+    setCustomPresetId(undefined)
+    const fallback = useSwarmStore.getState().presets.find((item) => item.isDefault) ?? useSwarmStore.getState().presets[0]
+    if (fallback) selectPreset(fallback)
+    setBusy(false)
+  }
+
+  function addAgent() {
+    const ordinal = roster.filter((agent) => agent.role === 'builder').length + 1
+    setRoster((current) => [...current, { id: `builder-${ordinal}-${crypto.randomUUID()}`, role: 'builder', runtime: 'codex' }])
+    setPresetId('__custom__')
+  }
+
+  function removeAgent(id: string) {
+    setRoster((current) => {
+      const next = current.filter((item) => item.id !== id)
+      setMaxParallel((capacity) => Math.max(1, Math.min(capacity, next.length)))
+      return next
+    })
+    setPresetId('__custom__')
+  }
+
+  async function moveToMission() {
+    if (roster.length === 0 || duplicateNames) {
+      setError('Add at least one valid agent before continuing.')
+      return
+    }
+    setError('')
+    setStep('mission')
+  }
+
+  function request(): CreateSwarmRequest {
+    return {
+      projectId,
+      mission: mission.trim(),
+      presetId: presetId === '__custom__' ? (presets.find((item) => item.isDefault)?.id ?? presets[0]?.id ?? 'auto') : presetId,
+      maxParallel,
+      instructions: instructions.trim() || undefined,
+      roles,
+      attachments,
+    }
+  }
+
+  async function review() {
+    if (mission.trim().length < 4) {
+      setError('Describe the engineering outcome before continuing.')
+      return
+    }
+    setBusy(true)
+    setError('')
     try {
-      const swarm = await create({
-        projectId,
-        mission: mission.trim(),
-        presetId: isCustom ? (presets.find((p) => p.isDefault)?.id ?? presets[0]?.id ?? 'auto') : presetId,
-        maxParallel,
-        instructions: instructions.trim() || undefined,
-        roles: isCustom ? customRoles : undefined,
-      })
-      await start(swarm.id)
-      onCreated(swarm.id)
+      setPreview(await native.previewSwarmLaunch(request()))
+      setStep('review')
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Could not create the Swarm.')
+      setError(caught instanceof Error ? caught.message : 'Launch validation failed.')
     } finally {
       setBusy(false)
     }
   }
 
+  async function launch() {
+    if (!preview?.canLaunch) return
+    setBusy(true)
+    setError('')
+    try {
+      const swarm = await create(request())
+      await start(swarm.id)
+      onCreated(swarm.id)
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'The Swarm could not launch.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function attachFiles() {
+    const selected = await open({ directory: false, multiple: true, defaultPath: project?.rootPath, title: 'Attach project context' })
+    if (!selected) return
+    const paths = Array.isArray(selected) ? selected : [selected]
+    setAttachments((current) => [...new Set([...current, ...paths])])
+  }
+
   return (
-    <div className="swarm-create">
-      <header className="swarm-create-head">
-        <h2>New Swarm</h2>
-        <p>Describe a mission, choose a team, and Paralith will plan and run the work.</p>
+    <div className="swarm-create-v2">
+      <header className="swarm-create-v2-head">
+        <div>
+          <span className="section-label">New project swarm</span>
+          <h2>Assemble the team</h2>
+          <p>{project?.name ?? 'Current project'} · the project remains the security and context boundary.</p>
+        </div>
+        <button type="button" className="button button-ghost" onClick={onCancel}>Cancel</button>
       </header>
 
-      <label className="swarm-field">
-        <span className="swarm-field-label">Mission</span>
-        <textarea
-          className="swarm-mission-input"
-          placeholder="e.g. Fix multi-window reliability on secondary monitors"
-          value={mission}
-          onChange={(event) => setMission(event.target.value)}
-          rows={3}
-          autoFocus
-        />
-      </label>
-
-      <div className="swarm-field">
-        <span className="swarm-field-label">Team</span>
-        <div className="swarm-preset-grid" role="radiogroup" aria-label="Team preset">
-          {presets.map((preset) => (
-            <button
-              key={preset.id}
-              type="button"
-              role="radio"
-              aria-checked={presetId === preset.id}
-              className={`swarm-preset-card ${presetId === preset.id ? 'is-selected' : ''}`}
-              onClick={() => selectPreset(preset.id, preset)}
-            >
-              <span className="swarm-preset-name">{preset.name}</span>
-              <span className="swarm-preset-roles">{describeRoles(preset.roles)}</span>
-            </button>
-          ))}
-          <button
-            type="button"
-            role="radio"
-            aria-checked={isCustom}
-            className={`swarm-preset-card ${isCustom ? 'is-selected' : ''}`}
-            onClick={() => selectPreset('__custom__')}
-          >
-            <span className="swarm-preset-name">Custom Team</span>
-            <span className="swarm-preset-roles">Configure each role</span>
+      <nav className="swarm-create-steps" aria-label="Swarm setup">
+        {(['team', 'mission', 'review'] as Step[]).map((item, index) => (
+          <button key={item} type="button" className={step === item ? 'is-current' : ''} disabled={index > ['team', 'mission', 'review'].indexOf(step)} onClick={() => setStep(item)}>
+            <span>0{index + 1}</span>{item === 'review' ? 'Review & Launch' : item[0].toUpperCase() + item.slice(1)}
           </button>
-        </div>
-      </div>
+        ))}
+      </nav>
 
-      {isCustom ? (
-        <div className="swarm-field">
-          <span className="swarm-field-label">Roles</span>
-          <div className="swarm-custom-roles">
-            {(customRoles ?? defaultCustomRoles()).map((role, index) => (
-              <div key={role.role} className="swarm-custom-role">
-                <label className="swarm-role-toggle">
-                  <input
-                    type="checkbox"
-                    checked={role.enabled}
-                    onChange={(event) =>
-                      setCustomRoles((prev) => updateRole(prev ?? defaultCustomRoles(), index, { enabled: event.target.checked }))
-                    }
-                  />
-                  <span>{roleLabel(role.role)}</span>
-                </label>
-                <input
-                  type="number"
-                  min={0}
-                  max={8}
-                  className="swarm-role-count"
-                  value={role.desiredCount}
-                  disabled={!role.enabled}
-                  onChange={(event) =>
-                    setCustomRoles((prev) => updateRole(prev ?? defaultCustomRoles(), index, { desiredCount: Number(event.target.value) }))
-                  }
-                  aria-label={`${roleLabel(role.role)} count`}
-                />
-                <select
-                  className="swarm-role-runtime"
-                  value={role.runtime}
-                  disabled={!role.enabled}
-                  onChange={(event) =>
-                    setCustomRoles((prev) => updateRole(prev ?? defaultCustomRoles(), index, { runtime: event.target.value as SwarmRuntimeKind }))
-                  }
-                  aria-label={`${roleLabel(role.role)} runtime`}
-                >
-                  {RUNTIME_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>{option.label}</option>
-                  ))}
-                </select>
-              </div>
+      {step === 'team' ? (
+        <section className="swarm-create-stage">
+          <div className="swarm-stage-intro"><h3>Choose the engineering team</h3><p>Each row is a persistent agent identity in the launched snapshot.</p></div>
+          <div className="swarm-preset-strip" role="radiogroup" aria-label="Team preset">
+            {presets.map((preset) => (
+              <button key={preset.id} type="button" role="radio" aria-checked={presetId === preset.id} className={presetId === preset.id ? 'is-selected' : ''} onClick={() => selectPreset(preset)}>
+                <strong>{preset.name}</strong><span>{expandRoster(preset.roles).length} agents · {preset.maxParallel} parallel</span>
+              </button>
             ))}
+            <button type="button" role="radio" aria-checked={presetId === '__custom__'} className={presetId === '__custom__' ? 'is-selected' : ''} onClick={() => setPresetId('__custom__')}>
+              <strong>Custom</strong><span>Current edited roster</span>
+            </button>
           </div>
-        </div>
-      ) : (
-        <p className="swarm-preset-summary">{describeRoles(effectiveRoles)}</p>
-      )}
 
-      <label className="swarm-field">
-        <span className="swarm-field-label">Parallel power</span>
-        <div className="swarm-parallel">
-          <input
-            type="range"
-            min={1}
-            max={16}
-            value={maxParallel}
-            onChange={(event) => setMaxParallel(Number(event.target.value))}
-          />
-          <span className="swarm-parallel-value">Auto — up to {maxParallel} agents</span>
-        </div>
-      </label>
+          <div className="swarm-preset-editor">
+            <label>Preset name<input value={presetName} onChange={(event) => { setPresetName(event.target.value); setPresetId('__custom__') }} /></label>
+            <label className="swarm-preset-default"><input type="checkbox" checked={presetDefault} onChange={(event) => { setPresetDefault(event.target.checked); setPresetId('__custom__') }} /> Use as default</label>
+            <button type="button" className="button button-secondary" disabled={busy} onClick={() => void persistPreset(false)}><Save size={14} />{customPresetId ? 'Update preset' : 'Save custom'}</button>
+            <button type="button" className="button button-ghost" disabled={busy} onClick={() => void persistPreset(true)}><Copy size={14} /> Duplicate</button>
+            {customPresetId ? <button type="button" className="button button-ghost tone-red" disabled={busy} onClick={() => void removePreset()}><Trash2 size={14} /> Delete</button> : <span>Built-in presets are immutable.</span>}
+          </div>
 
-      <div className="swarm-field">
-        <button
-          type="button"
-          className="swarm-disclosure"
-          aria-expanded={showInstructions}
-          onClick={() => setShowInstructions((value) => !value)}
-        >
-          <ChevronDown size={14} className={showInstructions ? 'is-open' : ''} />
-          Optional instructions
-        </button>
-        {showInstructions ? (
-          <textarea
-            className="swarm-instructions-input"
-            placeholder="e.g. Preserve the public Session API. Do not push to Git."
-            value={instructions}
-            onChange={(event) => setInstructions(event.target.value)}
-            rows={2}
-          />
-        ) : null}
-      </div>
-
+          <div className="swarm-roster-head"><span>Agent</span><span>Role</span><span>Runtime</span><span>Readiness</span><span /></div>
+          <div className="swarm-roster">
+            {roster.map((agent, index) => {
+              const isOpen = expanded === agent.id
+              return (
+                <div className={`swarm-roster-agent role-${agent.role}`} key={agent.id}>
+                  <button className="swarm-roster-summary" type="button" onClick={() => setExpanded(isOpen ? undefined : agent.id)} aria-expanded={isOpen}>
+                    {isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                    <strong>{displayName(agent, roster)}</strong>
+                    <span>{roleLabel(agent.role).replace(/s$/, '')}</span>
+                    <span className="swarm-runtime-mark">{runtimeLabel(agent.runtime)}</span>
+                    <span className="swarm-readiness-pending">Validated before launch</span>
+                    <span className="swarm-agent-index">{String(index + 1).padStart(2, '0')}</span>
+                  </button>
+                  {isOpen ? (
+                    <div className="swarm-roster-detail">
+                      <p>{RESPONSIBILITY[agent.role]}</p>
+                      <label>Role<select value={agent.role} onChange={(event) => updateAgent(agent.id, { role: event.target.value as SwarmRole })}>{ROLES.map((role) => <option key={role} value={role}>{roleLabel(role).replace(/s$/, '')}</option>)}</select></label>
+                      <label>Runtime<select value={agent.runtime} onChange={(event) => updateAgent(agent.id, { runtime: event.target.value as RosterAgent['runtime'] })}><option value="claude">Claude</option><option value="codex">Codex</option></select></label>
+                      <span className="swarm-permission-summary">{permissionSummary(agent.role)}</span>
+                      <div className="swarm-roster-order"><button type="button" aria-label={`Move ${displayName(agent, roster)} up`} disabled={index === 0} onClick={() => moveAgent(agent.id, -1)}><ArrowUp size={13} /></button><button type="button" aria-label={`Move ${displayName(agent, roster)} down`} disabled={index === roster.length - 1} onClick={() => moveAgent(agent.id, 1)}><ArrowDown size={13} /></button></div>
+                      <button type="button" className="swarm-remove-agent" onClick={() => removeAgent(agent.id)}><Trash2 size={13} /> Remove</button>
+                    </div>
+                  ) : null}
+                </div>
+              )
+            })}
+          </div>
+          <button type="button" className="swarm-add-agent" onClick={addAgent}><Plus size={14} /> Add agent</button>
+          <div className="swarm-team-footer">
+            <div className="swarm-role-chips">{roleCounts.map((item) => <span key={item.role}>{roleLabel(item.role)} {item.count}</span>)}</div>
+            <label>Maximum parallel capacity <input type="number" min={1} max={Math.max(1, roster.length)} value={maxParallel} onChange={(event) => setMaxParallel(Math.max(1, Math.min(Math.max(1, roster.length), Number(event.target.value))))} /></label>
+            <strong>{roster.length} configured</strong>
+          </div>
+          <div className="swarm-create-actions"><button type="button" className="button button-primary" onClick={moveToMission}>Continue to mission <ChevronRight size={14} /></button></div>
+        </section>
+      ) : step === 'mission' ? (
+        <section className="swarm-create-stage swarm-mission-stage">
+          <div className="swarm-stage-intro"><h3>Describe the outcome</h3><p>Paralith will inspect the repository, decompose the work, and infer safeguards.</p></div>
+          <textarea autoFocus rows={7} value={mission} onChange={(event) => setMission(event.target.value)} placeholder="What should this team change, verify, or investigate?" />
+          <label className="swarm-optional-field"><span>Optional constraints</span><textarea rows={3} value={instructions} onChange={(event) => setInstructions(event.target.value)} placeholder="Preserve a public API, avoid a dependency, or note a manual acceptance condition…" /></label>
+          <div className="swarm-attachments">
+            <button type="button" className="button button-secondary" onClick={attachFiles}><FilePlus2 size={14} /> Add project context</button>
+            {attachments.map((path) => <span key={path} title={path}>{path.split(/[\\/]/).at(-1)}<button type="button" aria-label={`Remove ${path}`} onClick={() => setAttachments((current) => current.filter((item) => item !== path))}>×</button></span>)}
+          </div>
+          <p className="swarm-safeguard-hint">Safeguards are inferred from the mission, repository, tests, Git state, and staffed Reviewer.</p>
+          <div className="swarm-create-actions"><button type="button" className="button button-ghost" onClick={() => setStep('team')}>Back</button><button type="button" className="button button-primary" disabled={busy} onClick={review}>{busy ? 'Validating…' : 'Review launch'} <ChevronRight size={14} /></button></div>
+        </section>
+      ) : preview ? (
+        <section className="swarm-create-stage swarm-launch-review">
+          <div className="swarm-stage-intro"><span className="section-label">Generated swarm name</span><h3>{preview.name}</h3><p>{project?.name} · {preview.projectRoot}</p></div>
+          <div className="swarm-review-grid">
+            <article><span>Mission</span><p>{mission}</p></article>
+            <article><span>Capacity</span><strong>{preview.totalAgents} agents</strong><p>Up to {preview.maxParallel} active in parallel</p></article>
+            <article className="swarm-review-roster"><span>Team snapshot</span>{roster.map((agent) => <p key={agent.id}><strong>{displayName(agent, roster)}</strong><em>{runtimeLabel(agent.runtime)}</em></p>)}</article>
+            <article><span>Runtime readiness</span>{preview.runtimeReadiness.map((runtime) => <p key={runtime.runtime} className={runtime.available ? 'tone-green' : 'tone-amber'}><strong>{runtimeLabel(runtime.runtime)}</strong> {runtime.message}</p>)}</article>
+            <article className="swarm-review-safeguards"><span>Inferred safeguards</span>{preview.safeguards.map((item) => <p key={item.code}><strong>{item.label}</strong>{item.reason}</p>)}</article>
+            <article><span>Attachments</span><p>{preview.attachments.length > 0 ? `${preview.attachments.length} project files` : 'No additional context'}</p></article>
+          </div>
+          {runtimeWarnings.length > 0 ? <div className="swarm-launch-warning" role="alert"><AlertTriangle size={16} /><div><strong>Launch is blocked</strong>{runtimeWarnings.map((warning) => <p key={warning}>{warning}</p>)}</div></div> : null}
+          <div className="swarm-create-actions"><button type="button" className="button button-ghost" onClick={() => setStep('mission')}>Back</button><button type="button" className="button button-primary" disabled={busy || !preview.canLaunch} onClick={launch}><Rocket size={15} />{busy ? 'Preparing…' : 'Launch Swarm'}</button></div>
+        </section>
+      ) : null}
       {error ? <p className="swarm-error" role="alert">{error}</p> : null}
-
-      <div className="swarm-create-actions">
-        <button type="button" className="button button-ghost" onClick={onCancel} disabled={busy}>
-          Cancel
-        </button>
-        <button type="button" className="button button-primary" onClick={submit} disabled={busy}>
-          <Rocket size={15} />
-          {busy ? 'Starting…' : 'Start Swarm'}
-        </button>
-      </div>
     </div>
   )
 }
 
-function describeRoles(roles: SwarmRoleConfig[]): string {
-  return roles
-    .filter((role) => role.enabled && role.desiredCount > 0)
-    .map((role) => `${roleLabel(role.role)} ×${role.desiredCount}`)
-    .join(' · ')
+function expandRoster(roles: SwarmRoleConfig[]): RosterAgent[] {
+  const result: RosterAgent[] = []
+  for (const role of roles.filter((item) => item.enabled)) {
+    for (const allocation of role.allocations) {
+      const runtime = allocation.runtime === 'auto' ? (role.role === 'reviewer' ? 'codex' : 'claude') : allocation.runtime
+      for (let index = 0; index < allocation.count; index += 1) result.push({ id: `${role.role}-${runtime}-${index}-${crypto.randomUUID()}`, role: role.role, runtime })
+    }
+  }
+  return result
 }
 
-function updateRole(roles: SwarmRoleConfig[], index: number, patch: Partial<SwarmRoleConfig>): SwarmRoleConfig[] {
-  return roles.map((role, position) => (position === index ? { ...role, ...patch } : role))
+function rosterToRoles(roster: RosterAgent[]): SwarmRoleConfig[] {
+  return ROLES.map((role) => {
+    const agents = roster.filter((agent) => agent.role === role)
+    return {
+      role,
+      enabled: agents.length > 0,
+      allocations: (['claude', 'codex'] as const).map((runtime) => ({ id: `${role}-${runtime}`, runtime, count: agents.filter((agent) => agent.runtime === runtime).length })).filter((allocation) => allocation.count > 0),
+    }
+  })
 }
 
-function defaultCustomRoles(): SwarmRoleConfig[] {
-  return [
-    { role: 'coordinator', runtime: 'auto', desiredCount: 1, enabled: true },
-    { role: 'scout', runtime: 'auto', desiredCount: 1, enabled: true },
-    { role: 'builder', runtime: 'auto', desiredCount: 2, enabled: true },
-    { role: 'debugger', runtime: 'auto', desiredCount: 1, enabled: false },
-    { role: 'reviewer', runtime: 'auto', desiredCount: 1, enabled: true },
-    { role: 'integrator', runtime: 'auto', desiredCount: 1, enabled: false },
-  ]
+function displayName(agent: RosterAgent, roster: RosterAgent[]): string {
+  const sameRole = roster.filter((item) => item.role === agent.role)
+  return `${roleLabel(agent.role).replace(/s$/, '')} ${sameRole.findIndex((item) => item.id === agent.id) + 1}`
+}
+
+function permissionSummary(role: SwarmRole): string {
+  if (role === 'scout' || role === 'reviewer') return 'Read-only project access · approval policy enforced'
+  if (role === 'coordinator') return 'Plan, assign, and message · no production-code writes'
+  return 'Assigned project scope only · destructive and remote operations require approval'
 }

@@ -1,11 +1,12 @@
 import { useEffect } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { Plus } from 'lucide-react'
+import { Archive, Plus } from 'lucide-react'
 import { useSwarmStore } from './swarmStore'
 import { SwarmCreatePanel } from './SwarmCreatePanel'
 import { SwarmOverview } from './SwarmOverview'
 import { isActiveLifecycle, lifecycleLabel, lifecycleTone, progressPercent } from './swarmPresentation'
 import { onSwarmChanged } from '../../native/events'
+import { SwarmRowMenu } from './SwarmRowMenu'
 
 /**
  * The main Swarm experience hosted by the Swarms route. Left: the project's Swarm list + create.
@@ -23,6 +24,7 @@ export function SwarmWorkspace({
   const navigate = useNavigate()
   const [params, setParams] = useSearchParams()
   const creating = params.get('new') === '1'
+  const showingHistory = params.get('history') === '1'
 
   const items = useSwarmStore((state) => state.itemsByProject[projectId]) ?? []
   const detail = useSwarmStore((state) => {
@@ -36,8 +38,8 @@ export function SwarmWorkspace({
   const clearError = useSwarmStore((state) => state.clearError)
 
   useEffect(() => {
-    void loadSwarms(projectId)
-  }, [projectId, loadSwarms])
+    void loadSwarms(projectId, showingHistory)
+  }, [projectId, loadSwarms, showingHistory])
 
   useEffect(() => {
     if (swarmId) void loadDetail(projectId, swarmId)
@@ -49,8 +51,13 @@ export function SwarmWorkspace({
     let cancelled = false
     void onSwarmChanged((changed) => {
       if (changed.projectId !== projectId) return
-      void refresh(projectId, changed.swarmId)
-      if (!swarmId) void loadSwarms(projectId)
+      if (showingHistory) {
+        if (swarmId === changed.swarmId) void loadDetail(projectId, changed.swarmId)
+        void loadSwarms(projectId, true)
+      } else {
+        void refresh(projectId, changed.swarmId)
+        if (!swarmId) void loadSwarms(projectId)
+      }
     }).then((stop) => {
       if (cancelled) stop()
       else unlisten = stop
@@ -59,7 +66,7 @@ export function SwarmWorkspace({
       cancelled = true
       unlisten?.()
     }
-  }, [projectId, swarmId, refresh, loadSwarms])
+  }, [projectId, swarmId, refresh, loadSwarms, loadDetail, showingHistory])
 
   const openCreate = () => {
     navigate(`/swarms/${projectId}?new=1`)
@@ -73,9 +80,7 @@ export function SwarmWorkspace({
       <aside className="swarm-list-col" aria-label="Swarms">
         <header className="swarm-list-head">
           <span className="section-label">Swarms</span>
-          <button type="button" className="ws-section-add" aria-label="New swarm" title="New swarm" onClick={openCreate}>
-            <Plus size={15} />
-          </button>
+          <div><button type="button" className={`ws-section-add ${showingHistory ? 'is-active' : ''}`} aria-label={showingHistory ? 'Hide archived Swarms' : 'Show Swarm history'} title="Swarm history" onClick={() => setParams(showingHistory ? {} : { history: '1' })}><Archive size={14} /></button><button type="button" className="ws-section-add" aria-label="New swarm" title="New swarm" onClick={openCreate}><Plus size={15} /></button></div>
         </header>
         <ul className="swarm-list" role="list">
           {items.map((item) => {
@@ -98,6 +103,7 @@ export function SwarmWorkspace({
                     </span>
                   </span>
                 </button>
+                <SwarmRowMenu item={item} onOpen={() => openSwarm(item.swarm.id)} onCreated={openSwarm} />
               </li>
             )
           })}

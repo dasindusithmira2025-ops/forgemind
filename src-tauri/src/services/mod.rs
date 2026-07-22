@@ -1,4 +1,7 @@
 pub mod agent_detector;
+pub mod browser_service;
+pub mod file_watch_service;
+pub mod filesystem_service;
 pub mod process_util;
 pub mod project_service;
 pub mod repository_service;
@@ -10,6 +13,9 @@ pub mod update_service;
 pub mod window_registry;
 
 pub use agent_detector::AgentDetector;
+pub use browser_service::BrowserService;
+pub use file_watch_service::FileWatchService;
+pub use filesystem_service::{FileSystemService, SelfWriteLedger};
 pub use project_service::ProjectService;
 pub use repository_service::RepositoryService;
 pub use restoration_scheduler::RestorationScheduler;

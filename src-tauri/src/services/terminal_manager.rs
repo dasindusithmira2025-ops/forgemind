@@ -30,6 +30,14 @@ const OUTPUT_QUEUE_DEPTH: usize = 128;
 const OUTPUT_BATCH_LIMIT: usize = 64 * 1024;
 const OUTPUT_BATCH_WINDOW: Duration = Duration::from_millis(12);
 const OUTPUT_LOG_ROTATE_BYTES: u64 = 5 * 1024 * 1024;
+// Provider JSONL is a machine protocol. A ConPTY resize reflows its screen and writes cursor
+// movement plus hard line breaks back into the output stream, corrupting otherwise valid JSON.
+// Swarm runtime PTYs therefore keep a wide, stable native surface; xterm still wraps the same
+// bytes visually inside whatever pane size the user chooses.
+const MACHINE_PROTOCOL_COLS: u16 = 32_760;
+const MACHINE_PROTOCOL_ROWS: u16 = 128;
+const CURSOR_POSITION_QUERY: &[u8] = b"\x1b[6n";
+const CURSOR_POSITION_RESPONSE: &[u8] = b"\x1b[1;1R";
 
 struct TerminalLog {
     path: PathBuf,
@@ -73,6 +81,7 @@ struct TerminalHandle {
     output_tail: Mutex<Vec<u8>>,
     output_log: Option<Mutex<TerminalLog>>,
     started_at: Instant,
+    machine_protocol: bool,
 }
 
 #[derive(Clone)]
@@ -122,6 +131,7 @@ impl TerminalManager {
     }
 
     pub fn create_session(&self, request: CreateTerminalRequest) -> AppResult<TerminalSession> {
+        let machine_protocol = is_machine_protocol_workspace(&request.workspace_id);
         let reservation_key = (request.workspace_id.clone(), request.pane_id.clone());
         // Atomically check for a live or in-flight duplicate and claim the pane. Both checks
         // happen under the `creating` lock so two concurrent creates can never both pass.
@@ -136,7 +146,7 @@ impl TerminalManager {
                 });
             if duplicate {
                 return Err(AppError::new(
-                    "terminal_create_failed",
+                    "terminal_session_conflict",
                     "This pane already has a running terminal session.",
                     true,
                 )
@@ -165,8 +175,16 @@ impl TerminalManager {
         let pty_system = native_pty_system();
         let pair = pty_system
             .openpty(PtySize {
-                rows: request.rows.max(1),
-                cols: request.cols.max(1),
+                rows: if machine_protocol {
+                    MACHINE_PROTOCOL_ROWS
+                } else {
+                    request.rows.max(1)
+                },
+                cols: if machine_protocol {
+                    MACHINE_PROTOCOL_COLS
+                } else {
+                    request.cols.max(1)
+                },
                 pixel_width: 0,
                 pixel_height: 0,
             })
@@ -257,6 +275,7 @@ impl TerminalManager {
             output_tail: Mutex::new(Vec::new()),
             output_log: output_log.map(Mutex::new),
             started_at: Instant::now(),
+            machine_protocol,
         });
         if let Some(database) = &self.database {
             // The child is already spawned, so a failed record would otherwise orphan a live
@@ -432,11 +451,48 @@ impl TerminalManager {
             ))
             .spawn(move || {
                 let mut buffer = vec![0u8; OUTPUT_BUFFER_SIZE];
+                let mut protocol_pending = Vec::new();
                 loop {
                     match reader.read(&mut buffer) {
-                        Ok(0) => break,
+                        Ok(0) => {
+                            if !protocol_pending.is_empty() {
+                                let _ = sender.try_send(std::mem::take(&mut protocol_pending));
+                            }
+                            break;
+                        }
                         Ok(read) => {
-                            let data = buffer[..read].to_vec();
+                            let data = if handle.machine_protocol {
+                                let (data, query_count) = consume_cursor_position_queries(
+                                    &mut protocol_pending,
+                                    &buffer[..read],
+                                );
+                                if query_count > 0 {
+                                    let mut writer = handle.writer.lock();
+                                    for _ in 0..query_count {
+                                        if let Err(error) =
+                                            writer.write_all(CURSOR_POSITION_RESPONSE)
+                                        {
+                                            log::warn!(
+                                                "machine-protocol PTY query response failed for {}: {error}",
+                                                handle.metadata.read().id
+                                            );
+                                            break;
+                                        }
+                                    }
+                                    if let Err(error) = writer.flush() {
+                                        log::warn!(
+                                            "machine-protocol PTY query flush failed for {}: {error}",
+                                            handle.metadata.read().id
+                                        );
+                                    }
+                                }
+                                data
+                            } else {
+                                buffer[..read].to_vec()
+                            };
+                            if data.is_empty() {
+                                continue;
+                            }
                             if let Err(error) = sender.try_send(data) {
                                 let dropped = match error {
                                     TrySendError::Full(data) | TrySendError::Disconnected(data) => {
@@ -620,6 +676,11 @@ impl TerminalManager {
             .entity(session_id));
         }
         let handle = self.owned(session_id)?;
+        if handle.machine_protocol {
+            // The frontend terminal remains responsive and wraps locally. Resizing the native
+            // ConPTY would rewrite provider JSONL and make lifecycle/evidence events ambiguous.
+            return Ok(());
+        }
         let result = handle.master.lock().resize(PtySize {
             rows,
             cols,
@@ -816,6 +877,37 @@ impl TerminalManager {
                 .entity(session_id)
             })
     }
+}
+
+/// Machine-protocol providers can query cursor position before they emit JSON. An attached
+/// xterm normally answers this, but Swarm agents must also run while their terminal is hidden.
+/// Remove the query from the visible/output stream and let the server-owned PTY answer it.
+fn consume_cursor_position_queries(pending: &mut Vec<u8>, input: &[u8]) -> (Vec<u8>, usize) {
+    pending.extend_from_slice(input);
+    let mut output = Vec::with_capacity(pending.len());
+    let mut query_count = 0;
+
+    while let Some(position) = pending
+        .windows(CURSOR_POSITION_QUERY.len())
+        .position(|window| window == CURSOR_POSITION_QUERY)
+    {
+        output.extend_from_slice(&pending[..position]);
+        pending.drain(..position + CURSOR_POSITION_QUERY.len());
+        query_count += 1;
+    }
+
+    let retained = (1..CURSOR_POSITION_QUERY.len())
+        .rev()
+        .find(|length| pending.ends_with(&CURSOR_POSITION_QUERY[..*length]))
+        .unwrap_or(0);
+    let emit_until = pending.len().saturating_sub(retained);
+    output.extend_from_slice(&pending[..emit_until]);
+    pending.drain(..emit_until);
+    (output, query_count)
+}
+
+fn is_machine_protocol_workspace(workspace_id: &str) -> bool {
+    workspace_id.starts_with("swarm-runtime-")
 }
 
 /// Bulk/duplicate termination must be idempotent: a session another path already reaped is a
@@ -1023,6 +1115,29 @@ mod tests {
     }
 
     #[test]
+    fn swarm_runtime_workspaces_keep_a_stable_machine_protocol_surface() {
+        assert!(is_machine_protocol_workspace("swarm-runtime-swarm-id"));
+        assert!(!is_machine_protocol_workspace("normal-workspace"));
+        let protocol_columns = MACHINE_PROTOCOL_COLS;
+        assert!(protocol_columns > 1_000);
+    }
+
+    #[test]
+    fn hidden_machine_protocol_terminals_answer_split_cursor_queries() {
+        let mut pending = Vec::new();
+        let (first, first_queries) = consume_cursor_position_queries(&mut pending, b"before\x1b[");
+        assert_eq!(first, b"before");
+        assert_eq!(first_queries, 0);
+        assert_eq!(pending, b"\x1b[");
+
+        let (second, second_queries) =
+            consume_cursor_position_queries(&mut pending, b"6nafter\x1b[6n");
+        assert_eq!(second, b"after");
+        assert_eq!(second_queries, 2);
+        assert!(pending.is_empty());
+    }
+
+    #[test]
     fn pty_accepts_input_resizes_streams_and_terminates_owned_session() {
         let manager = TerminalManager::for_test();
         let session = manager
@@ -1101,7 +1216,7 @@ mod tests {
         assert!(results
             .iter()
             .filter_map(|result| result.as_ref().err())
-            .all(|error| error.code == "terminal_create_failed"));
+            .all(|error| error.code == "terminal_session_conflict"));
         assert_eq!(manager.list_live_sessions(Some("race")).len(), 1);
         manager.terminate_all_sessions().unwrap();
     }

@@ -46,14 +46,30 @@ GitHub's generated `GITHUB_TOKEN` is used only by Actions to create the private 
 
 Protect the `stable-release` and `preview-release` environments with required reviewers. Protect `stable-v*` and `preview-v*` tags. Require the `Validate` workflow on `integration` and `main`.
 
+## Release channels
+
+| Channel | Edition | Trigger | Version shape | Workflow |
+|---|---|---|---|---|
+| internal | `preview` | automatic on push/merge to `main` | `X.Y.Z-internal.<runNumber>` | `release-internal.yml` |
+| stable | `stable` | protected tag `stable-vX.Y.Z` | `X.Y.Z` | `release-stable.yml` |
+
+The **internal channel is delivered on the `preview` edition** (separate identifier, data, updater state, and update endpoint from stable). A `beta` channel can be added later by introducing a third edition config plus a `ProductEdition` variant without changing the updater flow. Internal installs only ever query `PARALITH_PREVIEW_UPDATE_ENDPOINT`; stable installs only ever query `PARALITH_STABLE_UPDATE_ENDPOINT`. Internal releases publish only the preview manifest and never touch the stable manifest; stable releases never use an `-internal.*` prerelease version. Within a channel the Tauri updater rejects same-or-lower versions, so an accidental downgrade is refused.
+
+## Automatic internal releases (push to `main`)
+
+Every merge or push to `main` runs `release-internal.yml`: full CI validation (`ci.yml`) gates a build job that generates a unique internal version, builds the signed `preview` installer + updater artifacts, publishes a non-draft GitHub prerelease, and pushes the signed `latest.json` to the internal endpoint. Installed internal builds detect it on their next check and install on the next safe restart. No manual tagging or version editing is required.
+
+- **Versioning.** `scripts/release/internal-version.mjs` derives `X.Y.(Z+1)-internal.<github.run_number>` from the shipped stable base in `release/version.json`. The run number is monotonic, so each internal build is a valid upgrade over the previous one, sorts above the current stable, and sorts below the eventual stable release of that patch (`0.4.1-internal.101 < 0.4.1-internal.102 < 0.4.1`).
+- **Ephemeral, never committed.** The version bump and its generated changelog are written only inside the runner and are never committed back to `main`, so `main` stays on its canonical stable version.
+- **Fail-closed and de-duplicated.** The job aborts if `TAURI_SIGNING_PRIVATE_KEY` or `PARALITH_PREVIEW_UPDATE_ENDPOINT` is missing, so a build never ships unsigned or unpublishable. A `concurrency` group keyed to the commit SHA prevents two runs from publishing the same commit; the unique per-run version prevents accumulating conflicting drafts.
+- **Emergency disablement.** Disable `Release Internal` under the repository Actions tab (or remove the `preview-release` environment's signing secret) to immediately stop internal publication without affecting stable.
+
 ## Practical branch and release policy
 
 1. Work on a short feature or fix branch.
-2. Open a pull request into `integration`; all validation gates must pass.
-3. Set `release/version.json` and create its single changelog entry under `release/changelog/`.
-4. Publish `preview-vX.Y.Z-preview.N` for office migration/feature testing.
-5. After Preview validation, promote the reviewed commit/version to `main` and create `stable-vX.Y.Z`.
-6. Stable tags must point to a committed, clean tree. Normal commits never publish an update.
+2. Open a pull request; CI validation (`ci.yml`) runs on the PR and must pass. No release is produced from a PR.
+3. Merge to `main`. This automatically produces and publishes a signed **internal** build — no tag needed.
+4. To cut a **stable** release, set `release/version.json`, add its single `release/changelog/` entry, land it on `main`, then create the protected `stable-vX.Y.Z` tag. Stable tags must point to a committed, clean tree.
 
 The release workflows build MSI, NSIS, updater signatures, checksums, `latest.json`, release manifest, release notes, build metadata, and schema metadata. They archive all files in the private GitHub release and then run the configured internal publication adapter.
 
@@ -74,3 +90,34 @@ npm run tauri -- build --bundles msi,nsis --config $config
 ```
 
 Repeat with `preview`. Production `release` mode refuses placeholder public keys, non-HTTPS endpoints, missing signing secrets, dirty/tag-version mismatches, or failed validation.
+
+## Bootstrap: the one required manual install
+
+An existing installation that predates updater support cannot update itself — it has no updater public key, endpoint, or coordinator. Deliver the **first** updater-enabled internal build by hand once:
+
+1. Merge the updater-enabled code to `main` (or run `npm run build:preview` locally with production signing configured) to produce a signed `preview` NSIS installer.
+2. Install `PARALITH Preview_<version>_x64-setup.exe` on each office machine (per-user, `AppData\Local\PARALITH Preview`, no elevation).
+3. From then on, every push to `main` is delivered automatically to that install through the internal channel — no further manual installs.
+
+Stable follows the same one-time bootstrap using a `stable` build; after that, `stable-vX.Y.Z` tags update it automatically.
+
+## Testing an internal update locally
+
+`npm run update-server` serves a local `.artifacts/update-site` over HTTP for end-to-end verification without touching production infrastructure:
+
+1. Build `v1`: bump `release/version.json`, `npm run build:preview`, install the resulting NSIS setup.
+2. Build `v2` at a higher internal version and `npm run release:assemble` against the local server's base URL.
+3. Point the install's endpoint at the local server, then use **Settings → About & Updates → Check for Updates → Update Now**.
+
+## Testing the push-to-main automatic flow
+
+1. Configure the `preview-release` environment secrets/variables listed above (`TAURI_SIGNING_PRIVATE_KEY`, `PARALITH_PREVIEW_UPDATE_ENDPOINT`, `PARALITH_UPDATE_ARTIFACT_BASE_URL`, and a publication adapter target).
+2. Push a trivial change to `main`.
+3. Watch **Actions → Release Internal**: `validate` runs full CI, then `release` builds `X.Y.(Z+1)-internal.<run>`, publishes the prerelease, and syncs `latest.json`.
+4. On a bootstrapped internal install, confirm the new version is detected on the next check and installs on the next safe restart.
+
+## Publishing a stable release
+
+1. Land the release commit on `main` with `release/version.json` at the target `X.Y.Z` and a matching `stable` changelog entry (CI's `release:check` enforces consistency).
+2. Create and push the protected tag: `git tag stable-vX.Y.Z && git push origin stable-vX.Y.Z`.
+3. `release-stable.yml` runs full validation, verifies the tag matches the version on a clean tree, builds signed artifacts, and publishes a non-draft stable release plus the stable `latest.json` after the `stable-release` environment approval gate.

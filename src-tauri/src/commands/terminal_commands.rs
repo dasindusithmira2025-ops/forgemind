@@ -1,7 +1,9 @@
 use crate::errors::{AppError, AppResult};
 use crate::models::{RestorationResult, StartTerminalRequest, TerminalSession};
 use crate::AppState;
+use std::time::{Duration, SystemTime};
 use tauri::{State, Window};
+use uuid::Uuid;
 
 fn session_workspace(state: &AppState, session_id: &str) -> AppResult<String> {
     state
@@ -182,6 +184,87 @@ pub fn reset_restoration_circuit(
         .windows
         .validate_workspace_caller(&workspace_id, window.label(), false)?;
     state.restoration.reset_pane(&workspace_id, &pane_id)
+}
+
+/// Persist clipboard/drag image bytes to a private temp file so its path can be typed into a
+/// terminal. Terminals cannot render pixels, so pasted or dropped images become a file path the
+/// running CLI agent (Claude Code, etc.) can read — this materialises that path. Dropped files that
+/// already live on disk keep their original path and never reach this command.
+#[tauri::command]
+pub async fn save_dropped_image(data: Vec<u8>, extension: Option<String>) -> AppResult<String> {
+    tauri::async_runtime::spawn_blocking(move || write_temp_image(data, extension.as_deref()))
+        .await
+        .map_err(blocking_task_error)?
+}
+
+fn write_temp_image(data: Vec<u8>, extension: Option<&str>) -> AppResult<String> {
+    if data.is_empty() {
+        return Err(AppError::new(
+            "empty_clipboard_image",
+            "There was no image data to save.",
+            true,
+        )
+        .layer("terminal_manager"));
+    }
+    let dir = std::env::temp_dir().join("paralith-images");
+    std::fs::create_dir_all(&dir)
+        .map_err(|error| image_io_error("prepare the image cache", error))?;
+    prune_old_images(&dir);
+    let path = dir.join(format!(
+        "pasted-{}.{}",
+        Uuid::new_v4(),
+        sanitize_extension(extension)
+    ));
+    std::fs::write(&path, &data).map_err(|error| image_io_error("save the pasted image", error))?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
+/// Reduce an untrusted MIME-derived hint to a short, known image extension so it can never inject
+/// path separators or an unexpected file type. Anything unrecognised falls back to `png`.
+fn sanitize_extension(extension: Option<&str>) -> &'static str {
+    let normalized = extension
+        .unwrap_or("")
+        .trim()
+        .trim_start_matches('.')
+        .to_ascii_lowercase();
+    match normalized.as_str() {
+        "jpg" | "jpeg" => "jpg",
+        "gif" => "gif",
+        "webp" => "webp",
+        "bmp" => "bmp",
+        "svg" => "svg",
+        "tif" | "tiff" => "tiff",
+        "avif" => "avif",
+        "heic" => "heic",
+        _ => "png",
+    }
+}
+
+/// Drop pasted images older than a day so the cache cannot grow without bound. Best-effort: any
+/// filesystem hiccup while pruning is ignored so it never blocks saving the current image.
+fn prune_old_images(dir: &std::path::Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let cutoff = SystemTime::now()
+        .checked_sub(Duration::from_secs(24 * 60 * 60))
+        .unwrap_or(SystemTime::UNIX_EPOCH);
+    for entry in entries.flatten() {
+        let stale = entry
+            .metadata()
+            .and_then(|meta| meta.modified())
+            .map(|modified| modified < cutoff)
+            .unwrap_or(false);
+        if stale {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
+fn image_io_error(action: &str, error: std::io::Error) -> AppError {
+    AppError::new("image_cache_failed", format!("Could not {action}."), true)
+        .detail(error.to_string())
+        .layer("terminal_manager")
 }
 
 fn blocking_task_error(error: impl std::fmt::Display) -> AppError {

@@ -6,8 +6,8 @@
 
 use crate::errors::AppResult;
 use crate::models::{
-    CreateSwarmRequest, SavePresetRequest, Swarm, SwarmDetail, SwarmListItem, SwarmMessageRequest,
-    SwarmPreset,
+    CreateSwarmRequest, SavePresetRequest, Swarm, SwarmCommandDraft, SwarmDetail,
+    SwarmLaunchPreview, SwarmListItem, SwarmMessageRequest, SwarmPreset, SwarmRuntimeReadiness,
 };
 use crate::AppState;
 use tauri::{State, Window};
@@ -19,6 +19,45 @@ pub fn list_swarm_presets(
 ) -> AppResult<Vec<SwarmPreset>> {
     crate::require_main_window(&window)?;
     state.swarms.list_presets()
+}
+
+#[tauri::command]
+pub async fn list_swarm_runtime_readiness(
+    window: Window,
+    state: State<'_, AppState>,
+) -> AppResult<Vec<SwarmRuntimeReadiness>> {
+    crate::require_main_window(&window)?;
+    let swarms = state.swarms.clone();
+    tauri::async_runtime::spawn_blocking(move || swarms.runtime_readiness())
+        .await
+        .map_err(|error| {
+            crate::errors::AppError::new(
+                "runtime_task_failed",
+                "The runtime readiness check stopped unexpectedly.",
+                true,
+            )
+            .detail(error.to_string())
+        })?
+}
+
+#[tauri::command]
+pub async fn preview_swarm_launch(
+    request: CreateSwarmRequest,
+    window: Window,
+    state: State<'_, AppState>,
+) -> AppResult<SwarmLaunchPreview> {
+    crate::require_main_window(&window)?;
+    let swarms = state.swarms.clone();
+    tauri::async_runtime::spawn_blocking(move || swarms.preview_launch(&request))
+        .await
+        .map_err(|error| {
+            crate::errors::AppError::new(
+                "runtime_task_failed",
+                "The launch validation stopped unexpectedly.",
+                true,
+            )
+            .detail(error.to_string())
+        })?
 }
 
 #[tauri::command]
@@ -154,6 +193,20 @@ pub fn delete_swarm(
 }
 
 #[tauri::command]
+pub fn export_swarm_report(
+    project_id: String,
+    swarm_id: String,
+    destination: String,
+    window: Window,
+    state: State<'_, AppState>,
+) -> AppResult<()> {
+    crate::require_main_window(&window)?;
+    state
+        .swarms
+        .export_report(&project_id, &swarm_id, &destination)
+}
+
+#[tauri::command]
 pub fn set_swarm_priority(
     project_id: String,
     swarm_id: String,
@@ -177,6 +230,34 @@ pub fn send_swarm_message(
 }
 
 #[tauri::command]
+pub fn retry_swarm_test(
+    project_id: String,
+    swarm_id: String,
+    test_id: String,
+    window: Window,
+    state: State<'_, AppState>,
+) -> AppResult<()> {
+    crate::require_main_window(&window)?;
+    state
+        .swarms
+        .create_test_followup_task(&project_id, &swarm_id, &test_id, false)
+}
+
+#[tauri::command]
+pub fn generate_swarm_fix_task(
+    project_id: String,
+    swarm_id: String,
+    test_id: String,
+    window: Window,
+    state: State<'_, AppState>,
+) -> AppResult<()> {
+    crate::require_main_window(&window)?;
+    state
+        .swarms
+        .create_test_followup_task(&project_id, &swarm_id, &test_id, true)
+}
+
+#[tauri::command]
 pub fn accept_swarm_result(
     project_id: String,
     swarm_id: String,
@@ -185,6 +266,60 @@ pub fn accept_swarm_result(
 ) -> AppResult<()> {
     crate::require_main_window(&window)?;
     state.swarms.accept_result(&project_id, &swarm_id)
+}
+
+#[tauri::command]
+pub fn focus_swarm_agent_terminal(
+    project_id: String,
+    swarm_id: String,
+    agent_id: String,
+    window: Window,
+    state: State<'_, AppState>,
+) -> AppResult<String> {
+    crate::require_main_window(&window)?;
+    state
+        .swarms
+        .focus_agent_terminal(&project_id, &swarm_id, &agent_id)
+}
+
+#[tauri::command]
+pub fn get_swarm_command_draft(
+    project_id: String,
+    swarm_id: String,
+    window: Window,
+    state: State<'_, AppState>,
+) -> AppResult<Option<SwarmCommandDraft>> {
+    crate::require_main_window(&window)?;
+    state.swarms.get_command_draft(&project_id, &swarm_id)
+}
+
+#[tauri::command]
+pub fn save_swarm_command_draft(
+    project_id: String,
+    swarm_id: String,
+    target: String,
+    body: String,
+    window: Window,
+    state: State<'_, AppState>,
+) -> AppResult<()> {
+    crate::require_main_window(&window)?;
+    state
+        .swarms
+        .save_command_draft(&project_id, &swarm_id, &target, &body)
+}
+
+#[tauri::command]
+pub fn resolve_swarm_decision(
+    project_id: String,
+    swarm_id: String,
+    choice: String,
+    window: Window,
+    state: State<'_, AppState>,
+) -> AppResult<()> {
+    crate::require_main_window(&window)?;
+    state
+        .swarms
+        .resolve_decision(&project_id, &swarm_id, &choice)
 }
 
 #[tauri::command]

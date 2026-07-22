@@ -1,15 +1,18 @@
 import { useEffect, useState, type ReactNode } from 'react'
+import { listen } from '@tauri-apps/api/event'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { open } from '@tauri-apps/plugin-dialog'
 import { openPath } from '@tauri-apps/plugin-opener'
-import { ArrowLeft, CheckCircle2, Copy, Download, FolderOpen, RefreshCw, RotateCcw, Save, ShieldCheck, Stethoscope, Wrench } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, CheckCircle2, Copy, Download, FolderOpen, RefreshCw, RotateCcw, Save, ShieldCheck, Stethoscope, Wrench } from 'lucide-react'
 import { Brand } from '../components/ui/Brand'
 import { Button } from '../components/ui/Button'
 import { ErrorNotice } from '../components/ui/ErrorNotice'
 import { TextPromptDialog } from '../components/ui/TextPromptDialog'
 import { asNativeError, native } from '../native/commands'
-import type { AgentProfile, AgentProvider, AppSettings, DiagnosticsSnapshot, SafeRestartClientState, ShellProfile, UpdateStatus } from '../native/types'
+import type { AgentProfile, AgentProvider, AppSettings, DiagnosticsSnapshot, SafeRestartAssessment, SafeRestartClientState, ShellProfile, UpdateStatus } from '../native/types'
 import { defaultSettings, useAppStore } from '../stores/appStore'
+import { ThemeGallery } from '../theme/ThemeGallery'
+import { useThemeStore } from '../theme/themeStore'
 
 type Section = 'appearance' | 'terminal' | 'agents' | 'workspace' | 'updates' | 'diagnostics'
 const sections: Array<{ id: Section; label: string }> = [
@@ -41,6 +44,17 @@ export function SettingsScreen() {
   const [diagnostics, setDiagnostics] = useState<DiagnosticsSnapshot>()
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus>()
   const [updating, setUpdating] = useState(false)
+  const [assessment, setAssessment] = useState<SafeRestartAssessment>()
+
+  // The Rust update coordinator broadcasts every lifecycle change and download-progress tick to
+  // all windows, so the panel stays live (including cross-window installs) without polling.
+  useEffect(() => {
+    let cancelled = false
+    let stop: (() => void) | undefined
+    void listen<UpdateStatus>('update-status', (event) => setUpdateStatus(event.payload))
+      .then((unlisten) => { if (cancelled) unlisten(); else stop = unlisten })
+    return () => { cancelled = true; stop?.() }
+  }, [])
 
   useEffect(() => {
     document.documentElement.style.setProperty('--ui-scale', String(settings.uiScale))
@@ -68,7 +82,10 @@ export function SettingsScreen() {
     if (saving) return
     setSaving(true); setError('')
     try {
-      const result = await native.saveSettings(settings)
+      // The theme is persisted independently the moment it is picked, so always fold the live
+      // selection into this write instead of the value loaded at mount — otherwise saving unrelated
+      // settings would clobber a theme chosen after the Settings screen opened.
+      const result = await native.saveSettings({ ...settings, themeId: useThemeStore.getState().selectedId })
       setSettings(result); setStored(result); setStatus('Settings saved')
     } catch (caught) { setError(asNativeError(caught).message); setStatus('Save failed') }
     finally { setSaving(false) }
@@ -115,20 +132,37 @@ export function SettingsScreen() {
     finally { setUpdating(false) }
   }
   const restartClientState = (): SafeRestartClientState => {
-    return { unsavedEditorState: false, unsavedSettings: status === 'Unsaved changes', unsavedMissionDraft: false }
+    return { unsavedEditorState: false, unsavedSettings: status === 'Unsaved changes', unsavedBrowserState: false }
   }
+  const reviewActiveWork = async () => {
+    try { const next = await native.assessSafeRestart(restartClientState()); setAssessment(next); setStatus(next.safe ? 'No active work is blocking an update' : `${next.blockers.length + next.hardBlockers.length} item(s) to review`) }
+    catch (caught) { setError(asNativeError(caught).message) }
+  }
+  // Returns the assessment and whether the install may proceed. A hard block (in-flight Git
+  // mutation) can never be overridden; soft blockers require an explicit confirmation.
   const confirmRestart = async () => {
     const client = restartClientState()
-    const assessment = await native.assessSafeRestart(client)
-    return { client, confirmed: assessment.safe || window.confirm(`PARALITH must stop active work before updating.\n\n${assessment.blockers.join('\n')}\n\nInstall and restart now?`) }
+    const next = await native.assessSafeRestart(client)
+    setAssessment(next)
+    if (next.hardBlocked) {
+      setError(`PARALITH cannot update while a Git operation is in progress.\n${next.hardBlockers.join('\n')}`)
+      return { client, next, confirmed: false }
+    }
+    const confirmed = next.safe || window.confirm(`PARALITH must safely stop active work before updating.\n\n${next.blockers.join('\n')}\n\nAgents and Swarms will checkpoint, terminals will stop, and your workspace layout will be restored after restart.\n\nUpdate now?`)
+    return { client, next, confirmed }
   }
   const installNow = async () => {
-    try { const request = await confirmRestart(); if (!request.confirmed) return; await native.installDownloadedUpdate(request.client, !((await native.assessSafeRestart(request.client)).safe)) }
+    try { const request = await confirmRestart(); if (!request.confirmed) return; await native.installDownloadedUpdate(request.client, !request.next.safe) }
     catch (caught) { setError(asNativeError(caught).message) }
   }
   const installOnExit = async () => {
-    try { const request = await confirmRestart(); if (!request.confirmed) return; setUpdateStatus(await native.installUpdateOnExit(request.client, true)); setStatus('Verified update will install when PARALITH exits') }
+    try { const request = await confirmRestart(); if (!request.confirmed) return; setUpdateStatus(await native.installUpdateOnExit(request.client, !request.next.safe)); setStatus('Verified update will install when PARALITH exits') }
     catch (caught) { setError(asNativeError(caught).message) }
+  }
+  const viewReleaseNotes = () => {
+    const notes = updateStatus?.journal.available?.releaseNotes
+    if (notes) window.alert(`PARALITH ${updateStatus?.journal.available?.version}\n\n${notes}`)
+    else setStatus('No release notes are available yet')
   }
 
   return <main className="settings-shell focused-settings">
@@ -136,7 +170,9 @@ export function SettingsScreen() {
     <div className="settings-layout">
       <nav className="settings-nav" aria-label="Settings sections">{sections.map((item) => <button key={item.id} className={section === item.id ? 'active' : ''} aria-current={section === item.id ? 'page' : undefined} onClick={() => setSection(item.id)}>{item.label}</button>)}</nav>
       <section className="settings-panel">{error && <ErrorNotice message={error} />}
-        {section === 'appearance' && <SettingsSection title="Appearance" description="Density and terminal rendering update immediately.">
+        {section === 'appearance' && <>
+        <div className="focused-section"><header><h2>Theme</h2><p>Choose how PARALITH looks. Themes apply instantly across every window, terminal, and editor — no save needed.</p></header><ThemeGallery /></div>
+        <SettingsSection title="Interface &amp; terminal" description="Density and terminal rendering update immediately.">
           <SettingRow label="UI scale" detail="Scale the entire desktop interface."><input aria-label="UI scale" type="range" min="0.8" max="1.5" step="0.05" value={settings.uiScale} onChange={(event) => update('uiScale', Number(event.target.value))} /><output>{Math.round(settings.uiScale * 100)}%</output></SettingRow>
           <SettingRow label="Interface density" detail="Control heights, list rows, and pane chrome. Terminal text is unaffected."><select aria-label="Interface density" value={settings.uiDensity} onChange={(event) => update('uiDensity', event.target.value as AppSettings['uiDensity'])}><option value="comfortable">Comfortable</option><option value="standard">Standard</option><option value="compact">Compact</option></select></SettingRow>
           <SettingRow label="Terminal font"><input aria-label="Terminal font" value={settings.terminalFontFamily} onChange={(event) => update('terminalFontFamily', event.target.value)} /></SettingRow>
@@ -144,7 +180,7 @@ export function SettingsScreen() {
           <SettingRow label="Line height"><input aria-label="Terminal line height" type="range" min="0.9" max="2" step="0.05" value={settings.terminalLineHeight} onChange={(event) => update('terminalLineHeight', Number(event.target.value))} /><output>{settings.terminalLineHeight.toFixed(2)}</output></SettingRow>
           <SettingRow label="Cursor style"><select aria-label="Cursor style" value={settings.cursorStyle} onChange={(event) => update('cursorStyle', event.target.value as AppSettings['cursorStyle'])}><option value="block">Block</option><option value="bar">Bar</option><option value="underline">Underline</option></select></SettingRow>
           <div className="terminal-preview" style={{ fontFamily: settings.terminalFontFamily, fontSize: settings.terminalFontSize, lineHeight: settings.terminalLineHeight }}><span>$ forge status</span><strong><i />4 panes ready</strong><span className={`preview-cursor ${settings.cursorStyle}`}> </span></div>
-        </SettingsSection>}
+        </SettingsSection></>}
         {section === 'terminal' && <SettingsSection title="Terminal" description="PTY defaults, output retention, and interaction safeguards.">
           <SettingRow label="Default shell"><select aria-label="Default shell" value={settings.defaultShell ?? ''} onChange={(event) => update('defaultShell', event.target.value || undefined)}><option value="">Automatic fallback</option>{shells.map((shell) => <option key={shell.id} value={shell.id}>{shell.name}</option>)}</select></SettingRow>
           <SettingRow label="Scrollback lines"><input aria-label="Scrollback lines" type="number" min="1000" max="1000000" step="1000" value={settings.scrollbackSize} onChange={(event) => update('scrollbackSize', Number(event.target.value))} /></SettingRow>
@@ -175,15 +211,21 @@ export function SettingsScreen() {
           <SettingRow label="Signature verification"><code>{updateStatus?.journal.signatureVerified ? 'Verified by bundled updater public key' : 'Not yet verified'}</code></SettingRow>
           <SettingRow label="Installation readiness"><code>{updateStatus?.journal.phase === 'downloaded' || updateStatus?.journal.phase === 'restart_requested' ? 'Ready' : updateStatus?.journal.phase.replaceAll('_', ' ') || 'Loading…'}</code></SettingRow>
           <SettingRow label="Previous result"><code>{updateStatus?.journal.lastResult || 'None'}</code></SettingRow>
-          {updateStatus?.journal.phase === 'downloading' && <div className="update-progress"><span style={{ width: updateStatus.journal.downloadTotal ? `${Math.min(100, updateStatus.journal.downloadReceived / updateStatus.journal.downloadTotal * 100)}%` : '20%' }} /></div>}
-          {updateStatus?.journal.available?.releaseNotes && <div className="update-notes"><strong>Release notes</strong><p>{updateStatus.journal.available.releaseNotes}</p></div>}
+          {updateStatus?.journal.phase === 'downloading' && <div className="update-download">
+            <div className="update-progress"><span style={{ width: updateStatus.journal.downloadTotal ? `${Math.min(100, updateStatus.journal.downloadReceived / updateStatus.journal.downloadTotal * 100)}%` : '20%' }} /></div>
+            <small>{formatBytes(updateStatus.journal.downloadReceived)}{updateStatus.journal.downloadTotal ? ` of ${formatBytes(updateStatus.journal.downloadTotal)} · ${Math.min(100, Math.round(updateStatus.journal.downloadReceived / updateStatus.journal.downloadTotal * 100))}%` : ' downloaded'}</small>
+          </div>}
+          {updateStatus?.journal.available?.releaseNotes && <div className="update-notes"><strong>Release notes · {updateStatus.journal.available.version}</strong><p>{updateStatus.journal.available.releaseNotes}</p></div>}
+          {assessment && !assessment.safe && <div className="update-notes attention"><strong>{assessment.hardBlocked ? <><AlertTriangle size={14} /> Update blocked by active Git work</> : 'Active work to review before updating'}</strong><p>{[...assessment.hardBlockers, ...assessment.blockers].map((item) => `• ${item}`).join('\n')}</p></div>}
           <div className="diagnostic-actions">
             <Button icon={<RefreshCw className={updating ? 'is-spinning' : ''} size={14} />} disabled={updating || !updateStatus?.endpointConfigured} onClick={() => void withUpdate('Checking for updates', native.checkForUpdates)}>Check for Updates</Button>
             <Button icon={<Download size={14} />} disabled={updating || updateStatus?.journal.phase !== 'available'} onClick={() => void withUpdate('Downloading signed update', native.downloadUpdate)}>Download Update</Button>
-            <Button variant="primary" disabled={!updateStatus?.journal.signatureVerified} onClick={() => void installNow()}>Install and Restart</Button>
-            <Button disabled={!updateStatus?.journal.signatureVerified} onClick={() => void installOnExit()}>Install on Exit</Button>
+            <Button variant="primary" disabled={!updateStatus?.journal.signatureVerified} onClick={() => void installNow()}>Update Now</Button>
+            <Button disabled={!updateStatus?.journal.signatureVerified} onClick={() => void installOnExit()}>Update When Idle</Button>
+            <Button icon={<ShieldCheck size={14} />} onClick={() => void reviewActiveWork()}>Review Active Work</Button>
+            <Button disabled={!updateStatus?.journal.available?.releaseNotes} onClick={() => viewReleaseNotes()}>View Release Notes</Button>
             <Button icon={<RotateCcw size={14} />} disabled={updating || updateStatus?.journal.phase !== 'failed'} onClick={() => void withUpdate('Retrying update', native.retryUpdate)}>Retry</Button>
-            <Button variant="ghost" onClick={() => setSection('diagnostics')}>Open Diagnostics</Button>
+            <Button variant="ghost" onClick={() => setSection('diagnostics')}>View Diagnostics</Button>
           </div>
         </SettingsSection>}
         {section === 'diagnostics' && <SettingsSection title="Diagnostics" description="Inspect and repair PARALITH metadata without touching source Projects.">
@@ -214,6 +256,13 @@ export function SettingsScreen() {
     </div>
     {customShellPath && <TextPromptDialog title="Add custom shell" label="Shell name" initialValue="Custom shell" confirmLabel="Add shell" onClose={() => setCustomShellPath(undefined)} onConfirm={async (name) => { const path = customShellPath; setCustomShellPath(undefined); if (!path) return; try { await native.saveCustomShell(name, path); setShells(await native.detectShells()); setStatus('Custom shell added') } catch (caught) { setError(asNativeError(caught).message) } }} />}
   </main>
+}
+
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB']
+  const exponent = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)))
+  return `${(bytes / 1024 ** exponent).toFixed(exponent === 0 ? 0 : 1)} ${units[exponent]}`
 }
 
 function SettingsSection({ title, description, children }: { title: string; description: string; children: ReactNode }) { return <div className="focused-section"><header><h2>{title}</h2><p>{description}</p></header><div className="setting-rows">{children}</div></div> }

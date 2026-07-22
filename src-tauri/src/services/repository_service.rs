@@ -1864,12 +1864,37 @@ impl RepositoryService {
             request.context.actor.agent_run_id.as_deref(),
         )?;
         let path = worktree.to_string_lossy().into_owned();
-        let result = self.git_text(
-            repository,
-            &["worktree", "add", "--no-track", "-b", branch, &path, &base],
-            None,
-            Some((timeout, cancellation)),
-        );
+        // `git worktree add` normally checks the tree out itself by spawning an internal
+        // `GIT_DIR=… GIT_WORK_TREE=… git reset --hard`. On Git for Windows that inherited-env child
+        // aborts with `fatal: '$GIT_DIR' too big` whenever git is launched from a non-MSYS host
+        // process (our background helper) — which silently broke every agent worktree, and with it
+        // every Swarm Builder task, on Windows. We create the worktree without a checkout and then
+        // populate the working tree with a checkout we spawn ourselves, cwd-scoped to the new
+        // worktree so git discovers its gitdir from the `.git` file with no inherited env.
+        let result = self
+            .git_text(
+                repository,
+                &[
+                    "worktree",
+                    "add",
+                    "--no-checkout",
+                    "--no-track",
+                    "-b",
+                    branch,
+                    &path,
+                    &base,
+                ],
+                None,
+                Some((timeout, cancellation)),
+            )
+            .and_then(|_| {
+                self.git_text(
+                    &worktree,
+                    &["checkout", "--force"],
+                    None,
+                    Some((timeout, cancellation)),
+                )
+            });
         if let Err(error) = result {
             self.database.update_worktree_lease_status(
                 &lease_id,
@@ -2069,19 +2094,16 @@ impl RepositoryService {
         project: &Project,
         requested: Option<&str>,
     ) -> AppResult<PathBuf> {
-        let project_root = Path::new(&project.root_path)
-            .canonicalize()
-            .map_err(|error| {
-                AppError::new(
-                    "project_folder_missing",
-                    "The Project folder is unavailable.",
-                    true,
-                )
-                .detail(error.to_string())
-                .entity(&project.id)
-            })?;
-        let candidate = Path::new(requested.unwrap_or(&project.root_path))
-            .canonicalize()
+        let project_root = git_canonicalize(Path::new(&project.root_path)).map_err(|error| {
+            AppError::new(
+                "project_folder_missing",
+                "The Project folder is unavailable.",
+                true,
+            )
+            .detail(error.to_string())
+            .entity(&project.id)
+        })?;
+        let candidate = git_canonicalize(Path::new(requested.unwrap_or(&project.root_path)))
             .map_err(|error| {
                 AppError::new(
                     "git_repository_not_found",
@@ -2102,7 +2124,7 @@ impl RepositoryService {
             self.git_text(&candidate, &["rev-parse", "--show-toplevel"], None, None)?
                 .trim(),
         );
-        let root = root.canonicalize().map_err(|error| {
+        let root = git_canonicalize(&root).map_err(|error| {
             AppError::new(
                 "git_repository_not_found",
                 "Git returned an invalid repository root.",
@@ -2130,7 +2152,7 @@ impl RepositoryService {
         let Some(requested) = requested else {
             return Ok(repository.to_path_buf());
         };
-        let path = Path::new(requested).canonicalize().map_err(|error| {
+        let path = git_canonicalize(Path::new(requested)).map_err(|error| {
             AppError::new(
                 "worktree_missing",
                 "The requested worktree path is unavailable.",
@@ -2149,12 +2171,10 @@ impl RepositoryService {
                 base.join(value)
             }
         };
-        let actual = resolve_common(&path, &actual_common)
-            .canonicalize()
-            .map_err(AppError::from)?;
-        let expected = resolve_common(repository, &repo_common)
-            .canonicalize()
-            .map_err(AppError::from)?;
+        let actual =
+            git_canonicalize(&resolve_common(&path, &actual_common)).map_err(AppError::from)?;
+        let expected =
+            git_canonicalize(&resolve_common(repository, &repo_common)).map_err(AppError::from)?;
         if actual != expected {
             return Err(AppError::new(
                 "repository_ownership_mismatch",
@@ -2783,6 +2803,26 @@ struct ParsedStatus {
     ahead: u64,
     behind: u64,
     files: Vec<RepositoryFileStatus>,
+}
+
+/// Canonicalize a path, then strip the Windows `\\?\` verbatim prefix that
+/// `std::fs::canonicalize` prepends. Most Git subcommands tolerate an extended-length working
+/// directory, but `git worktree add` mis-parses the gitdir it derives from one and dies with
+/// `fatal: '$GIT_DIR' too big` — which silently broke every agent worktree on Windows. Every path
+/// handed to Git as a working directory or worktree target must be a plain drive path.
+fn git_canonicalize(path: &Path) -> std::io::Result<PathBuf> {
+    let canonical = path.canonicalize()?;
+    #[cfg(windows)]
+    {
+        let text = canonical.to_string_lossy();
+        if let Some(unc) = text.strip_prefix(r"\\?\UNC\") {
+            return Ok(PathBuf::from(format!(r"\\{unc}")));
+        }
+        if let Some(local) = text.strip_prefix(r"\\?\") {
+            return Ok(PathBuf::from(local.to_owned()));
+        }
+    }
+    Ok(canonical)
 }
 
 fn nonempty_string(bytes: &[u8]) -> Option<String> {
@@ -3737,6 +3777,16 @@ mod tests {
         let lease = service.list_leases(&project.id).unwrap().remove(0);
         assert_eq!(lease.branch_name, branch);
         assert!(Path::new(&lease.worktree_path).is_dir());
+        // The worktree must be checked out from the base commit: an agent needs the project's
+        // existing files, and a `git worktree add` that only creates an empty tree (the Windows
+        // `'$GIT_DIR' too big` failure mode) would leave Builders with nothing to edit.
+        assert_eq!(
+            fs::read_to_string(Path::new(&lease.worktree_path).join("tracked.txt"))
+                .unwrap()
+                .replace("\r\n", "\n"),
+            "initial\n",
+            "the agent worktree must be populated from its base commit"
+        );
         let leased_branch = service
             .ensure_branch_not_leased(&project.id, &root, &branch)
             .unwrap_err();

@@ -2,6 +2,7 @@ import { invoke } from '@tauri-apps/api/core'
 import type {
   AgentDetectionResult,
   AppSettings,
+  BrowserBounds,
   DiagnosticsSnapshot,
   SafeRestartAssessment,
   SafeRestartClientState,
@@ -56,6 +57,15 @@ import type {
   CreateSwarmRequest,
   ProjectCloseSwarmBehavior,
   SavePresetRequest,
+  SwarmRuntimeReadiness,
+  SwarmLaunchPreview,
+  SwarmCommandDraft,
+  DirectoryListing,
+  FileContents,
+  FileWriteResult,
+  FsEntryInfo,
+  FsPath,
+  ProjectFileIndex,
 } from './types'
 
 export const native = {
@@ -133,8 +143,14 @@ export const native = {
   terminateWorkspaceSessions: (workspaceId: string) => invoke<void>('terminate_workspace_sessions', { workspaceId }),
   listLiveSessions: (workspaceId?: string) => invoke<TerminalSession[]>('list_live_sessions', { workspaceId }),
   terminalSessionStatus: (sessionId: string) => invoke<TerminalSession>('terminal_session_status', { sessionId }),
+  /** Save clipboard/dropped image bytes to a temp file and return its absolute path (to type into a terminal). */
+  saveDroppedImage: (data: number[], extension?: string) => invoke<string>('save_dropped_image', { data, extension }),
   getSettings: () => invoke<AppSettings>('get_settings'),
   saveSettings: (settings: AppSettings) => invoke<AppSettings>('save_settings', { settings }),
+  /** Read the persisted theme id. Callable from any window (main + detached). */
+  getThemePreference: () => invoke<string>('get_theme_preference'),
+  /** Persist the selected theme id and broadcast a `theme-changed` event to every window. Main window only. */
+  setThemePreference: (themeId: string) => invoke<void>('set_theme_preference', { themeId }),
   listAgentProfiles: () => invoke<AgentProfile[]>('list_agent_profiles'),
   listAgentSessions: (workspaceId: string) => invoke<AgentSession[]>('list_agent_sessions', { workspaceId }),
   getDiagnostics: () => invoke<DiagnosticsSnapshot>('get_diagnostics'),
@@ -185,6 +201,8 @@ export const native = {
 
   // ---- Paralith Swarms --------------------------------------------------------------------
   listSwarmPresets: () => invoke<SwarmPreset[]>('list_swarm_presets'),
+  listSwarmRuntimeReadiness: () => invoke<SwarmRuntimeReadiness[]>('list_swarm_runtime_readiness'),
+  previewSwarmLaunch: (request: CreateSwarmRequest) => invoke<SwarmLaunchPreview>('preview_swarm_launch', { request }),
   saveSwarmPreset: (request: SavePresetRequest) => invoke<SwarmPreset>('save_swarm_preset', { request }),
   deleteSwarmPreset: (presetId: string) => invoke<void>('delete_swarm_preset', { presetId }),
   createSwarm: (request: CreateSwarmRequest) => invoke<Swarm>('create_swarm', { request }),
@@ -198,11 +216,55 @@ export const native = {
   stopSwarm: (projectId: string, swarmId: string, hard = false) => invoke<void>('stop_swarm', { projectId, swarmId, hard }),
   archiveSwarm: (projectId: string, swarmId: string, archived: boolean) => invoke<void>('archive_swarm', { projectId, swarmId, archived }),
   deleteSwarm: (projectId: string, swarmId: string) => invoke<void>('delete_swarm', { projectId, swarmId }),
+  exportSwarmReport: (projectId: string, swarmId: string, destination: string) => invoke<void>('export_swarm_report', { projectId, swarmId, destination }),
   setSwarmPriority: (projectId: string, swarmId: string, priority: number) => invoke<void>('set_swarm_priority', { projectId, swarmId, priority }),
+  focusSwarmAgentTerminal: (projectId: string, swarmId: string, agentId: string) => invoke<string>('focus_swarm_agent_terminal', { projectId, swarmId, agentId }),
   sendSwarmMessage: (projectId: string, swarmId: string, target: string, body: string) =>
     invoke<void>('send_swarm_message', { projectId, request: { swarmId, target, body } }),
+  retrySwarmTest: (projectId: string, swarmId: string, testId: string) => invoke<void>('retry_swarm_test', { projectId, swarmId, testId }),
+  generateSwarmFixTask: (projectId: string, swarmId: string, testId: string) => invoke<void>('generate_swarm_fix_task', { projectId, swarmId, testId }),
+  getSwarmCommandDraft: (projectId: string, swarmId: string) => invoke<SwarmCommandDraft | null>('get_swarm_command_draft', { projectId, swarmId }),
+  saveSwarmCommandDraft: (projectId: string, swarmId: string, target: string, body: string) => invoke<void>('save_swarm_command_draft', { projectId, swarmId, target, body }),
   acceptSwarmResult: (projectId: string, swarmId: string) => invoke<void>('accept_swarm_result', { projectId, swarmId }),
+  resolveSwarmDecision: (projectId: string, swarmId: string, choice: 'recommended' | 'alternative' | 'stop') => invoke<void>('resolve_swarm_decision', { projectId, swarmId, choice }),
   addSwarmBuilder: (projectId: string, swarmId: string) => invoke<void>('add_swarm_builder', { projectId, swarmId }),
+
+  // ---- Code surface (project-scoped, path-guarded filesystem) -----------------------------
+  listProjectDirectory: (projectId: string, relativePath = '') =>
+    invoke<DirectoryListing>('list_project_directory', { projectId, relativePath }),
+  readProjectFile: (projectId: string, relativePath: string) =>
+    invoke<FileContents>('read_project_file', { projectId, relativePath }),
+  writeProjectFile: (projectId: string, relativePath: string, content: string, expectedSha256?: string) =>
+    invoke<FileWriteResult>('write_project_file', { projectId, relativePath, content, expectedSha256 }),
+  createProjectFile: (projectId: string, relativePath: string) =>
+    invoke<FsEntryInfo>('create_project_file', { projectId, relativePath }),
+  createProjectDirectory: (projectId: string, relativePath: string) =>
+    invoke<FsEntryInfo>('create_project_directory', { projectId, relativePath }),
+  renameProjectEntry: (projectId: string, from: string, to: string) =>
+    invoke<FsEntryInfo>('rename_project_entry', { projectId, from, to }),
+  copyProjectEntry: (projectId: string, from: string, to: string) =>
+    invoke<FsEntryInfo>('copy_project_entry', { projectId, from, to }),
+  deleteProjectEntry: (projectId: string, relativePath: string, recursive = false) =>
+    invoke<FsPath>('delete_project_entry', { projectId, relativePath, recursive }),
+  searchProjectFiles: (projectId: string, limit?: number) =>
+    invoke<ProjectFileIndex>('search_project_files', { projectId, limit }),
+  watchProjectFiles: (projectId: string) => invoke<void>('watch_project_files', { projectId }),
+  unwatchProjectFiles: (projectId: string) => invoke<void>('unwatch_project_files', { projectId }),
+
+  // Embedded development browser (isolated native child webview beside the terminal canvas).
+  openBrowserView: (workspaceId: string, bounds: BrowserBounds, url?: string) =>
+    invoke<void>('open_browser_view', { workspaceId, bounds, url }),
+  browserNavigate: (workspaceId: string, url: string) => invoke<void>('browser_navigate', { workspaceId, url }),
+  browserReload: (workspaceId: string) => invoke<void>('browser_reload', { workspaceId }),
+  browserStop: (workspaceId: string) => invoke<void>('browser_stop', { workspaceId }),
+  browserSetBounds: (workspaceId: string, bounds: BrowserBounds) =>
+    invoke<void>('browser_set_bounds', { workspaceId, bounds }),
+  browserSetVisible: (workspaceId: string, visible: boolean) =>
+    invoke<void>('browser_set_visible', { workspaceId, visible }),
+  browserSetZoom: (workspaceId: string, factor: number) => invoke<void>('browser_set_zoom', { workspaceId, factor }),
+  browserSetInspect: (workspaceId: string, enable: boolean) =>
+    invoke<void>('browser_set_inspect', { workspaceId, enable }),
+  closeBrowserView: (workspaceId: string) => invoke<void>('close_browser_view', { workspaceId }),
 }
 
 export function asNativeError(error: unknown): { code: string; message: string; affectedEntity?: string; recommendedAction?: string } {

@@ -143,19 +143,6 @@ impl DatabaseService {
             .map_err(AppError::database)
     }
 
-    pub fn active_mission_count(&self) -> AppResult<usize> {
-        let count: i64 = self
-            .connection
-            .lock()
-            .query_row(
-                "SELECT count(*) FROM missions WHERE status IN ('planning','running','verifying')",
-                [],
-                |row| row.get(0),
-            )
-            .map_err(AppError::database)?;
-        Ok(count.max(0) as usize)
-    }
-
     pub fn health_report(&self) -> AppResult<crate::models::HealthReport> {
         let connection = self.connection.lock();
         let schema_version = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
@@ -662,7 +649,7 @@ impl DatabaseService {
 
     pub fn list_recent_workspaces(&self) -> AppResult<Vec<RecentWorkspace>> {
         let connection = self.connection.lock();
-        let mut statement = connection.prepare("SELECT w.id,w.project_id,w.name,w.normalized_name,w.layout_json,w.active_pane_id,w.restore_behavior,w.created_at,w.updated_at,w.last_opened_at,p.name,p.root_path FROM workspaces w JOIN projects p ON p.id=w.project_id WHERE w.removed_from_recent=0 ORDER BY w.last_opened_at DESC LIMIT 100")?;
+        let mut statement = connection.prepare("SELECT w.id,w.project_id,w.name,w.normalized_name,w.layout_json,w.active_pane_id,w.restore_behavior,w.created_at,w.updated_at,w.last_opened_at,p.name,p.root_path FROM workspaces w JOIN projects p ON p.id=w.project_id WHERE w.removed_from_recent=0 AND w.system_kind='user' ORDER BY w.last_opened_at DESC LIMIT 100")?;
         let rows = statement.query_map([], |row| {
             let workspace = Workspace {
                 id: row.get(0)?,
@@ -910,6 +897,7 @@ impl DatabaseService {
                 "keep_running" | "ask" | "stop"
             )
             || settings.inactive_workspace_rendering != "hibernate"
+            || !crate::models::settings::theme_id_is_acceptable(&settings.theme_id)
         {
             return Err(AppError::new(
                 "invalid_settings",
@@ -1253,7 +1241,7 @@ fn load_project_workspaces(connection: &Connection, project_id: &str) -> AppResu
     // Sidebar order is user-controlled (sort_order); last_opened_at is the deterministic
     // tiebreak so freshly migrated or newly created rows land predictably.
     let mut statement = connection.prepare(
-        "SELECT id,project_id,name,normalized_name,layout_json,active_pane_id,restore_behavior,created_at,updated_at,last_opened_at FROM workspaces WHERE project_id=?1 AND removed_from_recent=0 ORDER BY sort_order ASC, last_opened_at DESC, id ASC",
+        "SELECT id,project_id,name,normalized_name,layout_json,active_pane_id,restore_behavior,created_at,updated_at,last_opened_at FROM workspaces WHERE project_id=?1 AND removed_from_recent=0 AND system_kind='user' ORDER BY sort_order ASC, last_opened_at DESC, id ASC",
     )?;
     let mut workspaces = statement
         .query_map([project_id], row_to_workspace)?

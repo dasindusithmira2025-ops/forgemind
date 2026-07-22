@@ -1,10 +1,11 @@
 import { useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, Boxes, AlertTriangle, CheckCircle2, Loader2, Pause } from 'lucide-react'
+import { Archive, Plus, Boxes, AlertTriangle, CheckCircle2, Loader2, Pause } from 'lucide-react'
 import { useSwarmStore } from './swarmStore'
 import { isActiveLifecycle, lifecycleLabel, lifecycleTone, progressPercent } from './swarmPresentation'
 import { onSwarmChanged } from '../../native/events'
 import type { SwarmListItem } from '../../native/types'
+import { SwarmRowMenu } from './SwarmRowMenu'
 
 /**
  * The project-scoped SWARMS section of the sidebar. Swarms are first-class entities here — like
@@ -52,7 +53,7 @@ export function SwarmsSidebarSection({
         <span className="section-label">
           Swarms{list.length > 0 ? <span className="swarm-count"> {list.length}</span> : null}
         </span>
-        <button
+        <div className="swarm-section-actions"><button type="button" className="ws-section-add" aria-label="Swarm history" title="Completed and archived Swarms" disabled={!projectId} onClick={() => projectId && navigate(`/swarms/${projectId}?history=1`)}><Archive size={14} /></button><button
           type="button"
           className="ws-section-add"
           aria-label="New swarm"
@@ -61,7 +62,7 @@ export function SwarmsSidebarSection({
           onClick={() => projectId && navigate(`/swarms/${projectId}?new=1`)}
         >
           <Plus size={15} />
-        </button>
+        </button></div>
       </header>
 
       {!projectId ? (
@@ -98,6 +99,7 @@ export function SwarmsSidebarSection({
               item={item}
               active={item.swarm.id === activeSwarmId}
               onOpen={() => navigate(`/swarms/${projectId}/${item.swarm.id}`)}
+              onCreated={(swarmId) => navigate(`/swarms/${projectId}/${swarmId}`)}
             />
           ))}
         </ul>
@@ -110,10 +112,12 @@ function SwarmSidebarRow({
   item,
   active,
   onOpen,
+  onCreated,
 }: {
   item: SwarmListItem
   active: boolean
   onOpen: () => void
+  onCreated: (swarmId: string) => void
 }) {
   const { swarm, activity } = item
   const tone = lifecycleTone(swarm.lifecycle)
@@ -141,13 +145,14 @@ function SwarmSidebarRow({
           ) : null}
         </span>
       </button>
+      <SwarmRowMenu item={item} onOpen={onOpen} onCreated={onCreated} />
     </li>
   )
 }
 
 function SwarmStatusIcon({ lifecycle }: { lifecycle: SwarmListItem['swarm']['lifecycle'] }) {
-  if (lifecycle === 'decision_needed') return <AlertTriangle size={12} className="tone-amber" aria-hidden />
-  if (lifecycle === 'ready' || lifecycle === 'completed') return <CheckCircle2 size={12} className="tone-green" aria-hidden />
+  if (lifecycle === 'decision_required') return <AlertTriangle size={12} className="tone-amber" aria-hidden />
+  if (lifecycle === 'ready_for_review' || lifecycle === 'completed') return <CheckCircle2 size={12} className="tone-green" aria-hidden />
   if (lifecycle === 'paused') return <Pause size={12} aria-hidden />
   if (lifecycle === 'failed' || lifecycle === 'cancelled') return <AlertTriangle size={12} className="tone-red" aria-hidden />
   if (isActiveLifecycle(lifecycle)) return <Loader2 size={12} className="swarm-spin" aria-hidden />
