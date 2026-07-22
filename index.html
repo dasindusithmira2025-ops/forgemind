@@ -5,6 +5,32 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/png" href="/favicon.png" />
     <title>PARALITH</title>
+    <script>
+      // Theme bootstrap — runs before the stylesheet applies and before React mounts, in every
+      // window (main + detached), so the saved theme paints with no flash. It only reads the
+      // localStorage cache written by src/theme/applyTheme.ts (keys kept in sync there). The React
+      // theme runtime reconciles against the durable SQLite preference immediately after mount.
+      (function () {
+        try {
+          var root = document.documentElement;
+          var id = localStorage.getItem('paralith.theme.id') || 'paralith-dark';
+          root.setAttribute('data-theme', id);
+          var scheme = localStorage.getItem('paralith.theme.scheme');
+          if (scheme === 'light' || scheme === 'dark') root.style.colorScheme = scheme;
+          var raw = localStorage.getItem('paralith.theme.vars');
+          if (raw) {
+            var vars = JSON.parse(raw);
+            for (var name in vars) {
+              if (Object.prototype.hasOwnProperty.call(vars, name) && name.indexOf('--') === 0) {
+                root.style.setProperty(name, String(vars[name]));
+              }
+            }
+          }
+        } catch (e) {
+          /* No cache or storage disabled: the :root defaults (Paralith Dark) render, still flash-free. */
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

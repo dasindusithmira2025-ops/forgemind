@@ -14,17 +14,40 @@ use std::{
     fs,
     path::{Path, PathBuf},
     sync::Arc,
+    time::{Duration, Instant},
 };
-use tauri::AppHandle;
+use tauri::{AppHandle, Emitter};
 use tauri_plugin_updater::{Update, UpdaterExt};
 use url::Url;
 use uuid::Uuid;
+
+/// Emitted to every application window whenever the update lifecycle changes. Payload is the full
+/// [`UpdateStatus`]. Windows render from this instead of polling so the primary and any detached
+/// windows always agree on the current phase.
+pub const UPDATE_STATUS_EVENT: &str = "update-status";
+/// Emitted (throttled) during a download with received/total byte counts.
+pub const UPDATE_PROGRESS_EVENT: &str = "update-progress";
+
+/// Minimum interval between download-progress broadcasts, so a fast download does not flood every
+/// window with events.
+const PROGRESS_EMIT_INTERVAL: Duration = Duration::from_millis(100);
+
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DownloadProgress {
+    received: u64,
+    total: Option<u64>,
+}
 
 #[derive(Clone)]
 pub struct UpdateService {
     inner: Arc<Mutex<Runtime>>,
     update_data_dir: Arc<PathBuf>,
     installation_id: Arc<String>,
+    /// Set once the Tauri app handle exists (during setup). Used to broadcast lifecycle and
+    /// progress events to every window. `None` in unit tests, which exercise state without a UI.
+    broadcaster: Arc<Mutex<Option<AppHandle>>>,
+    last_progress_emit: Arc<Mutex<Instant>>,
 }
 
 struct Runtime {
@@ -131,9 +154,46 @@ impl UpdateService {
             })),
             update_data_dir: Arc::new(update_data_dir),
             installation_id: Arc::new(installation_id),
+            broadcaster: Arc::new(Mutex::new(None)),
+            last_progress_emit: Arc::new(Mutex::new(
+                Instant::now()
+                    .checked_sub(PROGRESS_EMIT_INTERVAL)
+                    .unwrap_or_else(Instant::now),
+            )),
         };
         service.persist()?;
         Ok(service)
+    }
+
+    /// Attach the Tauri app handle once it exists so lifecycle changes can be broadcast to every
+    /// window. Called from application setup.
+    pub fn attach_app(&self, app: AppHandle) {
+        *self.broadcaster.lock() = Some(app);
+    }
+
+    /// Broadcast the current status to every window. Must not be called while the `inner` lock is
+    /// held (it re-locks to build the status snapshot).
+    fn broadcast_status(&self) {
+        let Some(app) = self.broadcaster.lock().clone() else {
+            return;
+        };
+        let _ = app.emit(UPDATE_STATUS_EVENT, self.status());
+    }
+
+    /// Broadcast download progress, throttled to at most one event per [`PROGRESS_EMIT_INTERVAL`].
+    /// `force` bypasses the throttle for terminal updates (e.g. the final byte).
+    fn broadcast_progress(&self, received: u64, total: Option<u64>, force: bool) {
+        let Some(app) = self.broadcaster.lock().clone() else {
+            return;
+        };
+        {
+            let mut last = self.last_progress_emit.lock();
+            if !force && last.elapsed() < PROGRESS_EMIT_INTERVAL {
+                return;
+            }
+            *last = Instant::now();
+        }
+        let _ = app.emit(UPDATE_PROGRESS_EVENT, DownloadProgress { received, total });
     }
 
     pub fn status(&self) -> UpdateStatus {
@@ -332,6 +392,7 @@ impl UpdateService {
             Err(error) => self.record_failure(format!("Update check failed: {error}"))?,
         }
         self.persist()?;
+        self.broadcast_status();
         Ok(self.status())
     }
 
@@ -349,16 +410,22 @@ impl UpdateService {
             update
         };
         self.persist()?;
+        self.broadcast_status();
         let service = self.clone();
         let bytes = update
             .download(
                 move |chunk, total| {
-                    let mut runtime = service.inner.lock();
-                    runtime.journal.download_received = runtime
-                        .journal
-                        .download_received
-                        .saturating_add(chunk as u64);
-                    runtime.journal.download_total = total;
+                    let (received, total) = {
+                        let mut runtime = service.inner.lock();
+                        runtime.journal.download_received = runtime
+                            .journal
+                            .download_received
+                            .saturating_add(chunk as u64);
+                        runtime.journal.download_total = total;
+                        (runtime.journal.download_received, total)
+                    };
+                    // Emitted outside the lock and throttled so a fast download cannot flood windows.
+                    service.broadcast_progress(received, total, false);
                 },
                 || {},
             )
@@ -366,17 +433,22 @@ impl UpdateService {
         match bytes {
             Ok(bytes) => {
                 let mut runtime = self.inner.lock();
+                let received = runtime.journal.download_received;
+                let total = runtime.journal.download_total;
                 runtime.downloaded = Some(bytes);
                 runtime.journal.signature_verified = true;
                 runtime.journal.last_result =
                     Some("Updater signature and package metadata verified".into());
                 transition(&mut runtime.journal, UpdatePhase::Downloaded, None)?;
+                drop(runtime);
+                self.broadcast_progress(received, total, true);
             }
             Err(error) => self.record_failure(format!(
                 "Update download or signature verification failed: {error}"
             ))?,
         }
         self.persist()?;
+        self.broadcast_status();
         Ok(self.status())
     }
 
@@ -399,7 +471,9 @@ impl UpdateService {
             }),
         )?;
         drop(runtime);
-        self.persist()
+        self.persist()?;
+        self.broadcast_status();
+        Ok(())
     }
 
     pub fn installation_pending(&self, on_exit: bool) -> bool {
@@ -431,6 +505,7 @@ impl UpdateService {
         runtime.journal.first_launch_attempts = 0;
         drop(runtime);
         self.persist()?;
+        self.broadcast_status();
         Ok(Some((update, bytes)))
     }
 
@@ -444,7 +519,9 @@ impl UpdateService {
             Some("Manual retry requested".into()),
         )?;
         drop(runtime);
-        self.persist()
+        self.persist()?;
+        self.broadcast_status();
+        Ok(())
     }
 
     pub fn request_safe_mode(&self) -> AppResult<()> {
@@ -458,7 +535,9 @@ impl UpdateService {
         runtime.journal.last_result = Some(detail.clone());
         transition(&mut runtime.journal, UpdatePhase::Failed, Some(detail))?;
         drop(runtime);
-        self.persist()
+        self.persist()?;
+        self.broadcast_status();
+        Ok(())
     }
 
     fn persist(&self) -> AppResult<()> {

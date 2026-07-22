@@ -9,6 +9,10 @@ pub struct AppSettings {
     pub ui_scale: f64,
     #[serde(default = "default_ui_density")]
     pub ui_density: String,
+    /// Selected appearance theme id (e.g. "paralith-dark", "graphite", "system"). Settings saved
+    /// before this field existed default to the built-in dark theme.
+    #[serde(default = "default_theme_id")]
+    pub theme_id: String,
     pub terminal_font_size: u16,
     pub terminal_font_family: String,
     pub terminal_line_height: f64,
@@ -40,6 +44,7 @@ impl Default for AppSettings {
             sidebar_width: default_sidebar_width(),
             ui_scale: 1.0,
             ui_density: default_ui_density(),
+            theme_id: default_theme_id(),
             terminal_font_size: 13,
             terminal_font_family: "Cascadia Mono, Consolas, monospace".into(),
             terminal_line_height: 1.15,
@@ -76,4 +81,45 @@ fn default_sidebar_width() -> u16 {
 /// which matches the pre-density chrome metrics.
 fn default_ui_density() -> String {
     "standard".into()
+}
+
+/// The built-in default theme. Any unknown/removed id is tolerated here and reconciled to the
+/// default by the frontend theme registry, so a stale persisted id never leaves the app unstyled.
+fn default_theme_id() -> String {
+    "paralith-dark".into()
+}
+
+/// Accept only a bounded, non-empty theme id. The concrete allow-list lives in the frontend
+/// registry (which also owns the fallback), so the backend just rejects obviously invalid values.
+pub fn theme_id_is_acceptable(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 64 && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_settings_carry_the_default_theme() {
+        assert_eq!(AppSettings::default().theme_id, "paralith-dark");
+    }
+
+    #[test]
+    fn theme_id_validation_accepts_kebab_ids_and_rejects_junk() {
+        assert!(theme_id_is_acceptable("paralith-dark"));
+        assert!(theme_id_is_acceptable("system"));
+        assert!(theme_id_is_acceptable("arctic-light"));
+        assert!(!theme_id_is_acceptable(""));
+        assert!(!theme_id_is_acceptable("has space"));
+        assert!(!theme_id_is_acceptable("drop;table"));
+        assert!(!theme_id_is_acceptable(&"x".repeat(65)));
+    }
+
+    #[test]
+    fn settings_missing_theme_id_deserialize_to_the_default() {
+        // Settings persisted before the theme field existed must still load.
+        let legacy = r#"{"sidebarOpen":true,"uiScale":1.0,"terminalFontSize":13,"terminalFontFamily":"Cascadia Mono","terminalLineHeight":1.15,"cursorStyle":"block","scrollbackSize":10000,"copyOnSelect":false,"confirmMultilinePaste":true,"confirmClosePane":true,"reopenLastWorkspace":false,"restoreBehavior":"ask","outputLogRetention":"tail_only","restorationLaunchBudget":4,"defaultLayout":"auto","defaultPaneCount":4,"inactiveWorkspaceProcesses":"keep_running","inactiveWorkspaceRendering":"hibernate","automaticUpdateChecks":true,"settingsVersion":3}"#;
+        let parsed: AppSettings = serde_json::from_str(legacy).expect("legacy settings load");
+        assert_eq!(parsed.theme_id, "paralith-dark");
+    }
 }

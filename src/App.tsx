@@ -7,6 +7,7 @@ import { terminalRuntime } from './features/terminals/runtimeStore'
 import { detachedWorkspaceId } from './native/windowContext'
 import type { HandoffTicket, StartupStatus, UpdateStatus } from './native/types'
 import { RecoveryScreen } from './screens/RecoveryScreen'
+import { initThemeRuntime } from './theme/themeStore'
 
 const ProjectLauncher = lazy(() => import('./screens/ProjectLauncher').then((module) => ({ default: module.ProjectLauncher })))
 const WorkspaceSetup = lazy(() => import('./screens/WorkspaceSetup').then((module) => ({ default: module.WorkspaceSetup })))
@@ -53,6 +54,29 @@ export default function App() {
   const uiDensity = useAppStore((state) => state.settings.uiDensity)
   const [startup, setStartup] = useState<StartupStatus | null>()
   const [whatsNew, setWhatsNew] = useState<UpdateStatus>()
+  const [updateReady, setUpdateReady] = useState<UpdateStatus>()
+  const [updateDismissed, setUpdateDismissed] = useState(false)
+
+  // Theme synchronisation for this window: reconcile the persisted selection, follow OS appearance
+  // when set to System, and apply live theme-change broadcasts from any other window. Runs in the
+  // main window and every detached workspace window; the inline bootstrap already painted the
+  // cached theme before mount, so this only reconciles and keeps windows in sync.
+  useEffect(() => initThemeRuntime(), [])
+
+  // Unobtrusive, cross-window update notification. The Rust coordinator broadcasts every lifecycle
+  // change; we surface a small banner only once a compatible update is available or downloaded, and
+  // never in a detached Workspace window (updates are driven from the primary window).
+  useEffect(() => {
+    if (detachedWorkspaceId) return
+    let cancelled = false
+    let stop: (() => void) | undefined
+    void listen<UpdateStatus>('update-status', (event) => {
+      const phase = event.payload.journal.phase
+      if (phase === 'available' || phase === 'downloaded') { setUpdateReady(event.payload); setUpdateDismissed(false) }
+      else if (phase === 'installation_started' || phase === 'idle' || phase === 'no_update') setUpdateReady(undefined)
+    }).then((unlisten) => { if (cancelled) unlisten(); else stop = unlisten })
+    return () => { cancelled = true; stop?.() }
+  }, [])
 
   useEffect(() => {
     let active = true
@@ -122,6 +146,7 @@ export default function App() {
       </Routes>
       </Suspense>
       {whatsNew && <aside className="whats-new" aria-label="What's new"><span>UPDATED · {whatsNew.build.edition.toUpperCase()}</span><h2>PARALITH {whatsNew.build.version} is healthy.</h2><p>{Array.isArray(whatsNew.build.bundledRelease.highlights) ? (whatsNew.build.bundledRelease.highlights as string[]).join(' · ') : 'The signed update passed migration and startup health checks.'}</p><button onClick={() => setWhatsNew(undefined)}>Dismiss</button></aside>}
+      {updateReady && !updateDismissed && <aside className="update-toast" role="status" aria-label="Update available"><div><strong>PARALITH {updateReady.journal.available?.version} is {updateReady.journal.phase === 'downloaded' ? 'ready to install' : 'available'}.</strong><span>{updateReady.journal.phase === 'downloaded' ? 'A signed update has been verified and can be installed when you are ready.' : 'A signed update is available for this edition.'}</span></div><div className="update-toast-actions"><a href="#/settings?section=updates" onClick={() => setUpdateDismissed(true)}>Review</a><button onClick={() => setUpdateDismissed(true)}>Later</button></div></aside>}
     </HashRouter>
   )
 }

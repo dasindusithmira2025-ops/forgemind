@@ -508,6 +508,18 @@ impl DatabaseService {
         Ok(ids)
     }
 
+    /// Number of Swarms in an active lifecycle across every project. Used by the Safe Update Gate
+    /// so a pending update can offer the running Swarms a chance to checkpoint and stop before the
+    /// application restarts. Matches the active lifecycle set of the per-project query below.
+    pub fn count_active_swarms(&self) -> AppResult<usize> {
+        let count: i64 = self.connection.lock().query_row(
+            "SELECT count(*) FROM swarms WHERE archived=0 AND lifecycle IN ('validating','preparing','understanding','planning','building','running','verifying','decision_required','decision_needed','pausing','resuming','stopping','reviewing','recovering')",
+            [],
+            |row| row.get(0),
+        ).map_err(AppError::database)?;
+        Ok(count.max(0) as usize)
+    }
+
     pub fn list_active_swarm_ids_for_project(&self, project_id: &str) -> AppResult<Vec<String>> {
         let connection = self.connection.lock();
         let mut statement = connection.prepare(

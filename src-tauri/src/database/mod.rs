@@ -143,19 +143,6 @@ impl DatabaseService {
             .map_err(AppError::database)
     }
 
-    pub fn active_mission_count(&self) -> AppResult<usize> {
-        let count: i64 = self
-            .connection
-            .lock()
-            .query_row(
-                "SELECT count(*) FROM missions WHERE status IN ('planning','running','verifying')",
-                [],
-                |row| row.get(0),
-            )
-            .map_err(AppError::database)?;
-        Ok(count.max(0) as usize)
-    }
-
     pub fn health_report(&self) -> AppResult<crate::models::HealthReport> {
         let connection = self.connection.lock();
         let schema_version = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
@@ -910,6 +897,7 @@ impl DatabaseService {
                 "keep_running" | "ask" | "stop"
             )
             || settings.inactive_workspace_rendering != "hibernate"
+            || !crate::models::settings::theme_id_is_acceptable(&settings.theme_id)
         {
             return Err(AppError::new(
                 "invalid_settings",

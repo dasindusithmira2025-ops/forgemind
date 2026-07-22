@@ -143,8 +143,14 @@ export const native = {
   terminateWorkspaceSessions: (workspaceId: string) => invoke<void>('terminate_workspace_sessions', { workspaceId }),
   listLiveSessions: (workspaceId?: string) => invoke<TerminalSession[]>('list_live_sessions', { workspaceId }),
   terminalSessionStatus: (sessionId: string) => invoke<TerminalSession>('terminal_session_status', { sessionId }),
+  /** Save clipboard/dropped image bytes to a temp file and return its absolute path (to type into a terminal). */
+  saveDroppedImage: (data: number[], extension?: string) => invoke<string>('save_dropped_image', { data, extension }),
   getSettings: () => invoke<AppSettings>('get_settings'),
   saveSettings: (settings: AppSettings) => invoke<AppSettings>('save_settings', { settings }),
+  /** Read the persisted theme id. Callable from any window (main + detached). */
+  getThemePreference: () => invoke<string>('get_theme_preference'),
+  /** Persist the selected theme id and broadcast a `theme-changed` event to every window. Main window only. */
+  setThemePreference: (themeId: string) => invoke<void>('set_theme_preference', { themeId }),
   listAgentProfiles: () => invoke<AgentProfile[]>('list_agent_profiles'),
   listAgentSessions: (workspaceId: string) => invoke<AgentSession[]>('list_agent_sessions', { workspaceId }),
   getDiagnostics: () => invoke<DiagnosticsSnapshot>('get_diagnostics'),

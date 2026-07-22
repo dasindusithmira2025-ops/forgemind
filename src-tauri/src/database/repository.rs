@@ -426,6 +426,23 @@ impl DatabaseService {
         Ok(())
     }
 
+    /// Number of Git mutations (merge, rebase, cherry-pick, commit, staging, worktree creation,
+    /// repository repair, …) currently queued, running, or awaiting approval across every project.
+    /// The Safe Update Gate hard-blocks installation while any of these are in flight because a
+    /// mid-operation restart can leave a repository in a half-applied state.
+    pub fn count_active_git_mutations(&self) -> AppResult<usize> {
+        let count: i64 = self
+            .connection
+            .lock()
+            .query_row(
+                "SELECT count(*) FROM repository_operations WHERE status IN ('queued','running','awaiting_approval')",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(AppError::database)?;
+        Ok(count.max(0) as usize)
+    }
+
     pub(crate) fn reconcile_interrupted_repository_operations(&self) -> AppResult<Vec<String>> {
         let connection = self.connection.lock();
         let mut statement = connection

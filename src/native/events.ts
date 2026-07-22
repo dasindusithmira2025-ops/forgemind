@@ -46,6 +46,10 @@ export const onSwarmChanged = (handler: (event: SwarmChangedEvent) => void): Pro
 export const onBrowserEvent = (handler: (event: BrowserEvent) => void): Promise<UnlistenFn> =>
   listen<BrowserEvent>('browser-event', (event) => handler(event.payload))
 
+/** Fired to every window when the persisted theme changes, carrying the newly selected theme id. */
+export const onThemeChanged = (handler: (themeId: string) => void): Promise<UnlistenFn> =>
+  listen<string>('theme-changed', (event) => handler(event.payload))
+
 function decodeBase64(encoded: string): Uint8Array {
   const binary = atob(encoded)
   const bytes = new Uint8Array(binary.length)

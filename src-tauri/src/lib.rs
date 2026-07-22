@@ -402,6 +402,9 @@ pub fn run() {
                 legacy_migration,
                 updates: updates.clone(),
             });
+            // Give the update coordinator the app handle so every lifecycle change and download
+            // progress tick is broadcast to all windows, not just the one that invoked the command.
+            updates.attach_app(app.handle().clone());
             for placement in detached_to_restore {
                 let label = services::detached_label(&placement.workspace_id);
                 let geometry = placement.geometry.unwrap_or(models::WindowGeometry {
@@ -494,6 +497,7 @@ pub fn run() {
             commands::terminate_workspace_sessions,
             commands::list_live_sessions,
             commands::terminal_session_status,
+            commands::save_dropped_image,
             commands::restore_workspace_sessions,
             commands::reset_restoration_circuit,
             commands::get_pane_git_review,
@@ -539,6 +543,8 @@ pub fn run() {
             commands::evaluate_merge_readiness,
             commands::get_settings,
             commands::save_settings,
+            commands::get_theme_preference,
+            commands::set_theme_preference,
             commands::list_swarm_presets,
             commands::list_swarm_runtime_readiness,
             commands::preview_swarm_launch,

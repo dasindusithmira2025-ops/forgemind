@@ -2,7 +2,8 @@ use crate::{
     database::backup,
     errors::{AppError, AppResult},
     models::{
-        AgentProvider, SafeRestartAssessment, SafeRestartClientState, StartupStatus, UpdateStatus,
+        assess_restart, AgentProvider, RestartInputs, SafeRestartAssessment,
+        SafeRestartClientState, StartupStatus, UpdateStatus,
     },
     AppState,
 };
@@ -60,6 +61,7 @@ pub fn install_downloaded_update(
 ) -> AppResult<()> {
     crate::require_main_window(&window)?;
     let assessment = build_restart_assessment(&state, client)?;
+    reject_hard_blocked(&assessment)?;
     if !assessment.safe && !confirmed {
         return Err(AppError::new(
             "unsafe_restart",
@@ -83,6 +85,7 @@ pub fn install_update_on_exit(
 ) -> AppResult<UpdateStatus> {
     crate::require_main_window(&window)?;
     let assessment = build_restart_assessment(&state, client)?;
+    reject_hard_blocked(&assessment)?;
     if !assessment.safe && !confirmed {
         return Err(AppError::new(
             "unsafe_restart",
@@ -243,6 +246,25 @@ pub(crate) fn perform_install(app: &AppHandle, state: &AppState, on_exit: bool) 
     app.restart()
 }
 
+/// A hard blocker (an in-flight Git mutation) can never be overridden, even with an explicit
+/// confirmation, because a mid-operation restart risks corrupting the repository.
+fn reject_hard_blocked(assessment: &SafeRestartAssessment) -> AppResult<()> {
+    if assessment.hard_blocked {
+        return Err(AppError::new(
+            "update_hard_blocked",
+            "PARALITH cannot install an update while a Git operation is in progress.",
+            true,
+        )
+        .detail(assessment.hard_blockers.join(" "))
+        .action("Finish or abort the active Git operation, then try again.")
+        .layer("updater"));
+    }
+    Ok(())
+}
+
+/// Gather the live application signals the Safe Update Gate needs and evaluate them through the
+/// pure [`assess_restart`] policy. Flushing the WAL here (`prepare_for_update`) both drains any
+/// pending database writes and confirms the connection is quiescent before an install.
 fn build_restart_assessment(
     state: &AppState,
     client: SafeRestartClientState,
@@ -257,42 +279,18 @@ fn build_restart_assessment(
             )
         })
         .count();
-    let active_missions = state.database.active_mission_count()?;
+    let active_swarms = state.database.count_active_swarms()?;
+    let git_mutation_active = state.database.count_active_git_mutations()? > 0;
+    let detached_windows = state.windows.detached_window_labels().len();
     state.database.prepare_for_update()?;
-    let pending_database_writes = 0;
-    let mut blockers = Vec::new();
-    if !sessions.is_empty() {
-        blockers.push(format!(
-            "{} terminal session(s) are running.",
-            sessions.len()
-        ));
-    }
-    if active_agents > 0 {
-        blockers.push(format!("{active_agents} agent session(s) are active."));
-    }
-    if active_missions > 0 {
-        blockers.push(format!("{active_missions} Mission(s) are active."));
-    }
-    if client.unsaved_editor_state {
-        blockers.push("Editor state is unsaved.".into());
-    }
-    if client.unsaved_settings {
-        blockers.push("Settings changes are unsaved.".into());
-    }
-    if client.unsaved_mission_draft {
-        blockers.push("A Mission draft has unsaved browser state.".into());
-    }
-    Ok(SafeRestartAssessment {
-        safe: blockers.is_empty(),
+    Ok(assess_restart(RestartInputs {
         running_terminals: sessions.len(),
         active_agents,
-        active_missions,
-        pending_database_writes,
-        unsaved_editor_state: client.unsaved_editor_state,
-        unsaved_settings: client.unsaved_settings,
-        unsaved_mission_draft: client.unsaved_mission_draft,
-        blockers,
-    })
+        active_swarms,
+        detached_windows,
+        git_mutation_active,
+        client,
+    }))
 }
 
 #[cfg(test)]
@@ -302,7 +300,7 @@ mod tests {
     fn client_restart_state_defaults_to_no_unsaved_work() {
         let state = SafeRestartClientState::default();
         assert!(
-            !state.unsaved_editor_state && !state.unsaved_settings && !state.unsaved_mission_draft
+            !state.unsaved_editor_state && !state.unsaved_settings && !state.unsaved_browser_state
         );
     }
 }

@@ -6,6 +6,7 @@ export const defaultSettings: AppSettings = {
   sidebarWidth: 300,
   uiScale: 1,
   uiDensity: 'standard',
+  themeId: 'paralith-dark',
   terminalFontSize: 13,
   terminalFontFamily: 'Cascadia Mono, Consolas, monospace',
   terminalLineHeight: 1.15,

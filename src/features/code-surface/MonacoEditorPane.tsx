@@ -1,6 +1,9 @@
 import { useEffect, useRef } from 'react'
 import Editor, { DiffEditor, loader, type OnMount } from '@monaco-editor/react'
 import * as monaco from 'monaco-editor'
+import { allConcreteThemes } from '../../theme/registry'
+import { monacoThemeName, toMonacoColors } from '../../theme/tokens'
+import { useThemeStore } from '../../theme/themeStore'
 import editorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker'
 import jsonWorker from 'monaco-editor/esm/vs/language/json/json.worker?worker'
 import cssWorker from 'monaco-editor/esm/vs/language/css/css.worker?worker'
@@ -33,33 +36,24 @@ import tsWorker from 'monaco-editor/esm/vs/language/typescript/ts.worker?worker'
 }
 loader.config({ monaco })
 
-let themeDefined = false
-function ensureTheme() {
-  if (themeDefined) return
-  themeDefined = true
-  const read = (name: string, fallback: string) => {
-    if (typeof document === 'undefined') return fallback
-    const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
-    return value || fallback
+let themesDefined = false
+/**
+ * Register a Monaco theme for every PARALITH theme, derived from the same tokens the rest of the app
+ * uses so the editor can never drift from the applied theme. Runs once (idempotent) before the first
+ * editor mounts. Switching between them later is a cheap `setTheme` that preserves models, cursor,
+ * selection, and undo history.
+ */
+function ensureThemesRegistered() {
+  if (themesDefined) return
+  themesDefined = true
+  for (const theme of allConcreteThemes()) {
+    monaco.editor.defineTheme(monacoThemeName(theme.id), {
+      base: theme.editor.base,
+      inherit: true,
+      rules: [],
+      colors: toMonacoColors(theme),
+    })
   }
-  monaco.editor.defineTheme('paralith-dark', {
-    base: 'vs-dark',
-    inherit: true,
-    rules: [],
-    colors: {
-      'editor.background': read('--canvas', '#0a0c10'),
-      'editor.foreground': read('--text', '#e8eaf1'),
-      'editorLineNumber.foreground': read('--faint', '#778094'),
-      'editorLineNumber.activeForeground': read('--muted', '#a3abbd'),
-      'editor.selectionBackground': '#2c2a4a',
-      'editor.lineHighlightBackground': '#12141b',
-      'editorCursor.foreground': read('--accent-strong', '#a89bfa'),
-      'editorIndentGuide.background1': read('--border', '#262b37'),
-      'editorWidget.background': read('--surface-2', '#171a23'),
-      'editorGutter.background': read('--canvas', '#0a0c10'),
-      focusBorder: '#00000000',
-    },
-  })
 }
 
 const SHARED_OPTIONS: monaco.editor.IStandaloneEditorConstructionOptions = {
@@ -94,6 +88,7 @@ export interface MonacoEditorPaneProps {
  * sees them. View state is captured per model URI so cursor and scroll are restored on tab switch.
  */
 export default function MonacoEditorPane(props: MonacoEditorPaneProps) {
+  const monacoTheme = useThemeStore((state) => monacoThemeName(state.resolved.id))
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | undefined>(undefined)
   const viewStates = useRef(new Map<string, monaco.editor.ICodeEditorViewState | null>())
   const propsRef = useRef(props)
@@ -130,12 +125,12 @@ export default function MonacoEditorPane(props: MonacoEditorPaneProps) {
   return (
     <Editor
       className="code-monaco"
-      theme="paralith-dark"
+      theme={monacoTheme}
       path={props.path}
       language={props.language}
       value={props.value}
       keepCurrentModel
-      beforeMount={ensureTheme}
+      beforeMount={ensureThemesRegistered}
       onMount={handleMount}
       onChange={(value) => props.onChange(value ?? '')}
       options={SHARED_OPTIONS}
@@ -155,6 +150,7 @@ export interface DiffOverlayProps {
 /** Two-way comparison (buffer vs. disk) used by the conflict flow. This is an explicit
  * side-by-side compare, not a three-way merge — that is a later dedicated slice. */
 export function DiffOverlay(props: DiffOverlayProps) {
+  const monacoTheme = useThemeStore((state) => monacoThemeName(state.resolved.id))
   return (
     <div className="code-diff">
       <div className="code-diff-titles">
@@ -163,11 +159,11 @@ export function DiffOverlay(props: DiffOverlayProps) {
       </div>
       <DiffEditor
         className="code-diff-editor"
-        theme="paralith-dark"
+        theme={monacoTheme}
         original={props.original}
         modified={props.modified}
         language={props.language}
-        beforeMount={ensureTheme}
+        beforeMount={ensureThemesRegistered}
         options={{ ...SHARED_OPTIONS, readOnly: true, renderSideBySide: true }}
         loading={<div className="code-editor-loading" aria-label="Loading comparison" />}
       />

@@ -515,15 +515,26 @@ export interface UpdateStatus {
   recoveryMode: boolean
   updateDataDirectory: string
 }
-export interface SafeRestartClientState { unsavedEditorState: boolean; unsavedSettings: boolean; unsavedMissionDraft: boolean }
+export interface SafeRestartClientState { unsavedEditorState: boolean; unsavedSettings: boolean; unsavedBrowserState: boolean }
 export interface SafeRestartAssessment extends SafeRestartClientState {
   safe: boolean
+  /** Installation may proceed (after confirming soft blockers). False only when hard-blocked. */
+  installable: boolean
+  /** A Git mutation is in flight; installation is refused even with confirmation. */
+  hardBlocked: boolean
   runningTerminals: number
   activeAgents: number
-  activeMissions: number
+  activeSwarms: number
+  detachedWindows: number
+  gitMutationActive: boolean
   pendingDatabaseWrites: number
+  /** Reviewable blockers the user can confirm to proceed. */
   blockers: string[]
+  /** Blockers that must be resolved first and cannot be overridden. */
+  hardBlockers: string[]
 }
+/** Payload of the throttled `update-progress` event broadcast during a download. */
+export interface UpdateDownloadProgress { received: number; total?: number }
 export interface StartupStatus {
   recoveryMode: boolean
   failingAppVersion?: string
@@ -538,6 +549,8 @@ export interface AppSettings {
   sidebarWidth: number
   uiScale: number
   uiDensity: 'comfortable' | 'standard' | 'compact'
+  /** Selected appearance theme id (e.g. 'paralith-dark', 'system'). See src/theme. */
+  themeId: string
   terminalFontSize: number
   terminalFontFamily: string
   terminalLineHeight: number

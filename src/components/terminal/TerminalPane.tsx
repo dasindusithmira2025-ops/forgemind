@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
-import { Terminal } from '@xterm/xterm'
+import { Terminal, type ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { SearchAddon } from '@xterm/addon-search'
 import { WebLinksAddon } from '@xterm/addon-web-links'
@@ -10,6 +10,10 @@ import type { AgentActivityState, AppSettings, PaneAssignment, TerminalSession }
 import { providerLabel } from '../../shared/layout'
 import type { TerminalAction } from './terminalActions'
 import { terminalRuntime, useTerminalRuntime } from '../../features/terminals/runtimeStore'
+import { extensionForMime, registerTerminalDropTarget, typePathsIntoSession } from '../../features/terminals/terminalImageInput'
+import { useThemeStore } from '../../theme/themeStore'
+import { toTerminalTheme } from '../../theme/tokens'
+import type { ThemeDefinition } from '../../theme/tokens'
 
 const MAX_RENDER_BATCH_BYTES = 256 * 1024
 
@@ -32,6 +36,7 @@ interface TerminalPaneProps {
 
 export function TerminalPane({ assignment, session, deferred = false, active, maximized, settings, onFocus, onMaximize, onClose, onRestart, onMenu, onHeaderPointerDown }: TerminalPaneProps) {
   const containerRef = useRef<HTMLDivElement>(null)
+  const paneRef = useRef<HTMLElement>(null)
   const terminalRef = useRef<Terminal | undefined>(undefined)
   const fitRef = useRef<FitAddon | undefined>(undefined)
   const searchRef = useRef<SearchAddon | undefined>(undefined)
@@ -41,6 +46,7 @@ export function TerminalPane({ assignment, session, deferred = false, active, ma
   const [caseSensitive, setCaseSensitive] = useState(false)
   const [bell, setBell] = useState(false)
   const encoder = useRef(new TextEncoder())
+  const theme = useThemeStore((state) => state.resolved)
   const sessionId = session?.id
   const runtime = useTerminalRuntime(sessionId)
   const currentSession = runtime.session ?? session
@@ -71,7 +77,7 @@ export function TerminalPane({ assignment, session, deferred = false, active, ma
       fontSize: settings.terminalFontSize,
       lineHeight: settings.terminalLineHeight,
       scrollback: settings.scrollbackSize,
-      theme: terminalTheme,
+      theme: xtermTheme(useThemeStore.getState().resolved),
     })
     terminal.loadAddon(fit); terminal.loadAddon(search); terminal.loadAddon(new WebLinksAddon())
     terminal.open(containerRef.current)
@@ -101,6 +107,13 @@ export function TerminalPane({ assignment, session, deferred = false, active, ma
     terminal.options.scrollback = settings.scrollbackSize
     requestAnimationFrame(() => fitRef.current?.fit())
   }, [settings.cursorStyle, settings.scrollbackSize, settings.terminalFontFamily, settings.terminalFontSize, settings.terminalLineHeight])
+
+  // Live theme change: swap the xterm palette in place. The PTY, scrollback, and session state are
+  // untouched — only rendering colours update — so switching themes never disturbs a running agent.
+  useEffect(() => {
+    const terminal = terminalRef.current
+    if (terminal) terminal.options.theme = xtermTheme(theme)
+  }, [theme])
 
   useEffect(() => {
     sessionRef.current = sessionId
@@ -241,7 +254,41 @@ export function TerminalPane({ assignment, session, deferred = false, active, ma
     return () => window.removeEventListener('forgemind:terminal-action', handle)
   }, [assignment.id, settings.confirmMultilinePaste])
 
-  return <article className={`terminal-pane ${active ? 'active' : ''} ${maximized ? 'maximized' : ''} ${bell ? 'bell' : ''} ${agentState ? `agent-${agentState.state}` : ''}`} onMouseDown={onFocus} data-pane-id={assignment.id}>
+  // Ctrl/Cmd+V of an image: xterm can only paste text, so intercept image clipboard items before it
+  // sees them, write the bytes to a temp file, and type that path into the shell instead.
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container) return
+    const onPaste = (event: ClipboardEvent) => {
+      const item = Array.from(event.clipboardData?.items ?? []).find(
+        (candidate) => candidate.kind === 'file' && candidate.type.startsWith('image/'),
+      )
+      const file = item?.getAsFile()
+      if (!file) return
+      // Stop xterm's own paste handler on the inner textarea from also acting on this event.
+      event.preventDefault()
+      event.stopPropagation()
+      void (async () => {
+        try {
+          const bytes = new Uint8Array(await file.arrayBuffer())
+          const path = await native.saveDroppedImage(Array.from(bytes), extensionForMime(file.type))
+          typePathsIntoSession(sessionRef.current, [path])
+        } catch { /* A failed clipboard image save simply leaves the terminal untouched. */ }
+      })()
+    }
+    container.addEventListener('paste', onPaste, true)
+    return () => container.removeEventListener('paste', onPaste, true)
+  }, [])
+
+  // Drag an image file from the OS onto this pane: route the drop (via the shared webview listener)
+  // to this session and type the dropped file path(s) into the shell.
+  useEffect(() => {
+    const element = paneRef.current
+    if (!element) return
+    return registerTerminalDropTarget(assignment.id, { element, getSessionId: () => sessionRef.current })
+  }, [assignment.id])
+
+  return <article ref={paneRef} className={`terminal-pane ${active ? 'active' : ''} ${maximized ? 'maximized' : ''} ${bell ? 'bell' : ''} ${agentState ? `agent-${agentState.state}` : ''}`} onMouseDown={onFocus} data-pane-id={assignment.id}>
     <header className={`terminal-header ${onHeaderPointerDown ? 'draggable' : ''}`} onPointerDown={onHeaderPointerDown}>
       <span className={`terminal-status status-${agentState?.state ?? currentSession?.status ?? 'loading'}`} aria-label={agentState ? agentStateLabel(agentState.state) : currentSession?.status ?? 'starting'} title={agentState?.reason} />
       <div className="terminal-title"><strong>{assignment.title}</strong><span>{providerLabel(assignment.provider)}{agentState ? ` · ${agentStateLabel(agentState.state)}` : ''}</span></div>
@@ -268,7 +315,10 @@ function agentStateLabel(state: AgentActivityState) {
   return state[0].toUpperCase() + state.slice(1)
 }
 
-const terminalTheme = { background: '#0a0c10', foreground: '#d8dde7', cursor: '#a89bfa', cursorAccent: '#0a0c10', selectionBackground: '#8b7cf64d', black: '#161a22', red: '#ef7d7d', green: '#82c99a', yellow: '#d9bf76', blue: '#72a7ff', magenta: '#b99af7', cyan: '#70c4c9', white: '#d8dde7', brightBlack: '#6f7889', brightWhite: '#f2f5fa' }
+/** Convert a resolved PARALITH theme into the xterm.js ITheme shape. */
+function xtermTheme(theme: ThemeDefinition): ITheme {
+  return toTerminalTheme(theme) as ITheme
+}
 
 async function pasteIntoTerminal(terminal: Terminal, confirmMultiline: boolean) {
   const text = await navigator.clipboard.readText()
