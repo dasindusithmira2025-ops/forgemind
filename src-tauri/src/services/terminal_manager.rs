@@ -74,7 +74,10 @@ struct TerminalHandle {
     last_agent_output: Mutex<Option<Instant>>,
     agent_signal_buffer: Mutex<String>,
     master: Mutex<Box<dyn MasterPty + Send>>,
-    writer: Mutex<Box<dyn Write + Send>>,
+    // One-shot machine-protocol providers must be able to observe EOF after their terminal
+    // result event. Keeping the ConPTY writer alive makes recent Codex CLI versions wait for
+    // another prompt after `turn.completed`, so the Swarm scheduler would never see process exit.
+    writer: Mutex<Option<Box<dyn Write + Send>>>,
     child: Mutex<Box<dyn Child + Send + Sync>>,
     cancelled: AtomicBool,
     sequence: AtomicU64,
@@ -268,7 +271,7 @@ impl TerminalManager {
             ),
             agent_signal_buffer: Mutex::new(String::new()),
             master: Mutex::new(pair.master),
-            writer: Mutex::new(writer),
+            writer: Mutex::new(Some(writer)),
             child: Mutex::new(child),
             cancelled: AtomicBool::new(false),
             sequence: AtomicU64::new(0),
@@ -468,22 +471,24 @@ impl TerminalManager {
                                 );
                                 if query_count > 0 {
                                     let mut writer = handle.writer.lock();
-                                    for _ in 0..query_count {
-                                        if let Err(error) =
-                                            writer.write_all(CURSOR_POSITION_RESPONSE)
-                                        {
+                                    if let Some(writer) = writer.as_mut() {
+                                        for _ in 0..query_count {
+                                            if let Err(error) =
+                                                writer.write_all(CURSOR_POSITION_RESPONSE)
+                                            {
+                                                log::warn!(
+                                                    "machine-protocol PTY query response failed for {}: {error}",
+                                                    handle.metadata.read().id
+                                                );
+                                                break;
+                                            }
+                                        }
+                                        if let Err(error) = writer.flush() {
                                             log::warn!(
-                                                "machine-protocol PTY query response failed for {}: {error}",
+                                                "machine-protocol PTY query flush failed for {}: {error}",
                                                 handle.metadata.read().id
                                             );
-                                            break;
                                         }
-                                    }
-                                    if let Err(error) = writer.flush() {
-                                        log::warn!(
-                                            "machine-protocol PTY query flush failed for {}: {error}",
-                                            handle.metadata.read().id
-                                        );
                                     }
                                 }
                                 data
@@ -639,6 +644,14 @@ impl TerminalManager {
         let handle = self.owned(session_id)?;
         let result = {
             let mut writer = handle.writer.lock();
+            let writer = writer.as_mut().ok_or_else(|| {
+                AppError::new(
+                    "terminal_input_closed",
+                    "This terminal has finished accepting input.",
+                    true,
+                )
+                .entity(session_id)
+            })?;
             writer.write_all(data).and_then(|_| writer.flush())
         };
         let result = result.map_err(|error| {
@@ -664,6 +677,15 @@ impl TerminalManager {
             );
         }
         result
+    }
+
+    /// Close only the PTY input stream while leaving output and process monitoring active.
+    /// This is idempotent and is used by structured one-shot runtimes after their authoritative
+    /// completion event so the provider can exit normally without being force-killed.
+    pub fn close_input(&self, session_id: &str) -> AppResult<()> {
+        let handle = self.owned(session_id)?;
+        handle.writer.lock().take();
+        Ok(())
     }
 
     pub fn resize_session(&self, session_id: &str, cols: u16, rows: u16) -> AppResult<()> {
@@ -1088,6 +1110,55 @@ mod tests {
             rows: 24,
             restoration_attempt: false,
         }
+    }
+
+    #[test]
+    fn closing_input_allows_a_one_shot_process_waiting_for_eof_to_exit() {
+        let manager = TerminalManager::for_test();
+        #[cfg(windows)]
+        let (executable, args) = (
+            which::which("powershell.exe").unwrap(),
+            vec![
+                "-NoLogo".into(),
+                "-NoProfile".into(),
+                "-NonInteractive".into(),
+                "-Command".into(),
+                "$null=[Console]::In.ReadToEnd(); Write-Output 'EOF observed'".into(),
+            ],
+        );
+        #[cfg(not(windows))]
+        let (executable, args) = (
+            PathBuf::from("/bin/sh"),
+            vec![
+                "-c".into(),
+                "cat >/dev/null; printf 'EOF observed\\n'".into(),
+            ],
+        );
+        let session = manager
+            .create_session(CreateTerminalRequest {
+                project_id: "project".into(),
+                workspace_id: "swarm-runtime-eof".into(),
+                pane_id: "agent".into(),
+                provider: AgentProvider::CommandPrompt,
+                title: "EOF test".into(),
+                executable_path: executable.to_string_lossy().to_string(),
+                args,
+                working_directory: std::env::temp_dir().to_string_lossy().to_string(),
+                cols: 80,
+                rows: 24,
+                restoration_attempt: false,
+            })
+            .unwrap();
+        manager.close_input(&session.id).unwrap();
+        manager.close_input(&session.id).unwrap();
+        for _ in 0..100 {
+            if manager.workspace_for_session(&session.id).is_none() {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        manager.terminate_session(&session.id).unwrap();
+        panic!("the process did not exit after terminal input closed");
     }
 
     #[test]

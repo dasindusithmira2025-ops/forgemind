@@ -227,6 +227,8 @@ export const native = {
   saveSwarmCommandDraft: (projectId: string, swarmId: string, target: string, body: string) => invoke<void>('save_swarm_command_draft', { projectId, swarmId, target, body }),
   acceptSwarmResult: (projectId: string, swarmId: string) => invoke<void>('accept_swarm_result', { projectId, swarmId }),
   resolveSwarmDecision: (projectId: string, swarmId: string, choice: 'recommended' | 'alternative' | 'stop') => invoke<void>('resolve_swarm_decision', { projectId, swarmId, choice }),
+  resolveSwarmAttention: (projectId: string, swarmId: string, requestId: string, response: string, approved: boolean) => invoke<void>('resolve_swarm_attention', { projectId, swarmId, requestId, response, approved }),
+  retrySwarm: (projectId: string, swarmId: string, memberId?: string) => invoke<void>('retry_swarm', { projectId, swarmId, memberId: memberId ?? null }),
   addSwarmBuilder: (projectId: string, swarmId: string) => invoke<void>('add_swarm_builder', { projectId, swarmId }),
 
   // ---- Code surface (project-scoped, path-guarded filesystem) -----------------------------

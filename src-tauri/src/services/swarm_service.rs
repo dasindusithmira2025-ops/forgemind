@@ -15,7 +15,7 @@
 //!
 //! The engine, its events, and its persistence are identical across both runtimes.
 
-use crate::database::swarm::NewSwarmTask;
+use crate::database::swarm::{NewSwarmTask, SwarmAgentRunCompletion};
 use crate::database::DatabaseService;
 use crate::errors::{AppError, AppResult};
 use crate::models::swarm::*;
@@ -26,7 +26,6 @@ use crate::models::{
 };
 use crate::services::{AgentDetector, RepositoryService, TerminalManager};
 use chrono::Utc;
-#[cfg(test)]
 use parking_lot::Mutex;
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
@@ -44,6 +43,7 @@ pub struct RuntimeStep {
     pub succeeded: bool,
     pub activity_observed: bool,
     pub result_summary: String,
+    pub attention_request_id: Option<String>,
 }
 
 /// Validated ownership context handed to every runtime step. Real agent sessions, commands,
@@ -137,6 +137,7 @@ impl AgentRuntime for SimAdapter {
                 succeeded: false,
                 activity_observed: false,
                 result_summary: String::new(),
+                attention_request_id: None,
             });
         }
         // On the completing tick, decide success. A "fail once" task fails only on attempt 1;
@@ -153,6 +154,7 @@ impl AgentRuntime for SimAdapter {
             } else {
                 format!("{} completed with checks passing", task.title)
             },
+            attention_request_id: None,
         })
     }
 
@@ -340,6 +342,7 @@ impl ProductionAgentRuntime {
             summary,
             level: level.into(),
             metadata,
+            sequence: 0,
             created_at: Utc::now().to_rfc3339(),
         })
     }
@@ -772,6 +775,9 @@ impl AgentRuntime for ProductionAgentRuntime {
         if let Some(session_id) = agent.terminal_session_id.as_deref() {
             if let Ok(session) = self.terminals.session_status(session_id) {
                 let events = normalize_runtime_events(agent.runtime, &session.output_tail);
+                let provider_finished = events
+                    .iter()
+                    .any(|event| matches!(event.kind.as_str(), "completed" | "failed"));
                 let observed = self.persist_runtime_events(
                     agent,
                     task,
@@ -779,6 +785,12 @@ impl AgentRuntime for ProductionAgentRuntime {
                     &session.working_directory,
                     &events,
                 )?;
+                if provider_finished {
+                    // Codex exec keeps reading from an attached PTY after `turn.completed`.
+                    // Closing only stdin lets the provider exit with its real status while the
+                    // terminal manager continues draining output and owns process reaping.
+                    self.terminals.close_input(session_id)?;
+                }
                 return Ok(runtime_running(task, observed));
             }
             let Some(session) = self.database.get_terminal_session(session_id)? else {
@@ -844,6 +856,21 @@ impl AgentRuntime for ProductionAgentRuntime {
                 if succeeded { "completed" } else { "failed" },
                 failure,
             )?;
+            let attention_request_id = if approval_required {
+                let attention = runtime_events
+                    .iter()
+                    .find(|event| event.kind == "waiting_for_approval")
+                    .expect("approval_required was derived from this collection");
+                Some(self.database.create_swarm_attention_request(
+                    agent,
+                    task,
+                    "permission",
+                    &attention.summary,
+                    &attention.metadata,
+                )?)
+            } else {
+                None
+            };
             let evidence_id = Uuid::new_v4().to_string();
             self.database.record_swarm_evidence(&SwarmEvidence {
                 id: evidence_id.clone(),
@@ -873,6 +900,7 @@ impl AgentRuntime for ProductionAgentRuntime {
                 evidence_id: Some(evidence_id), summary: if succeeded { format!("{} completed {}", agent.display_name, task.title) } else { format!("{} failed {}", agent.display_name, task.title) },
                 level: if succeeded { "result" } else { "error" }.into(),
                 metadata: serde_json::json!({ "terminalSessionId": session.id, "exitCode": session.exit_code, "structured": structured, "providerCompleted": provider_completed, "approvalDenied": approval_required, "failureClass": failure }),
+                sequence: 0,
                 created_at: Utc::now().to_rfc3339(),
             })?;
             return Ok(RuntimeStep {
@@ -893,6 +921,7 @@ impl AgentRuntime for ProductionAgentRuntime {
                         failure.unwrap_or("unknown_failure")
                     )
                 },
+                attention_request_id,
             });
         }
 
@@ -1031,6 +1060,7 @@ fn runtime_running(task: &SwarmTask, activity_observed: bool) -> RuntimeStep {
         succeeded: false,
         activity_observed,
         result_summary: String::new(),
+        attention_request_id: None,
     }
 }
 
@@ -1428,12 +1458,20 @@ fn normalize_claude_event(
                     .and_then(serde_json::Value::as_str)
                     .unwrap_or_default();
                 if is_error && content.to_ascii_lowercase().contains("requires approval") {
+                    let mut metadata = input.clone();
+                    if let serde_json::Value::Object(ref mut object) = metadata {
+                        object.insert("tool".into(), serde_json::Value::String(name.clone()));
+                        object.insert(
+                            "tool_use_id".into(),
+                            serde_json::Value::String(tool_use_id.into()),
+                        );
+                    }
                     push_runtime_event(
                         events,
                         "waiting_for_approval",
                         format!("{name} requires approval"),
                         "error",
-                        block,
+                        metadata,
                     );
                     continue;
                 }
@@ -1616,6 +1654,10 @@ struct SwarmInner {
     /// Ceiling on total simultaneously-working agents across every Swarm (spec §12).
     global_active_limit: usize,
     scheduler_running: AtomicBool,
+    /// Serializes every lifecycle and scheduler mutation for one Swarm. Tauri commands and the
+    /// background scheduler can otherwise race between reading a Draft/Ready row and claiming
+    /// tasks, producing duplicate task graphs or provider processes.
+    operation_locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
 }
 
 /// The public engine handle. Cloneable via its inner `Arc`; the scheduler thread holds a clone.
@@ -1646,6 +1688,7 @@ impl SwarmService {
                 detector: Some(detector),
                 global_active_limit: 8,
                 scheduler_running: AtomicBool::new(true),
+                operation_locks: Mutex::new(HashMap::new()),
             }),
         };
         service.spawn_scheduler();
@@ -1664,6 +1707,7 @@ impl SwarmService {
                 detector: None,
                 global_active_limit: 8,
                 scheduler_running: AtomicBool::new(false),
+                operation_locks: Mutex::new(HashMap::new()),
             }),
         }
     }
@@ -1693,6 +1737,16 @@ impl SwarmService {
 
     fn db(&self) -> &DatabaseService {
         &self.inner.database
+    }
+
+    fn operation_lock(&self, swarm_id: &str) -> Arc<Mutex<()>> {
+        Arc::clone(
+            self.inner
+                .operation_locks
+                .lock()
+                .entry(swarm_id.to_string())
+                .or_insert_with(|| Arc::new(Mutex::new(()))),
+        )
     }
 
     fn project_record(&self, project_id: &str) -> AppResult<Project> {
@@ -2147,6 +2201,7 @@ impl SwarmService {
             safeguards,
             attachments: request.attachments.clone(),
             current_milestone: Some("Waiting to launch".into()),
+            revision: 0,
             roles,
             created_at: now,
             updated_at: String::new(),
@@ -2179,6 +2234,8 @@ impl SwarmService {
     /// Move a Draft/Paused Swarm into execution: decompose the mission into the adaptive task
     /// graph, spawn the role agents, and hand control to the scheduler.
     pub fn start_swarm(&self, project_id: &str, id: &str) -> AppResult<()> {
+        let operation_lock = self.operation_lock(id);
+        let operation = operation_lock.lock();
         let (swarm, project) = self.swarm_for_project(project_id, id)?;
         self.live_project_root(&project)?;
         if swarm.lifecycle.is_terminal() {
@@ -2222,6 +2279,7 @@ impl SwarmService {
                 )?;
                 return Err(error);
             }
+            self.db().create_swarm_run(&swarm)?;
             self.db().update_swarm_runtime(
                 id,
                 SwarmLifecycle::Preparing,
@@ -2255,12 +2313,15 @@ impl SwarmService {
         )?;
         self.event(id, "started", None, None, None, "Swarm started", "info")?;
         self.emit_changed(project_id, id);
+        drop(operation);
         // Run an immediate tick so state is visible without waiting for the scheduler.
         self.tick(id)?;
         Ok(())
     }
 
     pub fn pause_swarm(&self, project_id: &str, id: &str) -> AppResult<()> {
+        let operation_lock = self.operation_lock(id);
+        let _operation = operation_lock.lock();
         let (swarm, _) = self.swarm_for_project(project_id, id)?;
         if swarm.lifecycle.is_terminal() {
             return Ok(());
@@ -2279,46 +2340,92 @@ impl SwarmService {
             None,
             None,
         )?;
-        self.db().pause_idle_swarm_agents(id)?;
-        let running = self
-            .db()
-            .list_swarm_tasks(id)?
-            .into_iter()
-            .filter(|task| task.status == SwarmTaskStatus::Running)
-            .count();
-        if running == 0 {
-            self.db()
-                .set_all_agents_status(id, SwarmAgentStatus::Paused)?;
-            self.db().update_swarm_runtime(
+        self.event(
+            id,
+            "pause_requested",
+            None,
+            None,
+            None,
+            "Checkpoint pause requested; active provider sessions are stopping",
+            "info",
+        )?;
+        let tasks = self.db().list_swarm_tasks(id)?;
+        for agent in self.db().list_swarm_agents(id)? {
+            let Some(task_id) = agent.current_task_id.as_deref() else {
+                continue;
+            };
+            self.inner
+                .runtime
+                .stop_agent(&agent, false)
+                .map_err(|error| {
+                    AppError::new(
+                        "swarm_pause_failed",
+                        format!("{} could not be paused safely.", agent.display_name),
+                        true,
+                    )
+                    .detail(format!("{}: {}", error.code, error.message))
+                    .entity(&agent.id)
+                    .action("Stop the Swarm if the provider remains active.")
+                })?;
+            if let Some(session_id) = agent.terminal_session_id.as_deref() {
+                self.db().finish_swarm_agent_session(
+                    &agent.id,
+                    session_id,
+                    "paused",
+                    Some("checkpoint_pause"),
+                )?;
+            }
+            self.db().finish_swarm_agent_run(
                 id,
-                SwarmLifecycle::Paused,
-                swarm.progress,
-                None,
-                None,
-                None,
+                &agent.id,
+                task_id,
+                SwarmAgentRunCompletion {
+                    status: "interrupted",
+                    result: Some("Paused at a recoverable provider boundary."),
+                    failure_reason: None,
+                    cancellation_reason: Some("checkpoint_pause"),
+                },
             )?;
-            self.db().set_swarm_milestone(id, "Paused")?;
-            self.event(id, "paused", None, None, None, "Swarm paused", "info")?;
-        } else {
-            self.db().set_swarm_milestone(
-                id,
-                &format!("Pausing after {running} active task(s) reach a safe boundary"),
-            )?;
-            self.event(
-                id,
-                "pause_requested",
-                None,
-                None,
-                None,
-                "Pause requested; active provider work is finishing safely",
-                "info",
-            )?;
+            if let Some(task) = tasks.iter().find(|task| task.id == task_id) {
+                self.db().update_swarm_task(
+                    task_id,
+                    SwarmTaskStatus::Ready,
+                    task.progress,
+                    None,
+                    Some("Paused at a provider boundary; the next attempt will resume from persisted context."),
+                    false,
+                )?;
+                self.db().release_swarm_task_file_ownership(task_id)?;
+            }
         }
+        self.db()
+            .set_all_agents_status(id, SwarmAgentStatus::Paused)?;
+        self.db().update_swarm_runtime(
+            id,
+            SwarmLifecycle::Paused,
+            compute_progress(&tasks),
+            None,
+            None,
+            swarm.review_verdict.as_deref(),
+        )?;
+        self.db()
+            .set_swarm_milestone(id, "Paused at a recoverable boundary")?;
+        self.event(
+            id,
+            "paused",
+            None,
+            None,
+            None,
+            "Swarm provider sessions stopped; work can be resumed from persisted context",
+            "info",
+        )?;
         self.emit_changed(project_id, id);
         Ok(())
     }
 
     pub fn resume_swarm(&self, project_id: &str, id: &str) -> AppResult<()> {
+        let operation_lock = self.operation_lock(id);
+        let operation = operation_lock.lock();
         let (swarm, _) = self.swarm_for_project(project_id, id)?;
         if !matches!(
             swarm.lifecycle,
@@ -2350,6 +2457,7 @@ impl SwarmService {
         self.db().set_swarm_milestone(id, "Resumed")?;
         self.event(id, "resumed", None, None, None, "Swarm resumed", "info")?;
         self.emit_changed(project_id, id);
+        drop(operation);
         self.tick(id)?;
         Ok(())
     }
@@ -2357,6 +2465,8 @@ impl SwarmService {
     /// Graceful stop: stop scheduling, mark agents stopped, preserve partial work, transition to
     /// Cancelled. (`hard` additionally would tear down live process trees in production.)
     pub fn stop_swarm(&self, project_id: &str, id: &str, hard: bool) -> AppResult<()> {
+        let operation_lock = self.operation_lock(id);
+        let _operation = operation_lock.lock();
         let (swarm, _) = self.swarm_for_project(project_id, id)?;
         if swarm.lifecycle.is_terminal() {
             return Ok(());
@@ -2385,6 +2495,8 @@ impl SwarmService {
         }
         self.db()
             .cancel_open_swarm_tasks(id, "Cancelled when the Swarm was stopped")?;
+        self.db()
+            .cancel_open_swarm_agent_runs(id, "Cancelled when the Swarm was stopped")?;
         self.db().release_swarm_worktrees(id)?;
         self.db()
             .set_all_agents_status(id, SwarmAgentStatus::Paused)?;
@@ -2830,6 +2942,135 @@ impl SwarmService {
         Ok(())
     }
 
+    pub fn resolve_attention(
+        &self,
+        project_id: &str,
+        swarm_id: &str,
+        request_id: &str,
+        response: &str,
+        approved: bool,
+    ) -> AppResult<()> {
+        let operation_lock = self.operation_lock(swarm_id);
+        let operation = operation_lock.lock();
+        let (swarm, _) = self.swarm_for_project(project_id, swarm_id)?;
+        if swarm.lifecycle != SwarmLifecycle::DecisionRequired {
+            return Err(AppError::new(
+                "swarm_attention_stale",
+                "This Swarm is no longer waiting for that response.",
+                true,
+            )
+            .entity(request_id));
+        }
+        let (_, _, should_resume) = self.db().resolve_swarm_attention_request(
+            swarm_id,
+            request_id,
+            response.trim(),
+            approved,
+        )?;
+        let lifecycle = if should_resume {
+            SwarmLifecycle::Recovering
+        } else {
+            SwarmLifecycle::Failed
+        };
+        self.db().update_swarm_runtime(
+            swarm_id,
+            lifecycle,
+            swarm.progress,
+            None,
+            None,
+            swarm.review_verdict.as_deref(),
+        )?;
+        self.event(
+            swarm_id,
+            if should_resume {
+                "permission_approved"
+            } else {
+                "permission_denied"
+            },
+            None,
+            None,
+            None,
+            if should_resume {
+                "Permission response recorded; the affected work will resume as a new attempt"
+            } else {
+                "Permission denied; the affected work was stopped"
+            },
+            if should_resume { "info" } else { "error" },
+        )?;
+        self.emit_changed(project_id, swarm_id);
+        drop(operation);
+        if should_resume {
+            self.tick(swarm_id)?;
+        }
+        Ok(())
+    }
+
+    pub fn retry_swarm(
+        &self,
+        project_id: &str,
+        swarm_id: &str,
+        member_id: Option<&str>,
+    ) -> AppResult<()> {
+        let operation_lock = self.operation_lock(swarm_id);
+        let operation = operation_lock.lock();
+        let (swarm, _) = self.swarm_for_project(project_id, swarm_id)?;
+        if !matches!(
+            swarm.lifecycle,
+            SwarmLifecycle::Failed | SwarmLifecycle::Cancelled
+        ) {
+            return Err(AppError::new(
+                "swarm_retry_invalid_state",
+                "Only failed or cancelled Swarms can be retried.",
+                true,
+            )
+            .entity(swarm_id));
+        }
+        if let Some(member_id) = member_id {
+            let member = self
+                .db()
+                .list_swarm_agents(swarm_id)?
+                .into_iter()
+                .find(|member| member.id == member_id)
+                .ok_or_else(|| {
+                    AppError::new(
+                        "swarm_member_not_found",
+                        "The selected Swarm member no longer exists.",
+                        true,
+                    )
+                    .entity(member_id)
+                })?;
+            if member.swarm_id != swarm_id {
+                return Err(AppError::new(
+                    "swarm_member_scope_mismatch",
+                    "The selected member does not belong to this Swarm.",
+                    false,
+                ));
+            }
+        }
+        let (_, task_count) = self.db().prepare_swarm_retry(&swarm, member_id)?;
+        self.db().update_swarm_runtime(
+            swarm_id,
+            SwarmLifecycle::Recovering,
+            swarm.progress,
+            None,
+            None,
+            swarm.review_verdict.as_deref(),
+        )?;
+        self.event(
+            swarm_id,
+            "retry_started",
+            None,
+            member_id,
+            None,
+            &format!("Retry started for {task_count} failed work item(s)"),
+            "info",
+        )?;
+        self.emit_changed(project_id, swarm_id);
+        drop(operation);
+        self.tick(swarm_id)?;
+        Ok(())
+    }
+
     /// Validate and, when requested, pause every active Swarm before its Project session closes.
     /// Keep-running deliberately leaves the scheduler untouched; cancellation never calls this.
     pub fn prepare_project_close(
@@ -2919,6 +3160,8 @@ impl SwarmService {
     /// running tasks through the runtime, expand the graph on completion/failure, then recompute
     /// progress and lifecycle. Returns whether anything changed.
     pub fn tick(&self, id: &str) -> AppResult<bool> {
+        let operation_lock = self.operation_lock(id);
+        let _operation = operation_lock.lock();
         let (swarm, scope) = self.runtime_scope_for_swarm(id)?;
         if scope.project_id != swarm.project_id {
             return Err(self.swarm_integrity_error(id));
@@ -2991,20 +3234,7 @@ impl SwarmService {
                 // pools fairly before reusing a compatible warm worker.
                 .min_by_key(|agent| agent.last_result.is_some());
             let Some(agent) = agent else { continue };
-            self.db().update_swarm_task(
-                &task.id,
-                SwarmTaskStatus::Running,
-                task.progress,
-                Some(&agent.id),
-                None,
-                true, // bump attempt on (re)assignment
-            )?;
-            self.db().update_swarm_agent(
-                &agent.id,
-                SwarmAgentStatus::Active,
-                Some(&task.id),
-                Some(&format!("Working on: {}", task.title)),
-            )?;
+            self.db().claim_swarm_task(task, agent)?;
             task.status = SwarmTaskStatus::Running;
             task.assigned_agent_id = Some(agent.id.clone());
             task.attempts += 1;
@@ -3087,6 +3317,7 @@ impl SwarmService {
                         succeeded: false,
                         activity_observed: false,
                         result_summary: format!("Runtime failure: {}", error.message),
+                        attention_request_id: None,
                     }
                 }
             };
@@ -3138,6 +3369,23 @@ impl SwarmService {
                 self.emit_changed(&swarm.project_id, id);
             }
             return Ok(changed);
+        }
+
+        if self.db().has_open_swarm_attention(id)? {
+            if swarm.lifecycle != SwarmLifecycle::DecisionRequired {
+                self.db().update_swarm_runtime(
+                    id,
+                    SwarmLifecycle::DecisionRequired,
+                    compute_progress(&tasks),
+                    None,
+                    None,
+                    swarm.review_verdict.as_deref(),
+                )?;
+                self.db()
+                    .set_swarm_milestone(id, "A member requires attention")?;
+            }
+            self.emit_changed(&swarm.project_id, id);
+            return Ok(true);
         }
 
         // 4. Recompute progress + lifecycle from the authoritative task states.
@@ -3224,6 +3472,25 @@ impl SwarmService {
         let succeeded = step.succeeded && completion_failure.is_none();
         let result_summary = completion_failure.unwrap_or_else(|| step.result_summary.clone());
 
+        if let Some(request_id) = step.attention_request_id.as_deref() {
+            tasks[index].status = SwarmTaskStatus::Blocked;
+            tasks[index].assigned_agent_id = Some(agent.id.clone());
+            self.event(
+                swarm_id,
+                "permission_requested",
+                Some(task_role),
+                Some(&agent.id),
+                Some(&task_id),
+                &format!("{} requires permission to continue", agent.display_name),
+                "error",
+            )?;
+            self.db().set_swarm_milestone(
+                swarm_id,
+                &format!("Permission request {request_id} requires a response"),
+            )?;
+            return Ok(());
+        }
+
         if succeeded {
             self.db().update_swarm_task(
                 &task_id,
@@ -3239,6 +3506,17 @@ impl SwarmService {
                 SwarmAgentStatus::Idle,
                 None,
                 Some(&result_summary),
+            )?;
+            self.db().finish_swarm_agent_run(
+                swarm_id,
+                &agent.id,
+                &task_id,
+                SwarmAgentRunCompletion {
+                    status: "finished",
+                    result: Some(&result_summary),
+                    failure_reason: None,
+                    cancellation_reason: None,
+                },
             )?;
             self.db().release_swarm_task_file_ownership(&task_id)?;
             if task_role == SwarmRole::Integrator {
@@ -3314,6 +3592,17 @@ impl SwarmService {
 
         // Failure path. Retry up to 2 attempts on the same task before escalating.
         if attempts < 2 {
+            self.db().finish_swarm_agent_run(
+                swarm_id,
+                &agent.id,
+                &task_id,
+                SwarmAgentRunCompletion {
+                    status: "failed",
+                    result: Some(&result_summary),
+                    failure_reason: Some(&result_summary),
+                    cancellation_reason: None,
+                },
+            )?;
             self.db().update_swarm_task(
                 &task_id,
                 SwarmTaskStatus::Ready,
@@ -3347,6 +3636,17 @@ impl SwarmService {
         // original task fails again after repair, stop honestly instead of creating an infinite
         // chain of nominal fix tasks.
         if task_role == SwarmRole::Debugger || self.db().has_swarm_repair_for(swarm_id, &task_id)? {
+            self.db().finish_swarm_agent_run(
+                swarm_id,
+                &agent.id,
+                &task_id,
+                SwarmAgentRunCompletion {
+                    status: "failed",
+                    result: Some(&result_summary),
+                    failure_reason: Some(&result_summary),
+                    cancellation_reason: None,
+                },
+            )?;
             self.db().update_swarm_task(
                 &task_id,
                 SwarmTaskStatus::Failed,
@@ -3384,6 +3684,17 @@ impl SwarmService {
             Some(&agent.id),
             Some(&result_summary),
             false,
+        )?;
+        self.db().finish_swarm_agent_run(
+            swarm_id,
+            &agent.id,
+            &task_id,
+            SwarmAgentRunCompletion {
+                status: "failed",
+                result: Some(&result_summary),
+                failure_reason: Some(&result_summary),
+                cancellation_reason: None,
+            },
         )?;
         tasks[index].status = SwarmTaskStatus::Blocked;
         self.db().update_swarm_agent(
@@ -3877,19 +4188,33 @@ impl SwarmService {
             summary: summary.to_string(),
             level: level.to_string(),
             metadata: serde_json::Value::Object(serde_json::Map::new()),
+            sequence: 0,
             created_at: Utc::now().to_rfc3339(),
         })
     }
 
     fn emit_changed(&self, project_id: &str, swarm_id: &str) {
-        if let Some(app) = &self.inner.app_handle {
-            let _ = app.emit(
-                "swarm-changed",
-                SwarmChangedEvent {
-                    project_id: project_id.to_string(),
-                    swarm_id: swarm_id.to_string(),
-                },
-            );
+        match self.db().advance_swarm_sync_version(swarm_id) {
+            Ok((revision, event_sequence, updated_at)) => {
+                if let Some(app) = &self.inner.app_handle {
+                    let _ = app.emit(
+                        "swarm-changed",
+                        SwarmChangedEvent {
+                            project_id: project_id.to_string(),
+                            swarm_id: swarm_id.to_string(),
+                            revision,
+                            event_sequence,
+                            updated_at,
+                        },
+                    );
+                }
+            }
+            Err(error) => log::warn!(
+                "swarm sync event failed swarm_id={} code={} message={}",
+                swarm_id,
+                error.code,
+                error.message
+            ),
         }
     }
 }
@@ -4378,6 +4703,29 @@ mod tests {
             .filter_map(|t| t.assigned_agent_id.clone())
             .collect();
         assert!(reviewer_agents.is_disjoint(&builder_agents));
+        assert_eq!(detail.runs.len(), 1);
+        assert!(!detail.agent_runs.is_empty());
+        assert!(detail.swarm.revision > 0);
+        assert!(detail
+            .events
+            .windows(2)
+            .all(|pair| pair[0].sequence > pair[1].sequence));
+    }
+
+    #[test]
+    fn concurrent_duplicate_start_creates_one_durable_run() {
+        let (service, _db, project) = service_with(Arc::new(SimAdapter::new(0.2)));
+        let swarm = create(&service, &project, "feature_team");
+        let outcomes = std::thread::scope(|scope| {
+            let first = scope.spawn(|| service.start_swarm(&project, &swarm.id));
+            let second = scope.spawn(|| service.start_swarm(&project, &swarm.id));
+            vec![first.join().unwrap(), second.join().unwrap()]
+        });
+        assert_eq!(outcomes.iter().filter(|outcome| outcome.is_ok()).count(), 1);
+        assert_eq!(
+            service.get_detail(&project, &swarm.id).unwrap().runs.len(),
+            1
+        );
     }
 
     #[test]
@@ -4425,6 +4773,17 @@ mod tests {
             builder.attempts >= 2,
             "builder should have been retried after first failure"
         );
+        let mut attempts: Vec<_> = detail
+            .agent_runs
+            .iter()
+            .filter(|attempt| attempt.task_id.as_deref() == Some(builder.id.as_str()))
+            .collect();
+        attempts.sort_by_key(|attempt| attempt.attempt);
+        assert!(attempts.iter().any(|attempt| attempt.status == "failed"));
+        assert!(attempts.iter().any(|attempt| attempt.status == "finished"));
+        assert!(attempts
+            .windows(2)
+            .all(|pair| pair[0].attempt < pair[1].attempt));
         assert_eq!(detail.swarm.lifecycle, SwarmLifecycle::ReadyForReview);
     }
 
@@ -4540,22 +4899,10 @@ mod tests {
                 .unwrap()
                 .swarm
                 .lifecycle,
-            SwarmLifecycle::Pausing
+            SwarmLifecycle::Paused
         );
-        // A provider reaches a real safe boundary before the lifecycle becomes Paused. No new
-        // dependent task may be assigned while this drain is in progress.
-        for _ in 0..20 {
-            service.tick(&swarm.id).unwrap();
-            if service
-                .get_detail(&project, &swarm.id)
-                .unwrap()
-                .swarm
-                .lifecycle
-                == SwarmLifecycle::Paused
-            {
-                break;
-            }
-        }
+        // Pause is checkpoint-and-stop: no provider assignment remains live while the UI says
+        // paused, and the unfinished task is durable work that Resume may claim again.
         let paused = service.get_detail(&project, &swarm.id).unwrap();
         assert_eq!(paused.swarm.lifecycle, SwarmLifecycle::Paused);
         assert!(paused
@@ -4568,6 +4915,10 @@ mod tests {
                     SwarmTaskStatus::Claimed | SwarmTaskStatus::Running
                 ) && task.assigned_agent_id.is_none()
             }));
+        assert!(paused
+            .agent_runs
+            .iter()
+            .any(|attempt| attempt.status == "interrupted"));
         // A paused Swarm is not schedulable: ticking is a no-op.
         assert!(!service.tick(&swarm.id).unwrap());
         service.resume_swarm(&project, &swarm.id).unwrap();
@@ -4580,6 +4931,86 @@ mod tests {
                 .lifecycle,
             SwarmLifecycle::ReadyForReview
         );
+    }
+
+    #[test]
+    fn retry_cancelled_swarm_creates_a_new_run_and_preserves_attempts() {
+        let (service, _db, project) = service_with(Arc::new(SimAdapter::new(0.25)));
+        let swarm = create(&service, &project, "quick_fix");
+        service.start_swarm(&project, &swarm.id).unwrap();
+        service.stop_swarm(&project, &swarm.id, false).unwrap();
+        let cancelled = service.get_detail(&project, &swarm.id).unwrap();
+        assert_eq!(cancelled.swarm.lifecycle, SwarmLifecycle::Cancelled);
+        assert_eq!(cancelled.runs.len(), 1);
+        let prior_attempts = cancelled.agent_runs.len();
+
+        service.retry_swarm(&project, &swarm.id, None).unwrap();
+        run_to_quiescence(&service, &swarm.id);
+        let retried = service.get_detail(&project, &swarm.id).unwrap();
+        assert_eq!(retried.runs.len(), 2);
+        assert!(retried.agent_runs.len() > prior_attempts);
+        assert_eq!(retried.swarm.lifecycle, SwarmLifecycle::ReadyForReview);
+    }
+
+    #[test]
+    fn attention_response_is_exact_and_duplicate_safe() {
+        let (service, database, project) = service_with(Arc::new(SimAdapter::new(0.2)));
+        let swarm = create(&service, &project, "quick_fix");
+        service.start_swarm(&project, &swarm.id).unwrap();
+        let running = service
+            .get_detail(&project, &swarm.id)
+            .unwrap()
+            .tasks
+            .into_iter()
+            .find(|task| task.status == SwarmTaskStatus::Running)
+            .unwrap();
+        let member_id = running.assigned_agent_id.clone().unwrap();
+        let member = database
+            .list_swarm_agents(&swarm.id)
+            .unwrap()
+            .into_iter()
+            .find(|agent| agent.id == member_id)
+            .unwrap();
+        let request_id = database
+            .create_swarm_attention_request(
+                &member,
+                &running,
+                "permission",
+                "Run project tests",
+                &serde_json::json!({ "command": "npm test", "secret": "not persisted" }),
+            )
+            .unwrap();
+        database
+            .update_swarm_runtime(
+                &swarm.id,
+                SwarmLifecycle::DecisionRequired,
+                swarm.progress,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+
+        service
+            .resolve_attention(&project, &swarm.id, &request_id, "Approved", true)
+            .unwrap();
+        assert_eq!(
+            service
+                .resolve_attention(&project, &swarm.id, &request_id, "Again", true)
+                .unwrap_err()
+                .code,
+            "swarm_attention_stale"
+        );
+        let request = service
+            .get_detail(&project, &swarm.id)
+            .unwrap()
+            .attention_requests
+            .into_iter()
+            .find(|request| request.id == request_id)
+            .unwrap();
+        assert_eq!(request.status, "approved");
+        assert_eq!(request.safe_payload.get("command").unwrap(), "npm test");
+        assert!(request.safe_payload.get("secret").is_none());
     }
 
     #[test]
@@ -4734,22 +5165,6 @@ mod tests {
             .swarm
             .lifecycle
             .is_schedulable());
-        let draining = service
-            .prepare_project_close(&project, Some(ProjectCloseSwarmBehavior::PauseAndClose))
-            .unwrap_err();
-        assert_eq!(draining.code, "swarm_pause_incomplete");
-        for _ in 0..20 {
-            service.tick(&swarm.id).unwrap();
-            if service
-                .get_detail(&project, &swarm.id)
-                .unwrap()
-                .swarm
-                .lifecycle
-                == SwarmLifecycle::Paused
-            {
-                break;
-            }
-        }
         service
             .prepare_project_close(&project, Some(ProjectCloseSwarmBehavior::PauseAndClose))
             .unwrap();
@@ -5032,6 +5447,51 @@ mod tests {
     }
 
     #[test]
+    fn restart_reconciliation_does_not_leave_lost_processes_running() {
+        struct LostRuntime;
+        impl AgentRuntime for LostRuntime {
+            fn advance(
+                &self,
+                _scope: &SwarmRuntimeScope,
+                _task: &SwarmTask,
+                agent: &SwarmAgent,
+            ) -> AppResult<RuntimeStep> {
+                Err(AppError::new(
+                    "swarm_runtime_lost",
+                    "The persisted provider process no longer exists.",
+                    true,
+                )
+                .entity(&agent.id))
+            }
+        }
+
+        let (service, database, project) = service_with(Arc::new(SimAdapter::new(0.2)));
+        let swarm = create(&service, &project, "quick_fix");
+        service.start_swarm(&project, &swarm.id).unwrap();
+        assert!(service
+            .get_detail(&project, &swarm.id)
+            .unwrap()
+            .tasks
+            .iter()
+            .any(|task| task.status == SwarmTaskStatus::Running));
+
+        let recovered = SwarmService::for_tests(Arc::clone(&database), Arc::new(LostRuntime));
+        run_to_quiescence(&recovered, &swarm.id);
+        let detail = recovered.get_detail(&project, &swarm.id).unwrap();
+        assert_eq!(detail.swarm.lifecycle, SwarmLifecycle::Failed);
+        assert!(detail
+            .events
+            .iter()
+            .any(|event| event.kind == "recovery_started"));
+        assert!(detail.tasks.iter().all(|task| {
+            !matches!(
+                task.status,
+                SwarmTaskStatus::Running | SwarmTaskStatus::Claimed
+            )
+        }));
+    }
+
+    #[test]
     fn no_extra_workers_are_spawned_beyond_the_configured_pool() {
         // The engine leases idle workers; it never fabricates more than the configured allocations.
         let (service, database, project) = service_with(Arc::new(SimAdapter::new(1.0)));
@@ -5187,6 +5647,7 @@ mod tests {
             safeguards: Vec::new(),
             attachments: Vec::new(),
             current_milestone: None,
+            revision: 0,
             roles: Vec::new(),
             created_at: String::new(),
             updated_at: String::new(),

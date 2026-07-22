@@ -570,6 +570,8 @@ pub fn run() {
             commands::save_swarm_command_draft,
             commands::accept_swarm_result,
             commands::resolve_swarm_decision,
+            commands::resolve_swarm_attention,
+            commands::retry_swarm,
             commands::add_swarm_builder,
             commands::get_diagnostics,
             commands::run_health_check,

@@ -1,7 +1,7 @@
 use crate::errors::{AppError, AppResult};
 use rusqlite::{params, Connection};
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 20;
+pub const CURRENT_SCHEMA_VERSION: i64 = 21;
 
 const MIGRATION_1: &str = r#"
 CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
@@ -866,6 +866,15 @@ pub fn apply(connection: &Connection) -> AppResult<()> {
     if current < 20 || !table_exists(connection, "swarm_runtime_event_receipts")? {
         migrate_v20(connection)?;
     }
+    if current < 21
+        || !table_exists(connection, "swarm_runs")?
+        || !table_exists(connection, "swarm_agent_runs")?
+        || !table_exists(connection, "swarm_attention_requests")?
+        || !column_exists(connection, "swarms", "revision")?
+        || !column_exists(connection, "swarm_events", "sequence")?
+    {
+        migrate_v21(connection)?;
+    }
     Ok(())
 }
 
@@ -897,7 +906,12 @@ pub fn requires_migration(connection: &Connection) -> AppResult<bool> {
         || !column_exists(connection, "swarm_agents", "display_name")?
         || !table_exists(connection, "swarm_context_packs")?
         || !column_exists(connection, "swarm_tasks", "repair_for_task_id")?
-        || !table_exists(connection, "swarm_runtime_event_receipts")?)
+        || !table_exists(connection, "swarm_runtime_event_receipts")?
+        || !table_exists(connection, "swarm_runs")?
+        || !table_exists(connection, "swarm_agent_runs")?
+        || !table_exists(connection, "swarm_attention_requests")?
+        || !column_exists(connection, "swarms", "revision")?
+        || !column_exists(connection, "swarm_events", "sequence")?)
 }
 
 fn table_exists(connection: &Connection, table: &str) -> AppResult<bool> {
@@ -1947,6 +1961,144 @@ CREATE INDEX IF NOT EXISTS idx_swarm_runtime_event_receipts_session
     finish_migration_transaction(connection, result, 20)
 }
 
+/// Separate reusable Swarm configuration from durable executions without replacing the existing
+/// current-state projection. Every historical Swarm is backfilled as one run, and future task
+/// assignments append immutable agent attempts instead of overwriting execution history.
+fn migrate_v21(connection: &Connection) -> AppResult<()> {
+    connection
+        .execute_batch("BEGIN IMMEDIATE;")
+        .map_err(AppError::database)?;
+    let result = (|| {
+        add_column_if_missing(
+            connection,
+            "swarms",
+            "revision",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
+        add_column_if_missing(
+            connection,
+            "swarm_events",
+            "sequence",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
+        connection
+            .execute_batch(
+                r#"
+CREATE TABLE IF NOT EXISTS swarm_runs(
+  id TEXT PRIMARY KEY,
+  swarm_id TEXT NOT NULL REFERENCES swarms(id) ON DELETE CASCADE,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  objective TEXT NOT NULL,
+  status TEXT NOT NULL,
+  phase TEXT NOT NULL,
+  progress REAL NOT NULL DEFAULT 0,
+  max_parallel INTEGER NOT NULL,
+  failure_policy TEXT NOT NULL DEFAULT 'continue_independent',
+  cancellation_requested_at TEXT,
+  failure_json TEXT,
+  result_summary_json TEXT,
+  created_at TEXT NOT NULL,
+  started_at TEXT,
+  finished_at TEXT,
+  updated_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_swarm_runs_one_active
+  ON swarm_runs(swarm_id)
+  WHERE status IN ('queued','starting','running','paused','needs_input','needs_permission','cancelling','recovering');
+CREATE INDEX IF NOT EXISTS idx_swarm_runs_history
+  ON swarm_runs(swarm_id,created_at DESC,id DESC);
+
+CREATE TABLE IF NOT EXISTS swarm_agent_runs(
+  id TEXT PRIMARY KEY,
+  swarm_run_id TEXT NOT NULL REFERENCES swarm_runs(id) ON DELETE CASCADE,
+  swarm_id TEXT NOT NULL REFERENCES swarms(id) ON DELETE CASCADE,
+  member_id TEXT NOT NULL REFERENCES swarm_agents(id) ON DELETE RESTRICT,
+  task_id TEXT REFERENCES swarm_tasks(id) ON DELETE SET NULL,
+  terminal_session_id TEXT,
+  process_id INTEGER,
+  status TEXT NOT NULL,
+  attempt INTEGER NOT NULL,
+  exit_code INTEGER,
+  failure_reason TEXT,
+  cancellation_reason TEXT,
+  structured_result_json TEXT,
+  files_changed_json TEXT NOT NULL DEFAULT '[]',
+  evidence_json TEXT NOT NULL DEFAULT '[]',
+  created_at TEXT NOT NULL,
+  started_at TEXT,
+  finished_at TEXT,
+  updated_at TEXT NOT NULL,
+  UNIQUE(swarm_run_id,task_id,attempt)
+);
+CREATE INDEX IF NOT EXISTS idx_swarm_agent_runs_history
+  ON swarm_agent_runs(swarm_run_id,created_at,id);
+CREATE INDEX IF NOT EXISTS idx_swarm_agent_runs_member
+  ON swarm_agent_runs(member_id,created_at DESC);
+
+CREATE TABLE IF NOT EXISTS swarm_attention_requests(
+  id TEXT PRIMARY KEY,
+  swarm_id TEXT NOT NULL REFERENCES swarms(id) ON DELETE CASCADE,
+  swarm_run_id TEXT NOT NULL REFERENCES swarm_runs(id) ON DELETE CASCADE,
+  agent_run_id TEXT NOT NULL REFERENCES swarm_agent_runs(id) ON DELETE CASCADE,
+  member_id TEXT NOT NULL REFERENCES swarm_agents(id) ON DELETE RESTRICT,
+  task_id TEXT REFERENCES swarm_tasks(id) ON DELETE SET NULL,
+  request_kind TEXT NOT NULL,
+  summary TEXT NOT NULL,
+  safe_payload_json TEXT NOT NULL DEFAULT '{}',
+  status TEXT NOT NULL DEFAULT 'open',
+  response TEXT,
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  resolved_at TEXT,
+  UNIQUE(agent_run_id,request_kind,status)
+);
+CREATE INDEX IF NOT EXISTS idx_swarm_attention_open
+  ON swarm_attention_requests(swarm_id,status,created_at DESC);
+
+UPDATE swarms SET revision=1 WHERE revision=0;
+UPDATE swarm_events
+SET sequence=(
+  SELECT count(*) FROM swarm_events earlier
+  WHERE earlier.swarm_id=swarm_events.swarm_id
+    AND (earlier.created_at < swarm_events.created_at
+         OR (earlier.created_at=swarm_events.created_at AND earlier.id <= swarm_events.id))
+)
+WHERE sequence=0;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_swarm_events_sequence
+  ON swarm_events(swarm_id,sequence);
+
+INSERT OR IGNORE INTO swarm_runs(
+  id,swarm_id,project_id,objective,status,phase,progress,max_parallel,failure_policy,
+  cancellation_requested_at,failure_json,result_summary_json,created_at,started_at,finished_at,updated_at
+)
+SELECT 'legacy-run-' || id,id,project_id,mission,
+  CASE lifecycle
+    WHEN 'draft' THEN 'cancelled'
+    WHEN 'paused' THEN 'paused'
+    WHEN 'decision_required' THEN 'needs_input'
+    WHEN 'ready_for_review' THEN 'completed'
+    WHEN 'completed' THEN 'completed'
+    WHEN 'failed' THEN 'failed'
+    WHEN 'cancelled' THEN 'cancelled'
+    WHEN 'archived' THEN 'completed'
+    ELSE 'interrupted'
+  END,
+  phase,progress,max_parallel,'continue_independent',
+  CASE WHEN lifecycle IN ('stopping','cancelled') THEN updated_at END,
+  CASE WHEN lifecycle='failed' THEN json_object('reason','Migrated failed Swarm') END,
+  summary_json,created_at,started_at,
+  CASE WHEN lifecycle IN ('ready_for_review','completed','failed','cancelled','archived') THEN coalesce(completed_at,updated_at) END,
+  updated_at
+FROM swarms
+WHERE lifecycle <> 'draft';
+"#,
+            )
+            .map_err(AppError::database)?;
+        record_migration(connection, 21)
+    })();
+    finish_migration_transaction(connection, result, 21)
+}
+
 /// Rewrite every stored preset's `config_json` into the role-pool allocation shape. User presets
 /// are upgraded in place (no data loss); built-in presets are refreshed to the canonical
 /// composition from [`crate::models::swarm::builtin_presets`], which is where the Feature Team and
@@ -2363,6 +2515,9 @@ mod tests {
             "repository_sync_cursors",
             "repository_webhook_deliveries",
             "repository_recovery_checkpoints",
+            "swarm_runs",
+            "swarm_agent_runs",
+            "swarm_attention_requests",
         ] {
             assert!(table_exists(&connection, table).unwrap(), "missing {table}");
         }
@@ -2370,6 +2525,8 @@ mod tests {
             assert!(column_exists(&connection, "repository_sync_cursors", column).unwrap());
         }
         assert!(column_exists(&connection, "swarm_tasks", "repair_for_task_id").unwrap());
+        assert!(column_exists(&connection, "swarms", "revision").unwrap());
+        assert!(column_exists(&connection, "swarm_events", "sequence").unwrap());
         assert!(table_exists(&connection, "swarm_runtime_event_receipts").unwrap());
     }
 
@@ -2409,6 +2566,53 @@ mod tests {
             .unwrap();
         assert_eq!(default, 1, "exactly one default preset");
         assert!(column_exists(&connection, "swarms", "project_root").unwrap());
+    }
+
+    #[test]
+    fn v21_backfills_run_history_and_event_sequences_without_losing_legacy_swarm() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection.execute_batch(
+            "CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY,applied_at TEXT NOT NULL);
+             CREATE TABLE projects(id TEXT PRIMARY KEY);
+             CREATE TABLE swarms(id TEXT PRIMARY KEY,project_id TEXT NOT NULL,mission TEXT NOT NULL,lifecycle TEXT NOT NULL,phase TEXT NOT NULL,progress REAL NOT NULL,max_parallel INTEGER NOT NULL,summary_json TEXT,created_at TEXT NOT NULL,started_at TEXT,completed_at TEXT,updated_at TEXT NOT NULL);
+             CREATE TABLE swarm_agents(id TEXT PRIMARY KEY);
+             CREATE TABLE swarm_tasks(id TEXT PRIMARY KEY);
+             CREATE TABLE swarm_events(id TEXT PRIMARY KEY,swarm_id TEXT NOT NULL,created_at TEXT NOT NULL);
+             INSERT INTO projects(id) VALUES('project-1');
+             INSERT INTO swarms(id,project_id,mission,lifecycle,phase,progress,max_parallel,created_at,started_at,updated_at) VALUES('swarm-1','project-1','Preserve this run','building','building',0.4,2,'2026-01-01T00:00:00Z','2026-01-01T00:01:00Z','2026-01-01T00:02:00Z');
+             INSERT INTO swarm_events(id,swarm_id,created_at) VALUES('event-b','swarm-1','2026-01-01T00:02:00Z'),('event-a','swarm-1','2026-01-01T00:01:00Z');",
+        ).unwrap();
+
+        migrate_v21(&connection).unwrap();
+
+        assert_eq!(
+            connection
+                .query_row("SELECT mission FROM swarms WHERE id='swarm-1'", [], |row| {
+                    row.get::<_, String>(0)
+                })
+                .unwrap(),
+            "Preserve this run"
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT status FROM swarm_runs WHERE swarm_id='swarm-1'",
+                    [],
+                    |row| row.get::<_, String>(0)
+                )
+                .unwrap(),
+            "interrupted"
+        );
+        let sequences: Vec<i64> = connection
+            .prepare(
+                "SELECT sequence FROM swarm_events WHERE swarm_id='swarm-1' ORDER BY created_at",
+            )
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(sequences, vec![1, 2]);
     }
 
     #[test]

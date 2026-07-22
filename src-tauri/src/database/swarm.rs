@@ -22,6 +22,13 @@ pub struct NewSwarmTask {
     pub repair_for_task_id: Option<String>,
 }
 
+pub struct SwarmAgentRunCompletion<'a> {
+    pub status: &'a str,
+    pub result: Option<&'a str>,
+    pub failure_reason: Option<&'a str>,
+    pub cancellation_reason: Option<&'a str>,
+}
+
 impl DatabaseService {
     #[cfg(test)]
     pub fn seed_project_memory_for_test(&self, project_id: &str, title: &str) -> AppResult<String> {
@@ -267,6 +274,9 @@ impl DatabaseService {
         let tests = load_test_records(&connection, id)?;
         let memories = load_memory_contexts(&connection, id)?;
         let reviews = load_review_records(&connection, id)?;
+        let runs = load_swarm_runs(&connection, id)?;
+        let agent_runs = load_swarm_agent_runs(&connection, id)?;
+        let attention_requests = load_swarm_attention_requests(&connection, id)?;
         Ok(SwarmDetail {
             swarm,
             activity,
@@ -281,6 +291,9 @@ impl DatabaseService {
             tests,
             memories,
             reviews,
+            runs,
+            agent_runs,
+            attention_requests,
         })
     }
 
@@ -444,8 +457,234 @@ impl DatabaseService {
                 ],
             )?;
         }
+        let run_status = match lifecycle {
+            SwarmLifecycle::Draft => None,
+            SwarmLifecycle::Validating | SwarmLifecycle::Preparing => Some("starting"),
+            SwarmLifecycle::Pausing | SwarmLifecycle::Resuming => Some("running"),
+            SwarmLifecycle::Paused => Some("paused"),
+            SwarmLifecycle::DecisionRequired => Some(
+                if transaction.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM swarm_attention_requests WHERE swarm_id=?1 AND status='open' AND request_kind='permission')",
+                    [id],
+                    |row| row.get::<_, bool>(0),
+                )? {
+                    "needs_permission"
+                } else {
+                    "needs_input"
+                },
+            ),
+            SwarmLifecycle::Stopping => Some("cancelling"),
+            SwarmLifecycle::Recovering => Some("recovering"),
+            SwarmLifecycle::ReadyForReview | SwarmLifecycle::Completed => Some("completed"),
+            SwarmLifecycle::Failed => Some("failed"),
+            SwarmLifecycle::Cancelled => Some("cancelled"),
+            SwarmLifecycle::Archived => Some("completed"),
+            _ => Some("running"),
+        };
+        if let Some(run_status) = run_status {
+            let finished = matches!(
+                run_status,
+                "completed" | "failed" | "cancelled" | "interrupted"
+            );
+            transaction.execute(
+                "UPDATE swarm_runs SET status=?2,phase=?3,progress=?4,result_summary_json=COALESCE(?5,result_summary_json),started_at=COALESCE(started_at,?6),finished_at=CASE WHEN ?7 THEN COALESCE(finished_at,?6) ELSE finished_at END,updated_at=?6 WHERE id=(SELECT id FROM swarm_runs WHERE swarm_id=?1 ORDER BY created_at DESC,id DESC LIMIT 1)",
+                params![
+                    id,
+                    run_status,
+                    lifecycle.phase().as_str(),
+                    progress.clamp(0.0, 1.0),
+                    summary_json,
+                    now,
+                    finished,
+                ],
+            )?;
+        }
         transaction.commit()?;
         Ok(())
+    }
+
+    pub fn create_swarm_run(&self, swarm: &Swarm) -> AppResult<String> {
+        let now = Utc::now().to_rfc3339();
+        let id = Uuid::new_v4().to_string();
+        let mut connection = self.connection.lock();
+        let transaction = connection.transaction()?;
+        let active: bool = transaction.query_row(
+            "SELECT EXISTS(SELECT 1 FROM swarm_runs WHERE swarm_id=?1 AND status IN ('queued','starting','running','paused','needs_input','needs_permission','cancelling','recovering'))",
+            [&swarm.id],
+            |row| row.get(0),
+        )?;
+        if active {
+            return Err(AppError::new(
+                "swarm_run_conflict",
+                "This Swarm already has an active execution.",
+                true,
+            )
+            .entity(&swarm.id));
+        }
+        transaction.execute(
+            "INSERT INTO swarm_runs(id,swarm_id,project_id,objective,status,phase,progress,max_parallel,failure_policy,created_at,started_at,updated_at) VALUES(?1,?2,?3,?4,'starting',?5,0,?6,'continue_independent',?7,?7,?7)",
+            params![id, swarm.id, swarm.project_id, swarm.mission, swarm.phase.as_str(), swarm.max_parallel, now],
+        )?;
+        transaction.commit()?;
+        Ok(id)
+    }
+
+    /// Atomically claim one ready task for one idle member and append the durable attempt row.
+    /// The caller still holds the per-Swarm operation lock, while these predicates defend the
+    /// database contract against future or external writers.
+    pub fn claim_swarm_task(&self, task: &SwarmTask, agent: &SwarmAgent) -> AppResult<String> {
+        let now = Utc::now().to_rfc3339();
+        let mut connection = self.connection.lock();
+        let transaction = connection.transaction()?;
+        let run_id: String = transaction
+            .query_row(
+                "SELECT id FROM swarm_runs WHERE swarm_id=?1 AND status IN ('queued','starting','running','recovering') ORDER BY created_at DESC,id DESC LIMIT 1",
+                [&task.swarm_id],
+                |row| row.get(0),
+            )
+            .optional()?
+            .ok_or_else(|| {
+                AppError::new(
+                    "swarm_run_missing",
+                    "The scheduler cannot assign work without an active Swarm run.",
+                    false,
+                )
+                .entity(&task.swarm_id)
+            })?;
+        let attempt: i64 = transaction.query_row(
+            "SELECT COALESCE(MAX(attempt),0)+1 FROM swarm_agent_runs WHERE swarm_id=?1 AND task_id=?2",
+            params![task.swarm_id, task.id],
+            |row| row.get(0),
+        )?;
+        let task_updated = transaction.execute(
+            "UPDATE swarm_tasks SET status='running',assigned_agent_id=?2,attempts=attempts+1,updated_at=?3 WHERE id=?1 AND swarm_id=?4 AND status='ready' AND assigned_agent_id IS NULL",
+            params![task.id, agent.id, now, task.swarm_id],
+        )?;
+        let agent_updated = transaction.execute(
+            "UPDATE swarm_agents SET status='active',current_task_id=?2,last_result=?3,updated_at=?4 WHERE id=?1 AND swarm_id=?5 AND status='idle' AND current_task_id IS NULL",
+            params![agent.id, task.id, format!("Working on: {}", task.title), now, task.swarm_id],
+        )?;
+        if task_updated != 1 || agent_updated != 1 {
+            return Err(AppError::new(
+                "swarm_assignment_conflict",
+                "The task or member was claimed by another scheduler operation.",
+                true,
+            )
+            .entity(&task.id));
+        }
+        let agent_run_id = Uuid::new_v4().to_string();
+        transaction.execute(
+            "INSERT INTO swarm_agent_runs(id,swarm_run_id,swarm_id,member_id,task_id,status,attempt,created_at,started_at,updated_at) VALUES(?1,?2,?3,?4,?5,'starting',?6,?7,?7,?7)",
+            params![agent_run_id, run_id, task.swarm_id, agent.id, task.id, attempt, now],
+        )?;
+        transaction.commit()?;
+        Ok(agent_run_id)
+    }
+
+    pub fn prepare_swarm_retry(
+        &self,
+        swarm: &Swarm,
+        member_id: Option<&str>,
+    ) -> AppResult<(String, usize)> {
+        let swarm_id = swarm.id.as_str();
+        let now = Utc::now().to_rfc3339();
+        let mut connection = self.connection.lock();
+        let transaction = connection.transaction()?;
+        let active: bool = transaction.query_row(
+            "SELECT EXISTS(SELECT 1 FROM swarm_runs WHERE swarm_id=?1 AND status IN ('queued','starting','running','paused','needs_input','needs_permission','cancelling','recovering'))",
+            [swarm_id],
+            |row| row.get(0),
+        )?;
+        if active {
+            return Err(AppError::new(
+                "swarm_run_conflict",
+                "This Swarm already has an active execution.",
+                true,
+            )
+            .entity(swarm_id));
+        }
+        let task_ids = if let Some(member_id) = member_id {
+            let task_id = transaction
+                .query_row(
+                    "SELECT task_id FROM swarm_agent_runs WHERE swarm_id=?1 AND member_id=?2 AND status='failed' AND task_id IS NOT NULL ORDER BY attempt DESC,created_at DESC,id DESC LIMIT 1",
+                    params![swarm_id, member_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()?
+                .ok_or_else(|| {
+                    AppError::new(
+                        "swarm_retry_unavailable",
+                        "This member has no failed attempt to retry.",
+                        true,
+                    )
+                    .entity(member_id)
+                })?;
+            vec![task_id]
+        } else {
+            let mut statement = transaction.prepare(
+                "SELECT id FROM swarm_tasks WHERE swarm_id=?1 AND status IN ('failed','blocked','cancelled') ORDER BY position,id",
+            )?;
+            let rows = statement
+                .query_map([swarm_id], |row| row.get::<_, String>(0))?
+                .collect::<Result<Vec<_>, _>>()?;
+            rows
+        };
+        if task_ids.is_empty() {
+            return Err(AppError::new(
+                "swarm_retry_unavailable",
+                "This Swarm has no failed or cancelled work to retry.",
+                true,
+            )
+            .entity(swarm_id));
+        }
+        for task_id in &task_ids {
+            transaction.execute(
+                "UPDATE swarm_tasks SET status='proposed',progress=0,assigned_agent_id=NULL,result_json=NULL,updated_at=?2 WHERE id=?1 AND swarm_id=?3",
+                params![task_id, now, swarm_id],
+            )?;
+        }
+        if let Some(member_id) = member_id {
+            transaction.execute(
+                "UPDATE swarm_agents SET status='idle',current_task_id=NULL,last_result='Retry queued',recovery_state='retrying',updated_at=?3 WHERE id=?1 AND swarm_id=?2",
+                params![member_id, swarm_id, now],
+            )?;
+        } else {
+            transaction.execute(
+                "UPDATE swarm_agents SET status='idle',current_task_id=NULL,last_result=CASE WHEN status='failed' THEN 'Retry queued' ELSE last_result END,recovery_state=CASE WHEN status='failed' THEN 'retrying' ELSE recovery_state END,updated_at=?2 WHERE swarm_id=?1 AND status IN ('failed','completed','paused')",
+                params![swarm_id, now],
+            )?;
+        }
+        let run_id = Uuid::new_v4().to_string();
+        transaction.execute(
+            "INSERT INTO swarm_runs(id,swarm_id,project_id,objective,status,phase,progress,max_parallel,failure_policy,created_at,started_at,updated_at) VALUES(?1,?2,?3,?4,'starting',?5,0,?6,'continue_independent',?7,?7,?7)",
+            params![run_id, swarm.id, swarm.project_id, swarm.mission, swarm.phase.as_str(), swarm.max_parallel, now],
+        )?;
+        transaction.commit()?;
+        Ok((run_id, task_ids.len()))
+    }
+
+    pub fn finish_swarm_agent_run(
+        &self,
+        swarm_id: &str,
+        member_id: &str,
+        task_id: &str,
+        completion: SwarmAgentRunCompletion<'_>,
+    ) -> AppResult<()> {
+        let now = Utc::now().to_rfc3339();
+        self.connection.lock().execute(
+            "UPDATE swarm_agent_runs SET status=?4,structured_result_json=CASE WHEN ?5 IS NULL THEN structured_result_json ELSE json_object('summary',?5) END,failure_reason=?6,cancellation_reason=?7,finished_at=?8,updated_at=?8 WHERE id=(SELECT id FROM swarm_agent_runs WHERE swarm_id=?1 AND member_id=?2 AND task_id=?3 AND status IN ('queued','starting','working','needs_input','needs_permission','cancelling','paused') ORDER BY created_at DESC,id DESC LIMIT 1)",
+            params![swarm_id, member_id, task_id, completion.status, completion.result, completion.failure_reason, completion.cancellation_reason, now],
+        )?;
+        Ok(())
+    }
+
+    pub fn cancel_open_swarm_agent_runs(&self, swarm_id: &str, reason: &str) -> AppResult<usize> {
+        let now = Utc::now().to_rfc3339();
+        let affected = self.connection.lock().execute(
+            "UPDATE swarm_agent_runs SET status='cancelled',cancellation_reason=?2,finished_at=?3,updated_at=?3 WHERE swarm_id=?1 AND status IN ('queued','starting','working','needs_input','needs_permission','cancelling','paused')",
+            params![swarm_id, reason, now],
+        )?;
+        Ok(affected)
     }
 
     pub fn set_swarm_archived(&self, id: &str, archived: bool) -> AppResult<()> {
@@ -597,16 +836,6 @@ impl DatabaseService {
         Ok(affected)
     }
 
-    /// Pause workers that do not own live work. Running assignments retain both their status and
-    /// task identity until the provider reaches a safe completion boundary.
-    pub fn pause_idle_swarm_agents(&self, swarm_id: &str) -> AppResult<usize> {
-        let affected = self.connection.lock().execute(
-            "UPDATE swarm_agents SET status='paused',updated_at=?2 WHERE swarm_id=?1 AND current_task_id IS NULL",
-            params![swarm_id, Utc::now().to_rfc3339()],
-        )?;
-        Ok(affected)
-    }
-
     pub fn resume_paused_swarm_agents(&self, swarm_id: &str) -> AppResult<usize> {
         let affected = self.connection.lock().execute(
             "UPDATE swarm_agents SET status='idle',updated_at=?2 WHERE swarm_id=?1 AND status='paused' AND current_task_id IS NULL",
@@ -710,9 +939,15 @@ impl DatabaseService {
     // ---- Events & messages ---------------------------------------------------------------
 
     pub fn record_swarm_event(&self, event: &SwarmEvent) -> AppResult<()> {
-        let connection = self.connection.lock();
-        connection.execute(
-            "INSERT INTO swarm_events(id,swarm_id,kind,role,agent_id,task_id,destination_agent_id,destination_role,evidence_id,summary,level,metadata_json,created_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
+        let mut connection = self.connection.lock();
+        let transaction = connection.transaction()?;
+        let sequence: i64 = transaction.query_row(
+            "SELECT COALESCE(MAX(sequence),0)+1 FROM swarm_events WHERE swarm_id=?1",
+            [&event.swarm_id],
+            |row| row.get(0),
+        )?;
+        transaction.execute(
+            "INSERT INTO swarm_events(id,swarm_id,kind,role,agent_id,task_id,destination_agent_id,destination_role,evidence_id,summary,level,metadata_json,sequence,created_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
             params![
                 event.id,
                 event.swarm_id,
@@ -726,13 +961,46 @@ impl DatabaseService {
                 event.summary,
                 event.level,
                 event.metadata.to_string(),
+                sequence,
                 event.created_at,
             ],
         )?;
         // Activity events are canonical domain history, not terminal output. The read projection
         // is bounded and indexed, but persisted evidence must never be deleted as a side effect
         // of appending a later event.
+        transaction.commit()?;
         Ok(())
+    }
+
+    /// Advance the persisted synchronization version immediately before emitting a renderer
+    /// notification. Returning the latest event sequence gives every window a total order while
+    /// the full detail payload remains authoritative.
+    pub fn advance_swarm_sync_version(&self, swarm_id: &str) -> AppResult<(i64, i64, String)> {
+        let now = Utc::now().to_rfc3339();
+        let mut connection = self.connection.lock();
+        let transaction = connection.transaction()?;
+        let affected = transaction.execute(
+            "UPDATE swarms SET revision=revision+1,updated_at=?2 WHERE id=?1",
+            params![swarm_id, now],
+        )?;
+        if affected == 0 {
+            return Err(
+                AppError::new("swarm_not_found", "The Swarm no longer exists.", true)
+                    .entity(swarm_id),
+            );
+        }
+        let revision: i64 = transaction.query_row(
+            "SELECT revision FROM swarms WHERE id=?1",
+            [swarm_id],
+            |row| row.get(0),
+        )?;
+        let event_sequence: i64 = transaction.query_row(
+            "SELECT COALESCE(MAX(sequence),0) FROM swarm_events WHERE swarm_id=?1",
+            [swarm_id],
+            |row| row.get(0),
+        )?;
+        transaction.commit()?;
+        Ok((revision, event_sequence, now))
     }
 
     pub fn record_swarm_message(&self, swarm_id: &str, target: &str, body: &str) -> AppResult<()> {
@@ -755,6 +1023,155 @@ impl DatabaseService {
             params![swarm_id, agent_id, role_target],
         )?;
         Ok(affected)
+    }
+
+    pub fn create_swarm_attention_request(
+        &self,
+        agent: &SwarmAgent,
+        task: &SwarmTask,
+        request_kind: &str,
+        summary: &str,
+        payload: &serde_json::Value,
+    ) -> AppResult<String> {
+        let now = Utc::now();
+        let created_at = now.to_rfc3339();
+        let expires_at = (now + chrono::Duration::hours(24)).to_rfc3339();
+        let mut safe_payload = serde_json::Map::new();
+        for key in ["tool", "command", "file_path", "path", "description"] {
+            if let Some(value) = payload.get(key) {
+                safe_payload.insert(key.to_string(), value.clone());
+            }
+        }
+        let mut connection = self.connection.lock();
+        let transaction = connection.transaction()?;
+        let run_id: String = transaction.query_row(
+            "SELECT id FROM swarm_runs WHERE swarm_id=?1 AND status IN ('starting','running','recovering') ORDER BY created_at DESC,id DESC LIMIT 1",
+            [&agent.swarm_id],
+            |row| row.get(0),
+        )?;
+        let agent_run_id: String = transaction.query_row(
+            "SELECT id FROM swarm_agent_runs WHERE swarm_run_id=?1 AND member_id=?2 AND task_id=?3 AND status IN ('starting','working') ORDER BY created_at DESC,id DESC LIMIT 1",
+            params![run_id, agent.id, task.id],
+            |row| row.get(0),
+        )?;
+        let id = Uuid::new_v4().to_string();
+        transaction.execute(
+            "INSERT OR IGNORE INTO swarm_attention_requests(id,swarm_id,swarm_run_id,agent_run_id,member_id,task_id,request_kind,summary,safe_payload_json,status,created_at,expires_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,'open',?10,?11)",
+            params![id, agent.swarm_id, run_id, agent_run_id, agent.id, task.id, request_kind, summary, serde_json::Value::Object(safe_payload).to_string(), created_at, expires_at],
+        )?;
+        let stored_id: String = transaction.query_row(
+            "SELECT id FROM swarm_attention_requests WHERE agent_run_id=?1 AND request_kind=?2 AND status='open' ORDER BY created_at DESC LIMIT 1",
+            params![agent_run_id, request_kind],
+            |row| row.get(0),
+        )?;
+        transaction.execute(
+            "UPDATE swarm_agent_runs SET status=CASE WHEN ?2='permission' THEN 'needs_permission' ELSE 'needs_input' END,updated_at=?3 WHERE id=?1",
+            params![agent_run_id, request_kind, created_at],
+        )?;
+        transaction.execute(
+            "UPDATE swarm_tasks SET status='blocked',blocker=?2,updated_at=?3 WHERE id=?1 AND swarm_id=?4",
+            params![task.id, summary, created_at, agent.swarm_id],
+        )?;
+        transaction.execute(
+            "UPDATE swarm_agents SET status='blocked',current_blocker=?2,updated_at=?3 WHERE id=?1 AND swarm_id=?4",
+            params![agent.id, summary, created_at, agent.swarm_id],
+        )?;
+        transaction.execute(
+            "UPDATE swarm_runs SET status=CASE WHEN ?2='permission' THEN 'needs_permission' ELSE 'needs_input' END,updated_at=?3 WHERE id=?1",
+            params![run_id, request_kind, created_at],
+        )?;
+        transaction.commit()?;
+        Ok(stored_id)
+    }
+
+    pub fn has_open_swarm_attention(&self, swarm_id: &str) -> AppResult<bool> {
+        self.connection
+            .lock()
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM swarm_attention_requests WHERE swarm_id=?1 AND status='open')",
+                [swarm_id],
+                |row| row.get(0),
+            )
+            .map_err(Into::into)
+    }
+
+    /// Resolve one exact current attention request. Returns the member, task and whether work
+    /// should resume. A duplicate, expired, cross-run or late response updates zero rows and is
+    /// rejected instead of authorizing a different provider attempt.
+    pub fn resolve_swarm_attention_request(
+        &self,
+        swarm_id: &str,
+        request_id: &str,
+        response: &str,
+        approved: bool,
+    ) -> AppResult<(String, String, bool)> {
+        let now = Utc::now().to_rfc3339();
+        let mut connection = self.connection.lock();
+        let transaction = connection.transaction()?;
+        let (run_id, agent_run_id, member_id, task_id, expires_at): (String, String, String, String, String) = transaction
+            .query_row(
+                "SELECT swarm_run_id,agent_run_id,member_id,task_id,expires_at FROM swarm_attention_requests WHERE id=?1 AND swarm_id=?2 AND status='open'",
+                params![request_id, swarm_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
+            )
+            .optional()?
+            .ok_or_else(|| AppError::new("swarm_attention_stale", "That attention request is no longer open.", true).entity(request_id))?;
+        if expires_at <= now {
+            return Err(AppError::new(
+                "swarm_attention_expired",
+                "That attention request expired before the response arrived.",
+                true,
+            )
+            .entity(request_id));
+        }
+        let run_is_current: bool = transaction.query_row(
+            "SELECT EXISTS(SELECT 1 FROM swarm_runs WHERE id=?1 AND swarm_id=?2 AND status IN ('needs_input','needs_permission'))",
+            params![run_id, swarm_id],
+            |row| row.get(0),
+        )?;
+        if !run_is_current {
+            return Err(AppError::new(
+                "swarm_attention_stale",
+                "The provider attempt that requested attention is no longer current.",
+                true,
+            )
+            .entity(request_id));
+        }
+        let status = if approved { "approved" } else { "denied" };
+        let affected = transaction.execute(
+            "UPDATE swarm_attention_requests SET status=?3,response=?4,resolved_at=?5 WHERE id=?1 AND swarm_id=?2 AND status='open'",
+            params![request_id, swarm_id, status, response, now],
+        )?;
+        if affected != 1 {
+            return Err(AppError::new(
+                "swarm_attention_stale",
+                "That attention request was already resolved.",
+                true,
+            )
+            .entity(request_id));
+        }
+        transaction.execute(
+            "UPDATE swarm_agent_runs SET status=?2,failure_reason=CASE WHEN ?3 THEN NULL ELSE 'Permission denied by user' END,finished_at=?4,updated_at=?4 WHERE id=?1 AND status IN ('needs_input','needs_permission')",
+            params![agent_run_id, if approved { "interrupted" } else { "failed" }, approved, now],
+        )?;
+        transaction.execute(
+            "UPDATE swarm_tasks SET status=?2,assigned_agent_id=NULL,blocker=NULL,result_json=CASE WHEN ?3 THEN result_json ELSE 'Permission denied by user' END,updated_at=?4 WHERE id=?1 AND swarm_id=?5 AND status='blocked'",
+            params![task_id, if approved { "ready" } else { "failed" }, approved, now, swarm_id],
+        )?;
+        transaction.execute(
+            "UPDATE swarm_agents SET status=?2,current_task_id=NULL,current_blocker=NULL,last_result=?3,updated_at=?4 WHERE id=?1 AND swarm_id=?5",
+            params![member_id, if approved { "idle" } else { "failed" }, response, now, swarm_id],
+        )?;
+        transaction.execute(
+            "INSERT INTO swarm_messages(id,swarm_id,target,body,category,sender_kind,task_id,delivery_state,created_at) VALUES(?1,?2,?3,?4,'attention_response','user',?5,'queued',?6)",
+            params![Uuid::new_v4().to_string(), swarm_id, member_id, response, task_id, now],
+        )?;
+        transaction.execute(
+            "UPDATE swarm_runs SET status=?2,updated_at=?3 WHERE id=?1",
+            params![run_id, if approved { "recovering" } else { "failed" }, now],
+        )?;
+        transaction.commit()?;
+        Ok((member_id, task_id, approved))
     }
 
     /// Claim one provider-native event before applying any derived writes. Replaying a bounded
@@ -938,6 +1355,10 @@ impl DatabaseService {
         transaction.execute(
             "INSERT INTO swarm_runtime_sessions(id,swarm_id,project_id,agent_id,task_id,runtime,provider_session_id,terminal_session_id,state,resumable,working_directory,instruction_hash,usage_json,failure_class,started_at,updated_at,ended_at) VALUES(?1,?2,?3,?4,?5,?6,NULL,?7,'running',1,?8,?9,'{}',NULL,?10,?10,NULL)",
             params![Uuid::new_v4().to_string(), agent.swarm_id, session.project_id, agent.id, task_id, agent.runtime.as_str(), session.id, session.working_directory, instruction_hash, now],
+        )?;
+        transaction.execute(
+            "UPDATE swarm_agent_runs SET terminal_session_id=?4,process_id=?5,status='working',updated_at=?6 WHERE id=(SELECT id FROM swarm_agent_runs WHERE swarm_id=?1 AND member_id=?2 AND task_id=?3 AND status='starting' ORDER BY created_at DESC,id DESC LIMIT 1)",
+            params![agent.swarm_id, agent.id, task_id, session.id, session.process_id, now],
         )?;
         transaction.commit()?;
         Ok(())
@@ -1340,7 +1761,7 @@ impl DatabaseService {
     }
 }
 
-const SWARM_COLUMNS_SQL: &str = "SELECT id,project_id,project_root,name,mission,lifecycle,phase,team_preset,max_parallel,instructions,progress,priority,decision_json,summary_json,review_verdict,archived,created_at,updated_at,started_at,completed_at,repository_identity,git_state_json,safeguards_json,attachments_json,current_milestone FROM swarms WHERE id=?1";
+const SWARM_COLUMNS_SQL: &str = "SELECT id,project_id,project_root,name,mission,lifecycle,phase,team_preset,max_parallel,instructions,progress,priority,decision_json,summary_json,review_verdict,archived,created_at,updated_at,started_at,completed_at,repository_identity,git_state_json,safeguards_json,attachments_json,current_milestone,revision FROM swarms WHERE id=?1";
 
 fn row_to_swarm(row: &Row<'_>) -> rusqlite::Result<Swarm> {
     let lifecycle_raw: String = row.get(5)?;
@@ -1371,6 +1792,7 @@ fn row_to_swarm(row: &Row<'_>) -> rusqlite::Result<Swarm> {
         safeguards: serde_json::from_str(&safeguards_json).unwrap_or_default(),
         attachments: serde_json::from_str(&attachments_json).unwrap_or_default(),
         current_milestone: row.get(24)?,
+        revision: row.get(25)?,
         archived: row.get(15)?,
         roles: Vec::new(),
         created_at: row.get(16)?,
@@ -1591,7 +2013,7 @@ fn load_tasks(connection: &Connection, swarm_id: &str) -> AppResult<Vec<SwarmTas
 
 fn load_events(connection: &Connection, swarm_id: &str, limit: i64) -> AppResult<Vec<SwarmEvent>> {
     let mut statement = connection.prepare(
-        "SELECT id,swarm_id,kind,role,agent_id,task_id,destination_agent_id,destination_role,evidence_id,summary,level,metadata_json,created_at FROM swarm_events WHERE swarm_id=?1 ORDER BY created_at DESC LIMIT ?2",
+        "SELECT id,swarm_id,kind,role,agent_id,task_id,destination_agent_id,destination_role,evidence_id,summary,level,metadata_json,sequence,created_at FROM swarm_events WHERE swarm_id=?1 ORDER BY sequence DESC LIMIT ?2",
     )?;
     let events = statement
         .query_map(params![swarm_id, limit], |row| {
@@ -1611,7 +2033,8 @@ fn load_events(connection: &Connection, swarm_id: &str, limit: i64) -> AppResult
                 summary: row.get(9)?,
                 level: row.get(10)?,
                 metadata: serde_json::from_str(&metadata_json).unwrap_or_default(),
-                created_at: row.get(12)?,
+                sequence: row.get(12)?,
+                created_at: row.get(13)?,
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
@@ -1860,6 +2283,111 @@ fn load_memory_contexts_query<P: rusqlite::Params>(
                 confidence: row.get(11)?,
                 source_uris: serde_json::from_str(&source_uris_json).unwrap_or_default(),
                 loaded_at: row.get(13)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(rows)
+}
+
+fn load_swarm_runs(connection: &Connection, swarm_id: &str) -> AppResult<Vec<SwarmRun>> {
+    let mut statement = connection.prepare(
+        "SELECT id,swarm_id,project_id,objective,status,phase,progress,max_parallel,failure_policy,cancellation_requested_at,failure_json,result_summary_json,created_at,started_at,finished_at,updated_at FROM swarm_runs WHERE swarm_id=?1 ORDER BY created_at DESC,id DESC",
+    )?;
+    let rows = statement
+        .query_map([swarm_id], |row| {
+            let phase: String = row.get(5)?;
+            let failure_json: Option<String> = row.get(10)?;
+            let result_json: Option<String> = row.get(11)?;
+            Ok(SwarmRun {
+                id: row.get(0)?,
+                swarm_id: row.get(1)?,
+                project_id: row.get(2)?,
+                objective: row.get(3)?,
+                status: row.get(4)?,
+                phase: parse_phase(&phase),
+                progress: row.get(6)?,
+                max_parallel: row.get(7)?,
+                failure_policy: row.get(8)?,
+                cancellation_requested_at: row.get(9)?,
+                failure: failure_json.and_then(|value| serde_json::from_str(&value).ok()),
+                result_summary: result_json.and_then(|value| serde_json::from_str(&value).ok()),
+                created_at: row.get(12)?,
+                started_at: row.get(13)?,
+                finished_at: row.get(14)?,
+                updated_at: row.get(15)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(rows)
+}
+
+fn load_swarm_agent_runs(connection: &Connection, swarm_id: &str) -> AppResult<Vec<SwarmAgentRun>> {
+    let mut statement = connection.prepare(
+        "SELECT id,swarm_run_id,swarm_id,member_id,task_id,terminal_session_id,process_id,status,attempt,exit_code,failure_reason,cancellation_reason,structured_result_json,files_changed_json,evidence_json,created_at,started_at,finished_at,updated_at FROM swarm_agent_runs WHERE swarm_id=?1 ORDER BY created_at,id",
+    )?;
+    let rows = statement
+        .query_map([swarm_id], |row| {
+            let process_id = row
+                .get::<_, Option<i64>>(6)?
+                .and_then(|value| u32::try_from(value).ok());
+            let exit_code = row
+                .get::<_, Option<i64>>(9)?
+                .and_then(|value| i32::try_from(value).ok());
+            let structured_result: Option<String> = row.get(12)?;
+            let files_changed: String = row.get(13)?;
+            let evidence: String = row.get(14)?;
+            Ok(SwarmAgentRun {
+                id: row.get(0)?,
+                swarm_run_id: row.get(1)?,
+                swarm_id: row.get(2)?,
+                member_id: row.get(3)?,
+                task_id: row.get(4)?,
+                terminal_session_id: row.get(5)?,
+                process_id,
+                status: row.get(7)?,
+                attempt: row.get(8)?,
+                exit_code,
+                failure_reason: row.get(10)?,
+                cancellation_reason: row.get(11)?,
+                structured_result: structured_result
+                    .and_then(|value| serde_json::from_str(&value).ok()),
+                files_changed: serde_json::from_str(&files_changed).unwrap_or_default(),
+                evidence_ids: serde_json::from_str(&evidence).unwrap_or_default(),
+                created_at: row.get(15)?,
+                started_at: row.get(16)?,
+                finished_at: row.get(17)?,
+                updated_at: row.get(18)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(rows)
+}
+
+fn load_swarm_attention_requests(
+    connection: &Connection,
+    swarm_id: &str,
+) -> AppResult<Vec<SwarmAttentionRequest>> {
+    let mut statement = connection.prepare(
+        "SELECT id,swarm_id,swarm_run_id,agent_run_id,member_id,task_id,request_kind,summary,safe_payload_json,status,response,created_at,expires_at,resolved_at FROM swarm_attention_requests WHERE swarm_id=?1 ORDER BY created_at DESC,id DESC",
+    )?;
+    let rows = statement
+        .query_map([swarm_id], |row| {
+            let payload: String = row.get(8)?;
+            Ok(SwarmAttentionRequest {
+                id: row.get(0)?,
+                swarm_id: row.get(1)?,
+                swarm_run_id: row.get(2)?,
+                agent_run_id: row.get(3)?,
+                member_id: row.get(4)?,
+                task_id: row.get(5)?,
+                request_kind: row.get(6)?,
+                summary: row.get(7)?,
+                safe_payload: serde_json::from_str(&payload).unwrap_or_default(),
+                status: row.get(9)?,
+                response: row.get(10)?,
+                created_at: row.get(11)?,
+                expires_at: row.get(12)?,
+                resolved_at: row.get(13)?,
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
