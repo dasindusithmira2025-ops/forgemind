@@ -10,6 +10,8 @@ use crate::services::process_util::background_command;
 use crate::services::project_service::display_path;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use chrono::Utc;
+#[cfg(test)]
+use parking_lot::Condvar;
 use parking_lot::{Mutex, RwLock};
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use std::collections::{HashMap, HashSet};
@@ -85,6 +87,8 @@ struct TerminalHandle {
     output_log: Option<Mutex<TerminalLog>>,
     started_at: Instant,
     machine_protocol: bool,
+    #[cfg(test)]
+    exit_signal: (Mutex<bool>, Condvar),
 }
 
 #[derive(Clone)]
@@ -279,6 +283,8 @@ impl TerminalManager {
             output_log: output_log.map(Mutex::new),
             started_at: Instant::now(),
             machine_protocol,
+            #[cfg(test)]
+            exit_signal: (Mutex::new(false), Condvar::new()),
         });
         if let Some(database) = &self.database {
             // The child is already spawned, so a failed record would otherwise orphan a live
@@ -590,6 +596,11 @@ impl TerminalManager {
                 };
                 transition_agent_state(&app, &database, &handle, final_signal);
                 sessions.write().remove(&session_id);
+                #[cfg(test)]
+                {
+                    *handle.exit_signal.0.lock() = true;
+                    handle.exit_signal.1.notify_all();
+                }
             })
             .map(drop)
     }
@@ -1149,14 +1160,22 @@ mod tests {
                 restoration_attempt: false,
             })
             .unwrap();
+        let handle = manager.owned(&session.id).unwrap();
         manager.close_input(&session.id).unwrap();
         manager.close_input(&session.id).unwrap();
-        for _ in 0..100 {
-            if manager.workspace_for_session(&session.id).is_none() {
-                return;
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut exited = handle.exit_signal.0.lock();
+        while !*exited {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                break;
             }
-            std::thread::sleep(std::time::Duration::from_millis(20));
+            handle.exit_signal.1.wait_for(&mut exited, remaining);
         }
+        if *exited {
+            return;
+        }
+        drop(exited);
         manager.terminate_session(&session.id).unwrap();
         panic!("the process did not exit after terminal input closed");
     }
