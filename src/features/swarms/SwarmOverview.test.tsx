@@ -136,4 +136,20 @@ describe('SwarmOverview live backend projection', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Validate & launch' }))
     expect(start).toHaveBeenCalledWith('s1')
   })
+
+  it('binds an attention decision to the persisted request id', async () => {
+    const resolveAttention = vi.fn(async () => undefined)
+    const waiting = {
+      ...detail,
+      swarm: { ...detail.swarm, lifecycle: 'decision_required' },
+      attentionRequests: [{ id: 'permission-1', swarmId: 's1', swarmRunId: 'run-1', agentRunId: 'attempt-1', memberId: 'builder', taskId: 'task', requestKind: 'permission', summary: 'Builder 1 requests PowerShell', safePayload: { command: 'npm test' }, status: 'open', response: null, createdAt: now, expiresAt: now, resolvedAt: null }],
+    } as SwarmDetail
+    useSwarmStore.setState({ resolveAttention })
+    render(<MemoryRouter><SwarmOverview detail={waiting} /></MemoryRouter>)
+
+    expect(screen.getByText('command: npm test')).toBeInTheDocument()
+    await userEvent.type(screen.getByLabelText('Response for agent'), 'Run the scoped test only')
+    await userEvent.click(screen.getByRole('button', { name: 'Approve and continue' }))
+    expect(resolveAttention).toHaveBeenCalledWith('s1', 'permission-1', 'Run the scoped test only', true)
+  })
 })
