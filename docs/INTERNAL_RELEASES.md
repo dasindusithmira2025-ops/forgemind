@@ -50,16 +50,16 @@ Protect the `stable-release` and `preview-release` environments with required re
 
 | Channel | Edition | Trigger | Version shape | Workflow |
 |---|---|---|---|---|
-| internal | `preview` | automatic on push/merge to `main` | `X.Y.Z-internal.<runNumber>` | `release-internal.yml` |
+| internal | `preview` | automatic on push/merge to `main` | `X.Y.Z-<runNumber>` | `release-internal.yml` |
 | stable | `stable` | protected tag `stable-vX.Y.Z` | `X.Y.Z` | `release-stable.yml` |
 
-The **internal channel is delivered on the `preview` edition** (separate identifier, data, updater state, and update endpoint from stable). A `beta` channel can be added later by introducing a third edition config plus a `ProductEdition` variant without changing the updater flow. Internal installs only ever query `PARALITH_PREVIEW_UPDATE_ENDPOINT`; stable installs only ever query `PARALITH_STABLE_UPDATE_ENDPOINT`. Internal releases publish only the preview manifest and never touch the stable manifest; stable releases never use an `-internal.*` prerelease version. Within a channel the Tauri updater rejects same-or-lower versions, so an accidental downgrade is refused.
+The **internal channel is delivered on the `preview` edition** (separate identifier, data, updater state, and update endpoint from stable). A `beta` channel can be added later by introducing a third edition config plus a `ProductEdition` variant without changing the updater flow. Internal installs only ever query `PARALITH_PREVIEW_UPDATE_ENDPOINT`; stable installs only ever query `PARALITH_STABLE_UPDATE_ENDPOINT`. Internal releases publish only the preview manifest and never touch the stable manifest; stable releases use clean `X.Y.Z` versions. Within a channel the Tauri updater rejects same-or-lower versions, so an accidental downgrade is refused.
 
 ## Automatic internal releases (push to `main`)
 
 Every merge or push to `main` runs `release-internal.yml`: full CI validation (`ci.yml`) gates a build job that generates a unique internal version, builds the signed `preview` installer + updater artifacts, publishes a non-draft GitHub prerelease, and pushes the signed `latest.json` to the internal endpoint. Installed internal builds detect it on their next check and install on the next safe restart. No manual tagging or version editing is required.
 
-- **Versioning.** `scripts/release/internal-version.mjs` derives `X.Y.(Z+1)-internal.<github.run_number>` from the shipped stable base in `release/version.json`. The run number is monotonic, so each internal build is a valid upgrade over the previous one, sorts above the current stable, and sorts below the eventual stable release of that patch (`0.4.1-internal.101 < 0.4.1-internal.102 < 0.4.1`).
+- **Versioning.** `scripts/release/internal-version.mjs` derives `X.Y.(Z+1)-<github.run_number>` from the shipped stable base in `release/version.json`. The numeric prerelease keeps Windows MSI bundling valid, and the run number is monotonic, so each internal build is a valid upgrade over the previous one, sorts above the current stable, and sorts below the eventual stable release of that patch (`0.4.1-101 < 0.4.1-102 < 0.4.1`).
 - **Ephemeral, never committed.** The version bump and its generated changelog are written only inside the runner and are never committed back to `main`, so `main` stays on its canonical stable version.
 - **Fail-closed and de-duplicated.** The job aborts if `TAURI_SIGNING_PRIVATE_KEY` or `PARALITH_PREVIEW_UPDATE_ENDPOINT` is missing, so a build never ships unsigned or unpublishable. A `concurrency` group keyed to the commit SHA prevents two runs from publishing the same commit; the unique per-run version prevents accumulating conflicting drafts.
 - **Emergency disablement.** Disable `Release Internal` under the repository Actions tab (or remove the `preview-release` environment's signing secret) to immediately stop internal publication without affecting stable.
@@ -113,7 +113,7 @@ Stable follows the same one-time bootstrap using a `stable` build; after that, `
 
 1. Configure the `preview-release` environment secrets/variables listed above (`TAURI_SIGNING_PRIVATE_KEY`, `PARALITH_PREVIEW_UPDATE_ENDPOINT`, `PARALITH_UPDATE_ARTIFACT_BASE_URL`, and a publication adapter target).
 2. Push a trivial change to `main`.
-3. Watch **Actions → Release Internal**: `validate` runs full CI, then `release` builds `X.Y.(Z+1)-internal.<run>`, publishes the prerelease, and syncs `latest.json`.
+3. Watch **Actions → Release Internal**: `validate` runs full CI, then `release` builds `X.Y.(Z+1)-<run>`, publishes the prerelease, and syncs `latest.json`.
 4. On a bootstrapped internal install, confirm the new version is detected on the next check and installs on the next safe restart.
 
 ## Publishing a stable release
