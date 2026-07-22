@@ -207,9 +207,14 @@ fn write_temp_image(data: Vec<u8>, extension: Option<&str>) -> AppResult<String>
         .layer("terminal_manager"));
     }
     let dir = std::env::temp_dir().join("paralith-images");
-    std::fs::create_dir_all(&dir).map_err(|error| image_io_error("prepare the image cache", error))?;
+    std::fs::create_dir_all(&dir)
+        .map_err(|error| image_io_error("prepare the image cache", error))?;
     prune_old_images(&dir);
-    let path = dir.join(format!("pasted-{}.{}", Uuid::new_v4(), sanitize_extension(extension)));
+    let path = dir.join(format!(
+        "pasted-{}.{}",
+        Uuid::new_v4(),
+        sanitize_extension(extension)
+    ));
     std::fs::write(&path, &data).map_err(|error| image_io_error("save the pasted image", error))?;
     Ok(path.to_string_lossy().into_owned())
 }
@@ -217,7 +222,11 @@ fn write_temp_image(data: Vec<u8>, extension: Option<&str>) -> AppResult<String>
 /// Reduce an untrusted MIME-derived hint to a short, known image extension so it can never inject
 /// path separators or an unexpected file type. Anything unrecognised falls back to `png`.
 fn sanitize_extension(extension: Option<&str>) -> &'static str {
-    let normalized = extension.unwrap_or("").trim().trim_start_matches('.').to_ascii_lowercase();
+    let normalized = extension
+        .unwrap_or("")
+        .trim()
+        .trim_start_matches('.')
+        .to_ascii_lowercase();
     match normalized.as_str() {
         "jpg" | "jpeg" => "jpg",
         "gif" => "gif",
@@ -234,7 +243,9 @@ fn sanitize_extension(extension: Option<&str>) -> &'static str {
 /// Drop pasted images older than a day so the cache cannot grow without bound. Best-effort: any
 /// filesystem hiccup while pruning is ignored so it never blocks saving the current image.
 fn prune_old_images(dir: &std::path::Path) {
-    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
     let cutoff = SystemTime::now()
         .checked_sub(Duration::from_secs(24 * 60 * 60))
         .unwrap_or(SystemTime::UNIX_EPOCH);
@@ -251,13 +262,9 @@ fn prune_old_images(dir: &std::path::Path) {
 }
 
 fn image_io_error(action: &str, error: std::io::Error) -> AppError {
-    AppError::new(
-        "image_cache_failed",
-        format!("Could not {action}."),
-        true,
-    )
-    .detail(error.to_string())
-    .layer("terminal_manager")
+    AppError::new("image_cache_failed", format!("Could not {action}."), true)
+        .detail(error.to_string())
+        .layer("terminal_manager")
 }
 
 fn blocking_task_error(error: impl std::fmt::Display) -> AppError {
