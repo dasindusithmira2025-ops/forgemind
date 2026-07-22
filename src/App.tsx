@@ -9,6 +9,12 @@ import type { HandoffTicket, StartupStatus, UpdateStatus } from './native/types'
 import { RecoveryScreen } from './screens/RecoveryScreen'
 import { initThemeRuntime } from './theme/themeStore'
 
+// Periodic background update poll while the app is running (in addition to the one-shot check after
+// safe startup and the manual Settings → Updates check). The Rust coordinator owns actual check
+// state and rejects overlapping checks, so this only nudges it on a calm cadence — never per render,
+// route change, or window creation.
+const UPDATE_POLL_INTERVAL_MS = 45 * 60 * 1000
+
 const ProjectLauncher = lazy(() => import('./screens/ProjectLauncher').then((module) => ({ default: module.ProjectLauncher })))
 const WorkspaceSetup = lazy(() => import('./screens/WorkspaceSetup').then((module) => ({ default: module.WorkspaceSetup })))
 const WorkspaceScreen = lazy(() => import('./screens/WorkspaceScreen').then((module) => ({ default: module.WorkspaceScreen })))
@@ -52,6 +58,7 @@ export default function App() {
   const setSettings = useAppStore((state) => state.setSettings)
   const uiScale = useAppStore((state) => state.settings.uiScale)
   const uiDensity = useAppStore((state) => state.settings.uiDensity)
+  const automaticUpdateChecks = useAppStore((state) => state.settings.automaticUpdateChecks)
   const [startup, setStartup] = useState<StartupStatus | null>()
   const [whatsNew, setWhatsNew] = useState<UpdateStatus>()
   const [updateReady, setUpdateReady] = useState<UpdateStatus>()
@@ -104,6 +111,15 @@ export default function App() {
     })().catch(() => { if (active) void native.getStartupStatus().then(setStartup).catch(() => setStartup(null)) })
     return () => { active = false; terminalRuntime.stop() }
   }, [setSettings])
+
+  // Periodic re-check while running. Primary window only (detached windows can't drive updates and
+  // the Rust command rejects them anyway), gated on the automatic-checks setting and on a healthy,
+  // non-recovery startup. One timer per app; failures are swallowed so a flaky poll is a no-op.
+  useEffect(() => {
+    if (detachedWorkspaceId || !automaticUpdateChecks || startup === undefined || startup?.recoveryMode) return
+    const timer = setInterval(() => { void native.checkForUpdates().catch(() => undefined) }, UPDATE_POLL_INTERVAL_MS)
+    return () => clearInterval(timer)
+  }, [automaticUpdateChecks, startup])
 
   useEffect(() => {
     document.documentElement.style.setProperty('--ui-scale', String(uiScale))

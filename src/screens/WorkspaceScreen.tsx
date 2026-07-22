@@ -191,18 +191,22 @@ export function WorkspaceScreen() {
         // Record this Workspace as the Project's most recently active so a later switch can
         // restore it. Best-effort — it must never block hydration.
         void native.setLastActiveWorkspace(loadedWorkspace.id).catch(() => undefined)
+        let alreadyLive = false
         if (forceFresh) {
           // Reuse the saved configuration but start brand-new Terminal Sessions.
           await native.terminateWorkspaceSessions(loadedWorkspace.id).catch(() => undefined)
         } else {
           const liveSessions = await native.listLiveSessions(loadedWorkspace.id)
-          if (liveSessions.length > 0) terminalRuntime.hydrate(liveSessions)
+          if (liveSessions.length > 0) { terminalRuntime.hydrate(liveSessions); alreadyLive = true }
         }
         // A superseded hydration (rapid workspace switch, remount) must never reach launchAll:
         // its restore would spawn terminals for a screen no longer on display, and with the
         // keep-running policy those sessions silently accumulate in the background.
         if (!live) return
-        const allowRestorePrompt = quietRestoreWorkspaceId.current !== loadedWorkspace.id
+        // Switching back to a Workspace whose Terminal Sessions are still running has nothing to
+        // restore, so suppress the "Restore saved Panes?" prompt — re-asking on every tab switch is
+        // pure noise. The prompt still appears on a genuine cold open (no live sessions yet).
+        const allowRestorePrompt = !alreadyLive && quietRestoreWorkspaceId.current !== loadedWorkspace.id
         quietRestoreWorkspaceId.current = undefined
         await launchAll(loadedWorkspace, false, allowRestorePrompt)
         // If a detached window requested an attach, the main renderer only commits ownership
