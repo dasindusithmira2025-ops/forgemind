@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url'
 // unique, monotonically increasing SemVer prerelease derived from the GitHub Actions run number.
 //
 // Given a shipped stable base of `0.4.0`, successive internal builds are
-//   0.4.1-101  <  0.4.1-102  <  0.4.1-103  <  0.4.1 (eventual stable)
+//   0.4.1-1002  <  0.4.1-1003  <  0.4.1-1004  <  0.4.1 (eventual stable)
 // so each internal build is a valid upgrade over the previous one, sorts ABOVE the current stable
 // (internal leads development), and sorts BELOW the eventual stable release of that patch.
 //
@@ -15,11 +15,29 @@ import { fileURLToPath } from 'node:url'
 // prerelease identifiers such as `internal.101`.
 
 const SEMVER = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/
+const INTERNAL_BUILD_FLOOR = 1001
 
 export function parseSemver(version) {
   const match = SEMVER.exec(String(version))
   if (!match) throw new Error(`Invalid semantic version: ${version}`)
   return { major: Number(match[1]), minor: Number(match[2]), patch: Number(match[3]), prerelease: match[4] ?? null }
+}
+
+/**
+ * Keep automatic builds strictly above the updater bootstrap build (1001). GitHub run numbers
+ * start at one for each workflow, so using them directly would make a recreated workflow look like
+ * a downgrade.
+ */
+export function computeInternalBuildNumber(runNumber) {
+  const run = Number(runNumber)
+  if (!Number.isInteger(run) || run <= 0) {
+    throw new Error(`Internal run number must be a positive integer, received: ${runNumber}`)
+  }
+  const build = INTERNAL_BUILD_FLOOR + run
+  if (build > 65535) {
+    throw new Error(`Internal build number must be <= 65535 for Windows MSI compatibility, received: ${build}`)
+  }
+  return build
 }
 
 /**
@@ -65,11 +83,11 @@ async function apply() {
   const root = new URL('../../', import.meta.url)
   const readJson = async (path) => JSON.parse(await readFile(new URL(path, root), 'utf8'))
   const canonical = await readJson('release/version.json')
-  const buildNumber = process.env.PARALITH_INTERNAL_BUILD_NUMBER || process.env.GITHUB_RUN_NUMBER
+  const runNumber = process.env.PARALITH_INTERNAL_BUILD_NUMBER || process.env.GITHUB_RUN_NUMBER
   const commit = (process.env.PARALITH_GIT_COMMIT || process.env.GITHUB_SHA || 'unknown').trim()
   const date = (process.env.PARALITH_BUILD_DATE || new Date().toISOString().slice(0, 10)).trim()
 
-  const version = computeInternalVersion(canonical.version, buildNumber)
+  const version = computeInternalVersion(canonical.version, computeInternalBuildNumber(runNumber))
   const baseChangelog = await readJson(`release/changelog/${canonical.version.replace(/-.*$/, '')}.json`)
   const changelog = buildInternalChangelog(baseChangelog, version, { date, commit })
 
@@ -87,8 +105,8 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const mode = process.argv[2] || 'apply'
   if (mode === 'compute') {
     const base = process.argv[3] ?? JSON.parse(await readFile(new URL('../../release/version.json', import.meta.url), 'utf8')).version
-    const build = process.argv[4] ?? process.env.PARALITH_INTERNAL_BUILD_NUMBER ?? process.env.GITHUB_RUN_NUMBER
-    console.log(computeInternalVersion(base, build))
+    const run = process.argv[4] ?? process.env.PARALITH_INTERNAL_BUILD_NUMBER ?? process.env.GITHUB_RUN_NUMBER
+    console.log(computeInternalVersion(base, computeInternalBuildNumber(run)))
   } else if (mode === 'apply') {
     await apply()
   } else {
