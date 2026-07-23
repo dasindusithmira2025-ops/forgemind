@@ -1,7 +1,7 @@
 use crate::errors::{AppError, AppResult};
 use rusqlite::{params, Connection};
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 20;
+pub const CURRENT_SCHEMA_VERSION: i64 = 21;
 
 const MIGRATION_1: &str = r#"
 CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
@@ -866,6 +866,9 @@ pub fn apply(connection: &Connection) -> AppResult<()> {
     if current < 20 || !table_exists(connection, "swarm_runtime_event_receipts")? {
         migrate_v20(connection)?;
     }
+    if current < 21 || !table_exists(connection, "orchestration_sessions")? {
+        migrate_v21(connection)?;
+    }
     Ok(())
 }
 
@@ -897,7 +900,8 @@ pub fn requires_migration(connection: &Connection) -> AppResult<bool> {
         || !column_exists(connection, "swarm_agents", "display_name")?
         || !table_exists(connection, "swarm_context_packs")?
         || !column_exists(connection, "swarm_tasks", "repair_for_task_id")?
-        || !table_exists(connection, "swarm_runtime_event_receipts")?)
+        || !table_exists(connection, "swarm_runtime_event_receipts")?
+        || !table_exists(connection, "orchestration_sessions")?)
 }
 
 fn table_exists(connection: &Connection, table: &str) -> AppResult<bool> {
@@ -1945,6 +1949,92 @@ CREATE INDEX IF NOT EXISTS idx_swarm_runtime_event_receipts_session
         record_migration(connection, 20)
     })();
     finish_migration_transaction(connection, result, 20)
+}
+
+/// Durable persistence for the Paralith Orchestration Kernel. A session is the authoritative
+/// unit the backend state machine owns; turns record the conversation and system inputs; events
+/// are the append-only observable timeline the UI derives from; capability executions record
+/// every typed application-control action the gateway ran, with sanitized (never secret) payloads.
+/// All four tables are project-scoped by `project_id` when a session is bound to a Project so the
+/// same window-security boundary that governs the rest of Paralith applies to orchestration data.
+fn migrate_v21(connection: &Connection) -> AppResult<()> {
+    connection
+        .execute_batch("BEGIN IMMEDIATE;")
+        .map_err(AppError::database)?;
+    let result = (|| {
+        connection
+            .execute_batch(
+                r#"
+CREATE TABLE IF NOT EXISTS orchestration_sessions(
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  originating_surface TEXT NOT NULL,
+  project_id TEXT,
+  workspace_id TEXT,
+  operating_mode TEXT NOT NULL,
+  state TEXT NOT NULL,
+  objective TEXT NOT NULL,
+  normalized_objective TEXT,
+  failure_classification TEXT,
+  token_budget INTEGER,
+  tokens_used INTEGER NOT NULL DEFAULT 0,
+  provider TEXT,
+  model TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  started_at TEXT,
+  completed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_orch_sessions_recent
+  ON orchestration_sessions(updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_orch_sessions_project
+  ON orchestration_sessions(project_id, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS orchestration_turns(
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL REFERENCES orchestration_sessions(id) ON DELETE CASCADE,
+  actor TEXT NOT NULL,
+  input_type TEXT NOT NULL,
+  content TEXT NOT NULL,
+  transcript_confidence REAL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_orch_turns_session
+  ON orchestration_turns(session_id, created_at ASC);
+
+CREATE TABLE IF NOT EXISTS orchestration_events(
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL REFERENCES orchestration_sessions(id) ON DELETE CASCADE,
+  sequence INTEGER NOT NULL,
+  event_type TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  source TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_orch_events_sequence
+  ON orchestration_events(session_id, sequence);
+
+CREATE TABLE IF NOT EXISTS orchestration_capability_executions(
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL REFERENCES orchestration_sessions(id) ON DELETE CASCADE,
+  capability_id TEXT NOT NULL,
+  risk_level TEXT NOT NULL,
+  validated_inputs_json TEXT NOT NULL,
+  sanitized_result_json TEXT,
+  state TEXT NOT NULL,
+  error_classification TEXT,
+  duration_ms INTEGER,
+  created_at TEXT NOT NULL,
+  completed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_orch_exec_session
+  ON orchestration_capability_executions(session_id, created_at ASC);
+"#,
+            )
+            .map_err(AppError::database)?;
+        record_migration(connection, 21)
+    })();
+    finish_migration_transaction(connection, result, 21)
 }
 
 /// Rewrite every stored preset's `config_json` into the role-pool allocation shape. User presets
@@ -3006,6 +3096,45 @@ mod tests {
                 )
                 .unwrap(),
             "Keep preset"
+        );
+        assert_eq!(
+            connection
+                .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            CURRENT_SCHEMA_VERSION
+        );
+    }
+
+    #[test]
+    fn upgrades_v20_to_orchestration_without_losing_projects() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", true)
+            .unwrap();
+        apply(&connection).unwrap();
+        connection.execute("INSERT INTO projects(id,name,root_path,canonical_root_path,major_languages_json,is_git_repository,has_package_json,has_lockfile,created_at,updated_at,last_opened_at) VALUES('p20','Preserved','/p20','/p20','[]',0,0,0,'t','t','t')", []).unwrap();
+        // Simulate a real existing database created before the Orchestrator shipped.
+        connection
+            .execute_batch(
+                "DROP TABLE orchestration_capability_executions; DROP TABLE orchestration_events; DROP TABLE orchestration_turns; DROP TABLE orchestration_sessions; DELETE FROM schema_migrations WHERE version=21; PRAGMA user_version=20;",
+            )
+            .unwrap();
+        assert!(!table_exists(&connection, "orchestration_sessions").unwrap());
+
+        apply(&connection).unwrap();
+
+        assert!(table_exists(&connection, "orchestration_sessions").unwrap());
+        assert!(table_exists(&connection, "orchestration_turns").unwrap());
+        assert!(table_exists(&connection, "orchestration_events").unwrap());
+        assert!(table_exists(&connection, "orchestration_capability_executions").unwrap());
+        assert_eq!(
+            connection
+                .query_row("SELECT name FROM projects WHERE id='p20'", [], |row| row
+                    .get::<_, String>(
+                    0
+                ))
+                .unwrap(),
+            "Preserved"
         );
         assert_eq!(
             connection

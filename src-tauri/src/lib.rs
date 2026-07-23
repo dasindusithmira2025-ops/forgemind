@@ -4,6 +4,7 @@ mod commands;
 mod database;
 mod errors;
 mod models;
+mod orchestration;
 mod services;
 
 use database::DatabaseService;
@@ -34,6 +35,9 @@ pub struct AppState {
     /// Authoritative runtime layer for open-Project sessions, Workspace placement, exclusive
     /// interactive leases, handoff coordination, and monitor state.
     windows: WindowRegistry,
+    /// The Paralith Orchestration Kernel: the privileged control plane that supervises missions,
+    /// swarms, and agents by executing typed capabilities against the subsystems above.
+    orchestrator: orchestration::OrchestrationKernel,
     log_directory: PathBuf,
     app_data_directory: PathBuf,
     app_config_directory: PathBuf,
@@ -383,6 +387,14 @@ pub fn run() {
                 .path()
                 .app_log_dir()
                 .unwrap_or_else(|_| data_dir.join("logs"));
+            // The Orchestration Kernel shares the same database, guarded filesystem, and terminal
+            // service the rest of Paralith uses; it never opens a second, unguarded path.
+            let orchestrator = orchestration::OrchestrationKernel::new(
+                database.clone(),
+                filesystem.clone(),
+                terminals.clone(),
+                app.handle().clone(),
+            );
             app.manage(AppState {
                 database,
                 detector,
@@ -394,6 +406,7 @@ pub fn run() {
                 browser,
                 swarms,
                 windows,
+                orchestrator,
                 log_directory,
                 app_data_directory: data_dir.clone(),
                 app_config_directory: config_dir,
@@ -607,6 +620,16 @@ pub fn run() {
             commands::stage_database_backup_restore,
             commands::start_in_safe_mode,
             commands::restart_after_recovery,
+            commands::orchestrator_create_session,
+            commands::orchestrator_get_session,
+            commands::orchestrator_list_sessions,
+            commands::orchestrator_list_interrupted_sessions,
+            commands::orchestrator_send_message,
+            commands::orchestrator_list_capabilities,
+            commands::orchestrator_execute_capability,
+            commands::orchestrator_pause_session,
+            commands::orchestrator_resume_session,
+            commands::orchestrator_cancel_session,
         ])
         .build(context);
 
