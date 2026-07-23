@@ -137,9 +137,17 @@ jobs:
           $dir = Get-ChildItem '.artifacts/release/preview' -Directory | Select-Object -First 1
           $notes = Join-Path $dir.FullName 'release-notes.md'
           $assets = Get-ChildItem $dir.FullName -File | ForEach-Object FullName
-          # Non-draft prerelease keyed to the unique internal version — never conflicts with an
-          # existing release, so no endless accumulating drafts.
-          gh release create '${{ steps.version.outputs.tag }}' $assets `
+          $tag = '${{ steps.version.outputs.tag }}'
+          # Idempotent publication: a re-run of this exact commit reuses the same unique internal
+          # version and therefore the same tag. Rather than fail on a duplicate tag, supersede the
+          # prior — undiscoverable — internal prerelease so no duplicate accumulates. This only ever
+          # touches internal prereleases; the customer Stable channel is never affected.
+          gh release view $tag > $null 2>&1
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "Superseding existing internal prerelease $tag"
+            gh release delete $tag --yes --cleanup-tag
+          }
+          gh release create $tag $assets `
             --title "PARALITH internal $($dir.Name)" `
             --notes-file $notes `
             --target '${{ github.sha }}' `
@@ -170,15 +178,28 @@ jobs:
           project_id: ${{ vars.FIREBASE_PROJECT_ID }}
           credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
 
+      - name: Generate Firebase deploy config bound to the staged Hosting directory
+        if: vars.PARALITH_UPDATE_PUBLISH_PROVIDER == 'firebase-hosting'
+        shell: pwsh
+        env:
+          FIREBASE_HOSTING_SITE: ${{ vars.FIREBASE_HOSTING_SITE }}
+        # The 4th argument pins hosting.public to the absolute, normalized staging directory so the
+        # deploy can never reinterpret it relative to the config file's location or the CWD.
+        run: node scripts/release/firebase-hosting-publisher.mjs config "$env:FIREBASE_HOSTING_SITE" "firebase.json" ".artifacts/firebase-hosting.json" ".artifacts/update-site-dist"
+
+      - name: Assert Firebase deploy readiness before invoking the Firebase CLI
+        if: vars.PARALITH_UPDATE_PUBLISH_PROVIDER == 'firebase-hosting'
+        shell: pwsh
+        # Fail fast with safe diagnostics (paths, filenames, sizes — never secrets) if the staged
+        # Hosting site, signed payloads, manifest state, or config public path are not coherent.
+        run: node scripts/release/firebase-hosting-publisher.mjs assert-deploy-ready ".artifacts/update-site-dist" ".artifacts/update-site/preview/latest.json" ".artifacts/firebase-hosting.json"
+
       - name: Deploy signed Preview updater artifacts to Firebase Hosting
         if: vars.PARALITH_UPDATE_PUBLISH_PROVIDER == 'firebase-hosting'
         shell: pwsh
         env:
           FIREBASE_PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID }}
-          FIREBASE_HOSTING_SITE: ${{ vars.FIREBASE_HOSTING_SITE }}
-        run: |
-          node scripts/release/firebase-hosting-publisher.mjs config "$env:FIREBASE_HOSTING_SITE" "firebase.json" ".artifacts/firebase-hosting.json"
-          npm exec --yes "--package=firebase-tools@${{ env.FIREBASE_CLI_VERSION }}" -- firebase deploy --only hosting --project "$env:FIREBASE_PROJECT_ID" --config ".artifacts/firebase-hosting.json" --non-interactive
+        run: npm exec --yes "--package=firebase-tools@${{ env.FIREBASE_CLI_VERSION }}" -- firebase deploy --only hosting --project "$env:FIREBASE_PROJECT_ID" --config ".artifacts/firebase-hosting.json" --non-interactive
 
       - name: Verify Firebase Hosting updater artifacts before manifest activation
         if: vars.PARALITH_UPDATE_PUBLISH_PROVIDER == 'firebase-hosting'
@@ -190,6 +211,7 @@ jobs:
         shell: pwsh
         run: |
           node scripts/release/firebase-hosting-publisher.mjs activate ".artifacts/update-site/preview/latest.json" ".artifacts/update-site-dist"
+          if ($LASTEXITCODE -ne 0) { throw "Preview manifest activation failed with exit code $LASTEXITCODE" }
           npm exec --yes "--package=firebase-tools@${{ env.FIREBASE_CLI_VERSION }}" -- firebase deploy --only hosting --project "${{ vars.FIREBASE_PROJECT_ID }}" --config ".artifacts/firebase-hosting.json" --non-interactive
 
       - name: Verify Firebase Hosting Preview manifest and Stable preservation

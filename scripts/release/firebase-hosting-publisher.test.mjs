@@ -1,15 +1,18 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { isAbsolute, join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { formatMissingPublishKeys, invalidPublishConfiguration, missingPublishKeys } from './preflight-publish.mjs'
 import {
   FIREBASE_CLI_VERSION,
   FIREBASE_DEPLOYMENT_CONCURRENCY_GROUP,
+  assertDeployReady,
   assertDeploySucceeded,
   firebaseDeployInvocation,
   firebaseHostingConfig,
   activatePreviewManifest,
+  planReleasePublication,
+  resolveConfigPublicDirectory,
   stageFirebaseHostingSite,
   verifyFirebaseDeployment,
   verifyReleaseArtifacts,
@@ -247,5 +250,158 @@ describe('release and live deployment verification', () => {
     })
     expect(deployed.version).toBe('0.4.1-1002')
     expect(previewCalls).toBe(2)
+  })
+})
+
+// Regression coverage for the staging/config path defect that caused
+// "Directory 'update-site-dist' for Hosting does not exist." in run 30021066339.
+async function stageDeployTree(root, { version = '0.4.1-1002', generateConfig = true, configPublicDir } = {}) {
+  const dist = join(root, '.artifacts', 'update-site-dist')
+  const payloadDir = join(dist, 'preview', version)
+  await mkdir(payloadDir, { recursive: true })
+  await writeFile(join(payloadDir, 'PARALITH_0.4.1_x64-setup.exe'), 'signed installer bytes')
+  await writeFile(join(payloadDir, 'PARALITH_0.4.1_x64-setup.exe.sig'), 'updater-signature')
+  await writeFile(join(payloadDir, 'PARALITH_0.4.1_x64_en-US.msi'), 'signed installer bytes')
+  const source = join(root, '.artifacts', 'update-site', 'preview')
+  await mkdir(source, { recursive: true })
+  await writeFile(join(source, 'latest.json'), JSON.stringify(manifest()))
+  const base = join(root, 'firebase.json')
+  await writeFile(base, JSON.stringify({ hosting: { public: 'update-site-dist' } }))
+  const configPath = join(root, '.artifacts', 'firebase-hosting.json')
+  if (generateConfig) await writeFirebaseDeployConfig({ baseConfigPath: base, outputPath: configPath, site: 'site', publicDir: configPublicDir ?? dist })
+  return { dist, base, sourceManifestPath: join(source, 'latest.json'), configPath }
+}
+
+describe('Firebase deploy path/staging coherence', () => {
+  it('pins the generated deploy config public directory to an absolute staged path', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'paralith-firebase-'))
+    try {
+      const base = join(root, 'firebase.json')
+      await writeFile(base, JSON.stringify({ hosting: { public: 'update-site-dist' } }))
+      const output = join(root, '.artifacts', 'firebase-hosting.json')
+      const dist = join(root, '.artifacts', 'update-site-dist')
+      const config = await writeFirebaseDeployConfig({ baseConfigPath: base, outputPath: output, site: 'site', publicDir: dist })
+      expect(isAbsolute(config.hosting.public)).toBe(true)
+      expect(config.hosting.public).toBe(resolve(dist))
+      // Firebase resolves public relative to the config file's directory; an absolute value is
+      // interpreted identically no matter where the config lives.
+      const written = JSON.parse(await readFile(output, 'utf8')).hosting.public
+      expect(resolveConfigPublicDirectory(output, written)).toBe(resolve(dist))
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('resolves a relative config public path against the config directory, not the CWD', () => {
+    const configPath = join('deep', 'nested', '.artifacts', 'firebase-hosting.json')
+    expect(resolveConfigPublicDirectory(configPath, 'update-site-dist')).toBe(resolve('deep', 'nested', '.artifacts', 'update-site-dist'))
+    const absolute = resolve('elsewhere', 'update-site-dist')
+    expect(resolveConfigPublicDirectory(configPath, absolute)).toBe(absolute)
+  })
+
+  it('passes when the staged Hosting site is coherent with the generated config', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'paralith-firebase-'))
+    try {
+      const { dist, sourceManifestPath, configPath } = await stageDeployTree(root)
+      const result = await assertDeployReady({ publicDir: dist, sourceManifestPath, configPath, log: () => {} })
+      expect(result.publicDir).toBe(resolve(dist))
+      expect(result.configPublic).toBe(resolve(dist))
+      expect(result.installers.length).toBeGreaterThan(0)
+      expect(result.signatures.length).toBeGreaterThan(0)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('normalizes a denormalized staging path and still matches the deploy config (Windows-safe)', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'paralith-firebase-'))
+    try {
+      const { dist, sourceManifestPath, configPath } = await stageDeployTree(root)
+      const denormalized = join(dist, 'sub', '..')
+      const result = await assertDeployReady({ publicDir: denormalized, sourceManifestPath, configPath, log: () => {} })
+      expect(result.publicDir).toBe(resolve(dist))
+      expect(result.configPublic).toBe(resolve(dist))
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('fails before the Firebase CLI runs when the Hosting public directory is missing', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'paralith-firebase-'))
+    try {
+      const source = join(root, '.artifacts', 'update-site', 'preview')
+      await mkdir(source, { recursive: true })
+      await writeFile(join(source, 'latest.json'), JSON.stringify(manifest()))
+      const base = join(root, 'firebase.json')
+      await writeFile(base, JSON.stringify({ hosting: { public: 'update-site-dist' } }))
+      const dist = join(root, '.artifacts', 'update-site-dist') // deliberately never created
+      const configPath = join(root, '.artifacts', 'firebase-hosting.json')
+      await writeFirebaseDeployConfig({ baseConfigPath: base, outputPath: configPath, site: 'site', publicDir: dist })
+      await expect(assertDeployReady({ publicDir: dist, sourceManifestPath: join(source, 'latest.json'), configPath, log: () => {} })).rejects.toThrow(/does not exist/)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects a config whose public directory does not match the staged directory', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'paralith-firebase-'))
+    try {
+      const { dist, base, sourceManifestPath, configPath } = await stageDeployTree(root, { generateConfig: false })
+      await writeFirebaseDeployConfig({ baseConfigPath: base, outputPath: configPath, site: 'site', publicDir: join(root, 'a-different-directory') })
+      await expect(assertDeployReady({ publicDir: dist, sourceManifestPath, configPath, log: () => {} })).rejects.toThrow(/does not match/)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('fails when no signed payload or signature is staged', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'paralith-firebase-'))
+    try {
+      const dist = join(root, '.artifacts', 'update-site-dist')
+      await mkdir(join(dist, 'preview'), { recursive: true }) // preview dir exists but empty
+      const source = join(root, '.artifacts', 'update-site', 'preview')
+      await mkdir(source, { recursive: true })
+      await writeFile(join(source, 'latest.json'), JSON.stringify(manifest()))
+      const base = join(root, 'firebase.json')
+      await writeFile(base, JSON.stringify({ hosting: { public: 'update-site-dist' } }))
+      const configPath = join(root, '.artifacts', 'firebase-hosting.json')
+      await writeFirebaseDeployConfig({ baseConfigPath: base, outputPath: configPath, site: 'site', publicDir: dist })
+      await expect(assertDeployReady({ publicDir: dist, sourceManifestPath: join(source, 'latest.json'), configPath, log: () => {} })).rejects.toThrow(/installer payload|signature/)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('idempotent internal release publication', () => {
+  it('supersedes an existing internal prerelease tag instead of creating a duplicate', () => {
+    expect(planReleasePublication({ existingTags: ['internal-v0.4.1-1006', 'internal-v0.4.1-1009'], tag: 'internal-v0.4.1-1009' }))
+      .toEqual({ tag: 'internal-v0.4.1-1009', supersede: true })
+  })
+
+  it('creates a fresh internal prerelease when a strictly newer tag does not yet exist', () => {
+    expect(planReleasePublication({ existingTags: ['internal-v0.4.1-1009'], tag: 'internal-v0.4.1-1010' }))
+      .toEqual({ tag: 'internal-v0.4.1-1010', supersede: false })
+  })
+
+  it('requires a release tag', () => {
+    expect(() => planReleasePublication({ existingTags: [], tag: '' })).toThrow('release tag is required')
+  })
+})
+
+describe('release workflow wiring', () => {
+  it('stages, generates config, asserts, deploys, and activates against one .artifacts staging root', async () => {
+    const workflow = await readFile(join(process.cwd(), '.github', 'workflows', 'release-internal.yml'), 'utf8')
+    const stagingReferences = workflow.match(/\.artifacts\/update-site-dist/g) || []
+    expect(stagingReferences.length).toBeGreaterThanOrEqual(4)
+    // The fail-fast readiness assertion must run before the first Firebase deploy.
+    expect(workflow.indexOf('assert-deploy-ready')).toBeGreaterThan(-1)
+    expect(workflow.indexOf('assert-deploy-ready')).toBeLessThan(workflow.indexOf('firebase deploy --only hosting'))
+  })
+
+  it('publishes the internal prerelease idempotently by superseding an existing tag', async () => {
+    const workflow = await readFile(join(process.cwd(), '.github', 'workflows', 'release-internal.yml'), 'utf8')
+    expect(workflow).toContain('gh release view $tag')
+    expect(workflow).toContain('gh release delete $tag --yes --cleanup-tag')
   })
 })

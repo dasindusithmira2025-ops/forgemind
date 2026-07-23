@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
-import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
-import { basename, dirname, join } from 'node:path'
+import { cp, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
+import { basename, dirname, join, resolve } from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 import { comparePrecedence, validateManifest } from './verify-published-manifest.mjs'
@@ -11,12 +11,24 @@ export const FIREBASE_DEPLOYMENT_CONCURRENCY_GROUP = 'firebase-hosting-update-si
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex')
 const endpointFor = (previewEndpoint, path) => new URL(path, previewEndpoint).toString()
 
-export function firebaseHostingConfig(baseConfig, site) {
+// firebase-tools resolves `hosting.public` relative to the --config file's directory, NOT the
+// process CWD, so a relative public dir is silently reinterpreted whenever the generated config
+// and the staged site live in different directories. Emitting an absolute, normalized public path
+// removes that ambiguity on every platform (including the Windows runner) and is the single source
+// of truth every stage/deploy/activate step shares. Passing `publicDir` is optional so the base
+// `firebase.json` transform stays inspectable in isolation.
+export function firebaseHostingConfig(baseConfig, site, publicDir) {
   if (!site || !String(site).trim()) throw new Error('FIREBASE_HOSTING_SITE is required')
   const config = structuredClone(baseConfig)
   if (!config.hosting || Array.isArray(config.hosting)) throw new Error('firebase.json must define one hosting object')
   config.hosting.site = String(site).trim()
+  if (publicDir && String(publicDir).trim()) config.hosting.public = resolve(String(publicDir).trim())
   return config
+}
+
+/** Firebase resolves a config's `public` relative to the config file's own directory. */
+export function resolveConfigPublicDirectory(configPath, publicValue) {
+  return resolve(dirname(resolve(configPath)), String(publicValue))
 }
 
 export function firebaseDeployInvocation({ projectId, configPath }) {
@@ -60,12 +72,95 @@ export async function activatePreviewManifest({ previewManifestPath, destination
   await writeFile(join(destination, 'preview', 'latest.json'), await readFile(previewManifestPath))
 }
 
-export async function writeFirebaseDeployConfig({ baseConfigPath, outputPath, site }) {
+export async function writeFirebaseDeployConfig({ baseConfigPath, outputPath, site, publicDir }) {
   const base = JSON.parse(await readFile(baseConfigPath, 'utf8'))
-  const config = firebaseHostingConfig(base, site)
+  const config = firebaseHostingConfig(base, site, publicDir)
   await mkdir(dirname(outputPath), { recursive: true })
   await writeFile(outputPath, `${JSON.stringify(config, null, 2)}\n`)
   return config
+}
+
+async function listFilesRecursively(directory) {
+  const found = []
+  let entries
+  try {
+    entries = await readdir(directory, { withFileTypes: true })
+  } catch {
+    return found
+  }
+  for (const entry of entries) {
+    const full = join(directory, entry.name)
+    if (entry.isDirectory()) found.push(...(await listFilesRecursively(full)))
+    else found.push(full)
+  }
+  return found
+}
+
+/**
+ * Fail-fast gate that must run immediately before `firebase deploy`. It proves the staged Hosting
+ * site is coherent with the generated config so a path/staging defect surfaces here — with safe,
+ * greppable diagnostics — instead of deep inside the Firebase CLI. It never logs credentials,
+ * signatures, tokens, or service-account data: only the normalized directory, filenames, sizes,
+ * manifest presence, and config path.
+ */
+export async function assertDeployReady({ publicDir, sourceManifestPath, configPath, log = console.log }) {
+  const errors = []
+  const resolvedPublic = resolve(publicDir)
+
+  const publicStat = await stat(resolvedPublic).catch(() => null)
+  if (!publicStat?.isDirectory()) errors.push(`Hosting public directory does not exist: ${resolvedPublic}`)
+
+  const previewDir = join(resolvedPublic, 'preview')
+  const previewStat = await stat(previewDir).catch(() => null)
+  if (!previewStat?.isDirectory()) errors.push(`Preview payload directory does not exist: ${previewDir}`)
+
+  const files = previewStat?.isDirectory() ? await listFilesRecursively(previewDir) : []
+  const installers = files.filter((file) => file.endsWith('.msi') || file.endsWith('-setup.exe'))
+  const signatures = files.filter((file) => file.endsWith('.sig'))
+  if (installers.length === 0) errors.push('No signed installer payload (.msi / -setup.exe) is staged under preview/')
+  if (signatures.length === 0) errors.push('No updater signature (.sig) is staged under preview/')
+
+  const manifestStat = await stat(sourceManifestPath).catch(() => null)
+  if (!manifestStat?.isFile()) errors.push(`Preview manifest staging state is missing: ${resolve(sourceManifestPath)}`)
+
+  let configPublic = null
+  try {
+    const config = JSON.parse(await readFile(configPath, 'utf8'))
+    const publicValue = config?.hosting?.public
+    if (!publicValue) errors.push(`Firebase config has no hosting.public: ${resolve(configPath)}`)
+    else {
+      configPublic = resolveConfigPublicDirectory(configPath, publicValue)
+      if (configPublic !== resolvedPublic) {
+        errors.push(`Firebase config public directory (${configPublic}) does not match the staged Hosting directory (${resolvedPublic})`)
+      }
+    }
+  } catch (error) {
+    errors.push(`Firebase config could not be read: ${resolve(configPath)} (${error.message})`)
+  }
+
+  log(`[assert-deploy-ready] hosting public dir: ${resolvedPublic} (${publicStat?.isDirectory() ? 'present' : 'MISSING'})`)
+  log(`[assert-deploy-ready] firebase config: ${resolve(configPath)} -> public ${configPublic ?? '(unresolved)'}`)
+  log(`[assert-deploy-ready] preview manifest staging state: ${manifestStat?.isFile() ? 'present' : 'MISSING'} (${resolve(sourceManifestPath)})`)
+  log(`[assert-deploy-ready] staged payload files: ${files.length} (installers=${installers.length}, signatures=${signatures.length})`)
+  for (const file of files) {
+    const fileStat = await stat(file).catch(() => null)
+    log(`  - ${file.slice(resolvedPublic.length + 1)}  ${fileStat ? fileStat.size : '?'} bytes`)
+  }
+
+  if (errors.length) throw new Error(`Firebase deploy preflight failed before the Firebase CLI ran:\n${errors.map((error) => `  - ${error}`).join('\n')}`)
+  return { publicDir: resolvedPublic, configPublic, installers, signatures, files }
+}
+
+/**
+ * Idempotent internal-release publication plan. A re-run of the same commit reuses the same unique
+ * internal version (and therefore the same tag), so blindly creating the release would fail on a
+ * duplicate tag. When the tag already exists we supersede the prior — undiscoverable — prerelease
+ * instead of creating a duplicate. Only ever applies to internal prereleases; Stable is untouched.
+ */
+export function planReleasePublication({ existingTags, tag }) {
+  if (!tag || !String(tag).trim()) throw new Error('release tag is required')
+  const normalized = String(tag).trim()
+  return { tag: normalized, supersede: (existingTags || []).map(String).includes(normalized) }
 }
 
 async function fetchArtifact(url, fetchImpl) {
@@ -132,8 +227,13 @@ async function main() {
     return
   }
   if (command === 'config') {
-    const [site, baseConfigPath, outputPath] = args
-    await writeFirebaseDeployConfig({ site, baseConfigPath, outputPath })
+    const [site, baseConfigPath, outputPath, publicDir] = args
+    await writeFirebaseDeployConfig({ site, baseConfigPath, outputPath, publicDir })
+    return
+  }
+  if (command === 'assert-deploy-ready') {
+    const [publicDir, sourceManifestPath, configPath] = args
+    await assertDeployReady({ publicDir, sourceManifestPath, configPath })
     return
   }
   if (command === 'version') {
@@ -152,7 +252,7 @@ async function main() {
     await verifyFirebaseDeployment({ previewEndpoint, expectedVersion, stable, attempts: Number(process.env.FIREBASE_DEPLOY_VERIFY_ATTEMPTS || 4), delay: () => new Promise((resolve) => setTimeout(resolve, Number(process.env.FIREBASE_DEPLOY_VERIFY_DELAY_MS || 3000))) })
     return
   }
-  throw new Error('usage: firebase-hosting-publisher <stage|activate|config|version|verify-artifacts|verify> ...')
+  throw new Error('usage: firebase-hosting-publisher <stage|activate|config|assert-deploy-ready|version|verify-artifacts|verify> ...')
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
