@@ -150,7 +150,10 @@ jobs:
         shell: pwsh
         env:
           PARALITH_PREVIEW_UPDATE_ENDPOINT: ${{ vars.PARALITH_PREVIEW_UPDATE_ENDPOINT }}
-        run: node scripts/release/firebase-hosting-publisher.mjs stage ".artifacts/update-site/preview" "$env:PARALITH_PREVIEW_UPDATE_ENDPOINT" "update-site-dist" ".artifacts/firebase-hosting-state.json"
+        # The Hosting public dir MUST live beside the generated deploy config: firebase-tools
+        # resolves `hosting.public` relative to the --config file's directory (.artifacts), not the
+        # process CWD. Staging anywhere else yields "Directory 'update-site-dist' does not exist".
+        run: node scripts/release/firebase-hosting-publisher.mjs stage ".artifacts/update-site/preview" "$env:PARALITH_PREVIEW_UPDATE_ENDPOINT" ".artifacts/update-site-dist" ".artifacts/firebase-hosting-state.json"
 
       - name: Authenticate to Google Cloud with Workload Identity Federation
         if: vars.PARALITH_UPDATE_PUBLISH_PROVIDER == 'firebase-hosting' && vars.GCP_WORKLOAD_IDENTITY_PROVIDER != '' && vars.GCP_SERVICE_ACCOUNT != ''
@@ -186,7 +189,7 @@ jobs:
         if: vars.PARALITH_UPDATE_PUBLISH_PROVIDER == 'firebase-hosting'
         shell: pwsh
         run: |
-          node scripts/release/firebase-hosting-publisher.mjs activate ".artifacts/update-site/preview/latest.json" "update-site-dist"
+          node scripts/release/firebase-hosting-publisher.mjs activate ".artifacts/update-site/preview/latest.json" ".artifacts/update-site-dist"
           npm exec --yes "--package=firebase-tools@${{ env.FIREBASE_CLI_VERSION }}" -- firebase deploy --only hosting --project "${{ vars.FIREBASE_PROJECT_ID }}" --config ".artifacts/firebase-hosting.json" --non-interactive
 
       - name: Verify Firebase Hosting Preview manifest and Stable preservation
