@@ -183,8 +183,9 @@ jobs:
         shell: pwsh
         env:
           FIREBASE_HOSTING_SITE: ${{ vars.FIREBASE_HOSTING_SITE }}
-        # The 4th argument pins hosting.public to the absolute, normalized staging directory so the
-        # deploy can never reinterpret it relative to the config file's location or the CWD.
+        # The 4th argument is the staged Hosting directory. firebase-tools resolves hosting.public as
+        # path.join(<config dir>, public), so the config is generated INSIDE .artifacts and its public
+        # is derived as the relative path (update-site-dist) that joins back onto the staged directory.
         run: node scripts/release/firebase-hosting-publisher.mjs config "$env:FIREBASE_HOSTING_SITE" "firebase.json" ".artifacts/firebase-hosting.json" ".artifacts/update-site-dist"
 
       - name: Assert Firebase deploy readiness before invoking the Firebase CLI
