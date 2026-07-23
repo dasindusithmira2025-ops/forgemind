@@ -48,6 +48,20 @@ jobs:
           workspaces: src-tauri
       - run: npm ci
 
+      # Fail fast BEFORE the expensive Windows build: a preview release that cannot publish its
+      # manifest is worthless, so a missing publish key must stop the release here rather than
+      # silently produce a GitHub-only prerelease no installed app can discover. Names only, no values.
+      - name: Preview publish preflight
+        shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          PARALITH_PREVIEW_UPDATE_ENDPOINT: ${{ vars.PARALITH_PREVIEW_UPDATE_ENDPOINT }}
+          PARALITH_UPDATE_ARTIFACT_BASE_URL: ${{ vars.PARALITH_UPDATE_ARTIFACT_BASE_URL }}
+          PARALITH_UPDATE_PUBLISH_PROVIDER: ${{ vars.PARALITH_UPDATE_PUBLISH_PROVIDER }}
+          PARALITH_UPDATE_PUBLISH_TARGET: ${{ secrets.PARALITH_UPDATE_PUBLISH_TARGET }}
+          PARALITH_UPDATE_PUBLISH_TOKEN: ${{ secrets.PARALITH_UPDATE_PUBLISH_TOKEN }}
+        run: node scripts/release/preflight-publish.mjs
+
       - name: Generate ephemeral internal version
         id: version
         shell: pwsh
@@ -108,20 +122,21 @@ jobs:
             --target '${{ github.sha }}' `
             --prerelease
 
-      - name: Detect internal publication configuration
-        id: publication
-        shell: pwsh
-        env:
-          PUBLISH_TARGET: ${{ secrets.PARALITH_UPDATE_PUBLISH_TARGET }}
-        run: |
-          $enabled = if ($env:PUBLISH_TARGET) { 'true' } else { 'false' }
-          "enabled=$enabled" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-
+      # Publishing is mandatory for a preview release. The preflight above already guaranteed the
+      # required configuration is present, so this must run — it is never conditionally skipped.
       - name: Publish to internal update endpoint
-        if: steps.publication.outputs.enabled == 'true'
         shell: pwsh
         env:
           PARALITH_UPDATE_PUBLISH_TARGET: ${{ secrets.PARALITH_UPDATE_PUBLISH_TARGET }}
           PARALITH_UPDATE_PUBLISH_PROVIDER: ${{ vars.PARALITH_UPDATE_PUBLISH_PROVIDER }}
           PARALITH_UPDATE_PUBLISH_TOKEN: ${{ secrets.PARALITH_UPDATE_PUBLISH_TOKEN }}
         run: ./scripts/release/publish-internal-update.ps1
+
+      # Prove the update is genuinely usable by an installed app: fetch the REAL published manifest
+      # over HTTP and fail the release if it is not 200, not the just-released version, wrong channel,
+      # or missing a reachable signed Windows artifact. A locally-correct manifest is not evidence.
+      - name: Verify published preview manifest
+        shell: pwsh
+        env:
+          PARALITH_PREVIEW_UPDATE_ENDPOINT: ${{ vars.PARALITH_PREVIEW_UPDATE_ENDPOINT }}
+        run: node scripts/release/verify-published-manifest.mjs preview "$env:PARALITH_PREVIEW_UPDATE_ENDPOINT" "${{ steps.version.outputs.version }}"
