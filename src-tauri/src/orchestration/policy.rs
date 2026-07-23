@@ -32,21 +32,6 @@ pub fn evaluate(
         };
     }
 
-    // The risk threshold that may run automatically for this mode. Anything above it needs approval.
-    let auto_ceiling = match mode {
-        OperatingMode::Observe => RiskLevel::Low,
-        OperatingMode::Assist => {
-            // Assist auto-runs low-risk reads only; every mutation is proposed for approval.
-            if descriptor.mutates {
-                RiskLevel::Low // mutation is Medium+, so this forces approval below.
-            } else {
-                RiskLevel::Low
-            }
-        }
-        OperatingMode::Execute => RiskLevel::Medium,
-        OperatingMode::Autopilot => RiskLevel::High,
-    };
-
     // Critical always requires an explicit, action-specific approval — never auto, in any mode.
     if descriptor.risk == RiskLevel::Critical {
         return if approved {
@@ -56,11 +41,18 @@ pub fn evaluate(
         };
     }
 
-    if descriptor.risk <= auto_ceiling
-        && !(matches!(mode, OperatingMode::Assist) && descriptor.mutates)
-    {
-        GateDecision::Allow
-    } else if approved {
+    // What each mode may run without asking. A monotonic ladder: Observe/Assist auto-run only
+    // low-risk reads, Execute adds medium-risk actions, Autopilot adds high-risk ones. Any mutation
+    // in Observe was already refused above.
+    let auto_allowed = match mode {
+        OperatingMode::Observe | OperatingMode::Assist => {
+            descriptor.risk == RiskLevel::Low && !descriptor.mutates
+        }
+        OperatingMode::Execute => descriptor.risk <= RiskLevel::Medium,
+        OperatingMode::Autopilot => descriptor.risk <= RiskLevel::High,
+    };
+
+    if auto_allowed || approved {
         GateDecision::Allow
     } else {
         GateDecision::NeedsApproval
