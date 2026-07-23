@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { cp, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
-import { basename, dirname, join, resolve } from 'node:path'
+import { basename, dirname, join, normalize, relative, resolve, sep } from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 import { comparePrecedence, validateManifest } from './verify-published-manifest.mjs'
@@ -11,24 +11,44 @@ export const FIREBASE_DEPLOYMENT_CONCURRENCY_GROUP = 'firebase-hosting-update-si
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex')
 const endpointFor = (previewEndpoint, path) => new URL(path, previewEndpoint).toString()
 
-// firebase-tools resolves `hosting.public` relative to the --config file's directory, NOT the
-// process CWD, so a relative public dir is silently reinterpreted whenever the generated config
-// and the staged site live in different directories. Emitting an absolute, normalized public path
-// removes that ambiguity on every platform (including the Windows runner) and is the single source
-// of truth every stage/deploy/activate step shares. Passing `publicDir` is optional so the base
-// `firebase.json` transform stays inspectable in isolation.
-export function firebaseHostingConfig(baseConfig, site, publicDir) {
+// firebase-tools resolves `hosting.public` as path.join(<config file's directory>, public) — it is
+// ALWAYS relative to the --config file's directory, never the process CWD, and (because it uses
+// path.join, not path.resolve) it CANNOT accept an absolute public value: an absolute path is
+// concatenated onto the config directory into a nonexistent path. So the generated config must keep
+// `public` as a plain relative path whose join against the config directory lands exactly on the
+// staged Hosting directory. `publicDir` (the staged directory) is optional so the base
+// `firebase.json` transform stays inspectable in isolation; when supplied together with the config
+// output path we derive the correct relative value below.
+export function firebaseHostingConfig(baseConfig, site, publicPath) {
   if (!site || !String(site).trim()) throw new Error('FIREBASE_HOSTING_SITE is required')
   const config = structuredClone(baseConfig)
   if (!config.hosting || Array.isArray(config.hosting)) throw new Error('firebase.json must define one hosting object')
   config.hosting.site = String(site).trim()
-  if (publicDir && String(publicDir).trim()) config.hosting.public = resolve(String(publicDir).trim())
+  if (publicPath && String(publicPath).trim()) config.hosting.public = String(publicPath).trim()
   return config
 }
 
-/** Firebase resolves a config's `public` relative to the config file's own directory. */
+/**
+ * Relative `public` value that firebase-tools will join back onto the staged directory. Uses forward
+ * slashes (firebase config convention) and refuses a directory that escapes the config directory,
+ * because firebase itself rejects a `public` outside the project directory.
+ */
+export function relativePublicForConfig(outputPath, publicDir) {
+  const configDir = dirname(resolve(outputPath))
+  const relativePath = relative(configDir, resolve(publicDir))
+  if (!relativePath || relativePath.startsWith('..')) {
+    throw new Error(`Hosting public directory ${resolve(publicDir)} must live inside the deploy config directory ${configDir}`)
+  }
+  return relativePath.split(sep).join('/')
+}
+
+/**
+ * Mirror of firebase-tools' own resolution (path.join of the config file's directory and the raw
+ * `public` value) so the pre-deploy assertion validates the SAME path the Firebase CLI will read,
+ * and never diverges by (for example) treating an absolute value as resolvable when firebase can't.
+ */
 export function resolveConfigPublicDirectory(configPath, publicValue) {
-  return resolve(dirname(resolve(configPath)), String(publicValue))
+  return normalize(join(dirname(resolve(configPath)), String(publicValue)))
 }
 
 export function firebaseDeployInvocation({ projectId, configPath }) {
@@ -74,7 +94,8 @@ export async function activatePreviewManifest({ previewManifestPath, destination
 
 export async function writeFirebaseDeployConfig({ baseConfigPath, outputPath, site, publicDir }) {
   const base = JSON.parse(await readFile(baseConfigPath, 'utf8'))
-  const config = firebaseHostingConfig(base, site, publicDir)
+  const publicPath = publicDir ? relativePublicForConfig(outputPath, publicDir) : undefined
+  const config = firebaseHostingConfig(base, site, publicPath)
   await mkdir(dirname(outputPath), { recursive: true })
   await writeFile(outputPath, `${JSON.stringify(config, null, 2)}\n`)
   return config

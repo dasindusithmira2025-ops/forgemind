@@ -1,6 +1,6 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { isAbsolute, join, resolve } from 'node:path'
+import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { formatMissingPublishKeys, invalidPublishConfiguration, missingPublishKeys } from './preflight-publish.mjs'
 import {
@@ -273,7 +273,7 @@ async function stageDeployTree(root, { version = '0.4.1-1002', generateConfig = 
 }
 
 describe('Firebase deploy path/staging coherence', () => {
-  it('pins the generated deploy config public directory to an absolute staged path', async () => {
+  it('writes a RELATIVE config public path (firebase-tools cannot accept an absolute one) that joins back onto the staged dir', async () => {
     const root = await mkdtemp(join(tmpdir(), 'paralith-firebase-'))
     try {
       const base = join(root, 'firebase.json')
@@ -281,10 +281,10 @@ describe('Firebase deploy path/staging coherence', () => {
       const output = join(root, '.artifacts', 'firebase-hosting.json')
       const dist = join(root, '.artifacts', 'update-site-dist')
       const config = await writeFirebaseDeployConfig({ baseConfigPath: base, outputPath: output, site: 'site', publicDir: dist })
-      expect(isAbsolute(config.hosting.public)).toBe(true)
-      expect(config.hosting.public).toBe(resolve(dist))
-      // Firebase resolves public relative to the config file's directory; an absolute value is
-      // interpreted identically no matter where the config lives.
+      // Must be relative — firebase-tools does path.join(configDir, public), which breaks on absolute.
+      expect(isAbsolute(config.hosting.public)).toBe(false)
+      expect(config.hosting.public).toBe('update-site-dist')
+      // firebase's own join(configDir, public) must land exactly on the staged directory.
       const written = JSON.parse(await readFile(output, 'utf8')).hosting.public
       expect(resolveConfigPublicDirectory(output, written)).toBe(resolve(dist))
     } finally {
@@ -292,11 +292,22 @@ describe('Firebase deploy path/staging coherence', () => {
     }
   })
 
-  it('resolves a relative config public path against the config directory, not the CWD', () => {
+  it('refuses a staged directory that escapes the config directory (firebase rejects ".." public)', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'paralith-firebase-'))
+    try {
+      const base = join(root, 'firebase.json')
+      await writeFile(base, JSON.stringify({ hosting: { public: 'x' } }))
+      const output = join(root, '.artifacts', 'firebase-hosting.json')
+      await expect(writeFirebaseDeployConfig({ baseConfigPath: base, outputPath: output, site: 'site', publicDir: join(root, 'outside-dist') }))
+        .rejects.toThrow(/must live inside the deploy config directory/)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('mirrors firebase-tools resolution: joins the config directory with the raw public value', () => {
     const configPath = join('deep', 'nested', '.artifacts', 'firebase-hosting.json')
     expect(resolveConfigPublicDirectory(configPath, 'update-site-dist')).toBe(resolve('deep', 'nested', '.artifacts', 'update-site-dist'))
-    const absolute = resolve('elsewhere', 'update-site-dist')
-    expect(resolveConfigPublicDirectory(configPath, absolute)).toBe(absolute)
   })
 
   it('passes when the staged Hosting site is coherent with the generated config', async () => {
@@ -346,8 +357,10 @@ describe('Firebase deploy path/staging coherence', () => {
   it('rejects a config whose public directory does not match the staged directory', async () => {
     const root = await mkdtemp(join(tmpdir(), 'paralith-firebase-'))
     try {
-      const { dist, base, sourceManifestPath, configPath } = await stageDeployTree(root, { generateConfig: false })
-      await writeFirebaseDeployConfig({ baseConfigPath: base, outputPath: configPath, site: 'site', publicDir: join(root, 'a-different-directory') })
+      const { dist, sourceManifestPath, configPath } = await stageDeployTree(root, { generateConfig: false })
+      // A config that resolves (via firebase's join) to a sibling directory, not the staged one.
+      await mkdir(dirname(configPath), { recursive: true })
+      await writeFile(configPath, JSON.stringify({ hosting: { site: 'site', public: 'a-different-dist' } }))
       await expect(assertDeployReady({ publicDir: dist, sourceManifestPath, configPath, log: () => {} })).rejects.toThrow(/does not match/)
     } finally {
       await rm(root, { recursive: true, force: true })
