@@ -1,6 +1,7 @@
 pub mod backup;
 pub mod legacy_migration;
 pub mod migrations;
+pub(crate) mod orchestration;
 mod placement;
 mod repair;
 mod repository;

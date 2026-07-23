@@ -1,7 +1,7 @@
 use crate::errors::{AppError, AppResult};
 use rusqlite::{params, Connection};
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 21;
+pub const CURRENT_SCHEMA_VERSION: i64 = 22;
 
 const MIGRATION_1: &str = r#"
 CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
@@ -875,6 +875,9 @@ pub fn apply(connection: &Connection) -> AppResult<()> {
     {
         migrate_v21(connection)?;
     }
+    if current < 22 || !table_exists(connection, "orchestration_sessions")? {
+        migrate_v22(connection)?;
+    }
     Ok(())
 }
 
@@ -911,7 +914,8 @@ pub fn requires_migration(connection: &Connection) -> AppResult<bool> {
         || !table_exists(connection, "swarm_agent_runs")?
         || !table_exists(connection, "swarm_attention_requests")?
         || !column_exists(connection, "swarms", "revision")?
-        || !column_exists(connection, "swarm_events", "sequence")?)
+        || !column_exists(connection, "swarm_events", "sequence")?
+        || !table_exists(connection, "orchestration_sessions")?)
 }
 
 fn table_exists(connection: &Connection, table: &str) -> AppResult<bool> {
@@ -2099,6 +2103,92 @@ WHERE lifecycle <> 'draft';
     finish_migration_transaction(connection, result, 21)
 }
 
+/// Durable persistence for the Paralith Orchestration Kernel. A session is the authoritative
+/// unit the backend state machine owns; turns record the conversation and system inputs; events
+/// are the append-only observable timeline the UI derives from; capability executions record
+/// every typed application-control action the gateway ran, with sanitized (never secret) payloads.
+/// All four tables are project-scoped by `project_id` when a session is bound to a Project so the
+/// same window-security boundary that governs the rest of Paralith applies to orchestration data.
+fn migrate_v22(connection: &Connection) -> AppResult<()> {
+    connection
+        .execute_batch("BEGIN IMMEDIATE;")
+        .map_err(AppError::database)?;
+    let result = (|| {
+        connection
+            .execute_batch(
+                r#"
+CREATE TABLE IF NOT EXISTS orchestration_sessions(
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  originating_surface TEXT NOT NULL,
+  project_id TEXT,
+  workspace_id TEXT,
+  operating_mode TEXT NOT NULL,
+  state TEXT NOT NULL,
+  objective TEXT NOT NULL,
+  normalized_objective TEXT,
+  failure_classification TEXT,
+  token_budget INTEGER,
+  tokens_used INTEGER NOT NULL DEFAULT 0,
+  provider TEXT,
+  model TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  started_at TEXT,
+  completed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_orch_sessions_recent
+  ON orchestration_sessions(updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_orch_sessions_project
+  ON orchestration_sessions(project_id, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS orchestration_turns(
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL REFERENCES orchestration_sessions(id) ON DELETE CASCADE,
+  actor TEXT NOT NULL,
+  input_type TEXT NOT NULL,
+  content TEXT NOT NULL,
+  transcript_confidence REAL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_orch_turns_session
+  ON orchestration_turns(session_id, created_at ASC);
+
+CREATE TABLE IF NOT EXISTS orchestration_events(
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL REFERENCES orchestration_sessions(id) ON DELETE CASCADE,
+  sequence INTEGER NOT NULL,
+  event_type TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  source TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_orch_events_sequence
+  ON orchestration_events(session_id, sequence);
+
+CREATE TABLE IF NOT EXISTS orchestration_capability_executions(
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL REFERENCES orchestration_sessions(id) ON DELETE CASCADE,
+  capability_id TEXT NOT NULL,
+  risk_level TEXT NOT NULL,
+  validated_inputs_json TEXT NOT NULL,
+  sanitized_result_json TEXT,
+  state TEXT NOT NULL,
+  error_classification TEXT,
+  duration_ms INTEGER,
+  created_at TEXT NOT NULL,
+  completed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_orch_exec_session
+  ON orchestration_capability_executions(session_id, created_at ASC);
+"#,
+            )
+            .map_err(AppError::database)?;
+        record_migration(connection, 22)
+    })();
+    finish_migration_transaction(connection, result, 22)
+}
+
 /// Rewrite every stored preset's `config_json` into the role-pool allocation shape. User presets
 /// are upgraded in place (no data loss); built-in presets are refreshed to the canonical
 /// composition from [`crate::models::swarm::builtin_presets`], which is where the Feature Team and
@@ -3211,6 +3301,109 @@ mod tests {
                 .unwrap(),
             "Keep preset"
         );
+        assert_eq!(
+            connection
+                .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            CURRENT_SCHEMA_VERSION
+        );
+    }
+
+    /// The real installed Preview build reports database schema 10 (`readiness.json`). An update to
+    /// the Orchestrator build must migrate that database through the full ladder to the current
+    /// schema, create the orchestration tables, and preserve every pre-existing canonical record.
+    /// This exercises that exact 10 → current path with schema-10-era data present.
+    #[test]
+    fn upgrades_installed_schema_10_to_current_preserving_data() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", true)
+            .unwrap();
+        apply(&connection).unwrap();
+
+        // Canonical user data that exists at schema 10 (projects/app_settings are v1, memory_items
+        // is v8). These stand in for the installed user's projects, settings, and memory.
+        connection.execute("INSERT INTO projects(id,name,root_path,canonical_root_path,major_languages_json,is_git_repository,has_package_json,has_lockfile,created_at,updated_at,last_opened_at) VALUES('p10','Installed Project','/p10','/p10','[]',1,1,1,'t','t','t')", []).unwrap();
+        connection
+            .execute(
+                "INSERT INTO app_settings(key,value_json,updated_at) VALUES('settings','{\"kept\":true}','t')",
+                [],
+            )
+            .unwrap();
+        connection.execute("INSERT INTO memory_items(id,project_id,memory_type,dedup_key,title,state,visibility,pinned,created_at,updated_at) VALUES('m10','p10','procedure','keep-10','Installed memory','active','project_shared',0,'t','t')", []).unwrap();
+
+        // Simulate the installed schema-10 database: the post-10 additions this update introduces do
+        // not yet exist, and the schema ledger reflects version 10. The intermediate tables carry
+        // idempotent `IF NOT EXISTS` DDL, so re-running the ladder over them proves it is safe.
+        connection
+            .execute_batch(
+                "DROP TABLE IF EXISTS orchestration_capability_executions;\
+                 DROP TABLE IF EXISTS orchestration_events;\
+                 DROP TABLE IF EXISTS orchestration_turns;\
+                 DROP TABLE IF EXISTS orchestration_sessions;\
+                 DELETE FROM schema_migrations WHERE version > 10;\
+                 PRAGMA user_version=10;",
+            )
+            .unwrap();
+        assert!(!table_exists(&connection, "orchestration_sessions").unwrap());
+
+        // Run the full ladder 10 -> current.
+        apply(&connection).unwrap();
+
+        // Schema advanced to the current version and the orchestration tables now exist.
+        assert_eq!(
+            connection
+                .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            CURRENT_SCHEMA_VERSION
+        );
+        for table in [
+            "orchestration_sessions",
+            "orchestration_turns",
+            "orchestration_events",
+            "orchestration_capability_executions",
+        ] {
+            assert!(table_exists(&connection, table).unwrap(), "missing {table}");
+        }
+
+        // Pre-existing canonical data survived the migration untouched.
+        assert_eq!(
+            connection
+                .query_row("SELECT name FROM projects WHERE id='p10'", [], |row| row
+                    .get::<_, String>(
+                    0
+                ))
+                .unwrap(),
+            "Installed Project"
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT value_json FROM app_settings WHERE key='settings'",
+                    [],
+                    |row| row.get::<_, String>(0)
+                )
+                .unwrap(),
+            "{\"kept\":true}"
+        );
+        assert_eq!(
+            connection
+                .query_row("SELECT title FROM memory_items WHERE id='m10'", [], |row| {
+                    row.get::<_, String>(0)
+                })
+                .unwrap(),
+            "Installed memory"
+        );
+
+        // Integrity holds and a second startup does not re-run migrations (idempotent).
+        assert_eq!(
+            connection
+                .query_row("PRAGMA integrity_check", [], |row| row.get::<_, String>(0))
+                .unwrap(),
+            "ok"
+        );
+        assert!(!requires_migration(&connection).unwrap());
+        apply(&connection).unwrap();
         assert_eq!(
             connection
                 .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))

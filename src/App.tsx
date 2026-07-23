@@ -7,6 +7,7 @@ import { terminalRuntime } from './features/terminals/runtimeStore'
 import { detachedWorkspaceId } from './native/windowContext'
 import type { HandoffTicket, StartupStatus, UpdateStatus } from './native/types'
 import { RecoveryScreen } from './screens/RecoveryScreen'
+import { OrchestratorLauncher } from './features/orchestrator/OrchestratorLauncher'
 import { initThemeRuntime } from './theme/themeStore'
 
 // Periodic background update poll while the app is running (in addition to the one-shot check after
@@ -161,6 +162,7 @@ export default function App() {
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
       </Suspense>
+      <OrchestratorLauncher />
       {whatsNew && <aside className="whats-new" aria-label="What's new"><span>UPDATED · {whatsNew.build.edition.toUpperCase()}</span><h2>PARALITH {whatsNew.build.version} is healthy.</h2><p>{Array.isArray(whatsNew.build.bundledRelease.highlights) ? (whatsNew.build.bundledRelease.highlights as string[]).join(' · ') : 'The signed update passed migration and startup health checks.'}</p><button onClick={() => setWhatsNew(undefined)}>Dismiss</button></aside>}
       {updateReady && !updateDismissed && <aside className="update-toast" role="status" aria-label="Update available"><div><strong>PARALITH {updateReady.journal.available?.version} is {updateReady.journal.phase === 'downloaded' ? 'ready to install' : 'available'}.</strong><span>{updateReady.journal.phase === 'downloaded' ? 'A signed update has been verified and can be installed when you are ready.' : 'A signed update is available for this edition.'}</span></div><div className="update-toast-actions"><a href="#/settings?section=updates" onClick={() => setUpdateDismissed(true)}>Review</a><button onClick={() => setUpdateDismissed(true)}>Later</button></div></aside>}
     </HashRouter>
