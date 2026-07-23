@@ -774,7 +774,28 @@ export interface SwarmEvent {
   summary: string
   level: string
   metadata: Record<string, unknown>
+  sequence: number
   createdAt: string
+}
+
+export interface SwarmRun {
+  id: string; swarmId: string; projectId: string; objective: string; status: string
+  phase: SwarmPhase; progress: number; maxParallel: number; failurePolicy: string
+  cancellationRequestedAt?: string | null; failure?: Record<string, unknown> | null
+  resultSummary?: SwarmSummary | null; createdAt: string; startedAt?: string | null
+  finishedAt?: string | null; updatedAt: string
+}
+export interface SwarmAgentRun {
+  id: string; swarmRunId: string; swarmId: string; memberId: string; taskId?: string | null
+  terminalSessionId?: string | null; processId?: number | null; status: string; attempt: number
+  exitCode?: number | null; failureReason?: string | null; cancellationReason?: string | null
+  structuredResult?: Record<string, unknown> | null; filesChanged: string[]; evidenceIds: string[]
+  createdAt: string; startedAt?: string | null; finishedAt?: string | null; updatedAt: string
+}
+export interface SwarmAttentionRequest {
+  id: string; swarmId: string; swarmRunId: string; agentRunId: string; memberId: string
+  taskId?: string | null; requestKind: string; summary: string; safePayload: Record<string, unknown>
+  status: string; response?: string | null; createdAt: string; expiresAt: string; resolvedAt?: string | null
 }
 
 export interface SwarmDecision {
@@ -871,6 +892,7 @@ export interface Swarm {
   safeguards: SwarmSafeguard[]
   attachments: string[]
   currentMilestone?: string | null
+  revision: number
   roles: SwarmRoleConfig[]
   createdAt: string
   updatedAt: string
@@ -905,6 +927,9 @@ export interface SwarmDetail {
   tests: SwarmTestRecord[]
   memories: SwarmMemoryContext[]
   reviews: SwarmReviewRecord[]
+  runs: SwarmRun[]
+  agentRuns: SwarmAgentRun[]
+  attentionRequests: SwarmAttentionRequest[]
 }
 
 export interface SwarmPreset {
@@ -935,6 +960,9 @@ export type ProjectCloseSwarmBehavior = 'keep_running' | 'pause_and_close'
 export interface SwarmChangedEvent {
   projectId: string
   swarmId: string
+  revision: number
+  eventSequence: number
+  updatedAt: string
 }
 
 export interface SavePresetRequest {

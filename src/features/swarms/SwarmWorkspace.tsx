@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Archive, Plus } from 'lucide-react'
 import { useSwarmStore } from './swarmStore'
@@ -25,6 +25,7 @@ export function SwarmWorkspace({
   const [params, setParams] = useSearchParams()
   const creating = params.get('new') === '1'
   const showingHistory = params.get('history') === '1'
+  const observedRevisions = useRef(new Map<string, number>())
 
   const items = useSwarmStore((state) => state.itemsByProject[projectId]) ?? []
   const detail = useSwarmStore((state) => {
@@ -51,6 +52,10 @@ export function SwarmWorkspace({
     let cancelled = false
     void onSwarmChanged((changed) => {
       if (changed.projectId !== projectId) return
+      const cachedRevision = useSwarmStore.getState().detailById[changed.swarmId]?.swarm.revision ?? 0
+      const observedRevision = observedRevisions.current.get(changed.swarmId) ?? 0
+      if (changed.revision <= Math.max(cachedRevision, observedRevision)) return
+      observedRevisions.current.set(changed.swarmId, changed.revision)
       if (showingHistory) {
         if (swarmId === changed.swarmId) void loadDetail(projectId, changed.swarmId)
         void loadSwarms(projectId, true)

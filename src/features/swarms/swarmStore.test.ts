@@ -16,10 +16,11 @@ const createSwarm = vi.fn(async (request: { projectId: string; mission: string }
 const startSwarm = vi.fn(async (_projectId: string, _swarmId: string) => {
   state.swarms = state.swarms.map((item) => ({ ...item, swarm: { ...item.swarm, lifecycle: 'building', progress: 0.2 } }))
 })
-const getSwarmDetail = vi.fn(async (projectId: string, id: string) => ({
-  swarm: { id, projectId, name: 'S', lifecycle: 'building', progress: 0.2 },
-  activity: {}, agents: [], tasks: [], events: [], messages: [], connections: [], lifecycleHistory: [], runtimeSessions: [], evidence: [], tests: [], memories: [], reviews: [],
-}))
+const makeDetail = (projectId: string, id: string, revision = 1) => ({
+  swarm: { id, projectId, name: 'S', lifecycle: 'building', progress: 0.2, revision },
+  activity: {}, agents: [], tasks: [], events: [], messages: [], connections: [], lifecycleHistory: [], runtimeSessions: [], evidence: [], tests: [], memories: [], reviews: [], runs: [], agentRuns: [], attentionRequests: [],
+})
+const getSwarmDetail = vi.fn(async (projectId: string, id: string) => makeDetail(projectId, id))
 const deleteSwarm = vi.fn(async (_projectId: string, _swarmId: string) => { state.swarms = [] })
 
 vi.mock('../../native/commands', () => ({
@@ -41,7 +42,7 @@ describe('swarmStore (backend-authoritative)', () => {
     state.swarms = []
     state.detail = null
     vi.clearAllMocks()
-    useSwarmStore.setState({ presets: [], itemsByProject: {}, detailById: {}, error: undefined })
+    useSwarmStore.setState({ presets: [], itemsByProject: {}, detailById: {}, pendingBySwarm: {}, error: undefined })
   })
 
   it('creates a swarm and reloads the project list from the backend', async () => {
@@ -72,5 +73,20 @@ describe('swarmStore (backend-authoritative)', () => {
     await useSwarmStore.getState().create({ projectId: 'p1', mission: 'Fix bug', presetId: 'auto' })
     await expect(useSwarmStore.getState().remove('s1')).rejects.toThrow('swarm_running')
     expect(useSwarmStore.getState().error).toBe('swarm_running')
+  })
+
+  it('does not let an older detail request overwrite a newer revision', async () => {
+    let resolveOld!: (value: Awaited<ReturnType<typeof getSwarmDetail>>) => void
+    const old = new Promise<Awaited<ReturnType<typeof getSwarmDetail>>>((resolve) => { resolveOld = resolve })
+    getSwarmDetail
+      .mockImplementationOnce(() => old)
+      .mockResolvedValueOnce(makeDetail('p1', 's1', 2))
+
+    const first = useSwarmStore.getState().loadDetail('p1', 's1')
+    await useSwarmStore.getState().loadDetail('p1', 's1')
+    resolveOld(makeDetail('p1', 's1', 1))
+    await first
+
+    expect(useSwarmStore.getState().detailById.s1.swarm.revision).toBe(2)
   })
 })

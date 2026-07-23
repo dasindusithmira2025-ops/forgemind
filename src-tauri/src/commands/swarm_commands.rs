@@ -323,6 +323,36 @@ pub fn resolve_swarm_decision(
 }
 
 #[tauri::command]
+pub fn resolve_swarm_attention(
+    project_id: String,
+    swarm_id: String,
+    request_id: String,
+    response: String,
+    approved: bool,
+    window: Window,
+    state: State<'_, AppState>,
+) -> AppResult<()> {
+    crate::require_main_window(&window)?;
+    state
+        .swarms
+        .resolve_attention(&project_id, &swarm_id, &request_id, &response, approved)
+}
+
+#[tauri::command]
+pub fn retry_swarm(
+    project_id: String,
+    swarm_id: String,
+    member_id: Option<String>,
+    window: Window,
+    state: State<'_, AppState>,
+) -> AppResult<()> {
+    crate::require_main_window(&window)?;
+    state
+        .swarms
+        .retry_swarm(&project_id, &swarm_id, member_id.as_deref())
+}
+
+#[tauri::command]
 pub fn add_swarm_builder(
     project_id: String,
     swarm_id: String,

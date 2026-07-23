@@ -186,7 +186,13 @@ impl SwarmLifecycle {
             ),
             Self::DecisionRequired => matches!(
                 next,
-                Self::Building | Self::Verifying | Self::Paused | Self::Stopping | Self::Cancelled
+                Self::Building
+                    | Self::Verifying
+                    | Self::Paused
+                    | Self::Stopping
+                    | Self::Recovering
+                    | Self::Failed
+                    | Self::Cancelled
             ),
             Self::Pausing => matches!(
                 next,
@@ -659,7 +665,77 @@ pub struct SwarmEvent {
     pub summary: String,
     pub level: String,
     pub metadata: serde_json::Value,
+    /// Monotonic within one Swarm. Consumers use it to reject duplicate or stale updates.
+    pub sequence: i64,
     pub created_at: String,
+}
+
+/// One durable execution of a reusable Swarm configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SwarmRun {
+    pub id: String,
+    pub swarm_id: String,
+    pub project_id: String,
+    pub objective: String,
+    pub status: String,
+    pub phase: SwarmPhase,
+    pub progress: f64,
+    pub max_parallel: i64,
+    pub failure_policy: String,
+    pub cancellation_requested_at: Option<String>,
+    pub failure: Option<serde_json::Value>,
+    pub result_summary: Option<SwarmSummary>,
+    pub created_at: String,
+    pub started_at: Option<String>,
+    pub finished_at: Option<String>,
+    pub updated_at: String,
+}
+
+/// A preserved attempt by one configured Swarm member. Retries append rows; they never rewrite
+/// the evidence or exit details of an earlier attempt.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SwarmAgentRun {
+    pub id: String,
+    pub swarm_run_id: String,
+    pub swarm_id: String,
+    pub member_id: String,
+    pub task_id: Option<String>,
+    pub terminal_session_id: Option<String>,
+    pub process_id: Option<u32>,
+    pub status: String,
+    pub attempt: i64,
+    pub exit_code: Option<i32>,
+    pub failure_reason: Option<String>,
+    pub cancellation_reason: Option<String>,
+    pub structured_result: Option<serde_json::Value>,
+    pub files_changed: Vec<String>,
+    pub evidence_ids: Vec<String>,
+    pub created_at: String,
+    pub started_at: Option<String>,
+    pub finished_at: Option<String>,
+    pub updated_at: String,
+}
+
+/// A user response is valid only for this exact run, member attempt, task and open request.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SwarmAttentionRequest {
+    pub id: String,
+    pub swarm_id: String,
+    pub swarm_run_id: String,
+    pub agent_run_id: String,
+    pub member_id: String,
+    pub task_id: Option<String>,
+    pub request_kind: String,
+    pub summary: String,
+    pub safe_payload: serde_json::Value,
+    pub status: String,
+    pub response: Option<String>,
+    pub created_at: String,
+    pub expires_at: String,
+    pub resolved_at: Option<String>,
 }
 
 /// A decision Paralith cannot safely make automatically, surfaced to the user.
@@ -875,6 +951,7 @@ pub struct Swarm {
     pub safeguards: Vec<SwarmSafeguard>,
     pub attachments: Vec<String>,
     pub current_milestone: Option<String>,
+    pub revision: i64,
     pub roles: Vec<SwarmRoleConfig>,
     pub created_at: String,
     pub updated_at: String,
@@ -933,6 +1010,9 @@ pub struct SwarmDetail {
     pub tests: Vec<SwarmTestRecord>,
     pub memories: Vec<SwarmMemoryContext>,
     pub reviews: Vec<SwarmReviewRecord>,
+    pub runs: Vec<SwarmRun>,
+    pub agent_runs: Vec<SwarmAgentRun>,
+    pub attention_requests: Vec<SwarmAttentionRequest>,
 }
 
 /// Project-close policy when the Project still owns actively progressing Swarms. Cancellation
@@ -949,6 +1029,9 @@ pub enum ProjectCloseSwarmBehavior {
 pub struct SwarmChangedEvent {
     pub project_id: String,
     pub swarm_id: String,
+    pub revision: i64,
+    pub event_sequence: i64,
+    pub updated_at: String,
 }
 
 // ---- Request payloads --------------------------------------------------------------------

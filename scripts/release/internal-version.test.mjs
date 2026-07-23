@@ -1,5 +1,20 @@
 import { describe, expect, it } from 'vitest'
-import { buildInternalChangelog, computeInternalVersion, parseSemver } from './internal-version.mjs'
+import { buildInternalChangelog, computeInternalBuildNumber, computeInternalVersion, parseSemver } from './internal-version.mjs'
+
+describe('computeInternalBuildNumber', () => {
+  it('keeps workflow run numbers above the updater bootstrap build', () => {
+    expect(computeInternalBuildNumber(1)).toBe(1002)
+    expect(computeInternalBuildNumber(2)).toBe(1003)
+    expect(computeInternalBuildNumber(1001)).toBe(2002)
+  })
+
+  it('rejects invalid sequences and Windows-incompatible results', () => {
+    expect(() => computeInternalBuildNumber(0)).toThrow(/positive integer/)
+    expect(() => computeInternalBuildNumber('abc')).toThrow(/positive integer/)
+    expect(computeInternalBuildNumber(64534)).toBe(65535)
+    expect(() => computeInternalBuildNumber(64535)).toThrow(/MSI compatibility/)
+  })
+})
 
 describe('computeInternalVersion', () => {
   it('leads the next unreleased patch of a shipped stable base', () => {

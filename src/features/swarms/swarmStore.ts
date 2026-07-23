@@ -24,6 +24,7 @@ interface SwarmState {
   detailById: Record<string, SwarmDetail>
   loadingProject?: string
   error?: string
+  pendingBySwarm: Record<string, string | undefined>
 
   loadPresets: () => Promise<void>
   loadSwarms: (projectId: string, includeArchived?: boolean) => Promise<void>
@@ -43,10 +44,15 @@ interface SwarmState {
   resolveDecision: (swarmId: string, choice: 'recommended' | 'alternative' | 'stop') => Promise<void>
   addBuilder: (swarmId: string) => Promise<void>
   message: (swarmId: string, target: string, body: string) => Promise<void>
+  resolveAttention: (swarmId: string, requestId: string, response: string, approved: boolean) => Promise<void>
+  retry: (swarmId: string, memberId?: string) => Promise<void>
   savePreset: (request: SavePresetRequest) => Promise<void>
   deletePreset: (presetId: string) => Promise<void>
   clearError: () => void
 }
+
+const projectRequestVersions = new Map<string, number>()
+const detailRequestVersions = new Map<string, number>()
 
 function projectOf(state: SwarmState, swarmId: string): string | undefined {
   const detail = state.detailById[swarmId]
@@ -61,6 +67,7 @@ export const useSwarmStore = create<SwarmState>((set, get) => ({
   presets: [],
   itemsByProject: {},
   detailById: {},
+  pendingBySwarm: {},
 
   loadPresets: async () => {
     try {
@@ -72,24 +79,36 @@ export const useSwarmStore = create<SwarmState>((set, get) => ({
   },
 
   loadSwarms: async (projectId, includeArchived = false) => {
+    const requestVersion = (projectRequestVersions.get(projectId) ?? 0) + 1
+    projectRequestVersions.set(projectId, requestVersion)
     set({ loadingProject: projectId })
     try {
       const items = await native.listSwarms(projectId, includeArchived)
+      if (projectRequestVersions.get(projectId) !== requestVersion) return
       set((state) => ({
         itemsByProject: { ...state.itemsByProject, [projectId]: items },
         loadingProject: undefined,
       }))
     } catch (error) {
+      if (projectRequestVersions.get(projectId) !== requestVersion) return
       set({ error: asNativeError(error).message, loadingProject: undefined })
     }
   },
 
   loadDetail: async (projectId, swarmId) => {
+    const requestVersion = (detailRequestVersions.get(swarmId) ?? 0) + 1
+    detailRequestVersions.set(swarmId, requestVersion)
     try {
       const detail = await native.getSwarmDetail(projectId, swarmId)
-      set((state) => ({ detailById: { ...state.detailById, [swarmId]: detail } }))
+      if (detailRequestVersions.get(swarmId) !== requestVersion) return undefined
+      set((state) => {
+        const current = state.detailById[swarmId]
+        if (current && current.swarm.revision > detail.swarm.revision) return state
+        return { detailById: { ...state.detailById, [swarmId]: detail } }
+      })
       return detail
     } catch (error) {
+      if (detailRequestVersions.get(swarmId) !== requestVersion) return undefined
       set({ error: asNativeError(error).message })
       return undefined
     }
@@ -115,17 +134,21 @@ export const useSwarmStore = create<SwarmState>((set, get) => ({
     }
   },
 
-  start: async (swarmId) => runAction(set, get, swarmId, (projectId) => native.startSwarm(projectId, swarmId)),
-  pause: async (swarmId) => runAction(set, get, swarmId, (projectId) => native.pauseSwarm(projectId, swarmId)),
-  resume: async (swarmId) => runAction(set, get, swarmId, (projectId) => native.resumeSwarm(projectId, swarmId)),
-  stop: async (swarmId, hard = false) => runAction(set, get, swarmId, (projectId) => native.stopSwarm(projectId, swarmId, hard)),
-  archive: async (swarmId, archived) => runAction(set, get, swarmId, (projectId) => native.archiveSwarm(projectId, swarmId, archived)),
-  rename: async (swarmId, name) => runAction(set, get, swarmId, (projectId) => native.renameSwarm(projectId, swarmId, name)),
-  accept: async (swarmId) => runAction(set, get, swarmId, (projectId) => native.acceptSwarmResult(projectId, swarmId)),
-  resolveDecision: async (swarmId, choice) => runAction(set, get, swarmId, (projectId) => native.resolveSwarmDecision(projectId, swarmId, choice)),
-  addBuilder: async (swarmId) => runAction(set, get, swarmId, (projectId) => native.addSwarmBuilder(projectId, swarmId)),
+  start: async (swarmId) => runAction(set, get, swarmId, 'start', (projectId) => native.startSwarm(projectId, swarmId)),
+  pause: async (swarmId) => runAction(set, get, swarmId, 'pause', (projectId) => native.pauseSwarm(projectId, swarmId)),
+  resume: async (swarmId) => runAction(set, get, swarmId, 'resume', (projectId) => native.resumeSwarm(projectId, swarmId)),
+  stop: async (swarmId, hard = false) => runAction(set, get, swarmId, 'stop', (projectId) => native.stopSwarm(projectId, swarmId, hard)),
+  archive: async (swarmId, archived) => runAction(set, get, swarmId, 'archive', (projectId) => native.archiveSwarm(projectId, swarmId, archived)),
+  rename: async (swarmId, name) => runAction(set, get, swarmId, 'rename', (projectId) => native.renameSwarm(projectId, swarmId, name)),
+  accept: async (swarmId) => runAction(set, get, swarmId, 'accept', (projectId) => native.acceptSwarmResult(projectId, swarmId)),
+  resolveDecision: async (swarmId, choice) => runAction(set, get, swarmId, 'decision', (projectId) => native.resolveSwarmDecision(projectId, swarmId, choice)),
+  addBuilder: async (swarmId) => runAction(set, get, swarmId, 'add_builder', (projectId) => native.addSwarmBuilder(projectId, swarmId)),
   message: async (swarmId, target, body) =>
-    runAction(set, get, swarmId, (projectId) => native.sendSwarmMessage(projectId, swarmId, target, body)),
+    runAction(set, get, swarmId, 'message', (projectId) => native.sendSwarmMessage(projectId, swarmId, target, body)),
+  resolveAttention: async (swarmId, requestId, response, approved) =>
+    runAction(set, get, swarmId, 'attention', (projectId) => native.resolveSwarmAttention(projectId, swarmId, requestId, response, approved)),
+  retry: async (swarmId, memberId) =>
+    runAction(set, get, swarmId, 'retry', (projectId) => native.retrySwarm(projectId, swarmId, memberId)),
 
   remove: async (swarmId) => {
     const projectId = projectOf(get(), swarmId)
@@ -170,16 +193,21 @@ async function runAction(
   set: (partial: Partial<SwarmState>) => void,
   get: () => SwarmState,
   swarmId: string,
+  operation: string,
   action: (projectId: string) => Promise<unknown>,
 ): Promise<void> {
   try {
     const projectId = projectOf(get(), swarmId)
     if (!projectId) throw new Error('The Swarm is not bound to a loaded Project.')
+    if (get().pendingBySwarm[swarmId]) throw new Error('Another Swarm operation is still in progress.')
+    set({ pendingBySwarm: { ...get().pendingBySwarm, [swarmId]: operation } })
     await action(projectId)
     await get().refresh(projectId, swarmId)
   } catch (error) {
     const message = asNativeError(error).message
     set({ error: message })
     throw new Error(message)
+  } finally {
+    set({ pendingBySwarm: { ...get().pendingBySwarm, [swarmId]: undefined } })
   }
 }
