@@ -10,14 +10,11 @@
   "fixes": [
     "Reject duplicate runtime allocations, empty enabled roles, negative counts, and teams above the capacity limit",
     "Block Swarm launch with actionable errors when an explicitly selected runtime is unavailable",
-    "Preserve immutable launch-time team snapshots when source presets are edited later",
-    "Serialize Swarm lifecycle operations, preserve retry attempts, and bind permission responses to the exact requesting agent run",
-    "Close provider stdin after a structured terminal result so one-shot Codex sessions exit and release their terminal"
+    "Preserve immutable launch-time team snapshots when source presets are edited later"
   ],
   "databaseChanges": [
     "Add forward-only schemas 16-20 for role allocations, lifecycle history, runtime sessions, evidence, reviews, recovery, worktrees, file ownership, tests, command drafts, project Memory context, repair lineage, and idempotent runtime-event receipts",
-    "Backfill existing single-runtime roles and upgrade saved preset and Swarm configurations without deleting user data",
-    "Add forward-only schema 21 for durable Swarm runs, agent attempts, attention requests, event sequences, and cross-window revisions"
+    "Backfill existing single-runtime roles and upgrade saved preset and Swarm configurations without deleting user data"
   ],
   "knownIssues": [
     "GitHub App installation-token exchange and public webhook ingress require the separately deployed Corelith backend service",
