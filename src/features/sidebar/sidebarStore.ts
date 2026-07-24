@@ -25,25 +25,30 @@ interface SidebarStore {
   /** Live width during a drag, before it is clamped and persisted on pointer-up. */
   draftWidth?: number
   resizing: boolean
+  /** The Project rail's popover — the sidebar's single Project surface. */
   projectSwitcherOpen: boolean
-  logoMenuOpen: boolean
   diagnosticsOpen: boolean
   hoveredWorkspaceId?: string
   draggingWorkspaceId?: string
   dropTargetWorkspaceId?: string
   menuWorkspaceId?: string
   menuAnchor?: { x: number; y: number }
+  /**
+   * Live filter over the two primary lists (Workspaces and Swarms). Deliberately transient: a
+   * filter that survived a restart would hide entities the user has forgotten they filtered.
+   */
+  filterQuery: string
   /** Open/closed state per collapsible section group (true = collapsed). Durable per device. */
   collapsedGroups: Record<string, boolean>
   setDraftWidth: (width?: number) => void
   setResizing: (resizing: boolean) => void
   setProjectSwitcherOpen: (open: boolean) => void
-  setLogoMenuOpen: (open: boolean) => void
   setDiagnosticsOpen: (open: boolean) => void
   setHoveredWorkspace: (id?: string) => void
   setDraggingWorkspace: (id?: string) => void
   setDropTarget: (id?: string) => void
   setMenuWorkspace: (id?: string, anchor?: { x: number; y: number }) => void
+  setFilterQuery: (query: string) => void
   setGroupCollapsed: (id: string, collapsed: boolean) => void
   closeOverlays: () => void
 }
@@ -51,18 +56,18 @@ interface SidebarStore {
 export const useSidebarStore = create<SidebarStore>((set) => ({
   resizing: false,
   projectSwitcherOpen: false,
-  logoMenuOpen: false,
   diagnosticsOpen: false,
+  filterQuery: '',
   collapsedGroups: loadCollapsedGroups(),
   setDraftWidth: (draftWidth) => set({ draftWidth }),
   setResizing: (resizing) => set({ resizing }),
   setProjectSwitcherOpen: (projectSwitcherOpen) => set({ projectSwitcherOpen }),
-  setLogoMenuOpen: (logoMenuOpen) => set({ logoMenuOpen }),
   setDiagnosticsOpen: (diagnosticsOpen) => set({ diagnosticsOpen }),
   setHoveredWorkspace: (hoveredWorkspaceId) => set({ hoveredWorkspaceId }),
   setDraggingWorkspace: (draggingWorkspaceId) => set({ draggingWorkspaceId }),
   setDropTarget: (dropTargetWorkspaceId) => set({ dropTargetWorkspaceId }),
   setMenuWorkspace: (menuWorkspaceId, menuAnchor) => set({ menuWorkspaceId, menuAnchor }),
+  setFilterQuery: (filterQuery) => set({ filterQuery }),
   setGroupCollapsed: (id, collapsed) =>
     set((state) => {
       const collapsedGroups = { ...state.collapsedGroups, [id]: collapsed }
@@ -73,6 +78,5 @@ export const useSidebarStore = create<SidebarStore>((set) => ({
       }
       return { collapsedGroups }
     }),
-  closeOverlays: () =>
-    set({ projectSwitcherOpen: false, logoMenuOpen: false, menuWorkspaceId: undefined }),
+  closeOverlays: () => set({ projectSwitcherOpen: false, menuWorkspaceId: undefined }),
 }))

@@ -11,6 +11,8 @@ interface WorkspaceRowProps {
   dragging: boolean
   dropTarget: boolean
   menuOpen: boolean
+  /** False while a filter is narrowing the list, where a drop index would be meaningless. */
+  reorderable: boolean
   actions: SidebarActions
   onOpenMenu: (id?: string, anchor?: { x: number; y: number }) => void
   onDragStart: (id: string) => void
@@ -30,6 +32,7 @@ function WorkspaceRowImpl({
   dragging,
   dropTarget,
   menuOpen,
+  reorderable,
   actions,
   onOpenMenu,
   onDragStart,
@@ -67,11 +70,11 @@ function WorkspaceRowImpl({
         dropTarget ? 'is-drop-target' : ''
       } ${switching ? 'is-switching' : ''}`}
       aria-current={active ? 'true' : undefined}
-      draggable
-      onDragStart={() => onDragStart(workspace.id)}
-      onDragEnter={() => onDragEnter(workspace.id)}
-      onDragOver={(event) => event.preventDefault()}
-      onDrop={() => onDrop(workspace.id)}
+      draggable={reorderable}
+      onDragStart={() => reorderable && onDragStart(workspace.id)}
+      onDragEnter={() => reorderable && onDragEnter(workspace.id)}
+      onDragOver={(event) => reorderable && event.preventDefault()}
+      onDrop={() => reorderable && onDrop(workspace.id)}
       onDragEnd={onDragEnd}
     >
       <span className="ws-row-accent" aria-hidden />
@@ -100,14 +103,16 @@ function WorkspaceRowImpl({
           </span>
         </span>
       </button>
-      <span
-        className="ws-row-handle"
-        aria-hidden
-        title="Drag to reorder"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
-        <GripVertical size={13} />
-      </span>
+      {reorderable && (
+        <span
+          className="ws-row-handle"
+          aria-hidden
+          title="Drag to reorder"
+          onMouseDown={(event) => event.stopPropagation()}
+        >
+          <GripVertical size={13} />
+        </span>
+      )}
       <button
         type="button"
         className="ws-row-menu"
