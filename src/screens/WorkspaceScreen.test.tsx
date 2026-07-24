@@ -79,15 +79,17 @@ describe('Workspace screen', () => {
   it('renders the focused sidebar without removed navigation surfaces', async () => {
     renderWorkspace(); await screen.findByTestId('terminal-pane')
     expect(screen.getByLabelText('PARALITH')).toBeInTheDocument()
-    expect(screen.getByText('Project Selection')).toBeInTheDocument()
+    expect(screen.getByText('Switch Project')).toBeInTheDocument()
     expect(screen.getByText('Current Projects')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /^Fixture/ })).toBeInTheDocument()
-    expect(screen.getByText('Workspaces — This Window')).toBeInTheDocument()
-    expect(screen.getByText('Workspaces — Other Monitors')).toBeInTheDocument()
+    expect(screen.getByText('Workspaces')).toBeInTheDocument()
+    // "Other Monitors" is shown only when a Workspace is detached; the fixture has none.
+    expect(screen.queryByText('Other Monitors')).not.toBeInTheDocument()
     // The project-scoped SWARMS section is a first-class sidebar entity alongside Workspaces.
     expect(screen.getByRole('region', { name: 'Swarms' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'New swarm' })).toBeInTheDocument()
-    expect(screen.getAllByRole('region')).toHaveLength(5)
+    // Four always-present collapsible groups: Current Projects, Switch Project, Workspaces, Swarms.
+    expect(screen.getAllByRole('region')).toHaveLength(4)
     expect(screen.getByRole('button', { name: 'New workspace' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Settings' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Diagnostics' })).toBeInTheDocument()

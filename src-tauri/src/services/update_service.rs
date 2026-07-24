@@ -144,6 +144,17 @@ impl UpdateService {
                     stale_marker_reason(context, "pending update"),
                 );
             }
+        } else if matches!(
+            journal.phase,
+            UpdatePhase::Downloading | UpdatePhase::Downloaded | UpdatePhase::RestartRequested
+        ) {
+            // The pending `Update` handle and the verified download bytes live only in memory, so a
+            // persisted download/ready/restart-requested phase means the previous process ended
+            // before the install completed — typically because an install-on-exit was deferred
+            // while work was running, or the app was closed mid-flight. Reset to Idle (keeping any
+            // discovered update metadata) so the UI never presents an armed install with no bytes;
+            // the next update check re-offers it cleanly.
+            repair_incomplete_download(&mut journal);
         }
         let service = Self {
             inner: Arc::new(Mutex::new(Runtime {
@@ -630,6 +641,31 @@ fn repair_stale_lifecycle_marker(journal: &mut UpdateJournal, detail: String) {
     }
 }
 
+/// Reset a persisted download/ready/restart-requested phase back to Idle at startup. The verified
+/// installer bytes and the pending `Update` handle only ever exist in memory, so once the process
+/// that downloaded them has exited they are gone. Clearing the armed flags (and the schedule) here
+/// prevents the UI from offering an install that can no longer run, while preserving the discovered
+/// update metadata so the next check re-offers and re-downloads it.
+fn repair_incomplete_download(journal: &mut UpdateJournal) {
+    let detail =
+        "Reset an incomplete download or deferred install: verified bytes cannot survive a restart, \
+so the update will be offered again on the next check."
+            .to_string();
+    journal.phase = UpdatePhase::Idle;
+    journal.install_on_exit = false;
+    journal.signature_verified = false;
+    journal.download_received = 0;
+    journal.download_total = None;
+    journal.first_launch_attempts = 0;
+    journal.last_result = Some(detail.clone());
+    journal
+        .history
+        .push(history(UpdatePhase::Idle, Some(detail)));
+    if journal.history.len() > 100 {
+        journal.history.drain(..journal.history.len() - 100);
+    }
+}
+
 fn history(phase: UpdatePhase, detail: Option<String>) -> UpdateHistoryEntry {
     UpdateHistoryEntry {
         phase,
@@ -1092,6 +1128,54 @@ mod tests {
                     .unwrap_or_default()
                     .contains("Repaired")
         }));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn persisted_restart_requested_phase_is_reset_to_idle_on_launch() {
+        let root = test_root("deferred-install-reset");
+        let mut journal = fresh_journal(crate::database::migrations::CURRENT_SCHEMA_VERSION);
+        // Simulate an install-on-exit that was armed but deferred (or interrupted): the process
+        // exited while the journal recorded a restart-requested, install-on-exit schedule.
+        journal.phase = UpdatePhase::RestartRequested;
+        journal.install_on_exit = true;
+        journal.signature_verified = true;
+        journal.target_version = Some("9.9.9".into());
+        journal.available = Some(AvailableUpdate {
+            version: "9.9.9".into(),
+            release_notes: String::new(),
+            published_at: None,
+            edition: "internal".into(),
+            channel: "internal".into(),
+            schema_version: crate::database::migrations::CURRENT_SCHEMA_VERSION,
+            minimum_schema_version: crate::database::migrations::CURRENT_SCHEMA_VERSION,
+            maximum_schema_version: crate::database::migrations::CURRENT_SCHEMA_VERSION,
+            rollout_percent: 100,
+            commit: None,
+            build_timestamp: None,
+            previous_installer_url: None,
+        });
+        seed_journal(&root, &journal);
+
+        let updates = UpdateService::new_with_context(
+            &root,
+            crate::database::migrations::CURRENT_SCHEMA_VERSION,
+            RELEASE_STARTUP,
+        )
+        .unwrap();
+        let repaired = updates.status().journal;
+
+        // The armed install is disarmed so the UI cannot trigger an install without bytes, ...
+        assert_eq!(repaired.phase, UpdatePhase::Idle);
+        assert!(!repaired.install_on_exit);
+        assert!(!repaired.signature_verified);
+        // ... but the discovered update is preserved so the next check can re-offer it.
+        assert_eq!(
+            repaired.available.map(|available| available.version),
+            Some("9.9.9".into())
+        );
+        assert!(!updates.installation_pending(false));
+        assert!(!updates.installation_pending(true));
         let _ = fs::remove_dir_all(root);
     }
 

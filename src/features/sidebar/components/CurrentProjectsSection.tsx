@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { AlertTriangle, Folder, FolderOpen, MoreHorizontal, Plus, RefreshCw, X } from 'lucide-react'
 import type { SidebarActions, SidebarOpenProject } from '../sidebarTypes'
+import { SidebarGroup } from './SidebarGroup'
 
 /**
  * The "Current Projects" section: every Project open in the main PARALITH window. Several may
@@ -18,11 +19,23 @@ export function CurrentProjectsSection({
 }) {
   const[menu,setMenu]=useState<string>()
   return (
-    <section className="project-block current-projects" aria-label="Current projects">
-      <header className="ws-section-head">
-        <span className="section-label">Current Projects</span>
-        {openProjects.length > 1 && <span className="ws-section-count">{openProjects.length}</span>}
-      </header>
+    <SidebarGroup
+      id="current-projects"
+      label="Current Projects"
+      count={openProjects.length > 1 ? openProjects.length : undefined}
+      className="current-projects"
+      actions={
+        <button
+          type="button"
+          className="ws-section-add"
+          aria-label="Open another Project"
+          title="Open another Project"
+          onClick={actions.onOpenLauncher}
+        >
+          <Plus size={15} />
+        </button>
+      }
+    >
       <ul className="open-projects-list" role="list">
         {openProjects.map((entry) => {
           const meta = [entry.project.gitBranch, entry.project.detectedFramework].filter(Boolean).join(' · ')
@@ -70,6 +83,6 @@ export function CurrentProjectsSection({
       <button type="button" className="open-project-add" onClick={actions.onOpenLauncher}>
         <Plus size={13} /> Open another Project
       </button>
-    </section>
+    </SidebarGroup>
   )
 }

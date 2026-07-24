@@ -5,6 +5,7 @@ import { useSwarmStore } from './swarmStore'
 import { isActiveLifecycle, lifecycleLabel, lifecycleTone, progressPercent } from './swarmPresentation'
 import { onSwarmChanged } from '../../native/events'
 import type { SwarmListItem } from '../../native/types'
+import { SidebarGroup } from '../sidebar/components/SidebarGroup'
 import { SwarmRowMenu } from './SwarmRowMenu'
 
 /**
@@ -48,23 +49,27 @@ export function SwarmsSidebarSection({
   const list = items ?? []
 
   return (
-    <section className="ws-section swarm-section" aria-label="Swarms">
-      <header className="ws-section-head">
-        <span className="section-label">
-          Swarms{list.length > 0 ? <span className="swarm-count"> {list.length}</span> : null}
-        </span>
-        <div className="swarm-section-actions"><button type="button" className="ws-section-add" aria-label="Swarm history" title="Completed and archived Swarms" disabled={!projectId} onClick={() => projectId && navigate(`/swarms/${projectId}?history=1`)}><Archive size={14} /></button><button
-          type="button"
-          className="ws-section-add"
-          aria-label="New swarm"
-          title={projectId ? 'New swarm' : 'Open a Project first'}
-          disabled={!projectId}
-          onClick={() => projectId && navigate(`/swarms/${projectId}?new=1`)}
-        >
-          <Plus size={15} />
-        </button></div>
-      </header>
-
+    <SidebarGroup
+      id="swarms"
+      label="Swarms"
+      count={list.length}
+      className="swarm-section"
+      actions={
+        <>
+          <button type="button" className="ws-section-add" aria-label="Swarm history" title="Completed and archived Swarms" disabled={!projectId} onClick={() => projectId && navigate(`/swarms/${projectId}?history=1`)}><Archive size={14} /></button>
+          <button
+            type="button"
+            className="ws-section-add"
+            aria-label="New swarm"
+            title={projectId ? 'New swarm' : 'Open a Project first'}
+            disabled={!projectId}
+            onClick={() => projectId && navigate(`/swarms/${projectId}?new=1`)}
+          >
+            <Plus size={15} />
+          </button>
+        </>
+      }
+    >
       {!projectId ? (
         <div className="ws-empty"><p>Open a Project to create a Swarm.</p></div>
       ) : loading && list.length === 0 ? (
@@ -104,7 +109,7 @@ export function SwarmsSidebarSection({
           ))}
         </ul>
       )}
-    </section>
+    </SidebarGroup>
   )
 }
 

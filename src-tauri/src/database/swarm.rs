@@ -663,6 +663,28 @@ impl DatabaseService {
         Ok((run_id, task_ids.len()))
     }
 
+    /// Undo a launch preparation that failed before the Swarm ever started working. The task
+    /// graph, the freshly spawned workers, and the durable run record are all created by
+    /// `start_swarm`; leaving any of them behind would make the next start skip decomposition or
+    /// collide with a run that never actually executed. Persisted history (events, lifecycle
+    /// transitions) is deliberately preserved — it explains why the launch failed.
+    pub fn discard_swarm_launch(&self, swarm_id: &str, reason: &str) -> AppResult<()> {
+        let now = Utc::now().to_rfc3339();
+        let mut connection = self.connection.lock();
+        let transaction = connection.transaction()?;
+        transaction.execute(
+            "UPDATE swarm_runs SET status='cancelled',cancellation_requested_at=?2,finished_at=?2,updated_at=?2,failure_json=json_object('reason',?3) WHERE swarm_id=?1 AND status IN ('queued','starting','running','paused','needs_input','needs_permission','cancelling','recovering')",
+            params![swarm_id, now, reason],
+        )?;
+        // Agent attempts can only exist once the scheduler claims work, which happens after a
+        // successful launch. Clear them defensively so the worker rows are never orphaned.
+        transaction.execute("DELETE FROM swarm_agent_runs WHERE swarm_id=?1", [swarm_id])?;
+        transaction.execute("DELETE FROM swarm_agents WHERE swarm_id=?1", [swarm_id])?;
+        transaction.execute("DELETE FROM swarm_tasks WHERE swarm_id=?1", [swarm_id])?;
+        transaction.commit()?;
+        Ok(())
+    }
+
     pub fn finish_swarm_agent_run(
         &self,
         swarm_id: &str,

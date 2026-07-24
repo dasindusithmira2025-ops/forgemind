@@ -94,6 +94,23 @@ export function roleLabel(role: SwarmRole): string {
   return plural[role]
 }
 
+/**
+ * The broadcast token the backend addresses a whole role with. Must stay in step with
+ * `role_target` in `swarm_service.rs` — it is what `mark_swarm_messages_delivered` matches on and
+ * what the command bar's role options send.
+ */
+export function roleTarget(role: SwarmRole): string {
+  const targets: Record<SwarmRole, string> = {
+    coordinator: '@coordinator',
+    scout: '@scout',
+    builder: '@builders',
+    debugger: '@debugger',
+    reviewer: '@reviewer',
+    integrator: '@integrator',
+  }
+  return targets[role]
+}
+
 export function progressPercent(progress: number): number {
   return Math.round(Math.max(0, Math.min(1, progress)) * 100)
 }

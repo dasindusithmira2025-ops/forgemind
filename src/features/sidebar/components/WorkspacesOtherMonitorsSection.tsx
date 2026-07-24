@@ -2,6 +2,7 @@ import { ExternalLink, MonitorSmartphone, PictureInPicture2, X } from 'lucide-re
 import type { MonitorInfo, WorkspacePlacement } from '../../../native/types'
 import { monitorForPlacement, monitorLabel } from '../../workspace-windows/placementSelectors'
 import type { SidebarActions, SidebarWorkspace } from '../sidebarTypes'
+import { SidebarGroup } from './SidebarGroup'
 
 /**
  * The fourth sidebar section: Workspaces from the active Project that are currently displayed
@@ -22,11 +23,12 @@ export function WorkspacesOtherMonitorsSection({
   actions: SidebarActions
 }) {
   return (
-    <section className="ws-section ws-section-detached" aria-label="Workspaces — Other Monitors">
-      <header className="ws-section-head">
-        <span className="section-label">Workspaces — Other Monitors</span>
-        <span className="ws-section-count">{workspaces.length}</span>
-      </header>
+    <SidebarGroup
+      id="other-monitors"
+      label="Other Monitors"
+      count={workspaces.length}
+      className="ws-section-detached"
+    >
       {workspaces.length===0?<div className="ws-empty"><p>No detached Workspaces for this Project.</p></div>:<ul className="ws-list" role="list">
         {workspaces.map((entry) => {
           const placement = placements.find((item) => item.workspaceId === entry.workspace.id)
@@ -64,6 +66,6 @@ export function WorkspacesOtherMonitorsSection({
           )
         })}
       </ul>}
-    </section>
+    </SidebarGroup>
   )
 }
