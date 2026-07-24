@@ -2335,7 +2335,7 @@ impl SwarmService {
             })
             .collect::<HashSet<_>>()
             .into_iter()
-            .map(role_label)
+            .map(role_identity_label)
             .collect();
         if tasks.is_empty() || !unstaffable.is_empty() {
             return Err(AppError::new(
@@ -3441,7 +3441,10 @@ impl SwarmService {
             )?;
             self.db().set_swarm_milestone(
                 id,
-                &format!("No {} agent is available to continue", role_label(blocked)),
+                &format!(
+                    "No {} agent is available to continue",
+                    role_identity_label(blocked)
+                ),
             )?;
             self.event(
                 id,
@@ -3451,7 +3454,7 @@ impl SwarmService {
                 None,
                 &format!(
                     "Remaining {} work cannot start because the Swarm has no agent in that role.",
-                    role_label(blocked)
+                    role_identity_label(blocked)
                 ),
                 "error",
             )?;
