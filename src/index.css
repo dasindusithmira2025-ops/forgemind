@@ -479,7 +479,10 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .collapsed-logo { padding: 0; color: var(--accent); }
 .collapsed-project:hover, .collapsed-ws:hover, .collapsed-swarms:hover, .collapsed-utilities button:hover { color: var(--text); background: var(--surface-hover); border-color: var(--border); }
 .collapsed-project.is-missing { color: var(--warning); }
-.collapsed-list { flex: 1; min-height: 0; margin: var(--space-1) 0; padding: 0; display: flex; flex-direction: column; align-items: center; gap: var(--space-1); list-style: none; overflow-y: auto; overflow-x: hidden; }
+/* Shrinks and scrolls rather than growing, so the Swarm indicator stays adjacent to the Workspace
+   list instead of being pushed down against the footer. The footer is pinned by its own auto
+   margin, not by this list absorbing the free space. */
+.collapsed-list { flex: 0 1 auto; min-height: 0; margin: var(--space-1) 0; padding: 0; display: flex; flex-direction: column; align-items: center; gap: var(--space-1); list-style: none; overflow-y: auto; overflow-x: hidden; }
 .collapsed-ws.is-active { position: relative; background: var(--accent-soft); }
 .collapsed-ws.is-active::before { content: ""; position: absolute; left: 0; top: 7px; bottom: 7px; width: 2px; border-radius: 2px; background: var(--accent-edge); }
 .collapsed-overflow { color: var(--faint); }
@@ -490,7 +493,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .collapsed-swarms-dot.tone-red { background: var(--danger); }
 .collapsed-swarms-dot.tone-blue { background: var(--info); }
 .collapsed-swarms-dot.tone-neutral { background: var(--faint); }
-.collapsed-utilities { display: flex; flex-direction: column; align-items: center; gap: var(--space-1); padding-top: var(--space-2); border-top: 1px solid var(--border); width: 100%; }
+.collapsed-utilities { margin-top: auto; display: flex; flex-direction: column; align-items: center; gap: var(--space-1); padding-top: var(--space-2); border-top: 1px solid var(--border); width: 100%; }
 
 /* Workspaces on other monitors */
 .ws-row-detached { display: flex; align-items: center; gap: 4px; }
