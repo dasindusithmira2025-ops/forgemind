@@ -2,9 +2,9 @@ use super::DatabaseService;
 use crate::errors::{AppError, AppResult};
 use crate::models::{
     RemoteProjectionObject, RemoteSyncStatus, RepositoryActor, RepositoryApprovalRequest,
-    RepositoryGraphSnapshot, RepositoryOperationRecord, RepositoryOperationStatus, RepositoryPolicyDecision,
-    RepositoryPolicyDecisionKind, RepositoryPolicyProfile, RepositorySnapshot,
-    RepositoryWorktreeLease,
+    RepositoryGraphSnapshot, RepositoryOperationRecord, RepositoryOperationStatus,
+    RepositoryPolicyDecision, RepositoryPolicyDecisionKind, RepositoryPolicyProfile,
+    RepositorySnapshot, RepositoryWorktreeLease,
 };
 use chrono::Utc;
 use rusqlite::{params, OptionalExtension};
