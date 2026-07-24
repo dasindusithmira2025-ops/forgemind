@@ -198,6 +198,17 @@ export function runtimeStatusLabel(status: WorkspaceRuntimeStatus): string {
   )[status]
 }
 
+/**
+ * The one matcher behind the sidebar's live filter. Every primary list (Workspaces, Swarms,
+ * detached Workspaces) filters through this so a query behaves identically everywhere: blank
+ * matches all, and matching is case-insensitive over whichever text a row actually shows.
+ */
+export function matchesSidebarFilter(query: string, ...fields: (string | undefined)[]): boolean {
+  const needle = query.trim().toLowerCase()
+  if (!needle) return true
+  return fields.some((field) => field?.toLowerCase().includes(needle))
+}
+
 export interface ProjectSwitcherRow {
   projectId: string
   name: string

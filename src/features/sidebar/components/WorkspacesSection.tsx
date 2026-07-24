@@ -7,17 +7,24 @@ import { WorkspaceContextMenu } from './WorkspaceContextMenu'
 import { WorkspaceRow } from './WorkspaceRow'
 
 /**
- * The flexible middle region: the reorderable Workspaces list for the current Project. Drag
- * reordering is committed once, on drop; keyboard Move Up/Down provides an equal alternative.
+ * The primary region: the reorderable Workspaces list for the current Project. Drag reordering is
+ * committed once, on drop; keyboard Move Up/Down provides an equal alternative.
+ *
+ * While the sidebar filter is active the list shows only matches and reordering is suspended —
+ * dragging within a filtered subset would silently move rows past the ones being hidden.
  */
 export function WorkspacesSection({
   workspaces,
+  visibleWorkspaces,
   activeWorkspaceId,
   switchingWorkspaceId,
   loading,
   actions,
 }: {
+  /** Every Workspace attached to this window — the reorder source of truth and the header count. */
   workspaces: SidebarWorkspace[]
+  /** The subset the filter allows through; identical to `workspaces` when no filter is active. */
+  visibleWorkspaces: SidebarWorkspace[]
   activeWorkspaceId: string
   switchingWorkspaceId?: string
   loading?: boolean
@@ -27,9 +34,11 @@ export function WorkspacesSection({
   const dropTargetWorkspaceId = useSidebarStore((state) => state.dropTargetWorkspaceId)
   const menuWorkspaceId = useSidebarStore((state) => state.menuWorkspaceId)
   const menuAnchor = useSidebarStore((state) => state.menuAnchor)
+  const filterQuery = useSidebarStore((state) => state.filterQuery)
   const setDragging = useSidebarStore((state) => state.setDraggingWorkspace)
   const setDropTarget = useSidebarStore((state) => state.setDropTarget)
   const setMenu = useSidebarStore((state) => state.setMenuWorkspace)
+  const filtering = filterQuery.trim().length > 0
 
   const commitDrop = useCallback(
     (targetId: string) => {
@@ -54,7 +63,8 @@ export function WorkspacesSection({
     <SidebarGroup
       id="workspaces"
       label="Workspaces"
-      count={workspaces.length}
+      count={filtering ? visibleWorkspaces.length : workspaces.length}
+      forceExpanded={filtering}
       actions={
         <button
           type="button"
@@ -81,15 +91,17 @@ export function WorkspacesSection({
         </ul>
       ) : workspaces.length === 0 ? (
         <div className="ws-empty">
-          <p>No workspaces yet for this project.</p>
+          <p>No Workspaces yet for this Project.</p>
           <button type="button" className="button button-secondary" onClick={actions.onNewWorkspace}>
             <Plus size={14} />
-            Create a workspace
+            Create a Workspace
           </button>
         </div>
+      ) : visibleWorkspaces.length === 0 ? (
+        <p className="sb-no-match">No Workspace matches the filter.</p>
       ) : (
         <ul className="ws-list" role="list">
-          {workspaces.map((entry) => (
+          {visibleWorkspaces.map((entry) => (
             <WorkspaceRow
               key={entry.workspace.id}
               entry={entry}
@@ -98,6 +110,7 @@ export function WorkspacesSection({
               dragging={entry.workspace.id === draggingWorkspaceId}
               dropTarget={entry.workspace.id === dropTargetWorkspaceId}
               menuOpen={entry.workspace.id === menuWorkspaceId}
+              reorderable={!filtering}
               actions={actions}
               onOpenMenu={setMenu}
               onDragStart={setDragging}
