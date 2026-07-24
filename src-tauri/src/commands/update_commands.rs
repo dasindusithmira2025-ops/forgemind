@@ -189,6 +189,28 @@ pub(crate) fn perform_install(app: &AppHandle, state: &AppState, on_exit: bool) 
     if !state.updates.installation_pending(on_exit) {
         return Ok(());
     }
+    // Install-on-exit is scheduled ahead of time, so work may have started (or a Git mutation may
+    // now be in flight) since the user armed it. Re-run the Safe Update Gate from server-observable
+    // signals before doing anything destructive: if the application is not genuinely idle, defer the
+    // install instead of tearing down active work and relaunching. The verified bytes live only in
+    // memory and cannot survive the exit, so the next launch resets to Idle and re-offers the
+    // update (see `repair_incomplete_download`). This is what makes a close-with-work-running a
+    // clean shutdown rather than a surprise restart. The immediate "Install and restart" path
+    // (`on_exit == false`) has already been gated and confirmed by the caller.
+    if on_exit {
+        let assessment = assess_restart(gather_restart_inputs(
+            state,
+            SafeRestartClientState::default(),
+        )?);
+        if !assessment.safe {
+            log::info!(
+                "Deferring install-on-exit: {} active-work blocker(s), {} hard blocker(s)",
+                assessment.blockers.len(),
+                assessment.hard_blockers.len()
+            );
+            return Ok(());
+        }
+    }
     let schema_version = state.database.health_report()?.schema_version;
     let backup_path = backup::create_recovery_backup(
         state.database.path().ok_or_else(|| {
@@ -269,6 +291,17 @@ fn build_restart_assessment(
     state: &AppState,
     client: SafeRestartClientState,
 ) -> AppResult<SafeRestartAssessment> {
+    Ok(assess_restart(gather_restart_inputs(state, client)?))
+}
+
+/// Collect the live application signals the Safe Update Gate depends on. Flushing the WAL here
+/// (`prepare_for_update`) drains pending database writes and confirms the connection is quiescent
+/// before the gate is evaluated. Shared by the interactive assessment command and the exit-time
+/// install path so both judge restart safety from an identical set of signals.
+fn gather_restart_inputs(
+    state: &AppState,
+    client: SafeRestartClientState,
+) -> AppResult<RestartInputs> {
     let sessions = state.terminals.list_live_sessions(None);
     let active_agents = sessions
         .iter()
@@ -283,14 +316,14 @@ fn build_restart_assessment(
     let git_mutation_active = state.database.count_active_git_mutations()? > 0;
     let detached_windows = state.windows.detached_window_labels().len();
     state.database.prepare_for_update()?;
-    Ok(assess_restart(RestartInputs {
+    Ok(RestartInputs {
         running_terminals: sessions.len(),
         active_agents,
         active_swarms,
         detached_windows,
         git_mutation_active,
         client,
-    }))
+    })
 }
 
 #[cfg(test)]
