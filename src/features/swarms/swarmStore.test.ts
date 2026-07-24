@@ -75,6 +75,33 @@ describe('swarmStore (backend-authoritative)', () => {
     expect(useSwarmStore.getState().error).toBe('swarm_running')
   })
 
+  it('keeps the in-flight operation locked when a concurrent action is rejected', async () => {
+    // The rejected second call must not release the first call's guard. Before the fix the
+    // `finally` block cleared it unconditionally, so every control re-enabled mid-flight and a
+    // third click could issue a genuinely concurrent lifecycle command to the engine.
+    let releaseStart!: () => void
+    startSwarm.mockImplementationOnce(() => new Promise<void>((resolve) => { releaseStart = () => resolve() }))
+    await useSwarmStore.getState().create({ projectId: 'p1', mission: 'Fix bug', presetId: 'auto' })
+
+    const first = useSwarmStore.getState().start('s1')
+    expect(useSwarmStore.getState().pendingBySwarm.s1).toBe('start')
+
+    await expect(useSwarmStore.getState().start('s1')).rejects.toThrow('Another Swarm operation is still in progress.')
+    expect(useSwarmStore.getState().pendingBySwarm.s1).toBe('start')
+    expect(startSwarm).toHaveBeenCalledOnce()
+
+    releaseStart()
+    await first
+    expect(useSwarmStore.getState().pendingBySwarm.s1).toBeUndefined()
+  })
+
+  it('releases the operation guard when the action itself fails', async () => {
+    startSwarm.mockRejectedValueOnce(new Error('swarm_runtime_unavailable'))
+    await useSwarmStore.getState().create({ projectId: 'p1', mission: 'Fix bug', presetId: 'auto' })
+    await expect(useSwarmStore.getState().start('s1')).rejects.toThrow('swarm_runtime_unavailable')
+    expect(useSwarmStore.getState().pendingBySwarm.s1).toBeUndefined()
+  })
+
   it('does not let an older detail request overwrite a newer revision', async () => {
     let resolveOld!: (value: Awaited<ReturnType<typeof getSwarmDetail>>) => void
     const old = new Promise<Awaited<ReturnType<typeof getSwarmDetail>>>((resolve) => { resolveOld = resolve })

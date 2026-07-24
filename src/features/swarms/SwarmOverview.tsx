@@ -8,7 +8,7 @@ import {
 import type { SwarmAgent, SwarmAttentionRequest, SwarmDetail, SwarmRole, SwarmTask } from '../../native/types'
 import { asNativeError, native } from '../../native/commands'
 import { useSwarmStore } from './swarmStore'
-import { SWARM_PHASES, isActiveLifecycle, lifecycleLabel, lifecycleTone, phaseIndex, roleLabel, runtimeLabel } from './swarmPresentation'
+import { SWARM_PHASES, isActiveLifecycle, lifecycleLabel, lifecycleTone, phaseIndex, roleLabel, roleTarget, runtimeLabel } from './swarmPresentation'
 import { SwarmRowMenu } from './SwarmRowMenu'
 
 type PrimaryView = 'canvas' | 'chat' | 'activity' | 'work'
@@ -93,9 +93,9 @@ export function SwarmOverview({ detail }: { detail: SwarmDetail }) {
         </div>
       </header>
 
-      {swarm.lifecycle === 'decision_required' && swarm.decision ? <DecisionPanel detail={detail} onResolve={(choice) => resolveDecision(swarm.id, choice)} /> : null}
-      {(detail.attentionRequests ?? []).filter((request) => request.status === 'open').map((request) => <AttentionPanel key={request.id} request={request} pending={pendingOperation === 'attention'} onResolve={(response, approved) => resolveAttention(swarm.id, request.id, response, approved)} />)}
-      {swarm.lifecycle === 'ready_for_review' ? <div className="swarm-ready-banner"><CheckCircle2 size={17} /><div><strong>Ready for review</strong><span>{detail.reviews.length > 0 ? `${detail.reviews.length} independent Reviewer record${detail.reviews.length === 1 ? '' : 's'} persisted.` : 'Verification finished; human acceptance is still required.'}</span></div><button type="button" className="button button-ghost" onClick={() => openWork('changes')}>Review changes</button><button type="button" className="button button-ghost" onClick={() => { setTarget('@reviewer'); setInstruction('Run an additional manual check and attach the observed evidence.') }}>Run manual check</button><button type="button" className="button button-primary" onClick={() => accept(swarm.id)}>Accept result</button></div> : null}
+      {swarm.lifecycle === 'decision_required' && swarm.decision ? <DecisionPanel detail={detail} onResolve={(choice) => resolveDecision(swarm.id, choice).catch(() => undefined)} /> : null}
+      {(detail.attentionRequests ?? []).filter((request) => request.status === 'open').map((request) => <AttentionPanel key={request.id} request={request} pending={pendingOperation === 'attention'} onResolve={(response, approved) => resolveAttention(swarm.id, request.id, response, approved).catch(() => undefined)} />)}
+      {swarm.lifecycle === 'ready_for_review' ? <div className="swarm-ready-banner"><CheckCircle2 size={17} /><div><strong>Ready for review</strong><span>{detail.reviews.length > 0 ? `${detail.reviews.length} independent Reviewer record${detail.reviews.length === 1 ? '' : 's'} persisted.` : 'Verification finished; human acceptance is still required.'}</span></div><button type="button" className="button button-ghost" onClick={() => openWork('changes')}>Review changes</button><button type="button" className="button button-ghost" onClick={() => { setTarget('@reviewer'); setInstruction('Run an additional manual check and attach the observed evidence.') }}>Run manual check</button><button type="button" className="button button-primary" disabled={Boolean(pendingOperation)} onClick={() => void accept(swarm.id).catch(() => undefined)}>Accept result</button></div> : null}
       {swarm.lifecycle === 'completed' && swarm.summary ? <CompletionStrip detail={detail} onWork={openWork} /> : null}
 
       <section className="swarm-health-strip">
@@ -123,7 +123,7 @@ export function SwarmOverview({ detail }: { detail: SwarmDetail }) {
         </main>
 
         {railOpen ? selectedAgent ? (
-          <AgentInspector agent={selectedAgent} task={selectedTask} onClose={() => setSelectedAgentId(undefined)} onMessage={() => setTarget(selectedAgent.id)} onTerminal={() => openTerminal(selectedAgent)} onRetry={() => retry(swarm.id, selectedAgent.id)} onWork={openWork} />
+          <AgentInspector agent={selectedAgent} task={selectedTask} onClose={() => setSelectedAgentId(undefined)} onMessage={() => setTarget(selectedAgent.id)} onTerminal={() => openTerminal(selectedAgent)} onRetry={() => retry(swarm.id, selectedAgent.id).catch(() => undefined)} onWork={openWork} />
         ) : (
           <HealthRail detail={detail} onCollapse={() => setRailOpen(false)} onAgent={setSelectedAgentId} onWork={openWork} />
         ) : <button type="button" className="swarm-rail-restore" onClick={() => setRailOpen(true)} aria-label="Open context rail"><ChevronRight size={16} /></button>}
@@ -158,7 +158,18 @@ function AgentCanvas({ agents, tasks, connections, selectedAgentId, onSelect, on
 }
 
 function ChatView({ detail, filter, setFilter, onAgent }: { detail: SwarmDetail; filter: string; setFilter: (value: string) => void; onAgent: (id: string) => void }) {
-  const visible = detail.messages.filter((item) => filter === 'all' || item.sourceAgentId === filter || item.target === `@${filter}` || (filter === 'system' && item.senderKind === 'system'))
+  // The agent options carry a raw agent id, and the backend addresses an individual agent by that
+  // same id (`record_swarm_agent_message` targets `destination.id`). Matching only `@${filter}`
+  // therefore hid every message sent *to* the selected agent — handoffs, review requests and
+  // attention responses all disappeared. Match the agent as sender, as direct target, and as a
+  // member of a broadcast role target.
+  const selected = detail.agents.find((agent) => agent.id === filter)
+  const visible = detail.messages.filter((item) => {
+    if (filter === 'all') return true
+    if (filter === 'system') return item.senderKind === 'system'
+    if (item.sourceAgentId === filter || item.target === filter) return true
+    return Boolean(selected) && item.target === roleTarget(selected!.role)
+  })
   return <section className="swarm-structured-view"><header><div><h3>Engineering communication</h3><p>Assignments, findings, handoffs, review requests, blockers, and results.</p></div><select value={filter} onChange={(event) => setFilter(event.target.value)}><option value="all">All</option><option value="system">System</option>{detail.agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.displayName}</option>)}</select></header><div className="swarm-message-list">{visible.map((item) => { const agent = detail.agents.find((candidate) => candidate.id === item.sourceAgentId); return <article key={item.id}><span className={`swarm-message-kind kind-${item.category}`}>{item.category}</span><button type="button" disabled={!agent} onClick={() => agent && onAgent(agent.id)}>{agent?.displayName ?? (item.senderKind === 'user' ? 'You' : 'Paralith')}</button><p>{item.body}</p><time>{formatTime(item.createdAt)} · {item.target} · {item.deliveryState}</time></article> })}{visible.length === 0 && <EmptyState title="No communication in this filter" body="Persisted engineering messages will appear here." />}</div></section>
 }
 

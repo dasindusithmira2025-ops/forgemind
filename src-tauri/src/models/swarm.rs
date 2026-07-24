@@ -122,9 +122,18 @@ impl SwarmLifecycle {
                 next,
                 Self::Draft | Self::Preparing | Self::Failed | Self::Cancelled
             ),
+            // `Draft` is reachable again because launch preparation is atomic: a Swarm whose
+            // decomposition or agent spawn fails is rolled back to Draft so the user can fix the
+            // team and start it again, instead of being stranded in a state no command accepts.
             Self::Preparing => matches!(
                 next,
-                Self::Understanding | Self::Pausing | Self::Paused | Self::Stopping | Self::Failed
+                Self::Draft
+                    | Self::Understanding
+                    | Self::DecisionRequired
+                    | Self::Pausing
+                    | Self::Paused
+                    | Self::Stopping
+                    | Self::Failed
             ),
             Self::Understanding => matches!(
                 next,
@@ -133,6 +142,7 @@ impl SwarmLifecycle {
                     | Self::Verifying
                     | Self::Reviewing
                     | Self::ReadyForReview
+                    | Self::DecisionRequired
                     | Self::Pausing
                     | Self::Paused
                     | Self::Stopping
@@ -216,9 +226,17 @@ impl SwarmLifecycle {
                     | Self::Planning
                     | Self::Failed
             ),
+            // A recovery attempt is ordinary scheduled work: it can finish its Builder tasks
+            // (Verifying) or hit a provider approval prompt (DecisionRequired) like any other pass.
             Self::Recovering => matches!(
                 next,
-                Self::Planning | Self::Building | Self::Paused | Self::Stopping | Self::Failed
+                Self::Planning
+                    | Self::Building
+                    | Self::Verifying
+                    | Self::DecisionRequired
+                    | Self::Paused
+                    | Self::Stopping
+                    | Self::Failed
             ),
             Self::ReadyForReview => {
                 matches!(next, Self::Building | Self::Completed | Self::Archived)

@@ -196,11 +196,17 @@ async function runAction(
   operation: string,
   action: (projectId: string) => Promise<unknown>,
 ): Promise<void> {
+  // The guards below run before this call owns the pending marker. Releasing it in `finally`
+  // regardless would clear the marker belonging to the operation that is *still in flight*, so a
+  // rejected second click re-enables every control and lets a third click issue a genuinely
+  // concurrent lifecycle command. Only the invocation that acquired the marker may release it.
+  let acquired = false
   try {
     const projectId = projectOf(get(), swarmId)
     if (!projectId) throw new Error('The Swarm is not bound to a loaded Project.')
     if (get().pendingBySwarm[swarmId]) throw new Error('Another Swarm operation is still in progress.')
     set({ pendingBySwarm: { ...get().pendingBySwarm, [swarmId]: operation } })
+    acquired = true
     await action(projectId)
     await get().refresh(projectId, swarmId)
   } catch (error) {
@@ -208,6 +214,6 @@ async function runAction(
     set({ error: message })
     throw new Error(message)
   } finally {
-    set({ pendingBySwarm: { ...get().pendingBySwarm, [swarmId]: undefined } })
+    if (acquired) set({ pendingBySwarm: { ...get().pendingBySwarm, [swarmId]: undefined } })
   }
 }

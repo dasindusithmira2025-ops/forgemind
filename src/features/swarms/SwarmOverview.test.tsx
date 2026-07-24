@@ -137,6 +137,31 @@ describe('SwarmOverview live backend projection', () => {
     expect(start).toHaveBeenCalledWith('s1')
   })
 
+  it('shows messages addressed to the selected agent, not just ones it sent', async () => {
+    // The backend addresses an individual agent by its raw id (`record_swarm_agent_message`
+    // targets `destination.id`), so filtering by agent must match the target as well as the
+    // sender. Matching only `@${agentId}` hid every inbound handoff and review request.
+    render(<MemoryRouter><SwarmOverview detail={detail} /></MemoryRouter>)
+    await userEvent.click(screen.getByRole('button', { name: 'Chat' }))
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: '' }), 'builder')
+    expect(screen.getByText('Implement the capture pipeline')).toBeInTheDocument()
+  })
+
+  it('holds Accept while another lifecycle operation is still in flight', async () => {
+    // Accept is a lifecycle transition like Pause/Stop and must respect the same in-flight guard,
+    // otherwise it can race a Stop or Retry the user already issued.
+    const accept = vi.fn(async () => undefined)
+    const ready = { ...detail, swarm: { ...detail.swarm, lifecycle: 'ready_for_review' } } as SwarmDetail
+    useSwarmStore.setState({ accept, pendingBySwarm: { s1: 'stop' } })
+    render(<MemoryRouter><SwarmOverview detail={ready} /></MemoryRouter>)
+
+    expect(screen.getByRole('button', { name: 'Accept result' })).toBeDisabled()
+    useSwarmStore.setState({ pendingBySwarm: {} })
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Accept result' })).toBeEnabled())
+    await userEvent.click(screen.getByRole('button', { name: 'Accept result' }))
+    expect(accept).toHaveBeenCalledWith('s1')
+  })
+
   it('binds an attention decision to the persisted request id', async () => {
     const resolveAttention = vi.fn(async () => undefined)
     const waiting = {

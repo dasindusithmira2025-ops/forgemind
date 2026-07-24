@@ -2265,10 +2265,11 @@ impl SwarmService {
                 None,
                 None,
             )?;
-            // Launch gate: every concrete runtime named by an enabled allocation must be available.
-            // A preset may be saved with an unavailable runtime, but it cannot be launched until the
-            // runtime is installed/authenticated or the allocation is replaced.
-            if let Err(error) = self.check_runtime_availability(&swarm) {
+            // Preparation is all-or-nothing. Every step below moves the Swarm out of Draft, and no
+            // command accepts a Swarm parked in Validating/Preparing — so any failure here must
+            // restore Draft, or the Swarm becomes permanently unstartable and can only be deleted.
+            if let Err(error) = self.prepare_launch(&swarm) {
+                self.db().discard_swarm_launch(id, &error.message)?;
                 self.db().update_swarm_runtime(
                     id,
                     SwarmLifecycle::Draft,
@@ -2277,29 +2278,21 @@ impl SwarmService {
                     None,
                     None,
                 )?;
+                self.event(
+                    id,
+                    "launch_failed",
+                    None,
+                    None,
+                    None,
+                    &format!(
+                        "Launch could not be prepared [{}]: {}",
+                        error.code, error.message
+                    ),
+                    "error",
+                )?;
+                self.emit_changed(project_id, id);
                 return Err(error);
             }
-            self.db().create_swarm_run(&swarm)?;
-            self.db().update_swarm_runtime(
-                id,
-                SwarmLifecycle::Preparing,
-                swarm.progress,
-                None,
-                None,
-                None,
-            )?;
-            let tasks = decompose(&swarm);
-            self.db().insert_swarm_tasks(id, &tasks)?;
-            self.spawn_agents(&swarm)?;
-            self.event(
-                id,
-                "planned",
-                Some(SwarmRole::Coordinator),
-                None,
-                None,
-                &format!("Planned {} initial tasks from the mission", tasks.len()),
-                "result",
-            )?;
         }
         self.db()
             .set_swarm_milestone(id, "Starting repository investigation")?;
@@ -2317,6 +2310,69 @@ impl SwarmService {
         // Run an immediate tick so state is visible without waiting for the scheduler.
         self.tick(id)?;
         Ok(())
+    }
+
+    /// The fallible half of launch: runtime gate, durable run record, task graph, and workers.
+    /// Kept separate so [`Self::start_swarm`] can restore `Draft` on any failure and leave the
+    /// Swarm exactly as startable as it was before the attempt.
+    fn prepare_launch(&self, swarm: &Swarm) -> AppResult<()> {
+        let id = swarm.id.as_str();
+        // Launch gate: every concrete runtime named by an enabled allocation must be available.
+        // A preset may be saved with an unavailable runtime, but it cannot be launched until the
+        // runtime is installed/authenticated or the allocation is replaced.
+        self.check_runtime_availability(swarm)?;
+        // The task graph must be executable by the staffed team. Launching work no configured role
+        // can ever claim would leave the Swarm running forever at partial progress.
+        let tasks = decompose(swarm);
+        let staffed = staffed_roles(swarm);
+        let unstaffable: Vec<&'static str> = tasks
+            .iter()
+            .map(|task| task.role)
+            .filter(|role| {
+                !staffed
+                    .iter()
+                    .any(|staffed| role_can_execute(*staffed, *role))
+            })
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .map(role_label)
+            .collect();
+        if tasks.is_empty() || !unstaffable.is_empty() {
+            return Err(AppError::new(
+                "swarm_team_cannot_execute_mission",
+                if tasks.is_empty() {
+                    "This team has no role that can carry out the mission.".to_string()
+                } else {
+                    format!(
+                        "This team has no agent that can carry out the planned {} work.",
+                        unstaffable.join(", ")
+                    )
+                },
+                true,
+            )
+            .entity(id)
+            .action("Add the missing role to the team, then start the Swarm again."));
+        }
+        self.db().create_swarm_run(swarm)?;
+        self.db().update_swarm_runtime(
+            id,
+            SwarmLifecycle::Preparing,
+            swarm.progress,
+            None,
+            None,
+            None,
+        )?;
+        self.db().insert_swarm_tasks(id, &tasks)?;
+        self.spawn_agents(swarm)?;
+        self.event(
+            id,
+            "planned",
+            Some(SwarmRole::Coordinator),
+            None,
+            None,
+            &format!("Planned {} initial tasks from the mission", tasks.len()),
+            "result",
+        )
     }
 
     pub fn pause_swarm(&self, project_id: &str, id: &str) -> AppResult<()> {
@@ -3371,6 +3427,38 @@ impl SwarmService {
             return Ok(changed);
         }
 
+        // A task whose role no live worker can execute will never be claimed. Left alone the
+        // Swarm would sit at partial progress forever with no explanation, so report it as a real
+        // failure the user can act on (add the role, then retry) instead of spinning.
+        if let Some(blocked) = unstaffable_roles(&tasks, &agents).first().copied() {
+            self.db().update_swarm_runtime(
+                id,
+                SwarmLifecycle::Failed,
+                compute_progress(&tasks),
+                None,
+                None,
+                swarm.review_verdict.as_deref(),
+            )?;
+            self.db().set_swarm_milestone(
+                id,
+                &format!("No {} agent is available to continue", role_label(blocked)),
+            )?;
+            self.event(
+                id,
+                "team_incomplete",
+                Some(blocked),
+                None,
+                None,
+                &format!(
+                    "Remaining {} work cannot start because the Swarm has no agent in that role.",
+                    role_label(blocked)
+                ),
+                "error",
+            )?;
+            self.emit_changed(&swarm.project_id, id);
+            return Ok(true);
+        }
+
         if self.db().has_open_swarm_attention(id)? {
             if swarm.lifecycle != SwarmLifecycle::DecisionRequired {
                 self.db().update_swarm_runtime(
@@ -4262,6 +4350,36 @@ fn role_can_execute(agent_role: SwarmRole, task_role: SwarmRole) -> bool {
         || (task_role == SwarmRole::Debugger && agent_role == SwarmRole::Builder)
 }
 
+/// Roles of unfinished tasks that no live worker can ever claim. Ordered by task position so the
+/// reported role is the earliest blocked one. Tasks already Failed are excluded: they carry their
+/// own recorded reason and are handled by the normal lifecycle computation.
+fn unstaffable_roles(tasks: &[SwarmTask], agents: &[SwarmAgent]) -> Vec<SwarmRole> {
+    let mut blocked = Vec::new();
+    for task in tasks {
+        if task.status.is_complete() || task.status == SwarmTaskStatus::Failed {
+            continue;
+        }
+        let claimable = agents
+            .iter()
+            .any(|agent| role_can_execute(agent.role, task.role));
+        if !claimable && !blocked.contains(&task.role) {
+            blocked.push(task.role);
+        }
+    }
+    blocked
+}
+
+/// The roles a launched Swarm will actually staff with workers. Mirrors [`SwarmService::spawn_agents`]
+/// so launch validation and the scheduler agree on which task roles can ever be claimed.
+fn staffed_roles(swarm: &Swarm) -> HashSet<SwarmRole> {
+    swarm
+        .roles
+        .iter()
+        .filter(|role| role.is_staffed())
+        .map(|role| role.role)
+        .collect()
+}
+
 fn role_from_target(target: &str) -> Option<SwarmRole> {
     let cleaned = target.trim_start_matches('@');
     SwarmRole::from_db(match cleaned {
@@ -4505,7 +4623,10 @@ fn decompose(swarm: &Swarm) -> Vec<NewSwarmTask> {
         None
     };
 
-    let builder_count = enabled(SwarmRole::Builder).max(1);
+    // Only plan implementation work when a Builder is actually staffed. `role_can_execute` lets a
+    // Builder pick up a Debugger task but never the reverse, so a fabricated Builder task on a
+    // read-only team (Scout + Reviewer) could never be claimed and would stall the Swarm forever.
+    let builder_count = enabled(SwarmRole::Builder);
     let mut builder_positions = Vec::new();
     for index in 0..builder_count {
         let pos = position;
@@ -5339,6 +5460,174 @@ mod tests {
         ];
         let error = create_with_roles(&service, &project, roles).unwrap_err();
         assert_eq!(error.code, "empty_role_pool");
+    }
+
+    /// A read-only investigation team (no Builder) used to have an implementation task fabricated
+    /// for it by `decompose`'s `.max(1)`. `role_can_execute` lets a Builder take a Debugger task
+    /// but never the reverse, so nothing could ever claim it: the Swarm sat in Building at partial
+    /// progress forever, with no error and no way to finish.
+    #[test]
+    fn read_only_team_plans_no_unclaimable_implementation_work() {
+        let (service, _db, project) = service_with(Arc::new(SimAdapter::new(1.0)));
+        let roles = vec![
+            SwarmRoleConfig::single(SwarmRole::Coordinator, SwarmRuntimeKind::Auto, 1),
+            SwarmRoleConfig::single(SwarmRole::Scout, SwarmRuntimeKind::Auto, 1),
+            SwarmRoleConfig::single(SwarmRole::Reviewer, SwarmRuntimeKind::Auto, 1),
+        ];
+        let swarm = create_with_roles(&service, &project, roles).unwrap();
+        service.start_swarm(&project, &swarm.id).unwrap();
+
+        let tasks = service.db().list_swarm_tasks(&swarm.id).unwrap();
+        assert!(
+            !tasks.iter().any(|task| task.role == SwarmRole::Builder),
+            "no Builder is staffed, so no Builder task may be planned"
+        );
+        assert!(tasks.iter().any(|task| task.role == SwarmRole::Scout));
+        assert!(tasks.iter().any(|task| task.role == SwarmRole::Reviewer));
+
+        run_to_quiescence(&service, &swarm.id);
+        let detail = service.get_detail(&project, &swarm.id).unwrap();
+        assert_eq!(
+            detail.swarm.lifecycle,
+            SwarmLifecycle::ReadyForReview,
+            "a staffed read-only team must be able to finish"
+        );
+        assert!(detail
+            .tasks
+            .iter()
+            .all(|task| task.status == SwarmTaskStatus::Completed));
+    }
+
+    /// A team that cannot execute any planned work is refused at launch instead of starting a
+    /// Swarm that can never progress.
+    #[test]
+    fn team_that_cannot_execute_the_mission_is_refused_at_launch() {
+        let (service, _db, project) = service_with(Arc::new(SimAdapter::default()));
+        // A Coordinator plans and delegates but owns no task of its own, so this team decomposes
+        // to an empty graph.
+        let roles = vec![SwarmRoleConfig::single(
+            SwarmRole::Coordinator,
+            SwarmRuntimeKind::Auto,
+            1,
+        )];
+        let swarm = create_with_roles(&service, &project, roles).unwrap();
+        let error = service.start_swarm(&project, &swarm.id).unwrap_err();
+        assert_eq!(error.code, "swarm_team_cannot_execute_mission");
+        assert!(error.recoverable);
+    }
+
+    /// A launch that fails after leaving Draft must leave nothing behind. Previously the Swarm was
+    /// stranded in Validating/Preparing: `start_swarm` then refused with `swarm_already_started`
+    /// and no other command accepted that lifecycle, so the Swarm could only be deleted.
+    #[test]
+    fn failed_launch_restores_a_startable_draft_with_no_partial_state() {
+        let (service, database, project) = service_with(Arc::new(SimAdapter::new(1.0)));
+        let roles = vec![SwarmRoleConfig::single(
+            SwarmRole::Coordinator,
+            SwarmRuntimeKind::Auto,
+            1,
+        )];
+        let swarm = create_with_roles(&service, &project, roles).unwrap();
+        service.start_swarm(&project, &swarm.id).unwrap_err();
+
+        let after = database.get_swarm(&swarm.id).unwrap();
+        assert_eq!(
+            after.lifecycle,
+            SwarmLifecycle::Draft,
+            "a failed launch must roll the Swarm back to Draft"
+        );
+        assert!(database.list_swarm_tasks(&swarm.id).unwrap().is_empty());
+        assert!(database.list_swarm_agents(&swarm.id).unwrap().is_empty());
+        let detail = service.get_detail(&project, &swarm.id).unwrap();
+        assert!(
+            detail.runs.iter().all(|run| run.status == "cancelled"),
+            "no launch attempt may leave an active run behind"
+        );
+        assert!(detail
+            .events
+            .iter()
+            .any(|event| event.kind == "launch_failed"));
+        assert!(
+            detail.events.iter().any(|event| event.kind == "created"),
+            "persisted history explaining the Swarm must survive the rollback"
+        );
+
+        // The failure is fully recoverable: fixing the team and starting again just works.
+        let fixed = create_with_roles(
+            &service,
+            &project,
+            vec![
+                SwarmRoleConfig::single(SwarmRole::Coordinator, SwarmRuntimeKind::Auto, 1),
+                SwarmRoleConfig::single(SwarmRole::Builder, SwarmRuntimeKind::Claude, 1),
+            ],
+        )
+        .unwrap();
+        service.start_swarm(&project, &fixed.id).unwrap();
+        run_to_quiescence(&service, &fixed.id);
+        assert_eq!(
+            service
+                .get_detail(&project, &fixed.id)
+                .unwrap()
+                .swarm
+                .lifecycle,
+            SwarmLifecycle::ReadyForReview
+        );
+    }
+
+    /// The rollback the failed-launch path depends on: an in-flight run must be closed and the
+    /// preparation artefacts removed, so the next start decomposes again instead of skipping
+    /// straight past a half-built graph or colliding with `swarm_run_conflict`.
+    #[test]
+    fn discarding_a_launch_clears_its_run_tasks_and_workers() {
+        let (service, database, project) = service_with(Arc::new(SimAdapter::new(0.2)));
+        let swarm = create(&service, &project, "feature_team");
+        service.start_swarm(&project, &swarm.id).unwrap();
+        assert!(!database.list_swarm_tasks(&swarm.id).unwrap().is_empty());
+        assert!(!database.list_swarm_agents(&swarm.id).unwrap().is_empty());
+
+        database
+            .discard_swarm_launch(&swarm.id, "launch preparation failed")
+            .unwrap();
+
+        assert!(database.list_swarm_tasks(&swarm.id).unwrap().is_empty());
+        assert!(database.list_swarm_agents(&swarm.id).unwrap().is_empty());
+        let detail = database.get_swarm_detail(&swarm.id).unwrap();
+        assert!(
+            detail.runs.iter().all(|run| run.status == "cancelled"),
+            "the open run must be closed, not left blocking the next launch"
+        );
+        assert!(detail.agent_runs.is_empty());
+        // A fresh run may now be created — the pre-fix leftover made this fail with a conflict.
+        database.create_swarm_run(&swarm).unwrap();
+    }
+
+    /// Every state the scheduler actually drives a Swarm into must be accepted by the lifecycle
+    /// table, or `update_swarm_runtime` rejects the write and `tick` fails on every pass — the
+    /// Swarm freezes and the background scheduler logs the same error every 900ms forever.
+    #[test]
+    fn lifecycle_table_accepts_every_transition_the_scheduler_produces() {
+        use SwarmLifecycle::*;
+        // `tick` surfaces a provider approval request from whatever state it is scheduling in.
+        for from in [
+            Preparing,
+            Understanding,
+            Planning,
+            Building,
+            Verifying,
+            Recovering,
+        ] {
+            assert!(
+                from.can_transition_to(DecisionRequired),
+                "{} must be able to surface an attention request",
+                from.as_str()
+            );
+        }
+        // `compute_lifecycle` returns Verifying as soon as the Builder tasks are complete, which
+        // is exactly the state a retry of a failed Reviewer task starts from.
+        assert!(Recovering.can_transition_to(Verifying));
+        // A launch that fails after leaving Draft rolls back so the Swarm stays startable.
+        assert!(Validating.can_transition_to(Draft));
+        assert!(Preparing.can_transition_to(Draft));
     }
 
     #[test]

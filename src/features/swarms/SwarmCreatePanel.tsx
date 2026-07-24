@@ -137,11 +137,12 @@ export function SwarmCreatePanel({ projectId, onCreated, onCancel }: {
   }
 
   function removeAgent(id: string) {
-    setRoster((current) => {
-      const next = current.filter((item) => item.id !== id)
-      setMaxParallel((capacity) => Math.max(1, Math.min(capacity, next.length)))
-      return next
-    })
+    // Both updates are derived from the roster we already hold. Nesting `setMaxParallel` inside the
+    // `setRoster` updater made the clamp run twice under StrictMode's double invocation and updated
+    // one piece of state from another's updater, which React does not guarantee is safe.
+    const next = roster.filter((item) => item.id !== id)
+    setRoster(next)
+    setMaxParallel((capacity) => Math.max(1, Math.min(capacity, Math.max(1, next.length))))
     setPresetId('__custom__')
   }
 
