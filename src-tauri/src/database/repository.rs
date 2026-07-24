@@ -2,7 +2,7 @@ use super::DatabaseService;
 use crate::errors::{AppError, AppResult};
 use crate::models::{
     RemoteProjectionObject, RemoteSyncStatus, RepositoryActor, RepositoryApprovalRequest,
-    RepositoryOperationRecord, RepositoryOperationStatus, RepositoryPolicyDecision,
+    RepositoryGraphSnapshot, RepositoryOperationRecord, RepositoryOperationStatus, RepositoryPolicyDecision,
     RepositoryPolicyDecisionKind, RepositoryPolicyProfile, RepositorySnapshot,
     RepositoryWorktreeLease,
 };
@@ -586,6 +586,99 @@ impl DatabaseService {
             .collect::<Result<Vec<_>, _>>()
             .map_err(AppError::database)?;
         Ok(rows)
+    }
+    pub(crate) fn replace_repository_graph_snapshot(
+        &self,
+        snapshot: &RepositoryGraphSnapshot,
+        impact_json: &Value,
+    ) -> AppResult<()> {
+        let mut connection = self.connection.lock();
+        let transaction = connection.transaction().map_err(AppError::database)?;
+        transaction
+            .execute(
+                "INSERT INTO repository_graph_snapshots(id,project_id,repository_id,worktree_path,head_sha,status_hash,extractor_version,impact_json,created_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+                params![
+                    snapshot.id,
+                    snapshot.project_id,
+                    snapshot.repository_id,
+                    snapshot.worktree_path,
+                    snapshot.head_sha,
+                    snapshot.status_hash,
+                    snapshot.extractor_version,
+                    impact_json.to_string(),
+                    snapshot.created_at,
+                ],
+            )
+            .map_err(AppError::database)?;
+        transaction
+            .execute(
+                "DELETE FROM repository_graph_nodes WHERE project_id=?1 AND repository_id=?2 AND snapshot_id<>?3",
+                params![snapshot.project_id, snapshot.repository_id, snapshot.id],
+            )
+            .map_err(AppError::database)?;
+        transaction
+            .execute(
+                "DELETE FROM repository_graph_edges WHERE project_id=?1 AND repository_id=?2 AND snapshot_id<>?3",
+                params![snapshot.project_id, snapshot.repository_id, snapshot.id],
+            )
+            .map_err(AppError::database)?;
+        for node in &snapshot.nodes {
+            transaction
+                .execute(
+                    "INSERT INTO repository_graph_nodes(id,snapshot_id,project_id,repository_id,node_type,external_key,display_label,metadata_json,content_hash,provenance_json,created_at,updated_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?11) ON CONFLICT(project_id,repository_id,node_type,external_key,snapshot_id) DO UPDATE SET display_label=excluded.display_label,metadata_json=excluded.metadata_json,content_hash=excluded.content_hash,provenance_json=excluded.provenance_json,updated_at=excluded.updated_at",
+                    params![
+                        node.id,
+                        snapshot.id,
+                        snapshot.project_id,
+                        node.repository_id,
+                        node.node_type.as_str(),
+                        node.external_key,
+                        node.label,
+                        node.metadata.to_string(),
+                        node.content_hash,
+                        serde_json::to_string(&node.provenance).map_err(AppError::database)?,
+                        snapshot.created_at,
+                    ],
+                )
+                .map_err(AppError::database)?;
+        }
+        for edge in &snapshot.edges {
+            transaction
+                .execute(
+                    "INSERT INTO repository_graph_edges(id,snapshot_id,project_id,repository_id,source_node_id,target_node_id,edge_type,metadata_json,provenance_json,confidence,created_at,updated_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?11) ON CONFLICT(project_id,repository_id,source_node_id,target_node_id,edge_type,snapshot_id) DO UPDATE SET metadata_json=excluded.metadata_json,provenance_json=excluded.provenance_json,confidence=excluded.confidence,updated_at=excluded.updated_at",
+                    params![
+                        edge.id,
+                        snapshot.id,
+                        snapshot.project_id,
+                        edge.repository_id,
+                        edge.source_node_id,
+                        edge.target_node_id,
+                        edge.edge_type.as_str(),
+                        edge.metadata.to_string(),
+                        serde_json::to_string(&edge.provenance).map_err(AppError::database)?,
+                        edge.provenance.confidence,
+                        snapshot.created_at,
+                    ],
+                )
+                .map_err(AppError::database)?;
+        }
+        transaction
+            .execute(
+                "INSERT INTO repository_graph_index_state(project_id,repository_id,worktree_path,head_sha,status_hash,last_success_at,extractor_version,node_count,edge_count,error_code,error_message) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,NULL,NULL) ON CONFLICT(project_id,repository_id,worktree_path) DO UPDATE SET head_sha=excluded.head_sha,status_hash=excluded.status_hash,last_success_at=excluded.last_success_at,extractor_version=excluded.extractor_version,node_count=excluded.node_count,edge_count=excluded.edge_count,error_code=NULL,error_message=NULL",
+                params![
+                    snapshot.project_id,
+                    snapshot.repository_id,
+                    snapshot.worktree_path,
+                    snapshot.head_sha,
+                    snapshot.status_hash,
+                    snapshot.created_at,
+                    snapshot.extractor_version,
+                    snapshot.nodes.len() as i64,
+                    snapshot.edges.len() as i64,
+                ],
+            )
+            .map_err(AppError::database)?;
+        transaction.commit().map_err(AppError::database)
     }
 }
 

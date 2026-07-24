@@ -2,6 +2,7 @@ import { useCallback } from 'react'
 import { Plus } from 'lucide-react'
 import { useSidebarStore } from '../sidebarStore'
 import type { SidebarActions, SidebarWorkspace } from '../sidebarTypes'
+import { SidebarGroup } from './SidebarGroup'
 import { WorkspaceContextMenu } from './WorkspaceContextMenu'
 import { WorkspaceRow } from './WorkspaceRow'
 
@@ -50,9 +51,11 @@ export function WorkspacesSection({
   )
 
   return (
-    <section className="ws-section" aria-label="Workspaces — This Window">
-      <header className="ws-section-head">
-        <span className="section-label">Workspaces — This Window</span>
+    <SidebarGroup
+      id="workspaces"
+      label="Workspaces"
+      count={workspaces.length}
+      actions={
         <button
           type="button"
           className="ws-section-add"
@@ -62,8 +65,8 @@ export function WorkspacesSection({
         >
           <Plus size={15} />
         </button>
-      </header>
-
+      }
+    >
       {loading ? (
         <ul className="ws-list" aria-hidden>
           {[0, 1, 2].map((key) => (
@@ -117,6 +120,6 @@ export function WorkspacesSection({
           onClose={() => setMenu(undefined)}
         />
       )}
-    </section>
+    </SidebarGroup>
   )
 }

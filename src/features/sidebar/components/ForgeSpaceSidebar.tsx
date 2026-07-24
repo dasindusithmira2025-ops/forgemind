@@ -72,22 +72,26 @@ export function ForgeSpaceSidebar(props: ForgeSpaceSidebarProps) {
       ) : (
         <>
           <SidebarBrandHeader actions={actions} />
-          <ProjectSelectionSection recents={props.recents} openProjectIds={new Set(currentProjects.map((entry)=>entry.project.id))} actions={actions}/>
-          <CurrentProjectsSection openProjects={currentProjects} actions={actions} />
-          <SwarmsSidebarSection projectId={project.id} />
-          <WorkspacesSection
-            workspaces={attachedWorkspaces}
-            activeWorkspaceId={activeWorkspaceId}
-            switchingWorkspaceId={switchingWorkspaceId}
-            loading={loadingWorkspaces}
-            actions={actions}
-          />
-          <WorkspacesOtherMonitorsSection
-            workspaces={detachedWorkspaces}
-            placements={placements}
-            monitors={monitors}
-            actions={actions}
-          />
+          <div className="sidebar-body">
+            <CurrentProjectsSection openProjects={currentProjects} actions={actions} />
+            <ProjectSelectionSection recents={props.recents} openProjectIds={new Set(currentProjects.map((entry)=>entry.project.id))} actions={actions}/>
+            <WorkspacesSection
+              workspaces={attachedWorkspaces}
+              activeWorkspaceId={activeWorkspaceId}
+              switchingWorkspaceId={switchingWorkspaceId}
+              loading={loadingWorkspaces}
+              actions={actions}
+            />
+            <SwarmsSidebarSection projectId={project.id} />
+            {detachedWorkspaces.length > 0 && (
+              <WorkspacesOtherMonitorsSection
+                workspaces={detachedWorkspaces}
+                placements={placements}
+                monitors={monitors}
+                actions={actions}
+              />
+            )}
+          </div>
           <SidebarUtilities actions={actions} />
           <SidebarResizeHandle width={width} onCommit={actions.onResizeCommit} />
         </>
