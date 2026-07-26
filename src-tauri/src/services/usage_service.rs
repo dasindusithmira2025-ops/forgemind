@@ -61,6 +61,13 @@ struct SafeWindow {
     resets_at: Option<String>,
 }
 
+struct ParsedFile {
+    records: Vec<SafeRecord>,
+    windows: Vec<SafeWindow>,
+    codex_totals: BTreeMap<String, TokenUsageSummary>,
+    final_offset: u64,
+}
+
 impl UsageService {
     pub fn new(database: Arc<DatabaseService>) -> Self {
         let snapshots = database.load_ai_usage_snapshots().unwrap_or_default();
@@ -243,12 +250,11 @@ impl UsageService {
         } else {
             0
         };
-        let (new_records, new_windows, totals, final_offset) =
-            parse_file(provider, path, offset, checkpoint.codex_totals.clone())?;
-        checkpoint.records.extend(new_records);
-        checkpoint.windows.extend(new_windows);
-        checkpoint.codex_totals = totals;
-        checkpoint.offset = final_offset;
+        let parsed = parse_file(provider, path, offset, checkpoint.codex_totals.clone())?;
+        checkpoint.records.extend(parsed.records);
+        checkpoint.windows.extend(parsed.windows);
+        checkpoint.codex_totals = parsed.codex_totals;
+        checkpoint.offset = parsed.final_offset;
         checkpoint.size = metadata.len();
         checkpoint.modified_at_ms = modified_at_ms;
         checkpoint.parser_version = PARSER_VERSION;
@@ -320,12 +326,7 @@ fn parse_file(
     path: &Path,
     offset: u64,
     mut codex_totals: BTreeMap<String, TokenUsageSummary>,
-) -> AppResult<(
-    Vec<SafeRecord>,
-    Vec<SafeWindow>,
-    BTreeMap<String, TokenUsageSummary>,
-    u64,
-)> {
+) -> AppResult<ParsedFile> {
     let mut file = File::open(path)?;
     file.seek(SeekFrom::Start(offset))?;
     let mut reader = BufReader::new(file);
@@ -363,7 +364,12 @@ fn parse_file(
             }
         }
     }
-    Ok((records, windows, codex_totals, position))
+    Ok(ParsedFile {
+        records,
+        windows,
+        codex_totals,
+        final_offset: position,
+    })
 }
 
 fn parse_claude_record(value: &Value) -> Option<SafeRecord> {
