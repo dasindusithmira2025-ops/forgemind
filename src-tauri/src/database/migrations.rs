@@ -1,7 +1,7 @@
 use crate::errors::{AppError, AppResult};
 use rusqlite::{params, Connection};
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 24;
+pub const CURRENT_SCHEMA_VERSION: i64 = 25;
 
 const MIGRATION_1: &str = r#"
 CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
@@ -892,6 +892,12 @@ pub fn apply(connection: &Connection) -> AppResult<()> {
     if current < 24 || !table_exists(connection, "swarm_execution_defaults")? {
         migrate_v24(connection)?;
     }
+    if current < 25
+        || !table_exists(connection, "ai_usage_snapshots")?
+        || !table_exists(connection, "ai_usage_file_checkpoints")?
+    {
+        migrate_v25(connection)?;
+    }
     Ok(())
 }
 
@@ -905,6 +911,8 @@ pub fn requires_migration(connection: &Connection) -> AppResult<bool> {
         || !table_exists(connection, "open_project_sessions")?
         || !table_exists(connection, "workspace_placements")?
         || !table_exists(connection, "usage_snapshots")?
+        || !table_exists(connection, "ai_usage_snapshots")?
+        || !table_exists(connection, "ai_usage_file_checkpoints")?
         || !column_exists(connection, "workspaces", "system_kind")?
         || !column_exists(connection, "missions", "origin_workspace_id")?
         || !column_exists(connection, "workspace_placements", "preferred_monitor_id")?
@@ -949,6 +957,36 @@ fn migrate_v24(connection: &Connection) -> AppResult<()> {
         record_migration(connection, 24)
     })();
     finish_migration_transaction(connection, result, 24)
+}
+
+/// Read-only AI usage cache. Values are sanitized summaries; the collector never stores a
+/// provider path, transcript text, request id, account identity, or credential.
+fn migrate_v25(connection: &Connection) -> AppResult<()> {
+    connection
+        .execute_batch("BEGIN IMMEDIATE;")
+        .map_err(AppError::database)?;
+    let result = (|| {
+        connection.execute_batch(
+            r#"
+            CREATE TABLE IF NOT EXISTS ai_usage_snapshots(
+              provider TEXT PRIMARY KEY CHECK(provider IN ('claude','codex')),
+              snapshot_json TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS ai_usage_file_checkpoints(
+              provider TEXT NOT NULL CHECK(provider IN ('claude','codex')),
+              path_hash TEXT NOT NULL,
+              checkpoint_json TEXT NOT NULL,
+              updated_at TEXT NOT NULL,
+              PRIMARY KEY(provider,path_hash)
+            );
+            CREATE INDEX IF NOT EXISTS idx_ai_usage_file_checkpoints_updated
+              ON ai_usage_file_checkpoints(provider,updated_at);
+        "#,
+        )?;
+        record_migration(connection, 25)
+    })();
+    finish_migration_transaction(connection, result, 25)
 }
 
 fn table_exists(connection: &Connection, table: &str) -> AppResult<bool> {

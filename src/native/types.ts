@@ -169,6 +169,16 @@ export interface TerminalStatusEvent {
   lifecycleEvent: string
 }
 
+export type UsageProvider = 'claude' | 'codex'
+export type UsageFreshness = 'live' | 'recent' | 'stale' | 'unavailable'
+export type UsageSnapshotStatus = 'ready' | 'loading' | 'unsupported' | 'unauthenticated' | 'stale' | 'error'
+export type UsageWindowKind = 'five_hour' | 'daily' | 'weekly' | 'fable_weekly'
+export type UsageConfidence = 'authoritative' | 'derived' | 'estimated'
+export interface UsageWindow { kind: UsageWindowKind; usedPercent: number; remainingPercent: number; resetsAt?: string; resetLabel?: string; source: 'local_session_state' | 'provider_cli' | 'supported_endpoint'; confidence: UsageConfidence; isWarning: boolean; isCritical: boolean }
+export interface TokenUsageSummary { inputTokens: number; outputTokens: number; cachedInputTokens: number; cacheCreationTokens: number; reasoningTokens: number; totalTokens: number }
+export interface ProviderUsageSnapshot { provider: UsageProvider; collectedAt: string; sourceUpdatedAt?: string; freshness: UsageFreshness; source: 'local_session_state' | 'provider_cli' | 'supported_endpoint'; windows: UsageWindow[]; tokenSummary?: TokenUsageSummary; status: UsageSnapshotStatus; diagnosticCode?: string; diagnosticMessage?: string }
+export interface AiUsageDiagnostics { provider: UsageProvider; filesSeen: number; filesReused: number; filesScanned: number; elapsedMs: number; status: UsageSnapshotStatus; diagnosticCode?: string }
+
 export interface RestorationProgress {
   workspaceId: string
   paneId: string

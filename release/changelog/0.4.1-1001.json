@@ -14,7 +14,8 @@
   ],
   "databaseChanges": [
     "Add forward-only schemas 16-20 for role allocations, lifecycle history, runtime sessions, evidence, reviews, recovery, worktrees, file ownership, tests, command drafts, project Memory context, repair lineage, and idempotent runtime-event receipts",
-    "Backfill existing single-runtime roles and upgrade saved preset and Swarm configurations without deleting user data"
+    "Backfill existing single-runtime roles and upgrade saved preset and Swarm configurations without deleting user data",
+    "Add forward-only schema 25 for read-only AI usage snapshots and safe incremental scanner checkpoints"
   ],
   "knownIssues": [
     "GitHub App installation-token exchange and public webhook ingress require the separately deployed Corelith backend service",

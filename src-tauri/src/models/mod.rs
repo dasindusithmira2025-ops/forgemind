@@ -11,6 +11,7 @@ pub mod settings;
 pub mod swarm;
 pub mod terminal;
 pub mod update;
+pub mod usage;
 pub mod workspace;
 
 pub use agent::*;
@@ -25,4 +26,5 @@ pub use settings::*;
 pub use swarm::*;
 pub use terminal::*;
 pub use update::*;
+pub use usage::*;
 pub use workspace::*;
