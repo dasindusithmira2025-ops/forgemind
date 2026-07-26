@@ -688,6 +688,11 @@ export type SwarmPhase = 'understanding' | 'planning' | 'building' | 'verifying'
 export type SwarmRole = 'coordinator' | 'scout' | 'builder' | 'debugger' | 'reviewer' | 'integrator'
 
 export type SwarmRuntimeKind = 'auto' | 'claude' | 'codex'
+export type SwarmModelValidationStatus = 'valid' | 'unvalidated' | 'provider_unavailable' | 'authentication_required' | 'model_unavailable' | 'unsupported_option' | 'deprecated_model' | 'configuration_error'
+export interface SwarmFallbackModelConfig { providerId: string; modelId: string; policy: 'when_unavailable' | 'when_provider_cannot_start' | 'require_approval' }
+export interface SwarmMemberModelConfig { providerId: string; providerDisplayName: string; modelId: string; modelDisplayName: string; reasoningEffort: 'low' | 'medium' | 'high' | 'max'; executionMode: 'interactive' | 'autonomous' | 'review'; contextStrategy: 'minimal' | 'balanced' | 'full'; permissionMode: 'ask' | 'trusted' | 'restricted'; fallback?: SwarmFallbackModelConfig | null; providerOptions: Record<string, unknown>; configVersion: number; lastValidationStatus: SwarmModelValidationStatus; lastValidatedAt?: string | null }
+export interface SwarmExecutionDefaults { member?: SwarmMemberModelConfig | null }
+export interface SwarmModelCapability { providerId: string; providerDisplayName: string; modelId: string; displayName: string; description: string; available: boolean; deprecated: boolean; replacementModelId?: string | null; coding: boolean; planning: boolean; review: boolean; toolUse: boolean; vision: boolean; supportedReasoningEfforts: string[]; supportedExecutionModes: string[]; recommendedRoles: string[]; authenticated: boolean; runtimeVersion?: string | null }
 
 export type SwarmAgentStatus =
   | 'starting' | 'active' | 'idle' | 'queued' | 'waiting' | 'blocked' | 'reviewing'
@@ -702,6 +707,7 @@ export interface SwarmRoleAllocation {
   id: string
   runtime: SwarmRuntimeKind
   count: number
+  modelConfig?: SwarmMemberModelConfig | null
 }
 
 export interface SwarmRoleConfig {
@@ -716,6 +722,7 @@ export interface SwarmAgent {
   swarmId: string
   role: SwarmRole
   runtime: SwarmRuntimeKind
+  modelConfig: SwarmMemberModelConfig
   /** The configured allocation this worker was staffed from, when applicable. */
   allocationId?: string | null
   displayName: string
@@ -788,6 +795,7 @@ export interface SwarmRun {
 export interface SwarmAgentRun {
   id: string; swarmRunId: string; swarmId: string; memberId: string; taskId?: string | null
   terminalSessionId?: string | null; processId?: number | null; status: string; attempt: number
+  requestedProviderId: string; requestedModelId: string; resolvedProviderId: string; resolvedModelId: string; reasoningEffort: string; fallbackUsed: boolean; fallbackReason?: string | null; providerRuntimeVersion?: string | null; executionConfigSnapshot: SwarmMemberModelConfig
   exitCode?: number | null; failureReason?: string | null; cancellationReason?: string | null
   structuredResult?: Record<string, unknown> | null; filesChanged: string[]; evidenceIds: string[]
   createdAt: string; startedAt?: string | null; finishedAt?: string | null; updatedAt: string

@@ -10,6 +10,39 @@
 
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SwarmModelValidationStatus { Valid, Unvalidated, ProviderUnavailable, AuthenticationRequired, ModelUnavailable, UnsupportedOption, DeprecatedModel, ConfigurationError }
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SwarmFallbackModelConfig { pub provider_id: String, pub model_id: String, #[serde(default = "default_fallback_policy")] pub policy: String }
+fn default_fallback_policy() -> String { "when_unavailable".into() }
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SwarmMemberModelConfig {
+    pub provider_id: String, pub provider_display_name: String, pub model_id: String, pub model_display_name: String,
+    #[serde(default = "default_reasoning_effort")] pub reasoning_effort: String,
+    #[serde(default = "default_execution_mode")] pub execution_mode: String,
+    #[serde(default = "default_context_strategy")] pub context_strategy: String,
+    #[serde(default = "default_permission_mode")] pub permission_mode: String,
+    #[serde(default)] pub fallback: Option<SwarmFallbackModelConfig>,
+    #[serde(default)] pub provider_options: serde_json::Value,
+    #[serde(default = "default_config_version")] pub config_version: i64,
+    #[serde(default = "default_validation_status")] pub last_validation_status: SwarmModelValidationStatus,
+    #[serde(default)] pub last_validated_at: Option<String>,
+}
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SwarmExecutionDefaults { pub member: Option<SwarmMemberModelConfig> }
+fn default_reasoning_effort() -> String { "medium".into() } fn default_execution_mode() -> String { "autonomous".into() } fn default_context_strategy() -> String { "balanced".into() } fn default_permission_mode() -> String { "ask".into() } fn default_config_version() -> i64 { 1 } fn default_validation_status() -> SwarmModelValidationStatus { SwarmModelValidationStatus::Unvalidated }
+impl SwarmMemberModelConfig { pub fn configured(provider_id: &str, model_id: &str, provider_display_name: &str, model_display_name: &str) -> Self { Self { provider_id: provider_id.into(), provider_display_name: provider_display_name.into(), model_id: model_id.into(), model_display_name: model_display_name.into(), reasoning_effort: default_reasoning_effort(), execution_mode: default_execution_mode(), context_strategy: default_context_strategy(), permission_mode: default_permission_mode(), fallback: None, provider_options: serde_json::Value::Object(Default::default()), config_version: 1, last_validation_status: SwarmModelValidationStatus::Unvalidated, last_validated_at: None } } }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SwarmModelCapability { pub provider_id: String, pub provider_display_name: String, pub model_id: String, pub display_name: String, pub description: String, pub available: bool, pub deprecated: bool, pub replacement_model_id: Option<String>, pub coding: bool, pub planning: bool, pub review: bool, pub tool_use: bool, pub vision: bool, pub supported_reasoning_efforts: Vec<String>, pub supported_execution_modes: Vec<String>, pub recommended_roles: Vec<String>, pub authenticated: bool, pub runtime_version: Option<String> }
+
 /// Full backend lifecycle. The user-facing surface collapses these into five [`SwarmPhase`]s,
 /// but the engine tracks the finer state so pause/resume/recovery are precise.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -490,7 +523,7 @@ impl SwarmTaskStatus {
 /// runtimes at once — e.g. Builders = Claude ×2 + Codex ×1. This is the unit the scheduler turns
 /// into individual agent workers; its [`id`](Self::id) is the stable allocation identity carried
 /// through persistence, runtime events, and task assignments.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct SwarmRoleAllocation {
     /// Stable allocation identity, preserved across edits and preset duplication. When a caller
@@ -499,6 +532,8 @@ pub struct SwarmRoleAllocation {
     pub id: String,
     pub runtime: SwarmRuntimeKind,
     pub count: i64,
+    #[serde(default)]
+    pub model_config: Option<SwarmMemberModelConfig>,
 }
 
 impl SwarmRoleAllocation {
@@ -507,6 +542,10 @@ impl SwarmRoleAllocation {
             id: id.into(),
             runtime,
             count,
+            // New configurations are given a registry-backed suggestion. The database loader
+            // replaces this with an explicit unvalidated config for records created before the
+            // model matrix existed; a legacy member must never silently acquire a model.
+            model_config: crate::agents::model_registry::default_for(runtime.as_str()),
         }
     }
 }
@@ -514,7 +553,7 @@ impl SwarmRoleAllocation {
 /// A saved role configuration for one role inside a preset or a live Swarm. A role is a
 /// *capability pool*: when enabled it staffs the union of its allocations, each with its own
 /// runtime and count. The scheduler treats every allocation under a role as one schedulable pool.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct SwarmRoleConfig {
     pub role: SwarmRole,
@@ -557,7 +596,7 @@ impl SwarmRoleConfig {
 }
 
 /// Structural validation shared by preset saving and Swarm creation. Enforces the role-pool
-/// invariants independent of any UI: no duplicate runtime within a role, no negative counts, an
+/// invariants independent of any UI: no duplicate allocation identity within a role, no negative counts, an
 /// enabled role must staff at least one worker, and the whole team must fit a sane capacity.
 ///
 /// Runtime *availability* (is Claude/Codex installed & authenticated) is deliberately not checked
@@ -570,11 +609,10 @@ pub fn validate_role_configs(roles: &[SwarmRoleConfig]) -> Result<(), RoleConfig
             if allocation.count < 0 {
                 return Err(RoleConfigError::NegativeCount(config.role));
             }
-            if !seen.insert(allocation.runtime) {
-                return Err(RoleConfigError::DuplicateRuntime(
-                    config.role,
-                    allocation.runtime,
-                ));
+            // Empty ids are accepted at request boundaries and minted by persistence. Only an
+            // explicit duplicate identity is a configuration conflict.
+            if !allocation.id.trim().is_empty() && !seen.insert(&allocation.id) {
+                return Err(RoleConfigError::DuplicateAllocation(config.role));
             }
         }
         if config.enabled && config.total_count() == 0 {
@@ -600,7 +638,7 @@ pub const MAX_TEAM_CAPACITY: i64 = 64;
 /// user-facing [`crate::errors::AppError`] with a clear, actionable message.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RoleConfigError {
-    DuplicateRuntime(SwarmRole, SwarmRuntimeKind),
+    DuplicateAllocation(SwarmRole),
     NegativeCount(SwarmRole),
     EmptyEnabledRole(SwarmRole),
     EmptyTeam,
@@ -615,6 +653,7 @@ pub struct SwarmAgent {
     pub swarm_id: String,
     pub role: SwarmRole,
     pub runtime: SwarmRuntimeKind,
+    pub model_config: SwarmMemberModelConfig,
     /// The role-pool allocation this worker was staffed from, when it came from a configured
     /// allocation. Dynamically added workers (e.g. an escalated Debugger) have `None`. Exposing
     /// it lets events and task assignments name the exact allocation identity a worker belongs to.
@@ -724,6 +763,15 @@ pub struct SwarmAgentRun {
     pub process_id: Option<u32>,
     pub status: String,
     pub attempt: i64,
+    pub requested_provider_id: String,
+    pub requested_model_id: String,
+    pub resolved_provider_id: String,
+    pub resolved_model_id: String,
+    pub reasoning_effort: String,
+    pub fallback_used: bool,
+    pub fallback_reason: Option<String>,
+    pub provider_runtime_version: Option<String>,
+    pub execution_config_snapshot: SwarmMemberModelConfig,
     pub exit_code: Option<i32>,
     pub failure_reason: Option<String>,
     pub cancellation_reason: Option<String>,
