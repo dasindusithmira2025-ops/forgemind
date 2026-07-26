@@ -1,5 +1,5 @@
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
-import type { AgentStateEvent, BrowserEvent, ProjectFileChangeBatch, RemoteProjection, RepositoryApprovalRequest, RepositoryOperationEvent, RepositoryOperationRecord, RestorationProgress, SwarmChangedEvent, TerminalExitEvent, TerminalOutputEvent, TerminalStatusEvent } from './types'
+import type { AgentStateEvent, BrowserEvent, ProjectFileChangeBatch, ProviderUsageSnapshot, RemoteProjection, RepositoryApprovalRequest, RepositoryOperationEvent, RepositoryOperationRecord, RestorationProgress, SwarmChangedEvent, TerminalExitEvent, TerminalOutputEvent, TerminalStatusEvent } from './types'
 
 type TerminalOutputWireEvent = Omit<TerminalOutputEvent, 'data'> & { data: string }
 
@@ -49,6 +49,10 @@ export const onBrowserEvent = (handler: (event: BrowserEvent) => void): Promise<
 /** Fired to every window when the persisted theme changes, carrying the newly selected theme id. */
 export const onThemeChanged = (handler: (themeId: string) => void): Promise<UnlistenFn> =>
   listen<string>('theme-changed', (event) => handler(event.payload))
+
+/** Backend emits this only after a material snapshot change; countdown text remains local. */
+export const onAiUsageChanged = (handler: (snapshots: ProviderUsageSnapshot[]) => void): Promise<UnlistenFn> =>
+  listen<ProviderUsageSnapshot[]>('ai-usage-changed', (event) => handler(event.payload))
 
 function decodeBase64(encoded: string): Uint8Array {
   const binary = atob(encoded)

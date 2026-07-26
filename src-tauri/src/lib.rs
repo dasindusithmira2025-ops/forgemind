@@ -10,7 +10,7 @@ mod services;
 use database::DatabaseService;
 use services::{
     AgentDetector, FileSystemService, FileWatchService, RepositoryService, RestorationScheduler,
-    SelfWriteLedger, TerminalManager, UpdateService, WindowRegistry,
+    SelfWriteLedger, TerminalManager, UpdateService, UsageService, WindowRegistry,
 };
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -45,6 +45,7 @@ pub struct AppState {
     backup_directory: PathBuf,
     legacy_migration: database::legacy_migration::LegacyMigrationStatus,
     updates: UpdateService,
+    usage: UsageService,
 }
 
 pub(crate) fn require_main_window(window: &tauri::Window) -> errors::AppResult<()> {
@@ -395,6 +396,7 @@ pub fn run() {
                 terminals.clone(),
                 app.handle().clone(),
             );
+            let usage = UsageService::new(database.clone());
             app.manage(AppState {
                 database,
                 detector,
@@ -414,6 +416,7 @@ pub fn run() {
                 backup_directory: backup_base.join(edition.channel()),
                 legacy_migration,
                 updates: updates.clone(),
+                usage,
             });
             // Give the update coordinator the app handle so every lifecycle change and download
             // progress tick is broadcast to all windows, not just the one that invoked the command.
@@ -555,6 +558,9 @@ pub fn run() {
             commands::get_repository_pull_request_detail,
             commands::evaluate_merge_readiness,
             commands::get_settings,
+            commands::get_ai_usage_snapshots,
+            commands::refresh_ai_usage,
+            commands::get_ai_usage_diagnostics,
             commands::save_settings,
             commands::get_theme_preference,
             commands::set_theme_preference,
