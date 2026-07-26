@@ -6,6 +6,7 @@ import type { PaneAssignment, Project, Workspace } from '../native/types'
 import { useAppStore } from '../stores/appStore'
 import { terminalRuntime, useWorkspaceSessions } from '../features/terminals/runtimeStore'
 import { AppShell } from '../components/shell/AppShell'
+import { AiUsageStatusBar } from '../features/usage/AiUsageStatusBar'
 import { Button } from '../components/ui/Button'
 import { Modal } from '../components/ui/Modal'
 import { ErrorNotice } from '../components/ui/ErrorNotice'
@@ -244,6 +245,7 @@ export function DetachedWorkspaceWindow({ workspaceId }: { workspaceId: string }
       <span className="status-path" title={project.rootPath}>{project.name}</span>
       <span>{running}/{workspace.panes.length} running</span>
       <span>{activePane?.title || 'No active pane'}</span>
+      <AiUsageStatusBar />
       <button className="status-inline-action" onClick={() => void native.terminateWorkspaceSessions(workspaceId).catch(() => undefined)}><CircleStop size={12} />Stop all</button>
       <button className="status-inline-action" onClick={() => workspace.panes.forEach((pane) => void restartPane(pane.id, pane))}><RotateCcw size={12} />Restart all</button>
     </>}

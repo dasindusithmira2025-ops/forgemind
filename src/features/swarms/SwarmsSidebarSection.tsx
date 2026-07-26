@@ -6,6 +6,8 @@ import { isActiveLifecycle, lifecycleLabel, lifecycleTone, progressPercent } fro
 import { onSwarmChanged } from '../../native/events'
 import type { SwarmListItem } from '../../native/types'
 import { SidebarGroup } from '../sidebar/components/SidebarGroup'
+import { useSidebarStore } from '../sidebar/sidebarStore'
+import { matchesSidebarFilter } from '../sidebar/sidebarSelectors'
 import { SwarmRowMenu } from './SwarmRowMenu'
 
 /**
@@ -25,6 +27,8 @@ export function SwarmsSidebarSection({
   const items = useSwarmStore((state) => (projectId ? state.itemsByProject[projectId] : undefined))
   const loading = useSwarmStore((state) => state.loadingProject === projectId)
   const loadSwarms = useSwarmStore((state) => state.loadSwarms)
+  const filterQuery = useSidebarStore((state) => state.filterQuery)
+  const filtering = filterQuery.trim().length > 0
 
   useEffect(() => {
     if (projectId) void loadSwarms(projectId)
@@ -47,12 +51,17 @@ export function SwarmsSidebarSection({
   }, [projectId, loadSwarms])
 
   const list = items ?? []
+  // Matching mirrors what a row actually shows: its name and its lifecycle label.
+  const visible = list.filter((item) =>
+    matchesSidebarFilter(filterQuery, item.swarm.name, lifecycleLabel(item.swarm.lifecycle)),
+  )
 
   return (
     <SidebarGroup
       id="swarms"
       label="Swarms"
-      count={list.length}
+      count={filtering ? visible.length : list.length}
+      forceExpanded={filtering}
       className="swarm-section"
       actions={
         <>
@@ -86,19 +95,21 @@ export function SwarmsSidebarSection({
         </ul>
       ) : list.length === 0 ? (
         <div className="ws-empty">
-          <p>No swarms yet for this project.</p>
+          <p>No Swarms yet for this Project.</p>
           <button
             type="button"
             className="button button-secondary"
             onClick={() => navigate(`/swarms/${projectId}?new=1`)}
           >
             <Plus size={14} />
-            Create a swarm
+            Create a Swarm
           </button>
         </div>
+      ) : visible.length === 0 ? (
+        <p className="sb-no-match">No Swarm matches the filter.</p>
       ) : (
         <ul className="ws-list swarm-list" role="list">
-          {list.map((item) => (
+          {visible.map((item) => (
             <SwarmSidebarRow
               key={item.swarm.id}
               item={item}

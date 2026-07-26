@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildInternalChangelog, computeInternalBuildNumber, computeInternalVersion, parseSemver } from './internal-version.mjs'
+import { baseChangelogCandidates, buildInternalChangelog, computeInternalBuildNumber, computeInternalVersion, parseSemver } from './internal-version.mjs'
 
 describe('computeInternalBuildNumber', () => {
   it('keeps workflow run numbers above the updater bootstrap build', () => {
@@ -52,6 +52,18 @@ describe('computeInternalVersion', () => {
   it('rejects a malformed base version', () => {
     expect(() => computeInternalVersion('0.4', 1)).toThrow(/Invalid semantic version/)
     expect(() => parseSemver('nope')).toThrow(/Invalid semantic version/)
+  })
+})
+
+describe('baseChangelogCandidates', () => {
+  it('prefers the exact entry when the base is itself a prerelease', () => {
+    // Regression: stripping straight to `0.4.1` pointed at a stable changelog that does not exist
+    // in the bootstrap state, so every push-to-main internal release failed with ENOENT.
+    expect(baseChangelogCandidates('0.4.1-1001')).toEqual(['0.4.1-1001', '0.4.1'])
+  })
+
+  it('uses only the core version for a clean stable base', () => {
+    expect(baseChangelogCandidates('0.4.0')).toEqual(['0.4.0'])
   })
 })
 

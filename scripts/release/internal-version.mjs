@@ -79,16 +79,44 @@ export function buildInternalChangelog(baseChangelog, version, { date, commit })
   }
 }
 
+/**
+ * Changelog files an internal build may inherit its notes from, in preference order.
+ *
+ * A clean stable base (`0.4.0`) only ever has a core-version entry. A base that is itself a
+ * prerelease — which is the bootstrap state, e.g. `0.4.1-1001` — ships its own entry, and stripping
+ * straight to `0.4.1` would point at a stable changelog that does not exist yet. Try the exact
+ * version first and fall back to the core version.
+ *
+ * @param {string} version canonical version from release/version.json
+ * @returns {string[]} candidate changelog versions, most specific first
+ */
+export function baseChangelogCandidates(version) {
+  const core = String(version).replace(/-.*$/, '')
+  return version === core ? [core] : [version, core]
+}
+
 async function apply() {
   const root = new URL('../../', import.meta.url)
   const readJson = async (path) => JSON.parse(await readFile(new URL(path, root), 'utf8'))
+  const readFirstJson = async (paths) => {
+    for (const path of paths) {
+      try {
+        return await readJson(path)
+      } catch (error) {
+        if (error.code !== 'ENOENT') throw error
+      }
+    }
+    throw new Error(`No base changelog found. Looked for: ${paths.join(', ')}`)
+  }
   const canonical = await readJson('release/version.json')
   const runNumber = process.env.PARALITH_INTERNAL_BUILD_NUMBER || process.env.GITHUB_RUN_NUMBER
   const commit = (process.env.PARALITH_GIT_COMMIT || process.env.GITHUB_SHA || 'unknown').trim()
   const date = (process.env.PARALITH_BUILD_DATE || new Date().toISOString().slice(0, 10)).trim()
 
   const version = computeInternalVersion(canonical.version, computeInternalBuildNumber(runNumber))
-  const baseChangelog = await readJson(`release/changelog/${canonical.version.replace(/-.*$/, '')}.json`)
+  const baseChangelog = await readFirstJson(
+    baseChangelogCandidates(canonical.version).map((entry) => `release/changelog/${entry}.json`),
+  )
   const changelog = buildInternalChangelog(baseChangelog, version, { date, commit })
 
   await writeFile(new URL('release/version.json', root), `${JSON.stringify({ ...canonical, version }, null, 2)}\n`)

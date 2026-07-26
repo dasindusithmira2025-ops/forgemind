@@ -6,6 +6,7 @@ mod placement;
 mod repair;
 mod repository;
 pub(crate) mod swarm;
+mod usage;
 
 pub(crate) use repository::NewRepositoryOperation;
 

@@ -1,7 +1,7 @@
 use crate::errors::{AppError, AppResult};
 use rusqlite::{params, Connection};
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 22;
+pub const CURRENT_SCHEMA_VERSION: i64 = 25;
 
 const MIGRATION_1: &str = r#"
 CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
@@ -878,6 +878,26 @@ pub fn apply(connection: &Connection) -> AppResult<()> {
     if current < 22 || !table_exists(connection, "orchestration_sessions")? {
         migrate_v22(connection)?;
     }
+    if current < 23
+        || !column_exists(connection, "swarm_role_allocations", "model_config_json")?
+        || !column_exists(connection, "swarm_agents", "model_config_json")?
+        || !column_exists(
+            connection,
+            "swarm_agent_runs",
+            "execution_config_snapshot_json",
+        )?
+    {
+        migrate_v23(connection)?;
+    }
+    if current < 24 || !table_exists(connection, "swarm_execution_defaults")? {
+        migrate_v24(connection)?;
+    }
+    if current < 25
+        || !table_exists(connection, "ai_usage_snapshots")?
+        || !table_exists(connection, "ai_usage_file_checkpoints")?
+    {
+        migrate_v25(connection)?;
+    }
     Ok(())
 }
 
@@ -891,6 +911,8 @@ pub fn requires_migration(connection: &Connection) -> AppResult<bool> {
         || !table_exists(connection, "open_project_sessions")?
         || !table_exists(connection, "workspace_placements")?
         || !table_exists(connection, "usage_snapshots")?
+        || !table_exists(connection, "ai_usage_snapshots")?
+        || !table_exists(connection, "ai_usage_file_checkpoints")?
         || !column_exists(connection, "workspaces", "system_kind")?
         || !column_exists(connection, "missions", "origin_workspace_id")?
         || !column_exists(connection, "workspace_placements", "preferred_monitor_id")?
@@ -915,7 +937,56 @@ pub fn requires_migration(connection: &Connection) -> AppResult<bool> {
         || !table_exists(connection, "swarm_attention_requests")?
         || !column_exists(connection, "swarms", "revision")?
         || !column_exists(connection, "swarm_events", "sequence")?
-        || !table_exists(connection, "orchestration_sessions")?)
+        || !table_exists(connection, "orchestration_sessions")?
+        || !column_exists(connection, "swarm_role_allocations", "model_config_json")?
+        || !column_exists(connection, "swarm_agents", "model_config_json")?
+        || !column_exists(
+            connection,
+            "swarm_agent_runs",
+            "execution_config_snapshot_json",
+        )?
+        || !table_exists(connection, "swarm_execution_defaults")?)
+}
+
+fn migrate_v24(connection: &Connection) -> AppResult<()> {
+    connection
+        .execute_batch("BEGIN IMMEDIATE;")
+        .map_err(AppError::database)?;
+    let result = (|| {
+        connection.execute_batch("CREATE TABLE IF NOT EXISTS swarm_execution_defaults(swarm_id TEXT PRIMARY KEY REFERENCES swarms(id) ON DELETE CASCADE,config_json TEXT NOT NULL DEFAULT '{}',updated_at TEXT NOT NULL);")?;
+        record_migration(connection, 24)
+    })();
+    finish_migration_transaction(connection, result, 24)
+}
+
+/// Read-only AI usage cache. Values are sanitized summaries; the collector never stores a
+/// provider path, transcript text, request id, account identity, or credential.
+fn migrate_v25(connection: &Connection) -> AppResult<()> {
+    connection
+        .execute_batch("BEGIN IMMEDIATE;")
+        .map_err(AppError::database)?;
+    let result = (|| {
+        connection.execute_batch(
+            r#"
+            CREATE TABLE IF NOT EXISTS ai_usage_snapshots(
+              provider TEXT PRIMARY KEY CHECK(provider IN ('claude','codex')),
+              snapshot_json TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS ai_usage_file_checkpoints(
+              provider TEXT NOT NULL CHECK(provider IN ('claude','codex')),
+              path_hash TEXT NOT NULL,
+              checkpoint_json TEXT NOT NULL,
+              updated_at TEXT NOT NULL,
+              PRIMARY KEY(provider,path_hash)
+            );
+            CREATE INDEX IF NOT EXISTS idx_ai_usage_file_checkpoints_updated
+              ON ai_usage_file_checkpoints(provider,updated_at);
+        "#,
+        )?;
+        record_migration(connection, 25)
+    })();
+    finish_migration_transaction(connection, result, 25)
 }
 
 fn table_exists(connection: &Connection, table: &str) -> AppResult<bool> {
@@ -2189,6 +2260,49 @@ CREATE INDEX IF NOT EXISTS idx_orch_exec_session
     finish_migration_transaction(connection, result, 22)
 }
 
+/// Per-member execution configuration and immutable attempt snapshots. Existing members keep
+/// their provider identity but become visibly `unvalidated`; no arbitrary model is assigned.
+fn migrate_v23(connection: &Connection) -> AppResult<()> {
+    connection
+        .execute_batch("BEGIN IMMEDIATE;")
+        .map_err(AppError::database)?;
+    let result = (|| {
+        for (table, column, definition) in [
+            (
+                "swarm_role_allocations",
+                "model_config_json",
+                "TEXT NOT NULL DEFAULT '{}'",
+            ),
+            (
+                "swarm_agents",
+                "model_config_json",
+                "TEXT NOT NULL DEFAULT '{}'",
+            ),
+            ("swarm_agent_runs", "requested_provider_id", "TEXT"),
+            ("swarm_agent_runs", "requested_model_id", "TEXT"),
+            ("swarm_agent_runs", "resolved_provider_id", "TEXT"),
+            ("swarm_agent_runs", "resolved_model_id", "TEXT"),
+            ("swarm_agent_runs", "reasoning_effort", "TEXT"),
+            (
+                "swarm_agent_runs",
+                "fallback_used",
+                "INTEGER NOT NULL DEFAULT 0",
+            ),
+            ("swarm_agent_runs", "fallback_reason", "TEXT"),
+            ("swarm_agent_runs", "provider_runtime_version", "TEXT"),
+            (
+                "swarm_agent_runs",
+                "execution_config_snapshot_json",
+                "TEXT NOT NULL DEFAULT '{}'",
+            ),
+        ] {
+            add_column_if_missing(connection, table, column, definition)?;
+        }
+        record_migration(connection, 23)
+    })();
+    finish_migration_transaction(connection, result, 23)
+}
+
 /// Rewrite every stored preset's `config_json` into the role-pool allocation shape. User presets
 /// are upgraded in place (no data loss); built-in presets are refreshed to the canonical
 /// composition from [`crate::models::swarm::builtin_presets`], which is where the Feature Team and
@@ -2575,6 +2689,44 @@ fn run_migration(connection: &Connection, sql: &str, version: i64) -> AppResult<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn model_configuration_migration_is_additive_and_preserves_existing_rows() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection.execute_batch("\
+            CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
+            CREATE TABLE swarm_role_allocations(id TEXT PRIMARY KEY, swarm_id TEXT, role TEXT, runtime TEXT, count INTEGER, position INTEGER);
+            CREATE TABLE swarm_agents(id TEXT PRIMARY KEY, swarm_id TEXT, runtime TEXT);
+            CREATE TABLE swarm_agent_runs(id TEXT PRIMARY KEY, swarm_id TEXT);
+            INSERT INTO swarm_role_allocations VALUES('allocation','swarm','builder','codex',1,0);
+            INSERT INTO swarm_agents VALUES('member','swarm','codex');
+            INSERT INTO swarm_agent_runs VALUES('attempt','swarm');
+        ").unwrap();
+        migrate_v23(&connection).unwrap();
+        assert!(column_exists(&connection, "swarm_role_allocations", "model_config_json").unwrap());
+        assert!(column_exists(&connection, "swarm_agents", "model_config_json").unwrap());
+        assert!(column_exists(
+            &connection,
+            "swarm_agent_runs",
+            "execution_config_snapshot_json"
+        )
+        .unwrap());
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT runtime FROM swarm_agents WHERE id='member'",
+                    [],
+                    |row| row.get::<_, String>(0)
+                )
+                .unwrap(),
+            "codex"
+        );
+        connection
+            .execute_batch("CREATE TABLE swarms(id TEXT PRIMARY KEY);")
+            .unwrap();
+        migrate_v24(&connection).unwrap();
+        assert!(table_exists(&connection, "swarm_execution_defaults").unwrap());
+    }
 
     fn insert_session(connection: &Connection) -> rusqlite::Result<usize> {
         connection.execute(

@@ -12,6 +12,9 @@ dist
 dist-ssr
 src-tauri/target
 .artifacts
+update-site-dist/
+gha-creds-*.json
+firebase-debug.log
 *.local
 
 # PARALITH local state and recovery material

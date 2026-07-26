@@ -10,6 +10,7 @@ pub mod startup_service;
 pub mod swarm_service;
 pub mod terminal_manager;
 pub mod update_service;
+pub mod usage_service;
 pub mod window_registry;
 
 pub use agent_detector::AgentDetector;
@@ -22,4 +23,5 @@ pub use restoration_scheduler::RestorationScheduler;
 pub use swarm_service::SwarmService;
 pub use terminal_manager::TerminalManager;
 pub use update_service::UpdateService;
+pub use usage_service::UsageService;
 pub use window_registry::{detached_label, WindowRegistry, MAIN_WINDOW_LABEL};
