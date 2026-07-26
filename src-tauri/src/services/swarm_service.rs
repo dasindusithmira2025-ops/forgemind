@@ -205,8 +205,10 @@ impl ProviderRuntimeAdapter for ClaudeAdapter {
         };
         let mut arguments = vec![
             "--print".into(),
-            "--model".into(), agent.model_config.model_id.clone(),
-            "--effort".into(), agent.model_config.reasoning_effort.clone(),
+            "--model".into(),
+            agent.model_config.model_id.clone(),
+            "--effort".into(),
+            agent.model_config.reasoning_effort.clone(),
             "--verbose".into(),
             "--output-format".into(),
             "stream-json".into(),
@@ -263,8 +265,13 @@ impl ProviderRuntimeAdapter for CodexAdapter {
         // Approval, sandbox and working-directory controls are top-level Codex options. Placing
         // them after `exec` is rejected by current CLIs before a thread can start.
         let mut arguments = vec![
-            "--model".into(), agent.model_config.model_id.clone(),
-            "-c".into(), format!("model_reasoning_effort=\"{}\"", agent.model_config.reasoning_effort),
+            "--model".into(),
+            agent.model_config.model_id.clone(),
+            "-c".into(),
+            format!(
+                "model_reasoning_effort=\"{}\"",
+                agent.model_config.reasoning_effort
+            ),
             "--ask-for-approval".into(),
             "never".into(),
             "--sandbox".into(),
@@ -777,7 +784,10 @@ impl AgentRuntime for ProductionAgentRuntime {
         agent: &SwarmAgent,
     ) -> AppResult<RuntimeStep> {
         if let Some(session_id) = agent.terminal_session_id.as_deref() {
-            let active_runtime = self.database.swarm_agent_session_runtime(&agent.id, session_id)?.unwrap_or(agent.runtime);
+            let active_runtime = self
+                .database
+                .swarm_agent_session_runtime(&agent.id, session_id)?
+                .unwrap_or(agent.runtime);
             if let Ok(session) = self.terminals.session_status(session_id) {
                 let events = normalize_runtime_events(active_runtime, &session.output_tail);
                 let provider_finished = events
@@ -936,19 +946,39 @@ impl AgentRuntime for ProductionAgentRuntime {
         if detection.executable_path.is_none() {
             if let Some(fallback) = &agent.model_config.fallback {
                 if fallback.policy != "require_approval" {
-                    if let Some(model) = crate::agents::model_registry::find(&fallback.provider_id, &fallback.model_id) {
-                        let runtime = SwarmRuntimeKind::from_db(&fallback.provider_id).ok_or_else(|| AppError::new("fallback_provider_invalid", "The configured fallback provider is invalid.", true))?;
-                        let candidate = self.detector.detect(Self::adapter(runtime)?.provider(), None, false);
+                    if let Some(model) = crate::agents::model_registry::find(
+                        &fallback.provider_id,
+                        &fallback.model_id,
+                    ) {
+                        let runtime =
+                            SwarmRuntimeKind::from_db(&fallback.provider_id).ok_or_else(|| {
+                                AppError::new(
+                                    "fallback_provider_invalid",
+                                    "The configured fallback provider is invalid.",
+                                    true,
+                                )
+                            })?;
+                        let candidate =
+                            self.detector
+                                .detect(Self::adapter(runtime)?.provider(), None, false);
                         if candidate.executable_path.is_some() {
                             execution_agent.runtime = runtime;
                             // Preserve the saved reasoning, context, permission, and
                             // provider-specific settings in the immutable attempt snapshot;
                             // only the explicitly resolved provider/model changes.
                             execution_agent.model_config.provider_id = model.provider_id.into();
-                            execution_agent.model_config.provider_display_name = model.provider_name.into();
+                            execution_agent.model_config.provider_display_name =
+                                model.provider_name.into();
                             execution_agent.model_config.model_id = model.model_id.into();
-                            execution_agent.model_config.model_display_name = model.display_name.into();
-                            self.database.record_swarm_agent_run_resolution(&agent.swarm_id, &agent.id, &task.id, &execution_agent.model_config, Some("Primary provider could not start"))?;
+                            execution_agent.model_config.model_display_name =
+                                model.display_name.into();
+                            self.database.record_swarm_agent_run_resolution(
+                                &agent.swarm_id,
+                                &agent.id,
+                                &task.id,
+                                &execution_agent.model_config,
+                                Some("Primary provider could not start"),
+                            )?;
                             self.record_runtime_event(agent, task, "fallback_applied", format!("Requested {} / {}; executing {} / {}", agent.model_config.provider_display_name, agent.model_config.model_display_name, execution_agent.model_config.provider_display_name, execution_agent.model_config.model_display_name), "warning", serde_json::json!({"requestedProviderId": agent.model_config.provider_id, "requestedModelId": agent.model_config.model_id, "resolvedProviderId": execution_agent.model_config.provider_id, "resolvedModelId": execution_agent.model_config.model_id}))?;
                             adapter = Self::adapter(runtime)?;
                             detection = candidate;
@@ -1021,8 +1051,12 @@ impl AgentRuntime for ProductionAgentRuntime {
             &working_directory,
         )?;
         let session = self.terminals.create_session(request)?;
-        self.database
-            .bind_swarm_agent_session(&execution_agent, &task.id, &session, &instruction_hash)?;
+        self.database.bind_swarm_agent_session(
+            &execution_agent,
+            &task.id,
+            &session,
+            &instruction_hash,
+        )?;
         self.database.mark_swarm_messages_delivered(
             &agent.swarm_id,
             &agent.id,
@@ -2025,61 +2059,203 @@ impl SwarmService {
         self.db().list_swarm_presets()
     }
 
-    pub fn execution_defaults(&self, project_id: &str, swarm_id: &str) -> AppResult<SwarmExecutionDefaults> { self.swarm_for_project(project_id, swarm_id)?; self.db().swarm_execution_defaults(swarm_id) }
-
-    pub fn save_execution_defaults(&self, project_id: &str, swarm_id: &str, defaults: &SwarmExecutionDefaults) -> AppResult<()> {
+    pub fn execution_defaults(
+        &self,
+        project_id: &str,
+        swarm_id: &str,
+    ) -> AppResult<SwarmExecutionDefaults> {
         self.swarm_for_project(project_id, swarm_id)?;
-        if let Some(config) = &defaults.member { self.validate_model_config(config)?; }
-        self.db().save_swarm_execution_defaults(swarm_id, defaults)?;
-        self.event(swarm_id, "swarm_model_defaults_changed", None, None, None, "Swarm defaults changed; existing members were not modified.", "info")?;
-        self.emit_changed(project_id, swarm_id); Ok(())
+        self.db().swarm_execution_defaults(swarm_id)
+    }
+
+    pub fn save_execution_defaults(
+        &self,
+        project_id: &str,
+        swarm_id: &str,
+        defaults: &SwarmExecutionDefaults,
+    ) -> AppResult<()> {
+        self.swarm_for_project(project_id, swarm_id)?;
+        if let Some(config) = &defaults.member {
+            self.validate_model_config(config)?;
+        }
+        self.db()
+            .save_swarm_execution_defaults(swarm_id, defaults)?;
+        self.event(
+            swarm_id,
+            "swarm_model_defaults_changed",
+            None,
+            None,
+            None,
+            "Swarm defaults changed; existing members were not modified.",
+            "info",
+        )?;
+        self.emit_changed(project_id, swarm_id);
+        Ok(())
     }
 
     /// Explicit bulk operation for existing members. Defaults otherwise affect only members
     /// created after the default is saved.
-    pub fn apply_execution_defaults(&self, project_id: &str, swarm_id: &str, member_ids: &[String]) -> AppResult<usize> {
+    pub fn apply_execution_defaults(
+        &self,
+        project_id: &str,
+        swarm_id: &str,
+        member_ids: &[String],
+    ) -> AppResult<usize> {
         self.swarm_for_project(project_id, swarm_id)?;
         let defaults = self.db().swarm_execution_defaults(swarm_id)?;
-        let Some(default_config) = defaults.member else { return Err(AppError::new("swarm_defaults_missing", "Set a Swarm execution default before applying it to members.", true)); };
+        let Some(default_config) = defaults.member else {
+            return Err(AppError::new(
+                "swarm_defaults_missing",
+                "Set a Swarm execution default before applying it to members.",
+                true,
+            ));
+        };
         let agents = self.db().list_swarm_agents(swarm_id)?;
         let mut updated = 0;
-        for agent in agents.into_iter().filter(|agent| member_ids.iter().any(|id| id == &agent.id)) {
+        for agent in agents
+            .into_iter()
+            .filter(|agent| member_ids.iter().any(|id| id == &agent.id))
+        {
             let mut config = default_config.clone();
             config.config_version = agent.model_config.config_version.saturating_add(1).max(1);
             config.last_validation_status = SwarmModelValidationStatus::Unvalidated;
             config.last_validated_at = None;
-            self.db().update_swarm_agent_model_config(&agent.id, &config)?;
+            self.db()
+                .update_swarm_agent_model_config(&agent.id, &config)?;
             updated += 1;
         }
-        self.event(swarm_id, "swarm_model_defaults_applied", None, None, None, &format!("Applied Swarm model defaults to {} selected member(s).", updated), "info")?;
+        self.event(
+            swarm_id,
+            "swarm_model_defaults_applied",
+            None,
+            None,
+            None,
+            &format!(
+                "Applied Swarm model defaults to {} selected member(s).",
+                updated
+            ),
+            "info",
+        )?;
         self.emit_changed(project_id, swarm_id);
         Ok(updated)
     }
 
-    pub fn validate_member_model_config(&self, project_id: &str, swarm_id: &str, member_id: &str) -> AppResult<SwarmMemberModelConfig> {
+    pub fn validate_member_model_config(
+        &self,
+        project_id: &str,
+        swarm_id: &str,
+        member_id: &str,
+    ) -> AppResult<SwarmMemberModelConfig> {
         self.swarm_for_project(project_id, swarm_id)?;
-        let mut agent = self.db().list_swarm_agents(swarm_id)?.into_iter().find(|agent| agent.id == member_id).ok_or_else(|| AppError::new("swarm_member_not_found", "The selected Swarm member no longer exists.", true).entity(member_id))?;
-        agent.model_config.last_validation_status = match self.validate_model_config(&agent.model_config) { Ok(()) => SwarmModelValidationStatus::Valid, Err(error) => { let code = error.code.as_str(); if code.contains("authentication") { SwarmModelValidationStatus::AuthenticationRequired } else if code.contains("provider") { SwarmModelValidationStatus::ProviderUnavailable } else if code.contains("model") { SwarmModelValidationStatus::ModelUnavailable } else { SwarmModelValidationStatus::ConfigurationError } } };
+        let mut agent = self
+            .db()
+            .list_swarm_agents(swarm_id)?
+            .into_iter()
+            .find(|agent| agent.id == member_id)
+            .ok_or_else(|| {
+                AppError::new(
+                    "swarm_member_not_found",
+                    "The selected Swarm member no longer exists.",
+                    true,
+                )
+                .entity(member_id)
+            })?;
+        agent.model_config.last_validation_status =
+            match self.validate_model_config(&agent.model_config) {
+                Ok(()) => SwarmModelValidationStatus::Valid,
+                Err(error) => {
+                    let code = error.code.as_str();
+                    if code.contains("authentication") {
+                        SwarmModelValidationStatus::AuthenticationRequired
+                    } else if code.contains("provider") {
+                        SwarmModelValidationStatus::ProviderUnavailable
+                    } else if code.contains("model") {
+                        SwarmModelValidationStatus::ModelUnavailable
+                    } else {
+                        SwarmModelValidationStatus::ConfigurationError
+                    }
+                }
+            };
         agent.model_config.last_validated_at = Some(Utc::now().to_rfc3339());
-        self.db().update_swarm_agent_model_config(member_id, &agent.model_config)?;
-        self.event(swarm_id, if agent.model_config.last_validation_status == SwarmModelValidationStatus::Valid { "member_model_validation_succeeded" } else { "member_model_validation_failed" }, Some(agent.role), Some(member_id), None, &format!("{} / {} validation: {:?}", agent.model_config.provider_display_name, agent.model_config.model_display_name, agent.model_config.last_validation_status), if agent.model_config.last_validation_status == SwarmModelValidationStatus::Valid { "result" } else { "warning" })?;
-        self.emit_changed(project_id, swarm_id); Ok(agent.model_config)
+        self.db()
+            .update_swarm_agent_model_config(member_id, &agent.model_config)?;
+        self.event(
+            swarm_id,
+            if agent.model_config.last_validation_status == SwarmModelValidationStatus::Valid {
+                "member_model_validation_succeeded"
+            } else {
+                "member_model_validation_failed"
+            },
+            Some(agent.role),
+            Some(member_id),
+            None,
+            &format!(
+                "{} / {} validation: {:?}",
+                agent.model_config.provider_display_name,
+                agent.model_config.model_display_name,
+                agent.model_config.last_validation_status
+            ),
+            if agent.model_config.last_validation_status == SwarmModelValidationStatus::Valid {
+                "result"
+            } else {
+                "warning"
+            },
+        )?;
+        self.emit_changed(project_id, swarm_id);
+        Ok(agent.model_config)
     }
 
     /// Change the configuration used by the member's *next* attempt. Running provider sessions
     /// retain their separately persisted execution snapshot and are never reconfigured in place.
-    pub fn update_member_model_config(&self, project_id: &str, swarm_id: &str, member_id: &str, mut config: SwarmMemberModelConfig) -> AppResult<SwarmMemberModelConfig> {
+    pub fn update_member_model_config(
+        &self,
+        project_id: &str,
+        swarm_id: &str,
+        member_id: &str,
+        mut config: SwarmMemberModelConfig,
+    ) -> AppResult<SwarmMemberModelConfig> {
         self.swarm_for_project(project_id, swarm_id)?;
-        let agent = self.db().list_swarm_agents(swarm_id)?.into_iter().find(|agent| agent.id == member_id).ok_or_else(|| AppError::new("swarm_member_not_found", "The selected Swarm member no longer exists.", true).entity(member_id))?;
+        let agent = self
+            .db()
+            .list_swarm_agents(swarm_id)?
+            .into_iter()
+            .find(|agent| agent.id == member_id)
+            .ok_or_else(|| {
+                AppError::new(
+                    "swarm_member_not_found",
+                    "The selected Swarm member no longer exists.",
+                    true,
+                )
+                .entity(member_id)
+            })?;
         // Configuration is intentionally saved even when the provider is currently unavailable;
         // validation records that state and the preflight explains it before launch.
-        let model = crate::agents::model_registry::find(&config.provider_id, &config.model_id).ok_or_else(|| AppError::new("swarm_model_unavailable", "The selected model is not in the provider registry.", true))?;
-        if !model.reasoning.contains(&config.reasoning_effort.as_str()) || !model.modes.contains(&config.execution_mode.as_str()) {
-            return Err(AppError::new("swarm_model_unsupported_option", "The selected reasoning effort or execution mode is unsupported by this model.", true));
+        let model = crate::agents::model_registry::find(&config.provider_id, &config.model_id)
+            .ok_or_else(|| {
+                AppError::new(
+                    "swarm_model_unavailable",
+                    "The selected model is not in the provider registry.",
+                    true,
+                )
+            })?;
+        if !model.reasoning.contains(&config.reasoning_effort.as_str())
+            || !model.modes.contains(&config.execution_mode.as_str())
+        {
+            return Err(AppError::new(
+                "swarm_model_unsupported_option",
+                "The selected reasoning effort or execution mode is unsupported by this model.",
+                true,
+            ));
         }
         if let Some(fallback) = &config.fallback {
-            if crate::agents::model_registry::find(&fallback.provider_id, &fallback.model_id).is_none() {
-                return Err(AppError::new("swarm_fallback_model_unavailable", "The fallback model is not in the provider registry.", true));
+            if crate::agents::model_registry::find(&fallback.provider_id, &fallback.model_id)
+                .is_none()
+            {
+                return Err(AppError::new(
+                    "swarm_fallback_model_unavailable",
+                    "The fallback model is not in the provider registry.",
+                    true,
+                ));
             }
         }
         config.provider_display_name = model.provider_name.into();
@@ -2087,20 +2263,77 @@ impl SwarmService {
         config.config_version = agent.model_config.config_version.saturating_add(1).max(1);
         config.last_validation_status = SwarmModelValidationStatus::Unvalidated;
         config.last_validated_at = None;
-        self.db().update_swarm_agent_model_config(member_id, &config)?;
-        self.event(swarm_id, "member_model_configuration_changed", Some(agent.role), Some(member_id), None, &format!("Next execution configured for {} / {}", config.provider_display_name, config.model_display_name), "info")?;
+        self.db()
+            .update_swarm_agent_model_config(member_id, &config)?;
+        self.event(
+            swarm_id,
+            "member_model_configuration_changed",
+            Some(agent.role),
+            Some(member_id),
+            None,
+            &format!(
+                "Next execution configured for {} / {}",
+                config.provider_display_name, config.model_display_name
+            ),
+            "info",
+        )?;
         self.emit_changed(project_id, swarm_id);
         Ok(config)
     }
 
     fn validate_model_config(&self, config: &SwarmMemberModelConfig) -> AppResult<()> {
-        let model = crate::agents::model_registry::find(&config.provider_id, &config.model_id).ok_or_else(|| AppError::new("swarm_model_unavailable", format!("{} / {} is not in the provider registry.", config.provider_display_name, config.model_display_name), true))?;
-        if !model.reasoning.contains(&config.reasoning_effort.as_str()) || !model.modes.contains(&config.execution_mode.as_str()) { return Err(AppError::new("swarm_model_unsupported_option", "The selected reasoning effort or execution mode is unsupported by this model.", true)); }
+        let model = crate::agents::model_registry::find(&config.provider_id, &config.model_id)
+            .ok_or_else(|| {
+                AppError::new(
+                    "swarm_model_unavailable",
+                    format!(
+                        "{} / {} is not in the provider registry.",
+                        config.provider_display_name, config.model_display_name
+                    ),
+                    true,
+                )
+            })?;
+        if !model.reasoning.contains(&config.reasoning_effort.as_str())
+            || !model.modes.contains(&config.execution_mode.as_str())
+        {
+            return Err(AppError::new(
+                "swarm_model_unsupported_option",
+                "The selected reasoning effort or execution mode is unsupported by this model.",
+                true,
+            ));
+        }
         let readiness = self.runtime_readiness()?;
-        let runtime = SwarmRuntimeKind::from_db(&config.provider_id).ok_or_else(|| AppError::new("swarm_provider_unavailable", "The selected provider is unsupported.", true))?;
-        let state = readiness.iter().find(|item| item.runtime == runtime).ok_or_else(|| AppError::new("swarm_provider_unavailable", "Provider readiness is unavailable.", true))?;
-        if !state.installed { return Err(AppError::new("swarm_provider_unavailable", state.message.clone(), true)); }
-        if !state.authenticated { return Err(AppError::new("swarm_authentication_required", state.message.clone(), true)); }
+        let runtime = SwarmRuntimeKind::from_db(&config.provider_id).ok_or_else(|| {
+            AppError::new(
+                "swarm_provider_unavailable",
+                "The selected provider is unsupported.",
+                true,
+            )
+        })?;
+        let state = readiness
+            .iter()
+            .find(|item| item.runtime == runtime)
+            .ok_or_else(|| {
+                AppError::new(
+                    "swarm_provider_unavailable",
+                    "Provider readiness is unavailable.",
+                    true,
+                )
+            })?;
+        if !state.installed {
+            return Err(AppError::new(
+                "swarm_provider_unavailable",
+                state.message.clone(),
+                true,
+            ));
+        }
+        if !state.authenticated {
+            return Err(AppError::new(
+                "swarm_authentication_required",
+                state.message.clone(),
+                true,
+            ));
+        }
         Ok(())
     }
 
@@ -2146,13 +2379,26 @@ impl SwarmService {
     /// availability; aliases and capabilities remain centralized in the application registry.
     pub fn model_registry(&self) -> AppResult<Vec<SwarmModelCapability>> {
         let readiness = self.runtime_readiness()?;
-        Ok(["claude", "codex"].into_iter().flat_map(|provider_id| {
-            let runtime = if provider_id == "claude" { SwarmRuntimeKind::Claude } else { SwarmRuntimeKind::Codex };
-            let state = readiness.iter().find(|item| item.runtime == runtime);
-            crate::agents::model_registry::provider_models(provider_id).into_iter().map(move |model| {
-                crate::agents::model_registry::capability(model, state.is_some_and(|item| item.available), state.and_then(|item| item.version.clone()))
+        Ok(["claude", "codex"]
+            .into_iter()
+            .flat_map(|provider_id| {
+                let runtime = if provider_id == "claude" {
+                    SwarmRuntimeKind::Claude
+                } else {
+                    SwarmRuntimeKind::Codex
+                };
+                let state = readiness.iter().find(|item| item.runtime == runtime);
+                crate::agents::model_registry::provider_models(provider_id)
+                    .into_iter()
+                    .map(move |model| {
+                        crate::agents::model_registry::capability(
+                            model,
+                            state.is_some_and(|item| item.available),
+                            state.and_then(|item| item.version.clone()),
+                        )
+                    })
             })
-        }).collect())
+            .collect())
     }
 
     pub fn save_preset(&self, request: &SavePresetRequest) -> AppResult<SwarmPreset> {
@@ -2200,7 +2446,14 @@ impl SwarmService {
             .iter()
             .filter(|role| role.enabled)
             .flat_map(|role| role.allocations.iter())
-            .filter(|allocation| allocation.count > 0 && allocation.model_config.as_ref().and_then(|config| config.fallback.as_ref()).is_none())
+            .filter(|allocation| {
+                allocation.count > 0
+                    && allocation
+                        .model_config
+                        .as_ref()
+                        .and_then(|config| config.fallback.as_ref())
+                        .is_none()
+            })
             .map(|allocation| allocation.runtime)
         {
             if runtime == SwarmRuntimeKind::Auto {
@@ -4219,7 +4472,13 @@ impl SwarmService {
                     allocation.runtime
                 };
                 for _ in 0..count {
-                    self.insert_agent(&swarm.id, role.role, runtime, Some(allocation.id.as_str()), allocation.model_config.clone())?;
+                    self.insert_agent(
+                        &swarm.id,
+                        role.role,
+                        runtime,
+                        Some(allocation.id.as_str()),
+                        allocation.model_config.clone(),
+                    )?;
                 }
             }
         }
@@ -4257,7 +4516,9 @@ impl SwarmService {
             swarm_id: swarm_id.to_string(),
             role,
             runtime: resolved,
-            model_config: model_config.unwrap_or_else(|| crate::agents::model_registry::unvalidated_for(resolved.as_str())),
+            model_config: model_config.unwrap_or_else(|| {
+                crate::agents::model_registry::unvalidated_for(resolved.as_str())
+            }),
             allocation_id: allocation_id.map(str::to_string),
             display_name,
             status: SwarmAgentStatus::Idle,
@@ -4298,7 +4559,17 @@ impl SwarmService {
             .iter()
             .filter(|role| role.enabled)
             .flat_map(|role| role.allocations.iter())
-            .filter(|allocation| allocation.count > 0 && allocation.model_config.as_ref().and_then(|config| config.fallback.as_ref()).map_or(true, |fallback| fallback.policy == "no_fallback" || fallback.policy == "require_approval"))
+            .filter(|allocation| {
+                allocation.count > 0
+                    && allocation
+                        .model_config
+                        .as_ref()
+                        .and_then(|config| config.fallback.as_ref())
+                        .map_or(true, |fallback| {
+                            fallback.policy == "no_fallback"
+                                || fallback.policy == "require_approval"
+                        })
+            })
             .map(|allocation| allocation.runtime)
             .collect();
         needed.sort_by_key(|runtime| runtime.as_str());
@@ -4321,13 +4592,57 @@ impl SwarmService {
                 unavailable.push(format!("{} (readiness unknown)", runtime_label(runtime)));
             }
         }
-        for allocation in swarm.roles.iter().filter(|role| role.enabled).flat_map(|role| role.allocations.iter()).filter(|allocation| allocation.count > 0) {
-            let Some(config) = allocation.model_config.as_ref() else { unavailable.push(format!("{} member has no saved model configuration", runtime_label(allocation.runtime))); continue; };
-            let Some(model) = crate::agents::model_registry::find(&config.provider_id, &config.model_id) else { unavailable.push(format!("{} / {} is not registered", config.provider_display_name, config.model_display_name)); continue; };
-            if config.provider_id != allocation.runtime.as_str() || !model.reasoning.contains(&config.reasoning_effort.as_str()) || !model.modes.contains(&config.execution_mode.as_str()) { unavailable.push(format!("{} / {} has unsupported execution settings", config.provider_display_name, config.model_display_name)); }
+        for allocation in swarm
+            .roles
+            .iter()
+            .filter(|role| role.enabled)
+            .flat_map(|role| role.allocations.iter())
+            .filter(|allocation| allocation.count > 0)
+        {
+            let Some(config) = allocation.model_config.as_ref() else {
+                unavailable.push(format!(
+                    "{} member has no saved model configuration",
+                    runtime_label(allocation.runtime)
+                ));
+                continue;
+            };
+            let Some(model) =
+                crate::agents::model_registry::find(&config.provider_id, &config.model_id)
+            else {
+                unavailable.push(format!(
+                    "{} / {} is not registered",
+                    config.provider_display_name, config.model_display_name
+                ));
+                continue;
+            };
+            if config.provider_id != allocation.runtime.as_str()
+                || !model.reasoning.contains(&config.reasoning_effort.as_str())
+                || !model.modes.contains(&config.execution_mode.as_str())
+            {
+                unavailable.push(format!(
+                    "{} / {} has unsupported execution settings",
+                    config.provider_display_name, config.model_display_name
+                ));
+            }
             if let Some(fallback) = &config.fallback {
-                if crate::agents::model_registry::find(&fallback.provider_id, &fallback.model_id).is_none() { unavailable.push(format!("Fallback {} / {} is not registered", fallback.provider_id, fallback.model_id)); }
-                else if let Some(runtime) = SwarmRuntimeKind::from_db(&fallback.provider_id) { if !readiness.iter().any(|item| item.runtime == runtime && item.available) { unavailable.push(format!("Fallback {} / {} is not available", fallback.provider_id, fallback.model_id)); } }
+                if crate::agents::model_registry::find(&fallback.provider_id, &fallback.model_id)
+                    .is_none()
+                {
+                    unavailable.push(format!(
+                        "Fallback {} / {} is not registered",
+                        fallback.provider_id, fallback.model_id
+                    ));
+                } else if let Some(runtime) = SwarmRuntimeKind::from_db(&fallback.provider_id) {
+                    if !readiness
+                        .iter()
+                        .any(|item| item.runtime == runtime && item.available)
+                    {
+                        unavailable.push(format!(
+                            "Fallback {} / {} is not available",
+                            fallback.provider_id, fallback.model_id
+                        ));
+                    }
+                }
             }
         }
         if unavailable.is_empty() {
@@ -4351,7 +4666,10 @@ impl SwarmService {
     pub fn add_builder(&self, project_id: &str, swarm_id: &str) -> AppResult<()> {
         self.swarm_for_project(project_id, swarm_id)?;
         let default_config = self.db().swarm_execution_defaults(swarm_id)?.member;
-        let runtime = default_config.as_ref().and_then(|config| SwarmRuntimeKind::from_db(&config.provider_id)).unwrap_or(SwarmRuntimeKind::Auto);
+        let runtime = default_config
+            .as_ref()
+            .and_then(|config| SwarmRuntimeKind::from_db(&config.provider_id))
+            .unwrap_or(SwarmRuntimeKind::Auto);
         self.insert_agent(swarm_id, SwarmRole::Builder, runtime, None, default_config)?;
         self.event(
             swarm_id,
@@ -4558,7 +4876,8 @@ fn role_config_error(error: RoleConfigError) -> AppError {
         RoleConfigError::DuplicateAllocation(role) => AppError::new(
             "duplicate_allocation_id",
             format!(
-                "{} contains duplicate member allocation identities.", role_label(role)
+                "{} contains duplicate member allocation identities.",
+                role_label(role)
             ),
             true,
         ),
@@ -5581,7 +5900,10 @@ mod tests {
         }];
         let swarm = create_with_roles(&service, &project, roles).unwrap();
         assert_eq!(swarm.roles[0].total_count(), 3);
-        assert_ne!(swarm.roles[0].allocations[0].id, swarm.roles[0].allocations[1].id);
+        assert_ne!(
+            swarm.roles[0].allocations[0].id,
+            swarm.roles[0].allocations[1].id
+        );
     }
 
     #[test]

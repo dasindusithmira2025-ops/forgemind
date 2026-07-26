@@ -12,36 +12,125 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum SwarmModelValidationStatus { Valid, Unvalidated, ProviderUnavailable, AuthenticationRequired, ModelUnavailable, UnsupportedOption, DeprecatedModel, ConfigurationError }
+pub enum SwarmModelValidationStatus {
+    Valid,
+    Unvalidated,
+    ProviderUnavailable,
+    AuthenticationRequired,
+    ModelUnavailable,
+    UnsupportedOption,
+    DeprecatedModel,
+    ConfigurationError,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct SwarmFallbackModelConfig { pub provider_id: String, pub model_id: String, #[serde(default = "default_fallback_policy")] pub policy: String }
-fn default_fallback_policy() -> String { "when_unavailable".into() }
+pub struct SwarmFallbackModelConfig {
+    pub provider_id: String,
+    pub model_id: String,
+    #[serde(default = "default_fallback_policy")]
+    pub policy: String,
+}
+fn default_fallback_policy() -> String {
+    "when_unavailable".into()
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct SwarmMemberModelConfig {
-    pub provider_id: String, pub provider_display_name: String, pub model_id: String, pub model_display_name: String,
-    #[serde(default = "default_reasoning_effort")] pub reasoning_effort: String,
-    #[serde(default = "default_execution_mode")] pub execution_mode: String,
-    #[serde(default = "default_context_strategy")] pub context_strategy: String,
-    #[serde(default = "default_permission_mode")] pub permission_mode: String,
-    #[serde(default)] pub fallback: Option<SwarmFallbackModelConfig>,
-    #[serde(default)] pub provider_options: serde_json::Value,
-    #[serde(default = "default_config_version")] pub config_version: i64,
-    #[serde(default = "default_validation_status")] pub last_validation_status: SwarmModelValidationStatus,
-    #[serde(default)] pub last_validated_at: Option<String>,
+    pub provider_id: String,
+    pub provider_display_name: String,
+    pub model_id: String,
+    pub model_display_name: String,
+    #[serde(default = "default_reasoning_effort")]
+    pub reasoning_effort: String,
+    #[serde(default = "default_execution_mode")]
+    pub execution_mode: String,
+    #[serde(default = "default_context_strategy")]
+    pub context_strategy: String,
+    #[serde(default = "default_permission_mode")]
+    pub permission_mode: String,
+    #[serde(default)]
+    pub fallback: Option<SwarmFallbackModelConfig>,
+    #[serde(default)]
+    pub provider_options: serde_json::Value,
+    #[serde(default = "default_config_version")]
+    pub config_version: i64,
+    #[serde(default = "default_validation_status")]
+    pub last_validation_status: SwarmModelValidationStatus,
+    #[serde(default)]
+    pub last_validated_at: Option<String>,
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct SwarmExecutionDefaults { pub member: Option<SwarmMemberModelConfig> }
-fn default_reasoning_effort() -> String { "medium".into() } fn default_execution_mode() -> String { "autonomous".into() } fn default_context_strategy() -> String { "balanced".into() } fn default_permission_mode() -> String { "ask".into() } fn default_config_version() -> i64 { 1 } fn default_validation_status() -> SwarmModelValidationStatus { SwarmModelValidationStatus::Unvalidated }
-impl SwarmMemberModelConfig { pub fn configured(provider_id: &str, model_id: &str, provider_display_name: &str, model_display_name: &str) -> Self { Self { provider_id: provider_id.into(), provider_display_name: provider_display_name.into(), model_id: model_id.into(), model_display_name: model_display_name.into(), reasoning_effort: default_reasoning_effort(), execution_mode: default_execution_mode(), context_strategy: default_context_strategy(), permission_mode: default_permission_mode(), fallback: None, provider_options: serde_json::Value::Object(Default::default()), config_version: 1, last_validation_status: SwarmModelValidationStatus::Unvalidated, last_validated_at: None } } }
+pub struct SwarmExecutionDefaults {
+    pub member: Option<SwarmMemberModelConfig>,
+}
+fn default_reasoning_effort() -> String {
+    "medium".into()
+}
+fn default_execution_mode() -> String {
+    "autonomous".into()
+}
+fn default_context_strategy() -> String {
+    "balanced".into()
+}
+fn default_permission_mode() -> String {
+    "ask".into()
+}
+fn default_config_version() -> i64 {
+    1
+}
+fn default_validation_status() -> SwarmModelValidationStatus {
+    SwarmModelValidationStatus::Unvalidated
+}
+impl SwarmMemberModelConfig {
+    pub fn configured(
+        provider_id: &str,
+        model_id: &str,
+        provider_display_name: &str,
+        model_display_name: &str,
+    ) -> Self {
+        Self {
+            provider_id: provider_id.into(),
+            provider_display_name: provider_display_name.into(),
+            model_id: model_id.into(),
+            model_display_name: model_display_name.into(),
+            reasoning_effort: default_reasoning_effort(),
+            execution_mode: default_execution_mode(),
+            context_strategy: default_context_strategy(),
+            permission_mode: default_permission_mode(),
+            fallback: None,
+            provider_options: serde_json::Value::Object(Default::default()),
+            config_version: 1,
+            last_validation_status: SwarmModelValidationStatus::Unvalidated,
+            last_validated_at: None,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SwarmModelCapability { pub provider_id: String, pub provider_display_name: String, pub model_id: String, pub display_name: String, pub description: String, pub available: bool, pub deprecated: bool, pub replacement_model_id: Option<String>, pub coding: bool, pub planning: bool, pub review: bool, pub tool_use: bool, pub vision: bool, pub supported_reasoning_efforts: Vec<String>, pub supported_execution_modes: Vec<String>, pub recommended_roles: Vec<String>, pub authenticated: bool, pub runtime_version: Option<String> }
+pub struct SwarmModelCapability {
+    pub provider_id: String,
+    pub provider_display_name: String,
+    pub model_id: String,
+    pub display_name: String,
+    pub description: String,
+    pub available: bool,
+    pub deprecated: bool,
+    pub replacement_model_id: Option<String>,
+    pub coding: bool,
+    pub planning: bool,
+    pub review: bool,
+    pub tool_use: bool,
+    pub vision: bool,
+    pub supported_reasoning_efforts: Vec<String>,
+    pub supported_execution_modes: Vec<String>,
+    pub recommended_roles: Vec<String>,
+    pub authenticated: bool,
+    pub runtime_version: Option<String>,
+}
 
 /// Full backend lifecycle. The user-facing surface collapses these into five [`SwarmPhase`]s,
 /// but the engine tracks the finer state so pause/resume/recovery are precise.

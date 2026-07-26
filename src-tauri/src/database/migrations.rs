@@ -881,9 +881,17 @@ pub fn apply(connection: &Connection) -> AppResult<()> {
     if current < 23
         || !column_exists(connection, "swarm_role_allocations", "model_config_json")?
         || !column_exists(connection, "swarm_agents", "model_config_json")?
-        || !column_exists(connection, "swarm_agent_runs", "execution_config_snapshot_json")?
-    { migrate_v23(connection)?; }
-    if current < 24 || !table_exists(connection, "swarm_execution_defaults")? { migrate_v24(connection)?; }
+        || !column_exists(
+            connection,
+            "swarm_agent_runs",
+            "execution_config_snapshot_json",
+        )?
+    {
+        migrate_v23(connection)?;
+    }
+    if current < 24 || !table_exists(connection, "swarm_execution_defaults")? {
+        migrate_v24(connection)?;
+    }
     Ok(())
 }
 
@@ -924,13 +932,22 @@ pub fn requires_migration(connection: &Connection) -> AppResult<bool> {
         || !table_exists(connection, "orchestration_sessions")?
         || !column_exists(connection, "swarm_role_allocations", "model_config_json")?
         || !column_exists(connection, "swarm_agents", "model_config_json")?
-        || !column_exists(connection, "swarm_agent_runs", "execution_config_snapshot_json")?
+        || !column_exists(
+            connection,
+            "swarm_agent_runs",
+            "execution_config_snapshot_json",
+        )?
         || !table_exists(connection, "swarm_execution_defaults")?)
 }
 
 fn migrate_v24(connection: &Connection) -> AppResult<()> {
-    connection.execute_batch("BEGIN IMMEDIATE;").map_err(AppError::database)?;
-    let result = (|| { connection.execute_batch("CREATE TABLE IF NOT EXISTS swarm_execution_defaults(swarm_id TEXT PRIMARY KEY REFERENCES swarms(id) ON DELETE CASCADE,config_json TEXT NOT NULL DEFAULT '{}',updated_at TEXT NOT NULL);")?; record_migration(connection, 24) })();
+    connection
+        .execute_batch("BEGIN IMMEDIATE;")
+        .map_err(AppError::database)?;
+    let result = (|| {
+        connection.execute_batch("CREATE TABLE IF NOT EXISTS swarm_execution_defaults(swarm_id TEXT PRIMARY KEY REFERENCES swarms(id) ON DELETE CASCADE,config_json TEXT NOT NULL DEFAULT '{}',updated_at TEXT NOT NULL);")?;
+        record_migration(connection, 24)
+    })();
     finish_migration_transaction(connection, result, 24)
 }
 
@@ -2208,21 +2225,41 @@ CREATE INDEX IF NOT EXISTS idx_orch_exec_session
 /// Per-member execution configuration and immutable attempt snapshots. Existing members keep
 /// their provider identity but become visibly `unvalidated`; no arbitrary model is assigned.
 fn migrate_v23(connection: &Connection) -> AppResult<()> {
-    connection.execute_batch("BEGIN IMMEDIATE;").map_err(AppError::database)?;
+    connection
+        .execute_batch("BEGIN IMMEDIATE;")
+        .map_err(AppError::database)?;
     let result = (|| {
         for (table, column, definition) in [
-            ("swarm_role_allocations", "model_config_json", "TEXT NOT NULL DEFAULT '{}'") ,
-            ("swarm_agents", "model_config_json", "TEXT NOT NULL DEFAULT '{}'") ,
+            (
+                "swarm_role_allocations",
+                "model_config_json",
+                "TEXT NOT NULL DEFAULT '{}'",
+            ),
+            (
+                "swarm_agents",
+                "model_config_json",
+                "TEXT NOT NULL DEFAULT '{}'",
+            ),
             ("swarm_agent_runs", "requested_provider_id", "TEXT"),
             ("swarm_agent_runs", "requested_model_id", "TEXT"),
             ("swarm_agent_runs", "resolved_provider_id", "TEXT"),
             ("swarm_agent_runs", "resolved_model_id", "TEXT"),
             ("swarm_agent_runs", "reasoning_effort", "TEXT"),
-            ("swarm_agent_runs", "fallback_used", "INTEGER NOT NULL DEFAULT 0"),
+            (
+                "swarm_agent_runs",
+                "fallback_used",
+                "INTEGER NOT NULL DEFAULT 0",
+            ),
             ("swarm_agent_runs", "fallback_reason", "TEXT"),
             ("swarm_agent_runs", "provider_runtime_version", "TEXT"),
-            ("swarm_agent_runs", "execution_config_snapshot_json", "TEXT NOT NULL DEFAULT '{}'"),
-        ] { add_column_if_missing(connection, table, column, definition)?; }
+            (
+                "swarm_agent_runs",
+                "execution_config_snapshot_json",
+                "TEXT NOT NULL DEFAULT '{}'",
+            ),
+        ] {
+            add_column_if_missing(connection, table, column, definition)?;
+        }
         record_migration(connection, 23)
     })();
     finish_migration_transaction(connection, result, 23)
@@ -2630,9 +2667,25 @@ mod tests {
         migrate_v23(&connection).unwrap();
         assert!(column_exists(&connection, "swarm_role_allocations", "model_config_json").unwrap());
         assert!(column_exists(&connection, "swarm_agents", "model_config_json").unwrap());
-        assert!(column_exists(&connection, "swarm_agent_runs", "execution_config_snapshot_json").unwrap());
-        assert_eq!(connection.query_row("SELECT runtime FROM swarm_agents WHERE id='member'", [], |row| row.get::<_, String>(0)).unwrap(), "codex");
-        connection.execute_batch("CREATE TABLE swarms(id TEXT PRIMARY KEY);").unwrap();
+        assert!(column_exists(
+            &connection,
+            "swarm_agent_runs",
+            "execution_config_snapshot_json"
+        )
+        .unwrap());
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT runtime FROM swarm_agents WHERE id='member'",
+                    [],
+                    |row| row.get::<_, String>(0)
+                )
+                .unwrap(),
+            "codex"
+        );
+        connection
+            .execute_batch("CREATE TABLE swarms(id TEXT PRIMARY KEY);")
+            .unwrap();
         migrate_v24(&connection).unwrap();
         assert!(table_exists(&connection, "swarm_execution_defaults").unwrap());
     }
