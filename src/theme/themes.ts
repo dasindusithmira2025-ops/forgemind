@@ -46,6 +46,11 @@ const paralithDark: ThemeDefinition = {
     },
     agent: { claude: '#d97757', codex: '#9aa0aa', generic: '#8d8d93', action: '#8b7cf6' },
     proof: { verified: '#55c982', partial: '#d9a441', missing: '#6e6e76', failed: '#ec7277' },
+    role: {
+      coordinator: '#5794df', scout: '#62a86f', builder: '#45aeb1',
+      reviewer: '#c8994f', debugger: '#cf735c', integrator: '#9276c9',
+    },
+    risk: { low: '#6fce9f', medium: '#d9a441', high: '#e5896a', critical: '#e5678a' },
     diff: {
       addedText: '#b6e8c9', removedText: '#f0bcbc',
       addedBackground: 'rgba(89, 185, 120, .09)', removedBackground: 'rgba(236, 114, 119, .09)',
@@ -111,6 +116,13 @@ const graphite: ThemeDefinition = {
     },
     agent: { claude: '#c98567', codex: '#9aa0aa', generic: '#8b95a6', action: '#a6afbd' },
     proof: { verified: '#6fbf95', partial: '#cdb072', missing: '#666b75', failed: '#d98b90' },
+    /* Graphite deliberately suppresses chroma, so roles stay recognisable by hue but never
+       compete with content. */
+    role: {
+      coordinator: '#7d93ab', scout: '#7fa287', builder: '#6fa3a5',
+      reviewer: '#b9a279', debugger: '#c08d7e', integrator: '#9b93b5',
+    },
+    risk: { low: '#6fbf95', medium: '#cdb072', high: '#d9a07f', critical: '#d98b90' },
     diff: {
       addedText: '#b9dcc5', removedText: '#e6bcbf',
       addedBackground: 'rgba(111, 191, 149, .09)', removedBackground: 'rgba(217, 139, 144, .09)',
@@ -176,6 +188,11 @@ const obsidian: ThemeDefinition = {
     },
     agent: { claude: '#e08464', codex: '#a3a9b3', generic: '#838995', action: '#9a8cff' },
     proof: { verified: '#63d29a', partial: '#e3c074', missing: '#6b7280', failed: '#ec7f8a' },
+    role: {
+      coordinator: '#6aa6f0', scout: '#72bd82', builder: '#55c3c6',
+      reviewer: '#dcaa5e', debugger: '#e28470', integrator: '#a68ade',
+    },
+    risk: { low: '#63d29a', medium: '#e3c074', high: '#ec9a72', critical: '#f2758c' },
     diff: {
       addedText: '#c0f0d3', removedText: '#f5c2c6',
       addedBackground: 'rgba(99, 210, 154, .10)', removedBackground: 'rgba(236, 127, 138, .10)',
@@ -241,6 +258,13 @@ const ember: ThemeDefinition = {
     },
     agent: { claude: '#dd8a5f', codex: '#a99c88', generic: '#877a66', action: '#d8963f' },
     proof: { verified: '#74bd88', partial: '#e0b45f', missing: '#6f6555', failed: '#e08574' },
+    /* Ember runs warm, so the cool roles are pulled toward the theme's slate-teal info hue
+       rather than a true blue that would read as foreign. */
+    role: {
+      coordinator: '#7ea6b4', scout: '#86b57f', builder: '#6fae9f',
+      reviewer: '#dca85c', debugger: '#dd8467', integrator: '#b294c4',
+    },
+    risk: { low: '#74bd88', medium: '#e0b45f', high: '#e08574', critical: '#d9647a' },
     diff: {
       addedText: '#cfe6c0', removedText: '#eec3b4',
       addedBackground: 'rgba(116, 189, 136, .09)', removedBackground: 'rgba(224, 133, 116, .10)',
@@ -306,6 +330,13 @@ const arcticLight: ThemeDefinition = {
     },
     agent: { claude: '#b8552c', codex: '#55606f', generic: '#6d7889', action: '#6a57df' },
     proof: { verified: '#1f7a44', partial: '#96650f', missing: '#8790a0', failed: '#c23a45' },
+    /* Darkened on light: these are read against white surfaces, so they carry the contrast the
+       dark themes get for free. */
+    role: {
+      coordinator: '#2f6fbf', scout: '#2f8f57', builder: '#17787c',
+      reviewer: '#96650f', debugger: '#b8552c', integrator: '#6a4fc0',
+    },
+    risk: { low: '#2f8f57', medium: '#96650f', high: '#b45a2a', critical: '#b0263a' },
     diff: {
       addedText: '#1f7a44', removedText: '#b23640',
       addedBackground: 'rgba(47, 143, 87, .12)', removedBackground: 'rgba(194, 58, 69, .10)',

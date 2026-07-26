@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
+import indexCss from '../index.css?raw'
 import {
   REQUIRED_CSS_VARS, monacoThemeName, toCssVars, toMonacoColors, toTerminalTheme,
 } from './tokens'
@@ -33,6 +34,18 @@ describe('theme registry', () => {
         expect(vars[name]?.trim().length ?? 0).toBeGreaterThan(0)
       }
     }
+  })
+
+  it('defines every required token in the index.css bootstrap :root so nothing renders unstyled before applyTheme runs', () => {
+    // The app paints from the :root block on first frame (flash-free bootstrap) and only then
+    // swaps in the persisted theme. A token added to the theme model but not to that block would
+    // resolve to nothing for that frame, so the two lists have to stay in lockstep.
+    const root = /:root\s*\{([\s\S]*?)\n\}/.exec(indexCss)
+    expect(root).not.toBeNull()
+    const declared = new Set(
+      Array.from(root![1].matchAll(/^\s*(--[\w-]+)\s*:/gm), (match) => match[1]),
+    )
+    expect(REQUIRED_CSS_VARS.filter((name) => !declared.has(name))).toEqual([])
   })
 
   it('validates and coerces theme ids, falling back to the default for unknown values', () => {

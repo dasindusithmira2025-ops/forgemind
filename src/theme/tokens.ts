@@ -133,6 +133,28 @@ export interface ProofTokens {
   failed: string
 }
 
+/** Swarm role identity. Like {@link AgentTokens} these are identity hues, not status: they appear
+ *  as a node's left edge, icon tint, and progress track, never as a filled panel. Kept distinct
+ *  from status colour so a green Scout is never read as a healthy Scout. */
+export interface RoleTokens {
+  coordinator: string
+  scout: string
+  builder: string
+  reviewer: string
+  debugger: string
+  integrator: string
+}
+
+/** Orchestrator capability risk bands. Four steps because the policy gate distinguishes
+ *  "high" (confirm) from "critical" (explicit approval); the three status colours cannot
+ *  express that without collapsing the two. */
+export interface RiskTokens {
+  low: string
+  medium: string
+  high: string
+  critical: string
+}
+
 export interface DiffTokens {
   addedText: string
   removedText: string
@@ -160,6 +182,8 @@ export interface SemanticColors {
   git: GitTokens
   agent: AgentTokens
   proof: ProofTokens
+  role: RoleTokens
+  risk: RiskTokens
   diff: DiffTokens
   effects: EffectTokens
 }
@@ -232,7 +256,7 @@ export interface ThemeDefinition {
  * independent and stay defined in `index.css :root`.
  */
 export function toCssVars(theme: ThemeDefinition): Record<string, string> {
-  const { background: bg, foreground: fg, border, accent, status, git, agent, proof, diff, effects } = theme.colors
+  const { background: bg, foreground: fg, border, accent, status, git, agent, proof, role, risk, diff, effects } = theme.colors
   const term = theme.terminal
   return {
     '--bg': bg.canvas,
@@ -303,6 +327,18 @@ export function toCssVars(theme: ThemeDefinition): Record<string, string> {
     '--proof-missing': proof.missing,
     '--proof-failed': proof.failed,
 
+    '--role-coordinator': role.coordinator,
+    '--role-scout': role.scout,
+    '--role-builder': role.builder,
+    '--role-reviewer': role.reviewer,
+    '--role-debugger': role.debugger,
+    '--role-integrator': role.integrator,
+
+    '--risk-low': risk.low,
+    '--risk-medium': risk.medium,
+    '--risk-high': risk.high,
+    '--risk-critical': risk.critical,
+
     '--diff-add-text': diff.addedText,
     '--diff-del-text': diff.removedText,
     '--diff-add-bg': diff.addedBackground,
@@ -336,6 +372,9 @@ export const REQUIRED_CSS_VARS: readonly string[] = [
   '--git-untracked', '--git-branch', '--git-review', '--git-conflict',
   '--agent-claude', '--agent-codex', '--agent-generic', '--agent-action',
   '--proof-verified', '--proof-partial', '--proof-missing', '--proof-failed',
+  '--role-coordinator', '--role-scout', '--role-builder',
+  '--role-reviewer', '--role-debugger', '--role-integrator',
+  '--risk-low', '--risk-medium', '--risk-high', '--risk-critical',
   '--diff-add-text', '--diff-del-text', '--diff-add-bg', '--diff-del-bg',
   '--terminal-fg', '--focus-ring', '--overlay-scrim',
   '--scrollbar-thumb', '--scrollbar-thumb-hover', '--shadow-sm', '--shadow-md', '--shadow-lg',
