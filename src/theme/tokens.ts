@@ -31,6 +31,10 @@ export interface BackgroundTokens {
   hover: string
   /** Selected / active row background. */
   selected: string
+  /** Active press feedback — one step denser than {@link hover}. */
+  pressed: string
+  /** Fill for disabled controls; stays readable rather than fading out. */
+  disabled: string
 }
 
 export interface ForegroundTokens {
@@ -87,6 +91,68 @@ export interface StatusTokens {
   errorBorder: string
   errorText: string
   info: string
+  /** Agent/task lifecycle states. These carry meaning through a dot, badge, or icon — never
+   *  through a filled panel. `success` and `error` above serve as the terminal success/failure
+   *  states, so they are deliberately not duplicated here. */
+  working: string
+  waiting: string
+  blocked: string
+  unread: string
+  offline: string
+  idle: string
+}
+
+/** Version-control decorations. Kept separate from {@link StatusTokens} so Git meaning never
+ *  drifts into agent-state meaning even when the underlying hues are related. */
+export interface GitTokens {
+  added: string
+  modified: string
+  deleted: string
+  renamed: string
+  untracked: string
+  branch: string
+  review: string
+  conflict: string
+}
+
+/** Provider identity for agent rows and icons. Used at icon/dot scale only — provider colour
+ *  must never fill a region large enough to read as the app's own accent. */
+export interface AgentTokens {
+  claude: string
+  codex: string
+  generic: string
+  /** Highlight for an agent-initiated action awaiting the operator. */
+  action: string
+}
+
+/** Evidence state in the Proof Ledger. */
+export interface ProofTokens {
+  verified: string
+  partial: string
+  missing: string
+  failed: string
+}
+
+/** Swarm role identity. Like {@link AgentTokens} these are identity hues, not status: they appear
+ *  as a node's left edge, icon tint, and progress track, never as a filled panel. Kept distinct
+ *  from status colour so a green Scout is never read as a healthy Scout. */
+export interface RoleTokens {
+  coordinator: string
+  scout: string
+  builder: string
+  reviewer: string
+  debugger: string
+  integrator: string
+}
+
+/** Orchestrator capability risk bands. Four steps because the policy gate distinguishes
+ *  "high" (confirm) from "critical" (explicit approval); the three status colours cannot
+ *  express that without collapsing the two. */
+export interface RiskTokens {
+  low: string
+  medium: string
+  high: string
+  critical: string
 }
 
 export interface DiffTokens {
@@ -113,6 +179,11 @@ export interface SemanticColors {
   border: BorderTokens
   accent: AccentTokens
   status: StatusTokens
+  git: GitTokens
+  agent: AgentTokens
+  proof: ProofTokens
+  role: RoleTokens
+  risk: RiskTokens
   diff: DiffTokens
   effects: EffectTokens
 }
@@ -185,7 +256,7 @@ export interface ThemeDefinition {
  * independent and stay defined in `index.css :root`.
  */
 export function toCssVars(theme: ThemeDefinition): Record<string, string> {
-  const { background: bg, foreground: fg, border, accent, status, diff, effects } = theme.colors
+  const { background: bg, foreground: fg, border, accent, status, git, agent, proof, role, risk, diff, effects } = theme.colors
   const term = theme.terminal
   return {
     '--bg': bg.canvas,
@@ -197,6 +268,8 @@ export function toCssVars(theme: ThemeDefinition): Record<string, string> {
     '--sidebar-bg': bg.sidebar,
     '--bg-input': bg.input,
     '--bg-selected': bg.selected,
+    '--surface-pressed': bg.pressed,
+    '--surface-disabled': bg.disabled,
 
     '--border': border.default,
     '--border-subtle': border.subtle,
@@ -228,6 +301,43 @@ export function toCssVars(theme: ThemeDefinition): Record<string, string> {
     '--danger-border': status.errorBorder,
     '--danger-text': status.errorText,
     '--info': status.info,
+    '--status-working': status.working,
+    '--status-waiting': status.waiting,
+    '--status-blocked': status.blocked,
+    '--status-unread': status.unread,
+    '--status-offline': status.offline,
+    '--status-idle': status.idle,
+
+    '--git-added': git.added,
+    '--git-modified': git.modified,
+    '--git-deleted': git.deleted,
+    '--git-renamed': git.renamed,
+    '--git-untracked': git.untracked,
+    '--git-branch': git.branch,
+    '--git-review': git.review,
+    '--git-conflict': git.conflict,
+
+    '--agent-claude': agent.claude,
+    '--agent-codex': agent.codex,
+    '--agent-generic': agent.generic,
+    '--agent-action': agent.action,
+
+    '--proof-verified': proof.verified,
+    '--proof-partial': proof.partial,
+    '--proof-missing': proof.missing,
+    '--proof-failed': proof.failed,
+
+    '--role-coordinator': role.coordinator,
+    '--role-scout': role.scout,
+    '--role-builder': role.builder,
+    '--role-reviewer': role.reviewer,
+    '--role-debugger': role.debugger,
+    '--role-integrator': role.integrator,
+
+    '--risk-low': risk.low,
+    '--risk-medium': risk.medium,
+    '--risk-high': risk.high,
+    '--risk-critical': risk.critical,
 
     '--diff-add-text': diff.addedText,
     '--diff-del-text': diff.removedText,
@@ -249,13 +359,22 @@ export function toCssVars(theme: ThemeDefinition): Record<string, string> {
 /** The complete list of CSS variable names a valid theme must produce. Used by tests. */
 export const REQUIRED_CSS_VARS: readonly string[] = [
   '--bg', '--canvas', '--surface', '--surface-2', '--surface-3', '--surface-hover',
-  '--sidebar-bg', '--bg-input', '--bg-selected',
+  '--sidebar-bg', '--bg-input', '--bg-selected', '--surface-pressed', '--surface-disabled',
   '--border', '--border-subtle', '--border-strong', '--accent-border',
   '--text', '--text-strong', '--muted', '--faint', '--disabled',
   '--accent', '--accent-strong', '--accent-active', '--accent-soft', '--accent-edge', '--on-accent',
   '--success', '--success-soft', '--success-border',
   '--warning', '--warning-soft', '--warning-border', '--warning-text',
   '--danger', '--danger-soft', '--danger-border', '--danger-text', '--info',
+  '--status-working', '--status-waiting', '--status-blocked',
+  '--status-unread', '--status-offline', '--status-idle',
+  '--git-added', '--git-modified', '--git-deleted', '--git-renamed',
+  '--git-untracked', '--git-branch', '--git-review', '--git-conflict',
+  '--agent-claude', '--agent-codex', '--agent-generic', '--agent-action',
+  '--proof-verified', '--proof-partial', '--proof-missing', '--proof-failed',
+  '--role-coordinator', '--role-scout', '--role-builder',
+  '--role-reviewer', '--role-debugger', '--role-integrator',
+  '--risk-low', '--risk-medium', '--risk-high', '--risk-critical',
   '--diff-add-text', '--diff-del-text', '--diff-add-bg', '--diff-del-bg',
   '--terminal-fg', '--focus-ring', '--overlay-scrim',
   '--scrollbar-thumb', '--scrollbar-thumb-hover', '--shadow-sm', '--shadow-md', '--shadow-lg',

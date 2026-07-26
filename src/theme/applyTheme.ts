@@ -24,9 +24,20 @@ export function applyTheme(theme: ThemeDefinition, selectedId: ThemeId): void {
   if (typeof document === 'undefined') return
   const root = document.documentElement
   const vars = toCssVars(theme)
+
+  // A theme swap rewrites every colour token in one pass. Component transitions would animate each
+  // of them independently and smear the whole window, so they are suppressed until the new values
+  // have painted (see the `[data-theme-swapping]` rule in index.css).
+  root.dataset.themeSwapping = ''
   for (const [name, value] of Object.entries(vars)) {
     root.style.setProperty(name, value)
   }
+  if (typeof requestAnimationFrame === 'function') {
+    requestAnimationFrame(() => { delete root.dataset.themeSwapping })
+  } else {
+    delete root.dataset.themeSwapping
+  }
+
   const scheme = theme.category === 'light' ? 'light' : 'dark'
   root.dataset.theme = selectedId
   root.dataset.themeResolved = theme.id

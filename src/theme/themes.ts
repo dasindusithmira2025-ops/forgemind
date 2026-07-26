@@ -19,50 +19,64 @@ const paralithDark: ThemeDefinition = {
   preview: { hint: 'Charcoal surfaces, iris accent' },
   colors: {
     background: {
-      canvas: '#0b0c10', surface: '#12141b', surfaceRaised: '#171a23', surfaceOverlay: '#1e222d',
-      sidebar: '#12141b', input: '#12141b', hover: '#232837', selected: '#20232f',
+      canvas: '#0b0b0c', surface: '#111112', surfaceRaised: '#161617', surfaceOverlay: '#1c1c1e',
+      sidebar: '#0f0f10', input: '#1a1a1c', hover: '#232326', selected: '#313136',
+      pressed: '#2b2b2e', disabled: '#171718',
     },
     foreground: {
-      primary: '#e8eaf1', strong: '#ffffff', secondary: '#a3abbd', muted: '#778094',
-      disabled: '#566079', onAccent: '#120e2b',
+      primary: '#f4f4f5', strong: '#ffffff', secondary: '#c8c8cb', muted: '#97979d',
+      disabled: '#66666c', onAccent: '#120e2b',
     },
-    border: { default: '#262b37', subtle: '#1d2130', strong: '#39404f', accent: '#38315e' },
+    border: { default: '#26262a', subtle: '#1c1c1f', strong: '#3a3a40', accent: '#35305c' },
     accent: {
-      primary: '#8b7cf6', hover: '#a89bfa', active: '#7668e0', soft: '#221f3f',
+      primary: '#8b7cf6', hover: '#a89bfa', active: '#7668e0', soft: '#201d33',
       edge: '#8b7cf6', contrast: '#120e2b',
     },
     status: {
-      success: '#66c98e', successSoft: '#12271c', successBorder: '#2b5a41',
-      warning: '#ddb666', warningSoft: '#241d10', warningBorder: '#5a4a2b', warningText: '#f1d48a',
-      error: '#e58089', errorSoft: '#2a171b', errorBorder: '#5f2d34', errorText: '#ffd0d0',
-      info: '#6fa8e6',
+      success: '#55c982', successSoft: '#12241a', successBorder: '#2a5540',
+      warning: '#d9a441', warningSoft: '#231c10', warningBorder: '#57462a', warningText: '#eeca86',
+      error: '#ec7277', errorSoft: '#28171a', errorBorder: '#5c2d33', errorText: '#f9cdcf',
+      info: '#68a6ef',
+      working: '#36c990', waiting: '#d9a441', blocked: '#e36f72',
+      unread: '#68a6ef', offline: '#6e6e76', idle: '#8d8d93',
     },
+    git: {
+      added: '#59b978', modified: '#d3a54e', deleted: '#e36f72', renamed: '#a38ae8',
+      untracked: '#7d7d86', branch: '#6fa8e6', review: '#a38ae8', conflict: '#ed7b72',
+    },
+    agent: { claude: '#d97757', codex: '#9aa0aa', generic: '#8d8d93', action: '#8b7cf6' },
+    proof: { verified: '#55c982', partial: '#d9a441', missing: '#6e6e76', failed: '#ec7277' },
+    role: {
+      coordinator: '#5794df', scout: '#62a86f', builder: '#45aeb1',
+      reviewer: '#c8994f', debugger: '#cf735c', integrator: '#9276c9',
+    },
+    risk: { low: '#6fce9f', medium: '#d9a441', high: '#e5896a', critical: '#e5678a' },
     diff: {
       addedText: '#b6e8c9', removedText: '#f0bcbc',
-      addedBackground: 'rgba(102, 201, 142, .09)', removedBackground: 'rgba(229, 128, 137, .09)',
-      modified: '#ddb666',
+      addedBackground: 'rgba(89, 185, 120, .09)', removedBackground: 'rgba(236, 114, 119, .09)',
+      modified: '#d3a54e',
     },
     effects: {
       focusRing: '#8b7cf6', scrim: 'rgba(0, 0, 0, .55)',
-      scrollbarThumb: '#2c3242', scrollbarThumbHover: '#3b4356',
+      scrollbarThumb: '#2e2e33', scrollbarThumbHover: '#3d3d44',
       shadowLow: '0 1px 2px rgba(0, 0, 0, .35), 0 2px 6px rgba(0, 0, 0, .22)',
       shadowMedium: '0 6px 18px rgba(0, 0, 0, .38), 0 2px 6px rgba(0, 0, 0, .28)',
       shadowHigh: '0 20px 50px rgba(0, 0, 0, .55), 0 8px 24px rgba(0, 0, 0, .4)',
     },
   },
   terminal: {
-    background: '#0a0c10', foreground: '#d8dde7', cursor: '#a89bfa', cursorAccent: '#0a0c10',
+    background: '#0b0b0c', foreground: '#dcdcdf', cursor: '#a89bfa', cursorAccent: '#0b0b0c',
     selection: 'rgba(139, 124, 246, .30)',
-    black: '#161a22', red: '#ef7d7d', green: '#82c99a', yellow: '#d9bf76', blue: '#72a7ff',
-    magenta: '#b99af7', cyan: '#70c4c9', white: '#d8dde7',
-    brightBlack: '#6f7889', brightRed: '#ff9a9a', brightGreen: '#9adcb2', brightYellow: '#ecd48f',
-    brightBlue: '#93bdff', brightMagenta: '#ccb2ff', brightCyan: '#8ad9de', brightWhite: '#f2f5fa',
+    black: '#17171a', red: '#ef7d7d', green: '#82c99a', yellow: '#d9bf76', blue: '#72a7ff',
+    magenta: '#b99af7', cyan: '#70c4c9', white: '#dcdcdf',
+    brightBlack: '#74747d', brightRed: '#ff9a9a', brightGreen: '#9adcb2', brightYellow: '#ecd48f',
+    brightBlue: '#93bdff', brightMagenta: '#ccb2ff', brightCyan: '#8ad9de', brightWhite: '#f6f6f8',
   },
   editor: {
-    base: 'vs-dark', background: '#0a0c10', foreground: '#e8eaf1', lineHighlight: '#12141b',
-    selection: '#2c2a4a', gutter: '#0a0c10', cursor: '#a89bfa', lineNumber: '#778094',
-    lineNumberActive: '#a3abbd', indentGuide: '#262b37', widgetBackground: '#171a23',
-    diffInserted: 'rgba(102, 201, 142, .12)', diffRemoved: 'rgba(229, 128, 137, .12)',
+    base: 'vs-dark', background: '#0d0d0e', foreground: '#f4f4f5', lineHighlight: '#151517',
+    selection: '#2c2a4a', gutter: '#0d0d0e', cursor: '#a89bfa', lineNumber: '#97979d',
+    lineNumberActive: '#c8c8cb', indentGuide: '#26262a', widgetBackground: '#161617',
+    diffInserted: 'rgba(89, 185, 120, .12)', diffRemoved: 'rgba(236, 114, 119, .12)',
   },
 }
 
@@ -75,8 +89,9 @@ const graphite: ThemeDefinition = {
   preview: { hint: 'Monochrome slate, neutral accent' },
   colors: {
     background: {
-      canvas: '#101114', surface: '#191b1f', surfaceRaised: '#20232a', surfaceOverlay: '#282b32',
-      sidebar: '#17181c', input: '#191b1f', hover: '#24272f', selected: '#22252d',
+      canvas: '#0f1012', surface: '#16171a', surfaceRaised: '#1c1e22', surfaceOverlay: '#23252a',
+      sidebar: '#131417', input: '#1e2025', hover: '#292c32', selected: '#33363d',
+      pressed: '#2e3138', disabled: '#1b1c20',
     },
     foreground: {
       primary: '#e5e7ec', strong: '#ffffff', secondary: '#a4a9b3', muted: '#767c87',
@@ -92,7 +107,22 @@ const graphite: ThemeDefinition = {
       warning: '#cdb072', warningSoft: '#23200f', warningBorder: '#514626', warningText: '#e6d29a',
       error: '#d98b90', errorSoft: '#271a1c', errorBorder: '#55353a', errorText: '#f2d2d4',
       info: '#86a7c9',
+      working: '#6fbf95', waiting: '#cdb072', blocked: '#d98b90',
+      unread: '#86a7c9', offline: '#666b75', idle: '#767c87',
     },
+    git: {
+      added: '#6fbf95', modified: '#cdb072', deleted: '#d98b90', renamed: '#a99fc0',
+      untracked: '#767c87', branch: '#86a7c9', review: '#a99fc0', conflict: '#dd9196',
+    },
+    agent: { claude: '#c98567', codex: '#9aa0aa', generic: '#8b95a6', action: '#a6afbd' },
+    proof: { verified: '#6fbf95', partial: '#cdb072', missing: '#666b75', failed: '#d98b90' },
+    /* Graphite deliberately suppresses chroma, so roles stay recognisable by hue but never
+       compete with content. */
+    role: {
+      coordinator: '#7d93ab', scout: '#7fa287', builder: '#6fa3a5',
+      reviewer: '#b9a279', debugger: '#c08d7e', integrator: '#9b93b5',
+    },
+    risk: { low: '#6fbf95', medium: '#cdb072', high: '#d9a07f', critical: '#d98b90' },
     diff: {
       addedText: '#b9dcc5', removedText: '#e6bcbf',
       addedBackground: 'rgba(111, 191, 149, .09)', removedBackground: 'rgba(217, 139, 144, .09)',
@@ -107,7 +137,7 @@ const graphite: ThemeDefinition = {
     },
   },
   terminal: {
-    background: '#101114', foreground: '#d5d8de', cursor: '#a6afbd', cursorAccent: '#101114',
+    background: '#0f1012', foreground: '#d5d8de', cursor: '#a6afbd', cursorAccent: '#0f1012',
     selection: 'rgba(139, 149, 166, .30)',
     black: '#1b1e24', red: '#d98b90', green: '#8dc7a2', yellow: '#cdb072', blue: '#8fb0d4',
     magenta: '#b0a6c4', cyan: '#86bcc0', white: '#d5d8de',
@@ -115,9 +145,9 @@ const graphite: ThemeDefinition = {
     brightBlue: '#a8c4e0', brightMagenta: '#c4bcd6', brightCyan: '#a0cccf', brightWhite: '#eef0f4',
   },
   editor: {
-    base: 'vs-dark', background: '#101114', foreground: '#e5e7ec', lineHighlight: '#191b1f',
-    selection: '#2f3540', gutter: '#101114', cursor: '#a6afbd', lineNumber: '#767c87',
-    lineNumberActive: '#a4a9b3', indentGuide: '#2b2e35', widgetBackground: '#20232a',
+    base: 'vs-dark', background: '#111214', foreground: '#e5e7ec', lineHighlight: '#16171a',
+    selection: '#2f3540', gutter: '#111214', cursor: '#a6afbd', lineNumber: '#8b9099',
+    lineNumberActive: '#c3c7ce', indentGuide: '#2b2e35', widgetBackground: '#1c1e22',
     diffInserted: 'rgba(111, 191, 149, .12)', diffRemoved: 'rgba(217, 139, 144, .12)',
   },
 }
@@ -131,8 +161,9 @@ const obsidian: ThemeDefinition = {
   preview: { hint: 'Near-black, high contrast' },
   colors: {
     background: {
-      canvas: '#050506', surface: '#0d0e11', surfaceRaised: '#141519', surfaceOverlay: '#1c1d22',
-      sidebar: '#08090b', input: '#0d0e11', hover: '#1e2027', selected: '#1c1e28',
+      canvas: '#050506', surface: '#0d0d0f', surfaceRaised: '#141416', surfaceOverlay: '#1c1c1f',
+      sidebar: '#08080a', input: '#17171a', hover: '#1f1f23', selected: '#2c2c31',
+      pressed: '#26262a', disabled: '#141416',
     },
     foreground: {
       primary: '#f3f4f7', strong: '#ffffff', secondary: '#b4b9c3', muted: '#838995',
@@ -148,7 +179,20 @@ const obsidian: ThemeDefinition = {
       warning: '#e3c074', warningSoft: '#241d0d', warningBorder: '#574728', warningText: '#f4d99a',
       error: '#ec7f8a', errorSoft: '#2a1417', errorBorder: '#5e2c34', errorText: '#ffd4d7',
       info: '#74b0ee',
+      working: '#63d29a', waiting: '#e3c074', blocked: '#ec7f8a',
+      unread: '#74b0ee', offline: '#6b7280', idle: '#838995',
     },
+    git: {
+      added: '#63d29a', modified: '#e3c074', deleted: '#ec7f8a', renamed: '#b09bff',
+      untracked: '#838995', branch: '#74b0ee', review: '#b09bff', conflict: '#f28a92',
+    },
+    agent: { claude: '#e08464', codex: '#a3a9b3', generic: '#838995', action: '#9a8cff' },
+    proof: { verified: '#63d29a', partial: '#e3c074', missing: '#6b7280', failed: '#ec7f8a' },
+    role: {
+      coordinator: '#6aa6f0', scout: '#72bd82', builder: '#55c3c6',
+      reviewer: '#dcaa5e', debugger: '#e28470', integrator: '#a68ade',
+    },
+    risk: { low: '#63d29a', medium: '#e3c074', high: '#ec9a72', critical: '#f2758c' },
     diff: {
       addedText: '#c0f0d3', removedText: '#f5c2c6',
       addedBackground: 'rgba(99, 210, 154, .10)', removedBackground: 'rgba(236, 127, 138, .10)',
@@ -171,9 +215,9 @@ const obsidian: ThemeDefinition = {
     brightBlue: '#95c4ff', brightMagenta: '#ccb6ff', brightCyan: '#8ee0e4', brightWhite: '#ffffff',
   },
   editor: {
-    base: 'vs-dark', background: '#050506', foreground: '#f3f4f7', lineHighlight: '#0d0e11',
-    selection: '#2b2748', gutter: '#050506', cursor: '#b6acff', lineNumber: '#838995',
-    lineNumberActive: '#b4b9c3', indentGuide: '#23252c', widgetBackground: '#141519',
+    base: 'vs-dark', background: '#08080a', foreground: '#f3f4f7', lineHighlight: '#0d0d0f',
+    selection: '#2b2748', gutter: '#08080a', cursor: '#b6acff', lineNumber: '#8f95a1',
+    lineNumberActive: '#c6cad3', indentGuide: '#23252c', widgetBackground: '#141416',
     diffInserted: 'rgba(99, 210, 154, .13)', diffRemoved: 'rgba(236, 127, 138, .13)',
   },
 }
@@ -188,7 +232,8 @@ const ember: ThemeDefinition = {
   colors: {
     background: {
       canvas: '#12100c', surface: '#1b1712', surfaceRaised: '#241f18', surfaceOverlay: '#2c261d',
-      sidebar: '#171410', input: '#1b1712', hover: '#2a2419', selected: '#282013',
+      sidebar: '#171410', input: '#221d15', hover: '#2a2419', selected: '#38301f',
+      pressed: '#332c1c', disabled: '#1f1a14',
     },
     foreground: {
       primary: '#ece4d7', strong: '#fff7ec', secondary: '#b4a892', muted: '#877a66',
@@ -204,7 +249,22 @@ const ember: ThemeDefinition = {
       warning: '#e0b45f', warningSoft: '#2a2110', warningBorder: '#574524', warningText: '#f0d69a',
       error: '#e08574', errorSoft: '#2a1a14', errorBorder: '#593a2e', errorText: '#ffd6c8',
       info: '#83a9b5',
+      working: '#74bd88', waiting: '#e0b45f', blocked: '#e08574',
+      unread: '#83a9b5', offline: '#6f6555', idle: '#877a66',
     },
+    git: {
+      added: '#74bd88', modified: '#e0b45f', deleted: '#e08574', renamed: '#c9a06f',
+      untracked: '#877a66', branch: '#83a9b5', review: '#c9a06f', conflict: '#e89078',
+    },
+    agent: { claude: '#dd8a5f', codex: '#a99c88', generic: '#877a66', action: '#d8963f' },
+    proof: { verified: '#74bd88', partial: '#e0b45f', missing: '#6f6555', failed: '#e08574' },
+    /* Ember runs warm, so the cool roles are pulled toward the theme's slate-teal info hue
+       rather than a true blue that would read as foreign. */
+    role: {
+      coordinator: '#7ea6b4', scout: '#86b57f', builder: '#6fae9f',
+      reviewer: '#dca85c', debugger: '#dd8467', integrator: '#b294c4',
+    },
+    risk: { low: '#74bd88', medium: '#e0b45f', high: '#e08574', critical: '#d9647a' },
     diff: {
       addedText: '#cfe6c0', removedText: '#eec3b4',
       addedBackground: 'rgba(116, 189, 136, .09)', removedBackground: 'rgba(224, 133, 116, .10)',
@@ -244,7 +304,8 @@ const arcticLight: ThemeDefinition = {
   colors: {
     background: {
       canvas: '#eef1f6', surface: '#ffffff', surfaceRaised: '#f6f8fc', surfaceOverlay: '#e9edf4',
-      sidebar: '#f4f6fa', input: '#ffffff', hover: '#eef1f7', selected: '#e7ebfb',
+      sidebar: '#f4f6fa', input: '#ffffff', hover: '#eef1f7', selected: '#dfe4f6',
+      pressed: '#e2e6f0', disabled: '#f1f3f7',
     },
     foreground: {
       primary: '#1b2330', strong: '#0a0e15', secondary: '#55606f', muted: '#6d7889',
@@ -260,7 +321,22 @@ const arcticLight: ThemeDefinition = {
       warning: '#96650f', warningSoft: '#f7ecd6', warningBorder: '#e4cf9f', warningText: '#7a5307',
       error: '#c23a45', errorSoft: '#fbe6e8', errorBorder: '#eec2c6', errorText: '#8f2730',
       info: '#2f6fbf',
+      working: '#1f8a5c', waiting: '#96650f', blocked: '#b83b46',
+      unread: '#2f6fbf', offline: '#8790a0', idle: '#6d7889',
     },
+    git: {
+      added: '#1f7a44', modified: '#96650f', deleted: '#c23a45', renamed: '#6a4fc0',
+      untracked: '#6d7889', branch: '#2f6fbf', review: '#6a4fc0', conflict: '#b02a35',
+    },
+    agent: { claude: '#b8552c', codex: '#55606f', generic: '#6d7889', action: '#6a57df' },
+    proof: { verified: '#1f7a44', partial: '#96650f', missing: '#8790a0', failed: '#c23a45' },
+    /* Darkened on light: these are read against white surfaces, so they carry the contrast the
+       dark themes get for free. */
+    role: {
+      coordinator: '#2f6fbf', scout: '#2f8f57', builder: '#17787c',
+      reviewer: '#96650f', debugger: '#b8552c', integrator: '#6a4fc0',
+    },
+    risk: { low: '#2f8f57', medium: '#96650f', high: '#b45a2a', critical: '#b0263a' },
     diff: {
       addedText: '#1f7a44', removedText: '#b23640',
       addedBackground: 'rgba(47, 143, 87, .12)', removedBackground: 'rgba(194, 58, 69, .10)',
