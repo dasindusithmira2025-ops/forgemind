@@ -10,12 +10,14 @@ import type {
   SwarmRole,
   SwarmRoleConfig,
   SwarmRuntimeKind,
+  SwarmMemberModelConfig,
+  SwarmModelCapability,
 } from '../../native/types'
 import { useSwarmStore } from './swarmStore'
 import { roleLabel, runtimeLabel } from './swarmPresentation'
 
 type Step = 'team' | 'mission' | 'review'
-interface RosterAgent { id: string; role: SwarmRole; runtime: Exclude<SwarmRuntimeKind, 'auto'> }
+interface RosterAgent { id: string; role: SwarmRole; runtime: Exclude<SwarmRuntimeKind, 'auto'>; modelConfig: SwarmMemberModelConfig }
 
 const ROLES: SwarmRole[] = ['coordinator', 'scout', 'builder', 'debugger', 'reviewer', 'integrator']
 const RESPONSIBILITY: Record<SwarmRole, string> = {
@@ -53,8 +55,10 @@ export function SwarmCreatePanel({ projectId, onCreated, onCancel }: {
   const [preview, setPreview] = useState<SwarmLaunchPreview>()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [models, setModels] = useState<SwarmModelCapability[]>([])
 
   useEffect(() => { if (presets.length === 0) void loadPresets() }, [loadPresets, presets.length])
+  useEffect(() => { const load = native.listSwarmModelRegistry; if (load) void load().then(setModels).catch(() => setModels([])) }, [])
   useEffect(() => {
     const load = native.getProject?.(projectId)
     void load?.then(setProject).catch(() => undefined)
@@ -132,7 +136,9 @@ export function SwarmCreatePanel({ projectId, onCreated, onCancel }: {
 
   function addAgent() {
     const ordinal = roster.filter((agent) => agent.role === 'builder').length + 1
-    setRoster((current) => [...current, { id: `builder-${ordinal}-${crypto.randomUUID()}`, role: 'builder', runtime: 'codex' }])
+    const model = recommendedModel(models, 'builder')
+    if (!model) { setError('Model registry is unavailable. Refresh and select a provider before adding a member.'); return }
+    setRoster((current) => [...current, { id: `builder-${ordinal}-${crypto.randomUUID()}`, role: 'builder', runtime: 'codex', modelConfig: configFromModel(model) }])
     setPresetId('__custom__')
   }
 
@@ -257,15 +263,21 @@ export function SwarmCreatePanel({ projectId, onCreated, onCancel }: {
                     {isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                     <strong>{displayName(agent, roster)}</strong>
                     <span>{roleLabel(agent.role).replace(/s$/, '')}</span>
-                    <span className="swarm-runtime-mark">{runtimeLabel(agent.runtime)}</span>
-                    <span className="swarm-readiness-pending">Validated before launch</span>
+                    <span className="swarm-runtime-mark">{agent.modelConfig.providerDisplayName}</span><span className="swarm-runtime-mark">{agent.modelConfig.modelDisplayName}</span>
+                    <span className="swarm-readiness-pending">{agent.modelConfig.lastValidationStatus === 'valid' ? 'Validated' : 'Validated before launch'}</span>
                     <span className="swarm-agent-index">{String(index + 1).padStart(2, '0')}</span>
                   </button>
                   {isOpen ? (
                     <div className="swarm-roster-detail">
                       <p>{RESPONSIBILITY[agent.role]}</p>
                       <label>Role<select value={agent.role} onChange={(event) => updateAgent(agent.id, { role: event.target.value as SwarmRole })}>{ROLES.map((role) => <option key={role} value={role}>{roleLabel(role).replace(/s$/, '')}</option>)}</select></label>
-                      <label>Runtime<select value={agent.runtime} onChange={(event) => updateAgent(agent.id, { runtime: event.target.value as RosterAgent['runtime'] })}><option value="claude">Claude</option><option value="codex">Codex</option></select></label>
+                      <label>Provider<select value={agent.modelConfig.providerId} onChange={(event) => { const model = recommendedModel(models.filter((item) => item.providerId === event.target.value), agent.role); if (model) updateAgent(agent.id, { runtime: model.providerId as RosterAgent['runtime'], modelConfig: preserveConfig(agent.modelConfig, model) }) }}><option value="claude">Claude</option><option value="codex">Codex</option></select></label>
+                      <label>Model<select value={agent.modelConfig.modelId} onChange={(event) => { const model = models.find((item) => item.providerId === agent.modelConfig.providerId && item.modelId === event.target.value); if (model) updateAgent(agent.id, { modelConfig: preserveConfig(agent.modelConfig, model) }) }}>{models.filter((item) => item.providerId === agent.modelConfig.providerId).map((model) => <option key={model.modelId} value={model.modelId} disabled={!model.available}>{model.displayName}{model.available ? ` — ${model.description}` : ' — unavailable'}</option>)}</select></label>
+                      <label>Reasoning<select value={agent.modelConfig.reasoningEffort} onChange={(event) => updateAgent(agent.id, { modelConfig: { ...agent.modelConfig, reasoningEffort: event.target.value as SwarmMemberModelConfig['reasoningEffort'] } })}>{['low','medium','high','max'].map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
+                      <label>Mode<select value={agent.modelConfig.executionMode} onChange={(event) => updateAgent(agent.id, { modelConfig: { ...agent.modelConfig, executionMode: event.target.value as SwarmMemberModelConfig['executionMode'] } })}>{['interactive','autonomous','review'].map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
+                      <label>Context<select value={agent.modelConfig.contextStrategy} onChange={(event) => updateAgent(agent.id, { modelConfig: { ...agent.modelConfig, contextStrategy: event.target.value as SwarmMemberModelConfig['contextStrategy'] } })}>{['minimal','balanced','full'].map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
+                      <label>Permission<select value={agent.modelConfig.permissionMode} onChange={(event) => updateAgent(agent.id, { modelConfig: { ...agent.modelConfig, permissionMode: event.target.value as SwarmMemberModelConfig['permissionMode'] } })}>{['ask','trusted','restricted'].map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
+                      <label>Fallback<select value={agent.modelConfig.fallback ? `${agent.modelConfig.fallback.providerId}/${agent.modelConfig.fallback.modelId}/${agent.modelConfig.fallback.policy}` : ''} onChange={(event) => { const [providerId, modelId, policy] = event.target.value.split('/'); updateAgent(agent.id, { modelConfig: { ...agent.modelConfig, fallback: providerId && modelId ? { providerId, modelId, policy: (policy || 'when_unavailable') as NonNullable<SwarmMemberModelConfig['fallback']>['policy'] } : null } }) }}><option value="">No fallback</option>{models.filter((model) => model.available && !(model.providerId === agent.modelConfig.providerId && model.modelId === agent.modelConfig.modelId)).flatMap((model) => ['when_unavailable', 'when_provider_cannot_start', 'require_approval'].map((policy) => <option key={`${model.providerId}/${model.modelId}/${policy}`} value={`${model.providerId}/${model.modelId}/${policy}`}>{model.providerDisplayName} / {model.displayName} · {policy.replaceAll('_', ' ')}</option>))}</select></label>
                       <span className="swarm-permission-summary">{permissionSummary(agent.role)}</span>
                       <div className="swarm-roster-order"><button type="button" aria-label={`Move ${displayName(agent, roster)} up`} disabled={index === 0} onClick={() => moveAgent(agent.id, -1)}><ArrowUp size={13} /></button><button type="button" aria-label={`Move ${displayName(agent, roster)} down`} disabled={index === roster.length - 1} onClick={() => moveAgent(agent.id, 1)}><ArrowDown size={13} /></button></div>
                       <button type="button" className="swarm-remove-agent" onClick={() => removeAgent(agent.id)}><Trash2 size={13} /> Remove</button>
@@ -301,7 +313,7 @@ export function SwarmCreatePanel({ projectId, onCreated, onCancel }: {
           <div className="swarm-review-grid">
             <article><span>Mission</span><p>{mission}</p></article>
             <article><span>Capacity</span><strong>{preview.totalAgents} agents</strong><p>Up to {preview.maxParallel} active in parallel</p></article>
-            <article className="swarm-review-roster"><span>Team snapshot</span>{roster.map((agent) => <p key={agent.id}><strong>{displayName(agent, roster)}</strong><em>{runtimeLabel(agent.runtime)}</em></p>)}</article>
+            <article className="swarm-review-roster"><span>Model composition</span>{roster.map((agent) => <p key={agent.id}><strong>{displayName(agent, roster)}</strong><em>{agent.modelConfig.providerDisplayName} / {agent.modelConfig.modelDisplayName} · {agent.modelConfig.reasoningEffort}</em></p>)}</article>
             <article><span>Runtime readiness</span>{preview.runtimeReadiness.map((runtime) => <p key={runtime.runtime} className={runtime.available ? 'tone-green' : 'tone-amber'}><strong>{runtimeLabel(runtime.runtime)}</strong> {runtime.message}</p>)}</article>
             <article className="swarm-review-safeguards"><span>Inferred safeguards</span>{preview.safeguards.map((item) => <p key={item.code}><strong>{item.label}</strong>{item.reason}</p>)}</article>
             <article><span>Attachments</span><p>{preview.attachments.length > 0 ? `${preview.attachments.length} project files` : 'No additional context'}</p></article>
@@ -320,7 +332,8 @@ function expandRoster(roles: SwarmRoleConfig[]): RosterAgent[] {
   for (const role of roles.filter((item) => item.enabled)) {
     for (const allocation of role.allocations) {
       const runtime = allocation.runtime === 'auto' ? (role.role === 'reviewer' ? 'codex' : 'claude') : allocation.runtime
-      for (let index = 0; index < allocation.count; index += 1) result.push({ id: `${role.role}-${runtime}-${index}-${crypto.randomUUID()}`, role: role.role, runtime })
+      const modelConfig = allocation.modelConfig ?? unconfiguredModel(runtime)
+      for (let index = 0; index < allocation.count; index += 1) result.push({ id: `${role.role}-${runtime}-${index}-${crypto.randomUUID()}`, role: role.role, runtime, modelConfig })
     }
   }
   return result
@@ -332,10 +345,15 @@ function rosterToRoles(roster: RosterAgent[]): SwarmRoleConfig[] {
     return {
       role,
       enabled: agents.length > 0,
-      allocations: (['claude', 'codex'] as const).map((runtime) => ({ id: `${role}-${runtime}`, runtime, count: agents.filter((agent) => agent.runtime === runtime).length })).filter((allocation) => allocation.count > 0),
+      allocations: agents.map((agent) => ({ id: agent.id, runtime: agent.runtime, count: 1, modelConfig: agent.modelConfig })),
     }
   })
 }
+
+function configFromModel(model: SwarmModelCapability): SwarmMemberModelConfig { return { providerId: model.providerId, providerDisplayName: model.providerDisplayName, modelId: model.modelId, modelDisplayName: model.displayName, reasoningEffort: (model.supportedReasoningEfforts.includes('high') ? 'high' : model.supportedReasoningEfforts[0] ?? 'medium') as SwarmMemberModelConfig['reasoningEffort'], executionMode: 'autonomous', contextStrategy: 'balanced', permissionMode: 'ask', providerOptions: {}, configVersion: 1, lastValidationStatus: model.available ? 'valid' : 'provider_unavailable' } }
+function preserveConfig(previous: SwarmMemberModelConfig, model: SwarmModelCapability): SwarmMemberModelConfig { const next = configFromModel(model); return { ...next, reasoningEffort: model.supportedReasoningEfforts.includes(previous.reasoningEffort) ? previous.reasoningEffort : next.reasoningEffort, executionMode: model.supportedExecutionModes.includes(previous.executionMode) ? previous.executionMode : next.executionMode, contextStrategy: previous.contextStrategy, permissionMode: previous.permissionMode, fallback: previous.fallback, providerOptions: previous.providerOptions } }
+function recommendedModel(models: SwarmModelCapability[], role: SwarmRole): SwarmModelCapability | undefined { const recommended = models.find((model) => model.available && model.recommendedRoles.includes(role)); return recommended ?? models.find((model) => model.available) ?? models[0] }
+function unconfiguredModel(providerId: Exclude<SwarmRuntimeKind, 'auto'>): SwarmMemberModelConfig { return { providerId, providerDisplayName: providerId === 'claude' ? 'Claude' : 'Codex', modelId: 'unconfigured', modelDisplayName: 'Model not configured', reasoningEffort: 'medium', executionMode: 'autonomous', contextStrategy: 'balanced', permissionMode: 'ask', providerOptions: {}, configVersion: 1, lastValidationStatus: 'unvalidated' } }
 
 function displayName(agent: RosterAgent, roster: RosterAgent[]): string {
   const sameRole = roster.filter((item) => item.role === agent.role)
