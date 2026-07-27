@@ -84,8 +84,8 @@ export interface AccentTokens {
  * Solid controls are deliberately *achromatic*: the highest-emphasis button in the app is a
  * neutral fill (near-white on dark, near-black on light), not the brand accent. Chroma is spent
  * only on meaning — state edges, agent actions, status and diff — so a screen full of buttons
- * never competes with a screen full of signal. `card` / `popover` name the two floating surfaces
- * so menus, dialogs and cards share one elevation instead of drifting apart per feature.
+ * never competes with a screen full of signal. `card` and `popover` name the two floating
+ * surfaces, so panels and menus each have one elevation instead of drifting apart per feature.
  */
 export interface ControlTokens {
   /** Highest-emphasis solid control fill. Neutral, never the accent hue. */
@@ -104,7 +104,12 @@ export interface ControlTokens {
   onSecondary: string
   /** Card / panel surface that floats above the canvas. */
   card: string
-  /** Menu, popover and dialog surface. */
+  /**
+   * Menu, popover and dialog surface. On dark themes this sits one step above {@link card},
+   * because the sidebar shares the card surface and a menu opened over it would otherwise be
+   * carried entirely by its border. On light themes there is no room above white, so a popover's
+   * elevation comes from its shadow instead.
+   */
   popover: string
   /** Neutral focus-ring hue. The ring reads as focus, not as brand. */
   ring: string

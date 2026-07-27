@@ -42,12 +42,19 @@ tinted toward the accent.
 
 ```
 canvas    #0a0a0a   the application root, the terminal canvas
-card      #171717   panels, the sidebar, popovers, dialogs
-raised    #1f1f1f   one step up: nested panels, active headers
-overlay   #262626   the top neutral: hover fill, segmented tracks
+card      #171717   panels, the sidebar, dialogs
+raised    #1f1f1f   one step up: nested panels, popovers, menus
+overlay   #262626   the top neutral: chips, badges, segmented tracks, active headers
 ```
 
 Only four steps. A fifth surface always turns out to be one of these four plus a border.
+
+**Interaction fills sit above the ladder, not inside it** — hover `#2e2e2e`, pressed `#383838`,
+selected `#454545`. A hover can land on *any* of the four surfaces, so it has to clear all of them.
+Reusing an overlay value as the hover fill is the specific mistake that makes hover look fine on a
+row and vanish on a chip, a count badge, or the active pane header; the
+`keeps every interaction fill visible on every surface it can be painted on` test exists purely to
+stop that recurring.
 
 ### 2. Dividers are an alpha wash, never an opaque grey
 
@@ -152,6 +159,8 @@ glyph metrics match what the OS ships.
 | Scrollbar thumb | Square, 12px gutter | Same | — |
 | Accent | `--accent` is the neutral hover fill; violet lives in `--ai-action-accent` | `--accent` is the violet state hue; the neutral fill is `--surface-hover` | Paralith already had a state-edge system built on `--accent`; renaming it would have touched every feature for no visual gain |
 | Type | Tailwind's 12/14/16 | 11/12/13/14/16/18/24 | Paralith's sidebar and status bar are denser than Orca's and need the 11 and 13 steps |
+| Popover surface | Same as `card` and `sidebar` | One step above `card` on dark themes | Our single Project popover opens directly over the sidebar; sharing the surface leaves the menu carried entirely by a 7%-alpha border |
+| Light canvas | Pure white behind white cards | `#f7f7f7` behind white cards | A dense tool with a dozen panels needs its panel edges to read without relying on borders alone |
 | Editor surface | `#1e1e1e` on a `#0a0a0a` app | Same | Code is read for minutes at a time; near-black behind syntax colour crushes the low-luminance tokens |
 
 ---
@@ -165,4 +174,5 @@ glyph metrics match what the OS ships.
 3. Bump `TOKEN_REVISION` in `src/theme/applyTheme.ts` **and** the matching literal in
    `index.html`. Without it, an upgraded install replays the previous palette from its localStorage
    cache for one frame before React corrects it. A test fails if the two literals drift.
-4. Run `npm test` — the `design genome` suite enforces rules 2, 3, 5 and 6 directly.
+4. Run `npm test` — the `design genome` suite enforces rules 1, 2, 3, 5 and 6 directly, including
+   the interaction-fill separation described under rule 1.
