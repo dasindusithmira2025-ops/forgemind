@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { UnlistenFn } from '@tauri-apps/api/event'
 import type { ThemeDefinition, ThemeId } from './tokens'
+import { toWindowChrome } from './tokens'
 import { applyTheme, cachedThemeId } from './applyTheme'
 import { coerceThemeId, resolveTheme } from './registry'
 import { onSystemAppearanceChange, prefersDarkNow } from './system'
@@ -29,6 +30,19 @@ interface ThemeStore {
 const initialPrefersDark = prefersDarkNow()
 const initialId = coerceThemeId(cachedThemeId())
 
+/**
+ * Apply a theme to this window: the CSS custom properties *and* the OS-drawn window frame.
+ *
+ * The frame is not reachable from CSS, so it has to be pushed to the backend separately. The call
+ * is fire-and-forget: a frame that could not be repainted is cosmetic, and must never stop the
+ * theme itself from applying (it also fails harmlessly in tests and in a plain browser, where
+ * there is no Tauri backend to talk to).
+ */
+function paint(resolved: ThemeDefinition, selectedId: ThemeId): void {
+  applyTheme(resolved, selectedId)
+  void native.applyWindowChrome(toWindowChrome(resolved)).catch(() => undefined)
+}
+
 export const useThemeStore = create<ThemeStore>((set, get) => ({
   selectedId: initialId,
   resolved: resolveTheme(initialId, initialPrefersDark),
@@ -38,7 +52,7 @@ export const useThemeStore = create<ThemeStore>((set, get) => ({
   applySelection: (id) => {
     const selectedId = coerceThemeId(id)
     const resolved = resolveTheme(selectedId, get().prefersDark)
-    applyTheme(resolved, selectedId)
+    paint(resolved, selectedId)
     set({ selectedId, resolved })
   },
 
@@ -59,7 +73,7 @@ export const useThemeStore = create<ThemeStore>((set, get) => ({
     set({ prefersDark })
     if (get().selectedId === 'system') {
       const resolved = resolveTheme('system', prefersDark)
-      applyTheme(resolved, 'system')
+      paint(resolved, 'system')
       set({ resolved })
     }
   },

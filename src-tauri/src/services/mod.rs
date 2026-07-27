@@ -4,6 +4,7 @@ pub mod file_watch_service;
 pub mod filesystem_service;
 pub mod process_util;
 pub mod project_service;
+pub mod repository_intelligence;
 pub mod repository_service;
 pub mod restoration_scheduler;
 pub mod startup_service;
@@ -11,6 +12,7 @@ pub mod swarm_service;
 pub mod terminal_manager;
 pub mod update_service;
 pub mod usage_service;
+pub mod window_chrome;
 pub mod window_registry;
 
 pub use agent_detector::AgentDetector;

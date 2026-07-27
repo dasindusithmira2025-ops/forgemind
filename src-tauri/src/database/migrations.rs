@@ -1,7 +1,7 @@
 use crate::errors::{AppError, AppResult};
 use rusqlite::{params, Connection};
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 25;
+pub const CURRENT_SCHEMA_VERSION: i64 = 26;
 
 const MIGRATION_1: &str = r#"
 CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
@@ -898,6 +898,9 @@ pub fn apply(connection: &Connection) -> AppResult<()> {
     {
         migrate_v25(connection)?;
     }
+    if current < 26 || !table_exists(connection, "repository_graph_nodes")? {
+        migrate_v26(connection)?;
+    }
     Ok(())
 }
 
@@ -945,7 +948,8 @@ pub fn requires_migration(connection: &Connection) -> AppResult<bool> {
             "swarm_agent_runs",
             "execution_config_snapshot_json",
         )?
-        || !table_exists(connection, "swarm_execution_defaults")?)
+        || !table_exists(connection, "swarm_execution_defaults")?
+        || !table_exists(connection, "repository_graph_nodes")?)
 }
 
 fn migrate_v24(connection: &Connection) -> AppResult<()> {
@@ -2303,6 +2307,91 @@ fn migrate_v23(connection: &Connection) -> AppResult<()> {
     finish_migration_transaction(connection, result, 23)
 }
 
+/// Provision the repository-intelligence graph projection. This is a derived cache rebuilt from
+/// Git, so no user-authored data needs a backfill. The unique constraints exactly match the
+/// snapshot writer's upsert keys and keep refreshes atomic and idempotent.
+fn migrate_v26(connection: &Connection) -> AppResult<()> {
+    connection
+        .execute_batch("BEGIN IMMEDIATE;")
+        .map_err(AppError::database)?;
+    let result = (|| {
+        connection
+            .execute_batch(
+                r#"
+CREATE TABLE IF NOT EXISTS repository_graph_snapshots(
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  repository_id TEXT NOT NULL,
+  worktree_path TEXT NOT NULL,
+  head_sha TEXT NOT NULL,
+  status_hash TEXT NOT NULL,
+  extractor_version TEXT NOT NULL,
+  impact_json TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_repo_graph_snapshots_recent
+  ON repository_graph_snapshots(project_id, repository_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS repository_graph_nodes(
+  id TEXT PRIMARY KEY,
+  snapshot_id TEXT NOT NULL,
+  project_id TEXT NOT NULL,
+  repository_id TEXT NOT NULL,
+  node_type TEXT NOT NULL,
+  external_key TEXT NOT NULL,
+  display_label TEXT NOT NULL,
+  metadata_json TEXT NOT NULL,
+  content_hash TEXT NOT NULL,
+  provenance_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(project_id, repository_id, node_type, external_key, snapshot_id)
+);
+CREATE INDEX IF NOT EXISTS idx_repo_graph_nodes_snapshot
+  ON repository_graph_nodes(snapshot_id, node_type);
+
+CREATE TABLE IF NOT EXISTS repository_graph_edges(
+  id TEXT PRIMARY KEY,
+  snapshot_id TEXT NOT NULL,
+  project_id TEXT NOT NULL,
+  repository_id TEXT NOT NULL,
+  source_node_id TEXT NOT NULL,
+  target_node_id TEXT NOT NULL,
+  edge_type TEXT NOT NULL,
+  metadata_json TEXT NOT NULL,
+  provenance_json TEXT NOT NULL,
+  confidence REAL NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(project_id, repository_id, source_node_id, target_node_id, edge_type, snapshot_id)
+);
+CREATE INDEX IF NOT EXISTS idx_repo_graph_edges_snapshot
+  ON repository_graph_edges(snapshot_id, edge_type);
+CREATE INDEX IF NOT EXISTS idx_repo_graph_edges_source
+  ON repository_graph_edges(snapshot_id, source_node_id);
+
+CREATE TABLE IF NOT EXISTS repository_graph_index_state(
+  project_id TEXT NOT NULL,
+  repository_id TEXT NOT NULL,
+  worktree_path TEXT NOT NULL,
+  head_sha TEXT NOT NULL,
+  status_hash TEXT NOT NULL,
+  last_success_at TEXT,
+  extractor_version TEXT NOT NULL,
+  node_count INTEGER NOT NULL,
+  edge_count INTEGER NOT NULL,
+  error_code TEXT,
+  error_message TEXT,
+  UNIQUE(project_id, repository_id, worktree_path)
+);
+"#,
+            )
+            .map_err(AppError::database)?;
+        record_migration(connection, 26)
+    })();
+    finish_migration_transaction(connection, result, 26)
+}
+
 /// Rewrite every stored preset's `config_json` into the role-pool allocation shape. User presets
 /// are upgraded in place (no data loss); built-in presets are refreshed to the canonical
 /// composition from [`crate::models::swarm::builtin_presets`], which is where the Feature Team and
@@ -2760,6 +2849,10 @@ mod tests {
             "swarm_runs",
             "swarm_agent_runs",
             "swarm_attention_requests",
+            "repository_graph_snapshots",
+            "repository_graph_nodes",
+            "repository_graph_edges",
+            "repository_graph_index_state",
         ] {
             assert!(table_exists(&connection, table).unwrap(), "missing {table}");
         }

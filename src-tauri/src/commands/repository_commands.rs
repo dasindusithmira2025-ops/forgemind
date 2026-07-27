@@ -384,5 +384,56 @@ pub async fn evaluate_merge_readiness(
         })?
 }
 
+/// Rebuild the repository-intelligence projection. Extraction shells out to Git repeatedly, so it
+/// runs on the blocking pool like every other repository worker rather than on the async runtime.
+#[tauri::command]
+pub async fn refresh_repository_intelligence(
+    request: RepositoryIntelligenceRequest,
+    app: AppHandle,
+    window: Window,
+    state: State<'_, AppState>,
+) -> AppResult<RepositoryIntelligence> {
+    require_project_scope(&window, &state, &request.project_id)?;
+    let service = state.repository.clone();
+    let intelligence =
+        tauri::async_runtime::spawn_blocking(move || service.build_intelligence(&request))
+            .await
+            .map_err(|error| {
+                AppError::new(
+                    "repository_worker_failed",
+                    "The repository intelligence worker stopped unexpectedly.",
+                    true,
+                )
+                .detail(error.to_string())
+            })??;
+    let _ = app.emit("repository-intelligence-updated", &intelligence.project_id);
+    Ok(intelligence)
+}
+
+/// Read the last persisted projection. Returns `None` when the extractor has never run for this
+/// repository, which the UI renders as an empty state rather than an error.
+#[tauri::command]
+pub async fn get_repository_intelligence(
+    project_id: String,
+    repository_path: Option<String>,
+    window: Window,
+    state: State<'_, AppState>,
+) -> AppResult<Option<RepositoryIntelligence>> {
+    require_project_scope(&window, &state, &project_id)?;
+    let service = state.repository.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        service.stored_intelligence(&project_id, repository_path.as_deref())
+    })
+    .await
+    .map_err(|error| {
+        AppError::new(
+            "repository_worker_failed",
+            "The repository intelligence worker stopped unexpectedly.",
+            true,
+        )
+        .detail(error.to_string())
+    })?
+}
+
 #[allow(dead_code)]
 fn _assert_value_is_send(_: Value) {}

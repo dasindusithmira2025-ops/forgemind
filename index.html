@@ -17,7 +17,12 @@
           root.setAttribute('data-theme', id);
           var scheme = localStorage.getItem('paralith.theme.scheme');
           if (scheme === 'light' || scheme === 'dark') root.style.colorScheme = scheme;
-          var raw = localStorage.getItem('paralith.theme.vars');
+          // The cached blob is only replayable while it was written by this token revision;
+          // otherwise it would paint one frame of the previous palette on an upgraded install.
+          // Keep '2' in sync with TOKEN_REVISION in src/theme/applyTheme.ts.
+          var raw = localStorage.getItem('paralith.theme.rev') === '2'
+            ? localStorage.getItem('paralith.theme.vars')
+            : null;
           if (raw) {
             var vars = JSON.parse(raw);
             for (var name in vars) {

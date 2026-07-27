@@ -13,6 +13,7 @@ import { RepositoryStatStrip } from './components/RepositoryStatStrip'
 import { ContextRail } from './components/ContextRail'
 import { OverviewSection } from './components/OverviewSection'
 import { ChangesSection } from './components/ChangesSection'
+import { IntelligenceSection } from './components/IntelligenceSection'
 import { BranchesSection } from './components/BranchesSection'
 import { PullRequestsSection } from './components/PullRequestsSection'
 import { ActionsSection } from './components/ActionsSection'
@@ -49,6 +50,7 @@ export function RepositoryCommandCenter({ projectId, projectName }: { projectId:
   const subscribe = useRepositoryStore((state) => state.subscribe)
   const refreshSnapshot = useRepositoryStore((state) => state.refreshSnapshot)
   const refreshRemote = useRepositoryStore((state) => state.refreshRemote)
+  const loadIntelligence = useRepositoryStore((state) => state.loadIntelligence)
 
   const [nav, setNav] = useState<NavState>(() => loadNav(projectId))
   const [selectedRun, setSelectedRun] = useState<number>()
@@ -85,6 +87,14 @@ export function RepositoryCommandCenter({ projectId, projectName }: { projectId:
     const timer = window.setInterval(() => { if (useRepositoryStore.getState().projectId === projectId) void refreshRemote() }, 120_000)
     return () => window.clearInterval(timer)
   }, [load.status, activeProjectId, projectId, refreshRemote])
+
+  // Read the stored graph only when the Intelligence section is actually opened. It is one
+  // indexed query rather than an extraction, so re-reading on entry keeps the view current
+  // without ever running Git behind the user's back.
+  useEffect(() => {
+    if (nav.section !== 'intelligence' || load.status !== 'ready' || activeProjectId !== projectId) return
+    void loadIntelligence()
+  }, [nav.section, load.status, activeProjectId, projectId, loadIntelligence])
 
   const navigate = (target: RepositoryNavTarget) => setNav((prev) => ({
     section: target.section,
@@ -176,6 +186,7 @@ export function RepositoryCommandCenter({ projectId, projectName }: { projectId:
           <div className="rcc-surface" role="region" aria-label={sectionLabel}>
             {nav.section === 'overview' && <OverviewSection onNavigate={goSection} />}
             {nav.section === 'changes' && <ChangesSection onNavigate={goSection} onRequestAgentWorktree={requestAgentWorktree} />}
+            {nav.section === 'intelligence' && <IntelligenceSection />}
             {nav.section === 'branches' && <BranchesSection onRequestAgentWorktree={requestAgentWorktree} />}
             {nav.section === 'pull-requests' && (
               <PullRequestsSection

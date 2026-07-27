@@ -12,7 +12,20 @@ export const STORAGE_KEYS = {
   id: 'paralith.theme.id',
   scheme: 'paralith.theme.scheme',
   vars: 'paralith.theme.vars',
+  rev: 'paralith.theme.rev',
 } as const
+
+/**
+ * Bumped whenever the token model or the palettes change.
+ *
+ * The bootstrap replays a cached blob of custom properties before any JS runs. Without a revision
+ * stamp, an install upgraded across a palette change would paint one frame of the *previous*
+ * theme — every cached variable still resolves, so the `:root` defaults never get a chance to
+ * show. A mismatched stamp makes the bootstrap discard the cache and fall through to `:root`.
+ *
+ * IMPORTANT: keep this value in sync with the inline script in `index.html`.
+ */
+export const TOKEN_REVISION = '2'
 
 /**
  * Apply a resolved theme to the document: write every CSS custom property as an inline style on the
@@ -47,6 +60,7 @@ export function applyTheme(theme: ThemeDefinition, selectedId: ThemeId): void {
     localStorage.setItem(STORAGE_KEYS.id, selectedId)
     localStorage.setItem(STORAGE_KEYS.scheme, scheme)
     localStorage.setItem(STORAGE_KEYS.vars, JSON.stringify(vars))
+    localStorage.setItem(STORAGE_KEYS.rev, TOKEN_REVISION)
   } catch {
     // Private-mode / storage-disabled: the theme is still applied for this session; only the
     // flash-free bootstrap cache is skipped.
