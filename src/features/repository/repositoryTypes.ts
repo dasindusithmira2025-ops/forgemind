@@ -13,6 +13,7 @@ import type {
 export type RepositorySectionId =
   | 'overview'
   | 'changes'
+  | 'intelligence'
   | 'branches'
   | 'pull-requests'
   | 'actions'
@@ -30,6 +31,7 @@ export interface RepositorySectionDef {
 export const REPOSITORY_SECTIONS: RepositorySectionDef[] = [
   { id: 'overview', label: 'Overview', remote: false },
   { id: 'changes', label: 'Changes', remote: false },
+  { id: 'intelligence', label: 'Intelligence', remote: false },
   { id: 'branches', label: 'Branches', remote: false },
   { id: 'pull-requests', label: 'Pull Requests', remote: true },
   { id: 'actions', label: 'Actions', remote: true },

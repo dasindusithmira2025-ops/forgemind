@@ -598,6 +598,236 @@ pub struct RemoteProjection {
     pub stale: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RepositoryGraphNodeKind {
+    Repository,
+    Worktree,
+    Branch,
+    Commit,
+    ChangeSet,
+    File,
+    Symbol,
+    Test,
+    Workflow,
+    Risk,
+}
+
+impl RepositoryGraphNodeKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Repository => "repository",
+            Self::Worktree => "worktree",
+            Self::Branch => "branch",
+            Self::Commit => "commit",
+            Self::ChangeSet => "change_set",
+            Self::File => "file",
+            Self::Symbol => "symbol",
+            Self::Test => "test",
+            Self::Workflow => "workflow",
+            Self::Risk => "risk",
+        }
+    }
+
+    /// Inverse of [`Self::as_str`], used when rehydrating a persisted graph projection. Returns
+    /// `None` for values this build does not know so the caller can reject the row rather than
+    /// silently coercing an unrecognized kind into a valid-looking one.
+    pub fn parse(value: &str) -> Option<Self> {
+        Some(match value {
+            "repository" => Self::Repository,
+            "worktree" => Self::Worktree,
+            "branch" => Self::Branch,
+            "commit" => Self::Commit,
+            "change_set" => Self::ChangeSet,
+            "file" => Self::File,
+            "symbol" => Self::Symbol,
+            "test" => Self::Test,
+            "workflow" => Self::Workflow,
+            "risk" => Self::Risk,
+            _ => return None,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RepositoryGraphEdgeKind {
+    Contains,
+    PointsTo,
+    Modifies,
+    Declares,
+    DependsOn,
+    Tests,
+    Builds,
+    BlockedBy,
+    SupportedBy,
+    VerifiedBy,
+}
+
+impl RepositoryGraphEdgeKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Contains => "contains",
+            Self::PointsTo => "points_to",
+            Self::Modifies => "modifies",
+            Self::Declares => "declares",
+            Self::DependsOn => "depends_on",
+            Self::Tests => "tests",
+            Self::Builds => "builds",
+            Self::BlockedBy => "blocked_by",
+            Self::SupportedBy => "supported_by",
+            Self::VerifiedBy => "verified_by",
+        }
+    }
+
+    /// Inverse of [`Self::as_str`]; see [`RepositoryGraphNodeKind::parse`] for why unknown values
+    /// return `None` instead of a fallback variant.
+    pub fn parse(value: &str) -> Option<Self> {
+        Some(match value {
+            "contains" => Self::Contains,
+            "points_to" => Self::PointsTo,
+            "modifies" => Self::Modifies,
+            "declares" => Self::Declares,
+            "depends_on" => Self::DependsOn,
+            "tests" => Self::Tests,
+            "builds" => Self::Builds,
+            "blocked_by" => Self::BlockedBy,
+            "supported_by" => Self::SupportedBy,
+            "verified_by" => Self::VerifiedBy,
+            _ => return None,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RepositoryGraphSourceKind {
+    Git,
+    Filesystem,
+    Ast,
+    Github,
+    Workflow,
+    Test,
+    Agent,
+    Memory,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryGraphProvenance {
+    pub source: RepositoryGraphSourceKind,
+    pub repository_id: String,
+    pub snapshot: String,
+    pub observed_at: String,
+    pub extractor_version: String,
+    pub confidence: f32,
+    pub evidence_ref: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryGraphNode {
+    pub id: String,
+    pub repository_id: String,
+    pub node_type: RepositoryGraphNodeKind,
+    pub external_key: String,
+    pub label: String,
+    pub metadata: Value,
+    pub content_hash: String,
+    pub provenance: RepositoryGraphProvenance,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryGraphEdge {
+    pub id: String,
+    pub repository_id: String,
+    pub source_node_id: String,
+    pub target_node_id: String,
+    pub edge_type: RepositoryGraphEdgeKind,
+    pub metadata: Value,
+    pub provenance: RepositoryGraphProvenance,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryGraphSnapshot {
+    pub id: String,
+    pub repository_id: String,
+    pub project_id: String,
+    pub worktree_path: String,
+    pub head_sha: String,
+    pub status_hash: String,
+    pub extractor_version: String,
+    pub created_at: String,
+    pub nodes: Vec<RepositoryGraphNode>,
+    pub edges: Vec<RepositoryGraphEdge>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryImpactItem {
+    pub path: String,
+    pub reason: String,
+    pub confidence: f32,
+    pub evidence: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryRiskSignal {
+    pub code: String,
+    pub severity: String,
+    pub summary: String,
+    pub evidence: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryImpactExplanation {
+    pub target_type: String,
+    pub target: String,
+    pub relationship: String,
+    pub reason: String,
+    pub evidence: Vec<String>,
+    pub confidence: f32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryImpactSummary {
+    pub changed_files: Vec<String>,
+    pub changed_symbols: Vec<RepositoryImpactItem>,
+    pub direct_dependents: Vec<RepositoryImpactItem>,
+    pub related_tests: Vec<RepositoryImpactItem>,
+    pub related_workflows: Vec<RepositoryImpactItem>,
+    pub risk_signals: Vec<RepositoryRiskSignal>,
+    pub missing_test_signals: Vec<RepositoryRiskSignal>,
+    pub explanations: Vec<RepositoryImpactExplanation>,
+    pub generated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryIntelligenceRequest {
+    pub project_id: String,
+    pub repository_path: Option<String>,
+    pub worktree_path: Option<String>,
+    pub paths: Option<Vec<String>>,
+    pub depth: Option<u8>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryIntelligence {
+    pub project_id: String,
+    pub repository_id: String,
+    pub worktree_path: String,
+    pub head_sha: String,
+    pub status_hash: String,
+    pub graph: RepositoryGraphSnapshot,
+    pub impact: RepositoryImpactSummary,
+}
 #[cfg(test)]
 mod tests {
     use super::*;

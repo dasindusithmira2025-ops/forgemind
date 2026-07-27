@@ -556,6 +556,8 @@ pub fn run() {
             commands::refresh_repository_remote_projection,
             commands::get_repository_workflow_run_detail,
             commands::get_repository_pull_request_detail,
+            commands::refresh_repository_intelligence,
+            commands::get_repository_intelligence,
             commands::evaluate_merge_readiness,
             commands::get_settings,
             commands::get_ai_usage_snapshots,

@@ -1463,6 +1463,39 @@ html[data-theme-swapping] *, html[data-theme-swapping] *::before, html[data-them
 .repo-next-actions strong { margin-right: auto; color: var(--text); font-size: var(--text-sm); }
 .repo-next-actions button { border: 0; background: none; color: var(--accent-strong); font-size: var(--text-sm); cursor: pointer; }
 
+/* Repository intelligence — change impact, risk signals and graph provenance */
+.repo-intel { padding: 12px 14px 24px; display: flex; flex-direction: column; gap: 10px; }
+.repo-intel-empty { flex: 1; align-items: center; justify-content: center; gap: 12px; color: var(--muted); text-align: center; padding: 40px; }
+.repo-intel-empty h2 { margin: 0; color: var(--text); font-size: var(--text-lg); }
+.repo-intel-empty p { max-width: 460px; margin: 0; font-size: var(--text-sm); line-height: var(--lh-body); }
+.repo-intel-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.repo-intel-head h2 { margin: 0; color: var(--text); font-size: var(--text-lg); }
+.repo-intel-head p { margin: 3px 0 0; color: var(--muted); font-size: var(--text-sm); }
+.repo-intel-head-actions { display: flex; align-items: center; gap: 8px; }
+
+.repo-intel-risks { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); overflow: hidden; }
+.repo-intel-risks > header { padding: 9px 10px; display: flex; justify-content: space-between; border-bottom: 1px solid var(--border); color: var(--muted); font-size: var(--text-xs); }
+.repo-intel-risks > header strong { color: var(--text); font-size: var(--text-sm); }
+.repo-intel-risk { padding: 9px 10px; display: flex; align-items: flex-start; gap: 9px; border-bottom: 1px solid var(--border); }
+.repo-intel-risk:last-child { border-bottom: 0; }
+.repo-intel-risk strong { color: var(--text); font-size: var(--text-sm); font-weight: 550; }
+.repo-intel-evidence { margin: 5px 0 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 4px; }
+.repo-intel-evidence li { padding: 1px 6px; border-radius: var(--radius-sm); background: var(--surface-3); color: var(--faint); font-size: var(--text-xs); overflow-wrap: anywhere; }
+
+.repo-intel-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.repo-intel-list { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); overflow: hidden; }
+.repo-intel-list > header { padding: 9px 10px; display: flex; align-items: center; gap: 7px; border-bottom: 1px solid var(--border); color: var(--muted); font-size: var(--text-xs); }
+.repo-intel-list > header strong { flex: 1; color: var(--text); font-size: var(--text-sm); }
+.repo-intel-list ul { margin: 0; padding: 0; list-style: none; }
+.repo-intel-list li { padding: 8px 10px; border-bottom: 1px solid var(--border); }
+.repo-intel-list li:last-child { border-bottom: 0; }
+.repo-intel-list small { display: block; margin-top: 3px; color: var(--muted); font-size: var(--text-xs); line-height: var(--lh-body); }
+.repo-intel-item-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.repo-intel-item-head span:first-child { flex: 1; min-width: 0; color: var(--text); font-size: var(--text-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.repo-intel-none { margin: 0; padding: 13px 10px; color: var(--muted); font-size: var(--text-xs); line-height: var(--lh-body); }
+
+.repo-intel-foot { display: flex; align-items: baseline; gap: 8px; color: var(--faint); font-size: var(--text-xs); line-height: var(--lh-body); }
+
 /* Placeholders & remote surfaces */
 .repo-placeholder { margin: 16px 14px; min-height: 96px; padding: 16px; display: flex; align-items: flex-start; gap: 14px; border: 1px solid var(--border-strong); border-radius: var(--radius-lg); background: var(--surface); }
 .repo-placeholder.inline { margin: 10px 0; min-height: 0; padding: 10px 12px; background: var(--surface-2); }
@@ -1798,6 +1831,7 @@ html[data-theme-swapping] *, html[data-theme-swapping] *::before, html[data-them
   .repo-workflow-list { max-height: 280px; border-right: 0; border-bottom: 1px solid var(--border); }
   .repo-workflow-runs { overflow: visible; }
   .repo-overview-columns { grid-template-columns: 1fr; }
+  .repo-intel-columns { grid-template-columns: 1fr; }
   .repo-clean-changes { grid-template-columns: 1fr; }
   .repo-clean-actions { grid-column: 1; }
   .repo-pr { grid-template-columns: 1fr; overflow-y: auto; }

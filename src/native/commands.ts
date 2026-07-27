@@ -46,6 +46,8 @@ import type {
   RemoteProjection,
   RemoteProjectionObject,
   RemoteProjectionRequest,
+  RepositoryIntelligence,
+  RepositoryIntelligenceRequest,
   WorkflowRunDetailRequest,
   RepositorySnapshot,
   RepositoryWorktreeLease,
@@ -139,6 +141,10 @@ export const native = {
     invoke<ProviderAccountStatus>('get_github_provider_status', { projectId, host }),
   refreshRepositoryRemoteProjection: (request: RemoteProjectionRequest) =>
     invoke<RemoteProjection>('refresh_repository_remote_projection', { request }),
+  refreshRepositoryIntelligence: (request: RepositoryIntelligenceRequest) =>
+    invoke<RepositoryIntelligence>('refresh_repository_intelligence', { request }),
+  getRepositoryIntelligence: (projectId: string, repositoryPath?: string) =>
+    invoke<RepositoryIntelligence | null>('get_repository_intelligence', { projectId, repositoryPath }),
   getRepositoryWorkflowRunDetail: (request: WorkflowRunDetailRequest) =>
     invoke<RemoteProjectionObject>('get_repository_workflow_run_detail', { request }),
   getRepositoryPullRequestDetail: (request: PullRequestDetailRequest) =>
