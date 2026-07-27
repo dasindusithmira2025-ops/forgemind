@@ -1,4 +1,4 @@
-import { Activity, Crosshair, PanelLeftClose, Rocket, Settings } from 'lucide-react'
+import { Activity, Crosshair, PanelLeftClose, Settings } from 'lucide-react'
 import { Brand } from '../../../components/ui/Brand'
 import { useSidebarStore } from '../sidebarStore'
 import type { SidebarActions } from '../sidebarTypes'
@@ -24,16 +24,13 @@ export function SidebarToolbar({
 
   return (
     <div className="sb-toolbar">
-      <button
-        type="button"
-        className="sb-toolbar-brand"
-        aria-label="Project launcher"
-        title="Project launcher"
-        onClick={actions.onOpenLauncher}
-      >
+      {/* Identity only, deliberately not a control. `Brand` renders a <div>, which is flow content
+          and invalid inside a <button>'s phrasing-content model — and the Project launcher this
+          used to open is already reachable from the one Project popover, so making it a control
+          also reintroduced exactly the second entry point this sidebar was rebuilt to remove. */}
+      <div className="sb-toolbar-brand">
         <Brand mono />
-        <Rocket size={13} className="sb-toolbar-brand-icon" aria-hidden />
-      </button>
+      </div>
 
       <div className="sb-toolbar-tools">
         {onScrollToActive && (
