@@ -56,7 +56,7 @@ const secondWorkspace: Workspace = { ...workspace, id: 'workspace-two', name: 'S
 describe('Workspace screen', () => {
   beforeEach(() => {
     vi.clearAllMocks(); runtime.sessions = [session]
-    useSidebarStore.setState({ projectSwitcherOpen: false, diagnosticsOpen: false, menuWorkspaceId: undefined, draggingWorkspaceId: undefined, filterQuery: '' })
+    useSidebarStore.setState({ projectSwitcherOpen: false, listOptionsOpen: false, diagnosticsOpen: false, menuWorkspaceId: undefined, draggingWorkspaceId: undefined, filterQuery: '', groupBy: 'project', sortMode: 'manual', collapsedGroups: {} })
     restoreWorkspace.mockResolvedValue({ workspaceId: 'workspace', sessions: [session], deferredPaneIds: [], failures: [], budget: 4 })
     terminateWorkspace.mockResolvedValue(undefined)
     reorderWorkspaces.mockResolvedValue(undefined)
@@ -76,20 +76,25 @@ describe('Workspace screen', () => {
     await waitFor(() => expect(restoreWorkspace).toHaveBeenCalledWith('workspace', 4, 'restart_agents'))
   })
 
-  it('renders the focused sidebar without removed navigation surfaces', async () => {
+  it('renders the four sidebar zones without removed navigation surfaces', async () => {
     renderWorkspace(); await screen.findByTestId('terminal-pane')
-    expect(screen.getByLabelText('PARALITH')).toBeInTheDocument()
-    // The pinned Project rail carries identity and is the only Project switcher entry point.
-    expect(screen.getByRole('button', { name: /Project Fixture/ })).toBeInTheDocument()
-    expect(screen.getByText('Workspaces')).toBeInTheDocument()
-    // "Other Monitors" is shown only when a Workspace is detached; the fixture has none.
-    expect(screen.queryByText('Other Monitors')).not.toBeInTheDocument()
-    // The project-scoped SWARMS section is a first-class sidebar entity alongside Workspaces.
-    expect(screen.getByRole('region', { name: 'Swarms' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'New swarm' })).toBeInTheDocument()
-    // The scroll body holds exactly the two primary lists; Projects live in the pinned rail.
-    expect(screen.getAllByRole('region')).toHaveLength(2)
+    // Zone 1 — nav: destinations only, each with a real target.
+    expect(screen.getByRole('navigation', { name: 'Go to' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^Search/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Repository' })).toBeInTheDocument()
+    // Zone 2 — list header: the title names the current grouping.
+    expect(screen.getByText('Projects')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Open a Project' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'New workspace' })).toBeInTheDocument()
+    // Zone 3 — scroll body: one group per open Project, plus Swarms. "Other Monitors" appears
+    // only when a Workspace is detached; the fixture has none.
+    expect(screen.getByRole('region', { name: 'Fixture' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Swarms' })).toBeInTheDocument()
+    expect(screen.getAllByRole('region')).toHaveLength(2)
+    expect(screen.queryByText('Other Monitors')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'New swarm' })).toBeInTheDocument()
+    // Zone 4 — toolbar: identity plus the least-used controls.
+    expect(screen.getByLabelText('PARALITH')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Settings' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Diagnostics' })).toBeInTheDocument()
     // Two Workspaces and no Swarms is under the filter threshold, so the field stays hidden.
@@ -103,15 +108,44 @@ describe('Workspace screen', () => {
   it('gives every sidebar action exactly one entry point', async () => {
     renderWorkspace(); await screen.findByTestId('terminal-pane')
     // Collapse, Settings, and Diagnostics each used to exist twice over (header + footer rail,
-    // and again in the brand-logo menu).
+    // and again in the brand-logo menu). They now live only in the toolbar.
     expect(screen.getAllByRole('button', { name: 'Collapse sidebar' })).toHaveLength(1)
     expect(screen.getAllByRole('button', { name: 'Settings' })).toHaveLength(1)
     expect(screen.getAllByRole('button', { name: 'Diagnostics' })).toHaveLength(1)
-    // Closing a Project lives only in the Project surface, never as a bare row affordance.
+    // Closing a Project lives only in the Project surface, never as a bare group-header control.
     expect(screen.queryByRole('button', { name: 'Close project Fixture' })).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: /Project Fixture/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Open a Project' }))
     expect(await screen.findByRole('dialog', { name: 'Project' })).toBeInTheDocument()
     expect(screen.getAllByRole('button', { name: 'Close project Fixture' })).toHaveLength(1)
+  })
+
+  it('groups Workspaces by Project and flips to one flat list on demand', async () => {
+    renderWorkspace(); await screen.findByTestId('terminal-pane')
+    // Default grouping: a section per open Project, titled with the Project's name.
+    expect(screen.getByRole('region', { name: 'Fixture' })).toBeInTheDocument()
+    expect(screen.getByText('Projects')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'List options' }))
+    fireEvent.click(await screen.findByRole('radio', { name: 'Workspaces' }))
+
+    // Flat grouping: one ungrouped list, and the title says so.
+    await waitFor(() => expect(screen.getByRole('region', { name: 'Workspaces' })).toBeInTheDocument())
+    expect(screen.queryByRole('region', { name: 'Fixture' })).not.toBeInTheDocument()
+    expect(within(screen.getByRole('region', { name: 'Workspaces' })).getByText('Fresh workspace')).toBeInTheDocument()
+    expect(within(screen.getByRole('region', { name: 'Workspaces' })).getByText('Second workspace')).toBeInTheDocument()
+  })
+
+  it('suspends drag reordering while the attention order is active', async () => {
+    renderWorkspace(); await screen.findByTestId('terminal-pane')
+    const group = () => within(screen.getByRole('region', { name: 'Fixture' }))
+    // Manual order is draggable: a drop index maps onto the persisted order.
+    expect(group().getAllByTitle('Drag to reorder').length).toBeGreaterThan(0)
+
+    fireEvent.click(screen.getByRole('button', { name: 'List options' }))
+    fireEvent.click(await screen.findByRole('radio', { name: 'Needs you' }))
+
+    // Attention order owns the sequence, so the handle that implies "you own it" disappears.
+    await waitFor(() => expect(group().queryByTitle('Drag to reorder')).not.toBeInTheDocument())
   })
 
   it('filters both primary lists once they are long enough to need it', async () => {
@@ -123,7 +157,7 @@ describe('Workspace screen', () => {
     )
     renderWorkspace(); await screen.findByTestId('terminal-pane')
     const filter = await screen.findByRole('searchbox', { name: 'Filter Workspaces and Swarms' })
-    const workspaceList = () => within(screen.getByRole('region', { name: 'Workspaces' }))
+    const workspaceList = () => within(screen.getByRole('region', { name: 'Fixture' }))
     const swarmList = () => within(screen.getByRole('region', { name: 'Swarms' }))
 
     fireEvent.change(filter, { target: { value: 'second' } })
@@ -132,10 +166,13 @@ describe('Workspace screen', () => {
     expect(swarmList().queryByText('Refactor auth')).not.toBeInTheDocument()
     expect(screen.getByRole('status')).toHaveTextContent('1 match')
 
-    // The same query narrows Swarms, and a group with no match says so rather than looking empty.
+    // The same query narrows Swarms. A Project group with no match drops out entirely — an empty
+    // header would read as "this Project has nothing", not "nothing here matched" — so the list
+    // says so once, on its own behalf.
     fireEvent.change(filter, { target: { value: 'auth' } })
     await waitFor(() => expect(swarmList().getByText('Refactor auth')).toBeInTheDocument())
-    expect(workspaceList().getByText('No Workspace matches the filter.')).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: 'Fixture' })).not.toBeInTheDocument()
+    expect(screen.getByText('No Workspace matches the filter.')).toBeInTheDocument()
     expect(swarmList().queryByText('Docs sweep')).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Clear filter' }))
@@ -146,7 +183,7 @@ describe('Workspace screen', () => {
   it('offers keep-running, pause-and-close, or cancel for active Project Swarms', async () => {
     listSwarms.mockResolvedValue([{ swarm: { id: 'swarm', projectId: 'project', projectRoot: 'c:\\fixture', name: 'Active', lifecycle: 'running', progress: 0.2 }, activity: {} }])
     renderWorkspace(); await screen.findByTestId('terminal-pane')
-    fireEvent.click(screen.getByRole('button', { name: /Project Fixture/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Open a Project' }))
     fireEvent.click(await screen.findByRole('button', { name: 'Close project Fixture' }))
     expect(await screen.findByText('1 active Swarm')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument()
