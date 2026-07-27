@@ -652,11 +652,8 @@ html[data-theme-swapping] *, html[data-theme-swapping] *::before, html[data-them
 /* Pinned utilities: one icon rail, not four labelled rows. */
 /* ---- Toolbar: identity left, the least-used controls right --------------------------------- */
 .sb-toolbar { flex: 0 0 auto; padding: 4px 6px; display: flex; align-items: center; justify-content: space-between; gap: 8px; border-top: 1px solid var(--border-subtle); background: color-mix(in srgb, var(--sidebar-bg) 88%, #000); }
-.sb-toolbar-brand { min-width: 0; padding: 0 6px; min-height: var(--icon-btn); display: flex; align-items: center; gap: 6px; background: transparent; border: 0; border-radius: var(--radius-sm); cursor: pointer; transition: background-color var(--dur-fast) var(--ease-out); }
-.sb-toolbar-brand:hover { background: var(--surface-hover); }
+.sb-toolbar-brand { min-width: 0; padding: 0 6px; min-height: var(--icon-btn); display: flex; align-items: center; }
 .sb-toolbar-brand .brand--monochrome .brand-logo { width: 92px; height: 22px; }
-.sb-toolbar-brand-icon { flex: 0 0 auto; color: var(--faint); opacity: 0; transition: opacity var(--dur-fast) var(--ease-out); }
-.sb-toolbar-brand:hover .sb-toolbar-brand-icon, .sb-toolbar-brand:focus-visible .sb-toolbar-brand-icon { opacity: 1; }
 .sb-toolbar-tools { flex: 0 0 auto; display: flex; align-items: center; gap: 1px; }
 .sb-toolbar-btn { width: var(--icon-btn); height: var(--icon-btn); display: grid; place-items: center; color: var(--faint); background: transparent; border: 0; border-radius: var(--radius-sm); cursor: pointer; transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out); }
 .sb-toolbar-btn:hover { color: var(--text); background: var(--surface-hover); }
