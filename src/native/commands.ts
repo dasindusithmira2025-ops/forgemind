@@ -60,6 +60,9 @@ import type {
   ProjectCloseSwarmBehavior,
   SavePresetRequest,
   SwarmRuntimeReadiness,
+  SwarmModelCapability,
+  SwarmExecutionDefaults,
+  SwarmMemberModelConfig,
   SwarmLaunchPreview,
   SwarmCommandDraft,
   DirectoryListing,
@@ -68,9 +71,14 @@ import type {
   FsEntryInfo,
   FsPath,
   ProjectFileIndex,
+  ProviderUsageSnapshot,
+  AiUsageDiagnostics,
 } from './types'
 
 export const native = {
+  getAiUsageSnapshots: () => invoke<ProviderUsageSnapshot[]>('get_ai_usage_snapshots'),
+  refreshAiUsage: () => invoke<ProviderUsageSnapshot[]>('refresh_ai_usage'),
+  getAiUsageDiagnostics: () => invoke<AiUsageDiagnostics[]>('get_ai_usage_diagnostics'),
   openProject: (path: string) => invoke<Project>('open_project', { path }),
   getProject: (projectId: string) => invoke<Project>('get_project', { projectId }),
   listRecentProjects: () => invoke<Project[]>('list_recent_projects'),
@@ -208,6 +216,12 @@ export const native = {
   // ---- Paralith Swarms --------------------------------------------------------------------
   listSwarmPresets: () => invoke<SwarmPreset[]>('list_swarm_presets'),
   listSwarmRuntimeReadiness: () => invoke<SwarmRuntimeReadiness[]>('list_swarm_runtime_readiness'),
+  listSwarmModelRegistry: () => invoke<SwarmModelCapability[]>('list_swarm_model_registry'),
+  getSwarmExecutionDefaults: (projectId: string, swarmId: string) => invoke<SwarmExecutionDefaults>('get_swarm_execution_defaults', { projectId, swarmId }),
+  saveSwarmExecutionDefaults: (projectId: string, swarmId: string, defaults: SwarmExecutionDefaults) => invoke<void>('save_swarm_execution_defaults', { projectId, swarmId, defaults }),
+  applySwarmExecutionDefaults: (projectId: string, swarmId: string, memberIds: string[]) => invoke<number>('apply_swarm_execution_defaults', { projectId, swarmId, memberIds }),
+  validateSwarmMemberModelConfig: (projectId: string, swarmId: string, memberId: string) => invoke<SwarmMemberModelConfig>('validate_swarm_member_model_config', { projectId, swarmId, memberId }),
+  updateSwarmMemberModelConfig: (projectId: string, swarmId: string, memberId: string, config: SwarmMemberModelConfig) => invoke<SwarmMemberModelConfig>('update_swarm_member_model_config', { projectId, swarmId, memberId, config }),
   previewSwarmLaunch: (request: CreateSwarmRequest) => invoke<SwarmLaunchPreview>('preview_swarm_launch', { request }),
   saveSwarmPreset: (request: SavePresetRequest) => invoke<SwarmPreset>('save_swarm_preset', { request }),
   deleteSwarmPreset: (presetId: string) => invoke<void>('delete_swarm_preset', { presetId }),

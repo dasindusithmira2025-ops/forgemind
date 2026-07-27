@@ -30,6 +30,29 @@ pub struct SwarmAgentRunCompletion<'a> {
 }
 
 impl DatabaseService {
+    pub fn swarm_execution_defaults(&self, swarm_id: &str) -> AppResult<SwarmExecutionDefaults> {
+        let raw: Option<String> = self
+            .connection
+            .lock()
+            .query_row(
+                "SELECT config_json FROM swarm_execution_defaults WHERE swarm_id=?1",
+                [swarm_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(raw
+            .and_then(|value| serde_json::from_str(&value).ok())
+            .unwrap_or_default())
+    }
+
+    pub fn save_swarm_execution_defaults(
+        &self,
+        swarm_id: &str,
+        defaults: &SwarmExecutionDefaults,
+    ) -> AppResult<()> {
+        self.connection.lock().execute("INSERT INTO swarm_execution_defaults(swarm_id,config_json,updated_at) VALUES(?1,?2,?3) ON CONFLICT(swarm_id) DO UPDATE SET config_json=excluded.config_json,updated_at=excluded.updated_at", params![swarm_id, serde_json::to_string(defaults).map_err(AppError::database)?, Utc::now().to_rfc3339()])?;
+        Ok(())
+    }
     #[cfg(test)]
     pub fn seed_project_memory_for_test(&self, project_id: &str, title: &str) -> AppResult<String> {
         let item_id = Uuid::new_v4().to_string();
@@ -574,8 +597,8 @@ impl DatabaseService {
         }
         let agent_run_id = Uuid::new_v4().to_string();
         transaction.execute(
-            "INSERT INTO swarm_agent_runs(id,swarm_run_id,swarm_id,member_id,task_id,status,attempt,created_at,started_at,updated_at) VALUES(?1,?2,?3,?4,?5,'starting',?6,?7,?7,?7)",
-            params![agent_run_id, run_id, task.swarm_id, agent.id, task.id, attempt, now],
+            "INSERT INTO swarm_agent_runs(id,swarm_run_id,swarm_id,member_id,task_id,status,attempt,requested_provider_id,requested_model_id,resolved_provider_id,resolved_model_id,reasoning_effort,execution_config_snapshot_json,created_at,started_at,updated_at) VALUES(?1,?2,?3,?4,?5,'starting',?6,?7,?8,?7,?8,?9,?10,?11,?11,?11)",
+            params![agent_run_id, run_id, task.swarm_id, agent.id, task.id, attempt, agent.model_config.provider_id, agent.model_config.model_id, agent.model_config.reasoning_effort, serde_json::to_string(&agent.model_config).unwrap_or_else(|_| "{}".into()), now],
         )?;
         transaction.commit()?;
         Ok(agent_run_id)
@@ -797,12 +820,13 @@ impl DatabaseService {
     pub fn insert_swarm_agent(&self, agent: &SwarmAgent) -> AppResult<()> {
         let now = Utc::now().to_rfc3339();
         self.connection.lock().execute(
-            "INSERT INTO swarm_agents(id,swarm_id,role,runtime,allocation_id,display_name,status,current_task_id,terminal_session_id,last_result,runtime_session_state,working_directory,worktree,permissions_json,changed_files_json,test_progress_json,last_message,current_blocker,recovery_state,created_at,updated_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?20)",
+            "INSERT INTO swarm_agents(id,swarm_id,role,runtime,model_config_json,allocation_id,display_name,status,current_task_id,terminal_session_id,last_result,runtime_session_state,working_directory,worktree,permissions_json,changed_files_json,test_progress_json,last_message,current_blocker,recovery_state,created_at,updated_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?21)",
             params![
                 agent.id,
                 agent.swarm_id,
                 agent.role.as_str(),
                 agent.runtime.as_str(),
+                serde_json::to_string(&agent.model_config).unwrap_or_else(|_| "{}".into()),
                 agent.allocation_id,
                 agent.display_name,
                 agent.status.as_str(),
@@ -835,6 +859,57 @@ impl DatabaseService {
         self.connection.lock().execute(
             "UPDATE swarm_agents SET status=?2,current_task_id=?3,last_result=COALESCE(?4,last_result),updated_at=?5 WHERE id=?1",
             params![id, status.as_str(), current_task_id, last_result, now],
+        )?;
+        Ok(())
+    }
+
+    pub fn update_swarm_agent_model_config(
+        &self,
+        agent_id: &str,
+        config: &SwarmMemberModelConfig,
+    ) -> AppResult<()> {
+        let runtime = SwarmRuntimeKind::from_db(&config.provider_id).ok_or_else(|| {
+            AppError::new(
+                "swarm_provider_unavailable",
+                "The selected provider is unsupported.",
+                true,
+            )
+        })?;
+        self.connection.lock().execute(
+            "UPDATE swarm_agents SET runtime=?2,model_config_json=?3,updated_at=?4 WHERE id=?1",
+            params![
+                agent_id,
+                runtime.as_str(),
+                serde_json::to_string(config).map_err(AppError::database)?,
+                Utc::now().to_rfc3339()
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn swarm_agent_session_runtime(
+        &self,
+        agent_id: &str,
+        terminal_session_id: &str,
+    ) -> AppResult<Option<SwarmRuntimeKind>> {
+        let value: Option<String> = self.connection.lock().query_row(
+            "SELECT runtime FROM swarm_runtime_sessions WHERE agent_id=?1 AND terminal_session_id=?2 ORDER BY started_at DESC LIMIT 1",
+            params![agent_id, terminal_session_id], |row| row.get(0),
+        ).optional()?;
+        Ok(value.and_then(|value| SwarmRuntimeKind::from_db(&value)))
+    }
+
+    pub fn record_swarm_agent_run_resolution(
+        &self,
+        swarm_id: &str,
+        member_id: &str,
+        task_id: &str,
+        config: &SwarmMemberModelConfig,
+        fallback_reason: Option<&str>,
+    ) -> AppResult<()> {
+        self.connection.lock().execute(
+            "UPDATE swarm_agent_runs SET resolved_provider_id=?4,resolved_model_id=?5,reasoning_effort=?6,fallback_used=?7,fallback_reason=?8,execution_config_snapshot_json=?9,updated_at=?10 WHERE id=(SELECT id FROM swarm_agent_runs WHERE swarm_id=?1 AND member_id=?2 AND task_id=?3 AND status='starting' ORDER BY created_at DESC,id DESC LIMIT 1)",
+            params![swarm_id, member_id, task_id, config.provider_id, config.model_id, config.reasoning_effort, fallback_reason.is_some(), fallback_reason, serde_json::to_string(config).map_err(AppError::database)?, Utc::now().to_rfc3339()],
         )?;
         Ok(())
     }
@@ -1882,14 +1957,15 @@ fn write_roles(
                 allocation.id.clone()
             };
             connection.execute(
-                "INSERT INTO swarm_role_allocations(id,swarm_id,role,runtime,count,position) VALUES(?1,?2,?3,?4,?5,?6)",
+            "INSERT INTO swarm_role_allocations(id,swarm_id,role,runtime,count,position,model_config_json) VALUES(?1,?2,?3,?4,?5,?6,?7)",
                 params![
                     allocation_id,
                     swarm_id,
                     role.role.as_str(),
                     allocation.runtime.as_str(),
-                    allocation.count,
-                    allocation_position as i64,
+                allocation.count,
+                allocation_position as i64,
+                allocation.model_config.as_ref().and_then(|value| serde_json::to_string(value).ok()).unwrap_or_else(|| "{}".into()),
                 ],
             )?;
         }
@@ -1899,19 +1975,30 @@ fn write_roles(
 
 fn load_roles(connection: &Connection, swarm_id: &str) -> AppResult<Vec<SwarmRoleConfig>> {
     let mut allocation_statement = connection.prepare(
-        "SELECT id,role,runtime,count FROM swarm_role_allocations WHERE swarm_id=?1 ORDER BY position, id",
+        "SELECT id,role,runtime,count,model_config_json FROM swarm_role_allocations WHERE swarm_id=?1 ORDER BY position, id",
     )?;
     let allocation_rows = allocation_statement
         .query_map([swarm_id], |row| {
             let role_raw: String = row.get(1)?;
             let runtime_raw: String = row.get(2)?;
+            let runtime = SwarmRuntimeKind::from_db(&runtime_raw).unwrap_or(SwarmRuntimeKind::Auto);
+            let config_json: String = row.get(4)?;
+            let mut allocation =
+                SwarmRoleAllocation::new(row.get::<_, String>(0)?, runtime, row.get::<_, i64>(3)?);
+            allocation.model_config = if config_json.trim() == "{}" {
+                Some(crate::agents::model_registry::unvalidated_for(
+                    runtime.as_str(),
+                ))
+            } else {
+                serde_json::from_str(&config_json).ok().or_else(|| {
+                    Some(crate::agents::model_registry::unvalidated_for(
+                        runtime.as_str(),
+                    ))
+                })
+            };
             Ok((
                 SwarmRole::from_db(&role_raw).unwrap_or(SwarmRole::Builder),
-                SwarmRoleAllocation::new(
-                    row.get::<_, String>(0)?,
-                    SwarmRuntimeKind::from_db(&runtime_raw).unwrap_or(SwarmRuntimeKind::Auto),
-                    row.get::<_, i64>(3)?,
-                ),
+                allocation,
             ))
         })?
         .collect::<Result<Vec<_>, _>>()?;
@@ -1940,38 +2027,41 @@ fn load_roles(connection: &Connection, swarm_id: &str) -> AppResult<Vec<SwarmRol
 
 fn load_agents(connection: &Connection, swarm_id: &str) -> AppResult<Vec<SwarmAgent>> {
     let mut statement = connection.prepare(
-        "SELECT id,swarm_id,role,runtime,allocation_id,display_name,status,current_task_id,terminal_session_id,last_result,runtime_session_state,working_directory,worktree,permissions_json,changed_files_json,test_progress_json,last_message,current_blocker,recovery_state,created_at,updated_at FROM swarm_agents WHERE swarm_id=?1 ORDER BY created_at,id",
+        "SELECT id,swarm_id,role,runtime,model_config_json,allocation_id,display_name,status,current_task_id,terminal_session_id,last_result,runtime_session_state,working_directory,worktree,permissions_json,changed_files_json,test_progress_json,last_message,current_blocker,recovery_state,created_at,updated_at FROM swarm_agents WHERE swarm_id=?1 ORDER BY created_at,id",
     )?;
     let agents = statement
         .query_map([swarm_id], |row| {
             let role_raw: String = row.get(2)?;
             let runtime_raw: String = row.get(3)?;
-            let status_raw: String = row.get(6)?;
-            let permissions_json: String = row.get(13)?;
-            let changed_files_json: String = row.get(14)?;
-            let test_progress_json: String = row.get(15)?;
+            let status_raw: String = row.get(7)?;
+            let permissions_json: String = row.get(14)?;
+            let changed_files_json: String = row.get(15)?;
+            let test_progress_json: String = row.get(16)?;
             Ok(SwarmAgent {
                 id: row.get(0)?,
                 swarm_id: row.get(1)?,
                 role: SwarmRole::from_db(&role_raw).unwrap_or(SwarmRole::Builder),
                 runtime: SwarmRuntimeKind::from_db(&runtime_raw).unwrap_or(SwarmRuntimeKind::Auto),
-                allocation_id: row.get(4)?,
-                display_name: row.get(5)?,
+                model_config: serde_json::from_str(&row.get::<_, String>(4)?).unwrap_or_else(
+                    |_| crate::agents::model_registry::unvalidated_for(&runtime_raw),
+                ),
+                allocation_id: row.get(5)?,
+                display_name: row.get(6)?,
                 status: SwarmAgentStatus::from_db(&status_raw).unwrap_or(SwarmAgentStatus::Idle),
-                current_task_id: row.get(7)?,
-                terminal_session_id: row.get(8)?,
-                last_result: row.get(9)?,
-                runtime_session_state: row.get(10)?,
-                working_directory: row.get(11)?,
-                worktree: row.get(12)?,
+                current_task_id: row.get(8)?,
+                terminal_session_id: row.get(9)?,
+                last_result: row.get(10)?,
+                runtime_session_state: row.get(11)?,
+                working_directory: row.get(12)?,
+                worktree: row.get(13)?,
                 permissions: serde_json::from_str(&permissions_json).unwrap_or_default(),
                 changed_files: serde_json::from_str(&changed_files_json).unwrap_or_default(),
                 test_progress: serde_json::from_str(&test_progress_json).unwrap_or_default(),
-                last_message: row.get(16)?,
-                current_blocker: row.get(17)?,
-                recovery_state: row.get(18)?,
-                created_at: row.get(19)?,
-                updated_at: row.get(20)?,
+                last_message: row.get(17)?,
+                current_blocker: row.get(18)?,
+                recovery_state: row.get(19)?,
+                created_at: row.get(20)?,
+                updated_at: row.get(21)?,
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
@@ -2345,7 +2435,7 @@ fn load_swarm_runs(connection: &Connection, swarm_id: &str) -> AppResult<Vec<Swa
 
 fn load_swarm_agent_runs(connection: &Connection, swarm_id: &str) -> AppResult<Vec<SwarmAgentRun>> {
     let mut statement = connection.prepare(
-        "SELECT id,swarm_run_id,swarm_id,member_id,task_id,terminal_session_id,process_id,status,attempt,exit_code,failure_reason,cancellation_reason,structured_result_json,files_changed_json,evidence_json,created_at,started_at,finished_at,updated_at FROM swarm_agent_runs WHERE swarm_id=?1 ORDER BY created_at,id",
+        "SELECT id,swarm_run_id,swarm_id,member_id,task_id,terminal_session_id,process_id,status,attempt,requested_provider_id,requested_model_id,resolved_provider_id,resolved_model_id,reasoning_effort,fallback_used,fallback_reason,provider_runtime_version,execution_config_snapshot_json,exit_code,failure_reason,cancellation_reason,structured_result_json,files_changed_json,evidence_json,created_at,started_at,finished_at,updated_at FROM swarm_agent_runs WHERE swarm_id=?1 ORDER BY created_at,id",
     )?;
     let rows = statement
         .query_map([swarm_id], |row| {
@@ -2353,11 +2443,12 @@ fn load_swarm_agent_runs(connection: &Connection, swarm_id: &str) -> AppResult<V
                 .get::<_, Option<i64>>(6)?
                 .and_then(|value| u32::try_from(value).ok());
             let exit_code = row
-                .get::<_, Option<i64>>(9)?
+                .get::<_, Option<i64>>(18)?
                 .and_then(|value| i32::try_from(value).ok());
-            let structured_result: Option<String> = row.get(12)?;
-            let files_changed: String = row.get(13)?;
-            let evidence: String = row.get(14)?;
+            let structured_result: Option<String> = row.get(21)?;
+            let files_changed: String = row.get(22)?;
+            let evidence: String = row.get(23)?;
+            let snapshot: String = row.get(17)?;
             Ok(SwarmAgentRun {
                 id: row.get(0)?,
                 swarm_run_id: row.get(1)?,
@@ -2368,17 +2459,27 @@ fn load_swarm_agent_runs(connection: &Connection, swarm_id: &str) -> AppResult<V
                 process_id,
                 status: row.get(7)?,
                 attempt: row.get(8)?,
+                requested_provider_id: row.get::<_, Option<String>>(9)?.unwrap_or_default(),
+                requested_model_id: row.get::<_, Option<String>>(10)?.unwrap_or_default(),
+                resolved_provider_id: row.get::<_, Option<String>>(11)?.unwrap_or_default(),
+                resolved_model_id: row.get::<_, Option<String>>(12)?.unwrap_or_default(),
+                reasoning_effort: row.get::<_, Option<String>>(13)?.unwrap_or_default(),
+                fallback_used: row.get::<_, bool>(14)?,
+                fallback_reason: row.get(15)?,
+                provider_runtime_version: row.get(16)?,
+                execution_config_snapshot: serde_json::from_str(&snapshot)
+                    .unwrap_or_else(|_| crate::agents::model_registry::unvalidated_for("unknown")),
                 exit_code,
-                failure_reason: row.get(10)?,
-                cancellation_reason: row.get(11)?,
+                failure_reason: row.get(19)?,
+                cancellation_reason: row.get(20)?,
                 structured_result: structured_result
                     .and_then(|value| serde_json::from_str(&value).ok()),
                 files_changed: serde_json::from_str(&files_changed).unwrap_or_default(),
                 evidence_ids: serde_json::from_str(&evidence).unwrap_or_default(),
-                created_at: row.get(15)?,
-                started_at: row.get(16)?,
-                finished_at: row.get(17)?,
-                updated_at: row.get(18)?,
+                created_at: row.get(24)?,
+                started_at: row.get(25)?,
+                finished_at: row.get(26)?,
+                updated_at: row.get(27)?,
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;

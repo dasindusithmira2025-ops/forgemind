@@ -10,6 +10,7 @@ pub mod settings_commands;
 pub mod swarm_commands;
 pub mod terminal_commands;
 pub mod update_commands;
+pub mod usage_commands;
 pub mod window_commands;
 pub mod workspace_commands;
 
@@ -25,5 +26,6 @@ pub use settings_commands::*;
 pub use swarm_commands::*;
 pub use terminal_commands::*;
 pub use update_commands::*;
+pub use usage_commands::*;
 pub use window_commands::*;
 pub use workspace_commands::*;

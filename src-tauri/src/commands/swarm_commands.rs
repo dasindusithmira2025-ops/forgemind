@@ -7,7 +7,8 @@
 use crate::errors::AppResult;
 use crate::models::{
     CreateSwarmRequest, SavePresetRequest, Swarm, SwarmCommandDraft, SwarmDetail,
-    SwarmLaunchPreview, SwarmListItem, SwarmMessageRequest, SwarmPreset, SwarmRuntimeReadiness,
+    SwarmExecutionDefaults, SwarmLaunchPreview, SwarmListItem, SwarmMemberModelConfig,
+    SwarmMessageRequest, SwarmModelCapability, SwarmPreset, SwarmRuntimeReadiness,
 };
 use crate::AppState;
 use tauri::{State, Window};
@@ -38,6 +39,89 @@ pub async fn list_swarm_runtime_readiness(
             )
             .detail(error.to_string())
         })?
+}
+
+#[tauri::command]
+pub async fn list_swarm_model_registry(
+    window: Window,
+    state: State<'_, AppState>,
+) -> AppResult<Vec<SwarmModelCapability>> {
+    crate::require_main_window(&window)?;
+    let swarms = state.swarms.clone();
+    tauri::async_runtime::spawn_blocking(move || swarms.model_registry())
+        .await
+        .map_err(|error| {
+            crate::errors::AppError::new(
+                "model_registry_task_failed",
+                "The model registry refresh stopped unexpectedly.",
+                true,
+            )
+            .detail(error.to_string())
+        })?
+}
+
+#[tauri::command]
+pub fn get_swarm_execution_defaults(
+    project_id: String,
+    swarm_id: String,
+    window: Window,
+    state: State<'_, AppState>,
+) -> AppResult<SwarmExecutionDefaults> {
+    crate::require_main_window(&window)?;
+    state.swarms.execution_defaults(&project_id, &swarm_id)
+}
+#[tauri::command]
+pub fn save_swarm_execution_defaults(
+    project_id: String,
+    swarm_id: String,
+    defaults: SwarmExecutionDefaults,
+    window: Window,
+    state: State<'_, AppState>,
+) -> AppResult<()> {
+    crate::require_main_window(&window)?;
+    state
+        .swarms
+        .save_execution_defaults(&project_id, &swarm_id, &defaults)
+}
+#[tauri::command]
+pub fn apply_swarm_execution_defaults(
+    project_id: String,
+    swarm_id: String,
+    member_ids: Vec<String>,
+    window: Window,
+    state: State<'_, AppState>,
+) -> AppResult<usize> {
+    crate::require_main_window(&window)?;
+    state
+        .swarms
+        .apply_execution_defaults(&project_id, &swarm_id, &member_ids)
+}
+#[tauri::command]
+pub fn validate_swarm_member_model_config(
+    project_id: String,
+    swarm_id: String,
+    member_id: String,
+    window: Window,
+    state: State<'_, AppState>,
+) -> AppResult<SwarmMemberModelConfig> {
+    crate::require_main_window(&window)?;
+    state
+        .swarms
+        .validate_member_model_config(&project_id, &swarm_id, &member_id)
+}
+#[tauri::command]
+pub fn update_swarm_member_model_config(
+    project_id: String,
+    swarm_id: String,
+    member_id: String,
+    config: SwarmMemberModelConfig,
+    window: Window,
+    state: State<'_, AppState>,
+) -> AppResult<SwarmMemberModelConfig> {
+    crate::require_main_window(&window)?;
+    state
+        .swarms
+        .update_member_model_config(&project_id, &swarm_id, &member_id, config)
 }
 
 #[tauri::command]

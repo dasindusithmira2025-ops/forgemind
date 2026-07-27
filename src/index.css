@@ -401,6 +401,14 @@ html[data-theme-swapping] *, html[data-theme-swapping] *::before, html[data-them
 .status-alert { color: var(--warning); }
 .status-inline-action { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); background: transparent; border: 0; cursor: pointer; font: inherit; }
 .status-inline-action:hover { color: var(--text); }
+.ai-usage-statusbar { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; font-variant-numeric: tabular-nums; }
+.ai-usage-chip { min-height: 28px; padding: 0 6px; display: inline-flex; align-items: center; gap: 6px; color: var(--muted); background: transparent; border: 1px solid transparent; border-radius: var(--radius-sm); font: inherit; cursor: pointer; }
+.ai-usage-chip:hover, .ai-usage-chip:focus-visible { color: var(--text); background: var(--surface-2); border-color: var(--border); outline: none; }
+.ai-usage-chip.caution { color: var(--warning); }.ai-usage-chip.critical { color: var(--danger); }
+.ai-usage-provider-mark { width: 16px; height: 16px; display: inline-grid; place-items: center; color: var(--text); background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-xs); font-family: var(--font-mono); font-weight: 700; font-size: var(--text-2xs); }.ai-usage-value { white-space: nowrap; }.ai-usage-value small { color: var(--faint); font-size: var(--text-2xs); }
+.ai-usage-popover { position: fixed; z-index: 200; width: min(380px, calc(100vw - 24px)); max-height: calc(100vh - 24px); padding: 12px; overflow: auto; color: var(--text); background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); box-shadow: var(--shadow-lg); }.ai-usage-popover header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }.ai-usage-popover header > div { display: flex; align-items: center; gap: 7px; }.ai-usage-popover header small { color: var(--faint); font-size: var(--text-xs); }.ai-usage-refresh { width: 28px; height: 28px; display: grid; place-items: center; color: var(--muted); background: transparent; border: 1px solid var(--border); border-radius: var(--radius-sm); cursor: pointer; }.ai-usage-refresh:hover { color: var(--text); background: var(--surface-2); }
+.ai-usage-windows { display: grid; gap: 13px; }.ai-usage-window { display: grid; gap: 6px; }.ai-usage-window > strong { color: var(--faint); font-family: var(--font-mono); font-weight: 600; font-size: var(--text-2xs); letter-spacing: .05em; }.ai-usage-track { height: 4px; overflow: hidden; background: var(--surface-2); border-radius: var(--radius-pill); }.ai-usage-track > i { display: block; height: 100%; background: var(--success); transition: width 180ms var(--ease-out); }.ai-usage-window.caution .ai-usage-track > i { background: var(--warning); }.ai-usage-window.critical .ai-usage-track > i { background: var(--danger); }.ai-usage-window > div:last-child { display: flex; justify-content: space-between; gap: 12px; color: var(--muted); font-size: var(--text-sm); }.ai-usage-window > div:last-child span:last-child { color: var(--faint); }.ai-usage-message { margin: 0; color: var(--muted); font-size: var(--text-sm); line-height: var(--lh-body); }.ai-usage-popover footer { display: flex; justify-content: space-between; margin-top: 12px; padding-top: 10px; color: var(--warning); border-top: 1px solid var(--border); font-size: var(--text-xs); }.ai-usage-popover footer button { color: inherit; background: transparent; border: 0; cursor: pointer; text-decoration: underline; }.ai-usage-skeleton { display: grid; gap: 12px; }.ai-usage-skeleton i { height: 32px; background: var(--surface-2); border-radius: var(--radius-sm); }
+@media (prefers-reduced-motion: reduce) { .ai-usage-track > i { transition: none; } }
 
 .workspace-shell { display: grid; }
 .workspace-shell .terminal-canvas { width: 100%; height: 100%; }
@@ -590,7 +598,10 @@ html[data-theme-swapping] *, html[data-theme-swapping] *::before, html[data-them
 .collapsed-logo { padding: 0; color: var(--accent); }
 .collapsed-project:hover, .collapsed-ws:hover, .collapsed-swarms:hover, .collapsed-utilities button:hover { color: var(--text); background: var(--surface-hover); border-color: var(--border); }
 .collapsed-project.is-missing { color: var(--warning); }
-.collapsed-list { flex: 1; min-height: 0; margin: var(--space-1) 0; padding: 0; display: flex; flex-direction: column; align-items: center; gap: var(--space-1); list-style: none; overflow-y: auto; overflow-x: hidden; }
+/* Shrinks and scrolls rather than growing, so the Swarm indicator stays adjacent to the Workspace
+   list instead of being pushed down against the footer. The footer is pinned by its own auto
+   margin, not by this list absorbing the free space. */
+.collapsed-list { flex: 0 1 auto; min-height: 0; margin: var(--space-1) 0; padding: 0; display: flex; flex-direction: column; align-items: center; gap: var(--space-1); list-style: none; overflow-y: auto; overflow-x: hidden; }
 .collapsed-ws.is-active { position: relative; background: var(--accent-soft); }
 .collapsed-ws.is-active::before { content: ""; position: absolute; left: 0; top: 7px; bottom: 7px; width: 2px; border-radius: var(--radius-pill); background: var(--accent-edge); }
 .collapsed-overflow { color: var(--faint); }
@@ -601,7 +612,7 @@ html[data-theme-swapping] *, html[data-theme-swapping] *::before, html[data-them
 .collapsed-swarms-dot.tone-red { background: var(--danger); }
 .collapsed-swarms-dot.tone-blue { background: var(--info); }
 .collapsed-swarms-dot.tone-neutral { background: var(--faint); }
-.collapsed-utilities { display: flex; flex-direction: column; align-items: center; gap: var(--space-1); padding-top: var(--space-2); border-top: 1px solid var(--border); width: 100%; }
+.collapsed-utilities { margin-top: auto; display: flex; flex-direction: column; align-items: center; gap: var(--space-1); padding-top: var(--space-2); border-top: 1px solid var(--border); width: 100%; }
 
 /* Workspaces on other monitors */
 .ws-row-detached { display: flex; align-items: center; gap: 4px; }
