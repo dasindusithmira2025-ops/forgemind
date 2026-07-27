@@ -8,7 +8,19 @@
    - `data-density` on <html> switches comfortable / standard / compact chrome.
    - The single "state edge" (2px accent bar) marks the active or
      attention-holding entity across sidebar rows, panes, and lists.
+   - Solid controls are achromatic (`--primary`); chroma is spent on meaning
+     only — state edges, status, Git, agent identity, diff.
+   - Dividers are an alpha wash of the foreground, never an opaque grey, so one
+     border value stays correct on every surface in the ladder.
    ============================================================================ */
+
+@font-face {
+  font-family: "Geist";
+  src: url("./assets/fonts/Geist-Variable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
 
 :root {
   color-scheme: dark;
@@ -16,127 +28,149 @@
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 
   --ui-scale: 1;
-  --font-ui: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
-  --font-mono: "Cascadia Mono", Consolas, "SFMono-Regular", monospace;
+  /* Geist is bundled (src/assets/fonts) rather than fetched, so the first frame of a cold start
+     paints in the real typeface instead of reflowing from a system fallback. */
+  --font-ui: "Geist", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "Cascadia Code", "Cascadia Mono", ui-monospace, SFMono-Regular, Consolas, monospace;
   --mono: var(--font-mono);
 
   /* Surfaces — a narrow neutral luminance ladder. These are fallbacks only: the theme engine
      (src/theme) overwrites every colour token below as an inline style on <html>. */
-  --bg: #0b0b0c;
-  --canvas: #0b0b0c;          /* terminal canvas; matches xterm theme background */
-  --surface: #111112;
-  --surface-2: #161617;
-  --surface-3: #1c1c1e;
-  --surface-hover: #232326;
-  --surface-pressed: #2b2b2e;
-  --surface-disabled: #171718;
-  --sidebar-bg: #0f0f10;
-  --bg-input: #1a1a1c;
-  --bg-selected: #313136;
-  --border: #26262a;
-  --border-subtle: #1c1c1f;
-  --border-strong: #3a3a40;
-  --accent-border: var(--accent-border);
+  --bg: #0a0a0a;
+  --canvas: #0a0a0a;          /* terminal canvas; matches xterm theme background */
+  --surface: #171717;
+  --surface-2: #1f1f1f;
+  --surface-3: #262626;
+  --surface-hover: #262626;
+  --surface-pressed: #2e2e2e;
+  --surface-disabled: #1a1a1a;
+  --sidebar-bg: #171717;
+  --bg-input: #1c1c1c;
+  --bg-selected: #363636;
+  /* Alpha hairlines: one value that reads correctly on canvas, card and popover alike. */
+  --border: rgb(255 255 255 / 0.07);
+  --border-subtle: rgb(255 255 255 / 0.045);
+  --border-strong: rgb(255 255 255 / 0.15);
+  --accent-border: color-mix(in srgb, #a78bfa 35%, transparent);
 
   /* Text */
-  --text: #f4f4f5;
+  --text: #fafafa;
   --text-strong: #ffffff;
-  --muted: #c8c8cb;
-  --faint: #97979d;
-  --disabled: #66666c;
+  --muted: #d4d4d4;
+  --faint: #a1a1a1;
+  --disabled: #737373;
 
-  /* Paralith brand accent (iris purple) — the only chromatic identity in the chrome. */
-  --accent: #8b7cf6;
-  --accent-strong: #a89bfa;
-  --accent-active: #7668e0;
-  --accent-soft: #201d33;
-  --accent-edge: #8b7cf6;
-  --on-accent: #120e2b;
+  /* Paralith state accent (iris). Marks state — it is never the fill of a solid control. */
+  --accent: #a78bfa;
+  --accent-strong: #c4b5fd;
+  --accent-active: #8b5cf6;
+  --accent-soft: color-mix(in srgb, #a78bfa 12%, transparent);
+  --accent-edge: #a78bfa;
+  --on-accent: #1b1035;
+
+  /* Control layer — solid controls, floating surfaces, focus hue. Achromatic by design. */
+  --primary: #e5e5e5;
+  --primary-hover: #f5f5f5;
+  --primary-active: #cfcfcf;
+  --on-primary: #171717;
+  --secondary: #262626;
+  --secondary-hover: #333333;
+  --on-secondary: #fafafa;
+  --card: #171717;
+  --popover: #171717;
+  --ring: #737373;
 
   /* Semantic state */
-  --success: #55c982;
-  --success-soft: #12241a;
-  --success-border: #2a5540;
-  --warning: #d9a441;
-  --warning-soft: #231c10;
-  --warning-border: #57462a;
-  --warning-text: #eeca86;
-  --danger: #ec7277;
-  --danger-soft: #28171a;
-  --danger-border: #5c2d33;
-  --danger-text: #f9cdcf;
-  --info: #68a6ef;
+  --success: #86efac;
+  --success-soft: color-mix(in srgb, #86efac 10%, transparent);
+  --success-border: color-mix(in srgb, #86efac 25%, transparent);
+  --warning: #fbbf24;
+  --warning-soft: color-mix(in srgb, #fbbf24 10%, transparent);
+  --warning-border: color-mix(in srgb, #fbbf24 25%, transparent);
+  --warning-text: #fcd34d;
+  --danger: #ff6568;
+  --danger-soft: color-mix(in srgb, #ff6568 12%, transparent);
+  --danger-border: color-mix(in srgb, #ff6568 28%, transparent);
+  --danger-text: #ffc4c5;
+  --info: #60a5fa;
 
   /* Agent / task lifecycle. Carried by a dot, badge or icon — never by a filled panel. */
-  --status-working: #36c990;
-  --status-waiting: #d9a441;
-  --status-blocked: #e36f72;
-  --status-unread: #68a6ef;
-  --status-offline: #6e6e76;
-  --status-idle: #8d8d93;
+  --status-working: #86efac;
+  --status-waiting: #fbbf24;
+  --status-blocked: #ff6568;
+  --status-unread: #60a5fa;
+  --status-offline: #6e6e6e;
+  --status-idle: #a1a1a1;
 
   /* Version-control decorations */
-  --git-added: #59b978;
-  --git-modified: #d3a54e;
-  --git-deleted: #e36f72;
-  --git-renamed: #a38ae8;
-  --git-untracked: #7d7d86;
-  --git-branch: #6fa8e6;
-  --git-review: #a38ae8;
-  --git-conflict: #ed7b72;
+  --git-added: #81b88b;
+  --git-modified: #e2c08d;
+  --git-deleted: #c74e39;
+  --git-renamed: #73c991;
+  --git-untracked: #6e6e6e;
+  --git-branch: #3794ff;
+  --git-review: #b66dff;
+  --git-conflict: #ea5c00;
 
   /* Provider identity — icon/dot scale only, never a large fill. */
   --agent-claude: #d97757;
-  --agent-codex: #9aa0aa;
-  --agent-generic: #8d8d93;
-  --agent-action: #8b7cf6;
+  --agent-codex: #a1a1a1;
+  --agent-generic: #737373;
+  --agent-action: #a78bfa;
 
   /* Proof Ledger evidence state */
-  --proof-verified: #55c982;
-  --proof-partial: #d9a441;
-  --proof-missing: #6e6e76;
-  --proof-failed: #ec7277;
+  --proof-verified: #86efac;
+  --proof-partial: #fbbf24;
+  --proof-missing: #6e6e6e;
+  --proof-failed: #ff6568;
 
-  /* Swarm role identity */
-  --role-coordinator: #5794df;
-  --role-scout: #62a86f;
-  --role-builder: #45aeb1;
-  --role-reviewer: #c8994f;
-  --role-debugger: #cf735c;
-  --role-integrator: #9276c9;
+  /* Swarm role identity — the IBM colourblind-safe set. */
+  --role-coordinator: #648fff;
+  --role-scout: #40b0a6;
+  --role-builder: #785ef0;
+  --role-reviewer: #ffb000;
+  --role-debugger: #fe6100;
+  --role-integrator: #dc267f;
 
   /* Orchestrator capability risk bands */
-  --risk-low: #6fce9f;
-  --risk-medium: #d9a441;
-  --risk-high: #e5896a;
-  --risk-critical: #e5678a;
+  --risk-low: #86efac;
+  --risk-medium: #fbbf24;
+  --risk-high: #fe6100;
+  --risk-critical: #ff6568;
 
   /* Diff + terminal-surface tint tokens */
-  --diff-add-text: #b6e8c9;
-  --diff-del-text: #f0bcbc;
-  --diff-add-bg: rgba(89, 185, 120, .09);
-  --diff-del-bg: rgba(236, 114, 119, .09);
-  --terminal-fg: #dcdcdf;
+  --diff-add-text: #a7dcb4;
+  --diff-del-text: #f0b3a5;
+  --diff-add-bg: color-mix(in srgb, #81b88b 12%, transparent);
+  --diff-del-bg: color-mix(in srgb, #c74e39 14%, transparent);
+  --terminal-fg: #d4d4d4;
 
   /* Focus, overlay, scrollbar */
-  --focus-ring: #8b7cf6;
-  --overlay-scrim: rgba(0, 0, 0, .55);
-  --scrollbar-thumb: #2e2e33;
-  --scrollbar-thumb-hover: #3d3d44;
+  --focus-ring: #737373;
+  --overlay-scrim: rgb(0 0 0 / 0.6);
+  --scrollbar-thumb: color-mix(in srgb, #a1a1a1 28%, transparent);
+  --scrollbar-thumb-hover: color-mix(in srgb, #a1a1a1 48%, transparent);
 
   /* Typography scale (× ui-scale).
-     2xs = micro label (11px floor), xs = secondary metadata, sm = body/rows, md = screen title. */
+     2xs = micro label (11px floor), xs = secondary metadata, sm = row/control text,
+     md = body + screen title. */
   --text-2xs: calc(11px * var(--ui-scale));
   --text-xs: calc(12px * var(--ui-scale));
   --text-sm: calc(13px * var(--ui-scale));
   --text-md: calc(14px * var(--ui-scale));
   --text-lg: calc(16px * var(--ui-scale));
   --text-xl: calc(18px * var(--ui-scale));
-  --text-2xl: calc(21px * var(--ui-scale));
+  --text-2xl: calc(24px * var(--ui-scale));
   --lh-tight: 1.3;
   --lh-body: 1.55;
+  /* Geist is drawn slightly tighter than Segoe; a hair of positive tracking at UI sizes and
+     negative tracking on display type is what keeps it from looking cramped or loose. */
+  --tracking-ui: .01em;
+  --tracking-label: .05em;
+  --tracking-display: -.02em;
 
   /* Spacing */
   --space-1: 4px;
@@ -151,42 +185,44 @@
   --icon-md: calc(16px * var(--ui-scale));
   --icon-lg: calc(18px * var(--ui-scale));
 
-  /* Density-driven chrome (standard defaults; see [data-density] below) */
+  /* Density-driven chrome (standard defaults; see [data-density] below).
+     The control ladder is 24 / 32 / 36 / 40 — one step per emphasis level, no in-between sizes. */
   --control-h-xs: calc(24px * var(--ui-scale));
-  --control-h-sm: calc(28px * var(--ui-scale));
-  --control-h: calc(30px * var(--ui-scale));
-  --control-h-lg: calc(36px * var(--ui-scale));
-  --row-h-dense: calc(29px * var(--ui-scale));
+  --control-h-sm: calc(32px * var(--ui-scale));
+  --control-h: calc(36px * var(--ui-scale));
+  --control-h-lg: calc(40px * var(--ui-scale));
+  --row-h-dense: calc(30px * var(--ui-scale));
   --row-h: calc(34px * var(--ui-scale));
-  --row-h-two-line: calc(50px * var(--ui-scale));
-  --icon-btn: calc(28px * var(--ui-scale));
+  --row-h-two-line: calc(52px * var(--ui-scale));
+  --icon-btn: calc(32px * var(--ui-scale));
   --pane-header-height: calc(36px * var(--ui-scale));
-  --toolbar-h: calc(35px * var(--ui-scale));
+  --toolbar-h: calc(36px * var(--ui-scale));
   --density-pad: 8px;
 
   /* Shell metrics */
-  --header-height: calc(48px * var(--ui-scale));
-  --status-height: calc(24px * var(--ui-scale));
-  --sidebar-width: 300px;
+  --header-height: calc(40px * var(--ui-scale));
+  --status-height: calc(26px * var(--ui-scale));
+  --sidebar-width: 264px;
   --sidebar-collapsed-width: calc(52px * var(--ui-scale));
   --content-max: 900px;
 
   /* Shape, depth, motion, layers */
-  /* Radius ladder 4 / 6 / 8 / 10 / 12. `--radius-sm` is the legacy name for the 4px step and keeps
-     its value so the 64 call sites that deliberately chose "smaller than default" do not shift. */
-  --radius-xs: 4px;
-  --radius-sm: 4px;
-  --radius: 6px;              /* house radius: buttons, inputs, selected rows */
+  /* Radius ladder 6 / 8 / 10 / 14. `--radius-sm`/`--radius-xs` are the 6px step and keep their
+     names so the call sites that deliberately chose "smaller than default" do not have to move. */
+  --radius-xs: 6px;
+  --radius-sm: 6px;
+  --radius: 8px;              /* house radius: buttons, inputs, selected rows */
   --radius-md: 8px;           /* segmented controls */
   --radius-lg: 10px;          /* popovers, menus */
-  --radius-xl: 12px;          /* dialogs */
+  --radius-xl: 14px;          /* dialogs, cards */
   --radius-pill: 999px;       /* chips, badges, counts — fully rounded ends */
-  /* The one soft focus halo. Every focusable control uses this so focus reads identically across
-     the wizard, settings, repository and swarm surfaces instead of drifting per feature. */
-  --focus-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, .35), 0 2px 6px rgba(0, 0, 0, .22);
-  --shadow-md: 0 6px 18px rgba(0, 0, 0, .38), 0 2px 6px rgba(0, 0, 0, .28);
-  --shadow-lg: 0 20px 50px rgba(0, 0, 0, .55), 0 8px 24px rgba(0, 0, 0, .4);
+  /* The one focus halo: a soft 3px ring in the neutral ring hue. Focus has to read as focus, so
+     it deliberately does not borrow the accent — an accented control would otherwise look
+     permanently focused. */
+  --focus-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 50%, transparent);
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.24);
+  --shadow-md: 0 8px 20px rgb(0 0 0 / 0.28), 0 2px 6px rgb(0 0 0 / 0.2);
+  --shadow-lg: 0 16px 40px rgb(0 0 0 / 0.45), 0 6px 16px rgb(0 0 0 / 0.3);
   --ease-out: cubic-bezier(.16, 1, .3, 1);
   --dur-fast: 100ms;          /* hover / press feedback */
   --dur: 140ms;               /* popovers, menus */
@@ -198,51 +234,60 @@
 }
 
 html[data-density="comfortable"] {
-  --control-h-xs: calc(27px * var(--ui-scale));
-  --control-h-sm: calc(31px * var(--ui-scale));
-  --control-h: calc(34px * var(--ui-scale));
-  --control-h-lg: calc(40px * var(--ui-scale));
-  --row-h-dense: calc(33px * var(--ui-scale));
-  --row-h: calc(38px * var(--ui-scale));
-  --row-h-two-line: calc(56px * var(--ui-scale));
-  --icon-btn: calc(30px * var(--ui-scale));
+  --control-h-xs: calc(28px * var(--ui-scale));
+  --control-h-sm: calc(36px * var(--ui-scale));
+  --control-h: calc(40px * var(--ui-scale));
+  --control-h-lg: calc(44px * var(--ui-scale));
+  --row-h-dense: calc(34px * var(--ui-scale));
+  --row-h: calc(40px * var(--ui-scale));
+  --row-h-two-line: calc(58px * var(--ui-scale));
+  --icon-btn: calc(36px * var(--ui-scale));
   --pane-header-height: calc(40px * var(--ui-scale));
-  --toolbar-h: calc(39px * var(--ui-scale));
+  --toolbar-h: calc(40px * var(--ui-scale));
+  --header-height: calc(44px * var(--ui-scale));
   --density-pad: 10px;
 }
 html[data-density="compact"] {
   --control-h-xs: calc(22px * var(--ui-scale));
-  --control-h-sm: calc(25px * var(--ui-scale));
-  --control-h: calc(26px * var(--ui-scale));
-  --control-h-lg: calc(32px * var(--ui-scale));
+  --control-h-sm: calc(28px * var(--ui-scale));
+  --control-h: calc(30px * var(--ui-scale));
+  --control-h-lg: calc(34px * var(--ui-scale));
   --row-h-dense: calc(26px * var(--ui-scale));
-  --row-h: calc(29px * var(--ui-scale));
-  --row-h-two-line: calc(44px * var(--ui-scale));
-  --icon-btn: calc(25px * var(--ui-scale));
-  --pane-header-height: calc(31px * var(--ui-scale));
-  --toolbar-h: calc(31px * var(--ui-scale));
+  --row-h: calc(30px * var(--ui-scale));
+  --row-h-two-line: calc(46px * var(--ui-scale));
+  --icon-btn: calc(28px * var(--ui-scale));
+  --pane-header-height: calc(32px * var(--ui-scale));
+  --toolbar-h: calc(32px * var(--ui-scale));
+  --header-height: calc(36px * var(--ui-scale));
   --density-pad: 6px;
 }
 
 /* ---- Base ------------------------------------------------------------------ */
 * { box-sizing: border-box; }
 html, body, #root { margin: 0; width: 100%; height: 100%; overflow: hidden; background: var(--bg); color: var(--text); }
-body { font-size: var(--text-md); line-height: var(--lh-tight); }
-button, input, select, textarea { font: inherit; }
+body { font-size: var(--text-md); line-height: var(--lh-tight); letter-spacing: var(--tracking-ui); }
+button, input, select, textarea { font: inherit; letter-spacing: inherit; }
 button { color: inherit; }
-button:disabled { cursor: not-allowed; opacity: .48; }
+button:disabled { cursor: not-allowed; opacity: .5; }
 h1, h2, h3, p, dl, dd { margin: 0; }
+h1, h2, h3 { letter-spacing: var(--tracking-display); }
 ::selection { background: color-mix(in srgb, var(--accent) 32%, transparent); color: var(--text-strong); }
 
+/* Sleek scrollbar: a square thumb inset by a 3px transparent border, so the track reads as empty
+   space rather than a channel. It is the same bar at every size — only the gutter changes. */
 * { scrollbar-width: thin; scrollbar-color: var(--scrollbar-thumb) transparent; }
-::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar { width: 12px; height: 12px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border: 3px solid transparent; background-clip: padding-box; border-radius: var(--radius-pill); }
+::-webkit-scrollbar-corner { background: transparent; }
+::-webkit-scrollbar-thumb { min-height: 28px; background: var(--scrollbar-thumb); border: 3px solid transparent; background-clip: padding-box; border-radius: 0; }
 ::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); background-clip: padding-box; }
+::-webkit-scrollbar-thumb:active { background: color-mix(in srgb, var(--text) 36%, transparent); background-clip: padding-box; }
 
+/* One focus treatment everywhere: a soft 3px ring in the neutral ring hue. `outline` rather than
+   `box-shadow` so it still renders on controls whose ancestor clips overflow. */
 button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, [tabindex]:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 1px;
+  outline: 3px solid color-mix(in srgb, var(--ring) 50%, transparent);
+  outline-offset: 0;
 }
 
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
@@ -260,7 +305,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   color: var(--faint);
   font-size: var(--text-2xs);
   font-weight: 600;
-  letter-spacing: .06em;
+  letter-spacing: var(--tracking-label);
   text-transform: uppercase;
 }
 
@@ -288,31 +333,32 @@ html[data-theme-swapping] *, html[data-theme-swapping] *::before, html[data-them
 @keyframes pl-pulse { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
 
 /* ---- Buttons ---------------------------------------------------------------- */
+/* Four emphasis levels, one geometry. The highest level is a neutral fill, not the accent: a
+   screen with six primary buttons should still have exactly one thing coloured. */
 .button {
   min-height: var(--control-h);
-  padding: 0 12px;
+  padding: 0 14px;
   border: 1px solid transparent;
   border-radius: var(--radius);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 7px;
+  gap: 8px;
   white-space: nowrap;
   cursor: pointer;
-  font-size: var(--text-sm);
-  font-weight: 550;
+  font-size: var(--text-md);
+  font-weight: 500;
   transition: background-color var(--dur) var(--ease-out), border-color var(--dur) var(--ease-out), color var(--dur) var(--ease-out);
 }
-.button:active:not(:disabled) { transform: translateY(1px); }
-.button-primary { background: var(--accent); color: var(--on-accent); font-weight: 650; }
-.button-primary:hover:not(:disabled) { background: var(--accent-strong); }
-.button-primary:active:not(:disabled) { background: var(--accent-active); color: var(--text-strong); }
-.button-secondary { background: var(--surface-2); border-color: var(--border-strong); color: var(--text); }
-.button-secondary:hover:not(:disabled) { background: var(--surface-3); }
-.button-ghost { background: transparent; color: var(--muted); padding-inline: 8px; }
-.button-ghost:hover:not(:disabled) { background: var(--surface-2); color: var(--text); }
+.button-primary { background: var(--primary); color: var(--on-primary); }
+.button-primary:hover:not(:disabled) { background: var(--primary-hover); }
+.button-primary:active:not(:disabled) { background: var(--primary-active); }
+.button-secondary { background: transparent; border-color: var(--border-strong); color: var(--text); box-shadow: var(--shadow-sm); }
+.button-secondary:hover:not(:disabled) { background: var(--surface-hover); border-color: var(--border-strong); }
+.button-ghost { background: transparent; color: var(--muted); padding-inline: 10px; box-shadow: none; }
+.button-ghost:hover:not(:disabled) { background: var(--surface-hover); color: var(--text); }
 .button-danger { background: var(--danger-soft); border-color: var(--danger-border); color: var(--danger-text); }
-.button-danger:hover:not(:disabled) { background: color-mix(in srgb, var(--danger) 22%, var(--danger-soft)); }
+.button-danger:hover:not(:disabled) { background: color-mix(in srgb, var(--danger) 22%, transparent); }
 
 /* ---- Brand ------------------------------------------------------------------ */
 .brand { display: flex; flex: 0 0 auto; align-items: center; gap: 0; line-height: 0; font-weight: 700; letter-spacing: -.01em; }
@@ -352,7 +398,7 @@ html[data-theme-swapping] *, html[data-theme-swapping] *::before, html[data-them
 .workspace-loading-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 
 /* ---- Menus & popovers -------------------------------------------------------- */
-.context-popover { width: 232px; padding: 5px; position: absolute; right: 0; top: 38px; z-index: var(--z-menu); background: var(--surface-3); border: 1px solid var(--border-strong); border-radius: var(--radius-lg); box-shadow: var(--shadow-lg); animation: pl-pop-in .14s var(--ease-out) both; }
+.context-popover { width: 232px; padding: 5px; position: absolute; right: 0; top: calc(var(--icon-btn) + 6px); z-index: var(--z-menu); background: var(--popover); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-lg); animation: pl-pop-in .14s var(--ease-out) both; }
 .context-popover button { width: 100%; min-height: var(--control-h); padding: 0 9px; display: flex; align-items: center; gap: 9px; border: 0; border-radius: var(--radius); background: none; text-align: left; font-size: var(--text-sm); cursor: pointer; }
 .context-popover button:hover { background: var(--surface-hover); }
 .context-popover .danger-item { color: var(--danger-text); }
@@ -360,12 +406,12 @@ html[data-theme-swapping] *, html[data-theme-swapping] *::before, html[data-them
 .context-scrim { position: fixed; inset: 0; z-index: calc(var(--z-menu) - 2); border: 0; background: transparent; }
 .menu-wrap { position: relative; }
 .pane-popover { position: fixed; z-index: calc(var(--z-menu) - 1); right: auto; top: auto; }
-.workspace-popover { top: 36px; z-index: calc(var(--z-menu) + 5); }
+.workspace-popover { top: calc(var(--control-h) + 4px); z-index: calc(var(--z-menu) + 5); }
 .workspace-menu-wrap { position: relative; }
 
 /* ---- Modals ------------------------------------------------------------------ */
 .modal-backdrop { position: fixed; inset: 0; z-index: var(--z-dialog); display: grid; place-items: center; background: var(--overlay-scrim); animation: pl-fade-in .16s ease both; }
-.modal { width: min(620px, calc(100% - 40px)); max-height: calc(100dvh - 60px); overflow: auto; background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: var(--radius-lg); box-shadow: var(--shadow-lg); animation: pl-pop-in .18s var(--ease-out) both; }
+.modal { width: min(620px, calc(100% - 40px)); max-height: calc(100dvh - 60px); overflow: auto; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-xl); box-shadow: var(--shadow-lg); animation: pl-pop-in .18s var(--ease-out) both; }
 .modal > header { height: 48px; padding: 0 12px 0 16px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border); }
 .modal > header h2 { font-size: var(--text-md); font-weight: 650; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
@@ -440,7 +486,7 @@ html[data-theme-swapping] *, html[data-theme-swapping] *::before, html[data-them
 .forge-sidebar { position: relative; flex: 0 0 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--sidebar-bg); border-right: 1px solid var(--border); }
 .forge-sidebar.is-collapsed { width: var(--sidebar-collapsed-width); }
 
-.sidebar-brand { flex: 0 0 auto; height: calc(48px * var(--ui-scale)); padding: 0 6px 0 12px; display: flex; align-items: center; justify-content: space-between; gap: 8px; border-bottom: 1px solid var(--border-subtle); }
+.sidebar-brand { flex: 0 0 auto; height: var(--header-height); padding: 0 6px 0 12px; display: flex; align-items: center; justify-content: space-between; gap: 8px; border-bottom: 1px solid var(--border-subtle); }
 .sidebar-brand .brand--monochrome .brand-logo { width: 124px; height: 30px; }
 .sidebar-collapse-btn { flex: 0 0 auto; width: var(--icon-btn); height: var(--icon-btn); display: grid; place-items: center; color: var(--faint); background: transparent; border: 1px solid transparent; border-radius: var(--radius); cursor: pointer; transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out); }
 .sidebar-collapse-btn:hover { color: var(--text); background: var(--surface-2); border-color: var(--border); }
@@ -474,7 +520,7 @@ html[data-theme-swapping] *, html[data-theme-swapping] *::before, html[data-them
 
 /* The one Project surface: switch sessions, act on the active Project, search recents, open a
    folder. Anchored to the rail — which sits outside the scroll region — so it never clips. */
-.sb-project-popover { position: absolute; z-index: var(--z-menu); top: calc(100% - 3px); left: 6px; width: max(292px, calc(100% - 12px)); max-height: min(70vh, 560px); display: flex; flex-direction: column; overflow: hidden; background: var(--surface-3); border: 1px solid var(--border-strong); border-radius: var(--radius-lg); box-shadow: var(--shadow-lg); animation: pl-pop-in .14s var(--ease-out) both; }
+.sb-project-popover { position: absolute; z-index: var(--z-menu); top: calc(100% - 3px); left: 6px; width: max(292px, calc(100% - 12px)); max-height: min(70vh, 560px); display: flex; flex-direction: column; overflow: hidden; background: var(--popover); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-lg); animation: pl-pop-in .14s var(--ease-out) both; }
 .sb-pop-section { min-height: 0; display: flex; flex-direction: column; padding: 6px; }
 .sb-pop-section + .sb-pop-section { border-top: 1px solid var(--border); }
 .sb-pop-section:last-of-type { flex: 1 1 auto; overflow: hidden; }
@@ -1568,7 +1614,7 @@ html[data-theme-swapping] *, html[data-theme-swapping] *::before, html[data-them
 .swarm-row-progress { height: 3px; border-radius: var(--radius-pill); background: var(--surface-3); overflow: hidden; }
 .swarm-row-progress-fill { display: block; height: 100%; background: currentColor; transition: width .4s ease; }
 .swarm-row-menu { position: absolute; top: 5px; right: 4px; z-index: 12; }.swarm-row-more { width: 26px; height: 26px; display: grid; place-items: center; opacity: 0; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--muted); cursor: pointer; }.swarm-list > li:hover .swarm-row-more, .swarm-row:hover .swarm-row-more, .swarm-row-more[aria-expanded="true"] { opacity: 1; }.swarm-row-menu-popover { position: absolute; top: 29px; right: 0; width: 196px; padding: 4px; background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: var(--radius); box-shadow: var(--shadow-lg); }.swarm-row-menu-popover button { width: 100%; display: flex; align-items: center; gap: 8px; padding: 7px 8px; background: none; border: 0; border-radius: var(--radius-sm); color: var(--muted); font: inherit; font-size: var(--text-xs); text-align: left; cursor: pointer; }.swarm-row-menu-popover button:hover { background: var(--surface-hover); color: var(--text); }.swarm-row-menu-popover button.tone-red { color: var(--danger); }
-.swarm-rename-popover { position: absolute; top: 29px; right: 0; width: 236px; display: grid; gap: 8px; padding: 10px; background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: var(--radius); box-shadow: var(--shadow-lg); }.swarm-rename-popover label { color: var(--muted); font-size: var(--text-xs); }.swarm-rename-popover input { width: 100%; min-width: 0; padding: 7px 8px; background: var(--surface-1); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); color: var(--text); font: inherit; }.swarm-rename-popover div { display: flex; justify-content: flex-end; gap: 6px; }.swarm-rename-popover button { padding: 6px 9px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text); cursor: pointer; }.swarm-rename-popover button[type="submit"] { background: var(--accent); border-color: var(--accent); color: var(--accent-contrast); }
+.swarm-rename-popover { position: absolute; top: calc(var(--control-h-sm) + 4px); right: 0; width: 236px; display: grid; gap: 8px; padding: 10px; background: var(--popover); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-lg); }.swarm-rename-popover label { color: var(--muted); font-size: var(--text-xs); }.swarm-rename-popover input { width: 100%; min-width: 0; padding: 7px 8px; background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); color: var(--text); font: inherit; }.swarm-rename-popover div { display: flex; justify-content: flex-end; gap: 6px; }.swarm-rename-popover button { padding: 6px 9px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text); cursor: pointer; }.swarm-rename-popover button[type="submit"] { background: var(--primary); border-color: transparent; color: var(--on-primary); }
 
 .swarm-shell { display: flex; flex-direction: column; }
 .swarm-workspace { flex: 1; min-height: 0; display: grid; grid-template-columns: 260px 1fr; }

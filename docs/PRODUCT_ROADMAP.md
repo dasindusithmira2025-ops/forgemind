@@ -202,7 +202,7 @@ plan capacity and pricing for 300K–1.5M paying developers.
 - One authoritative owner for placement state; exclusive terminal ownership; never two windows owning one interactive resource.
 - Forward-safe migrations, pre-migration backups, never recreate the user DB.
 - Evidence integrity: inferred ≠ verified; no fake metrics or fake activity anywhere in the UI.
-- Professional desktop-tool visual language; no generic AI-dashboard aesthetics.
+- Professional desktop-tool visual language; no generic AI-dashboard aesthetics. The rules are written down in `docs/UI_GENOME.md` and enforced by the `design genome` tests — surfaces stay achromatic, chroma is spent on meaning only.
 - Windows stays first-class while F8 lands; no platform regressions.
 
 ---
@@ -212,4 +212,5 @@ plan capacity and pricing for 300K–1.5M paying developers.
 | Date | Decision | Why |
 | --- | --- | --- |
 | 2026-07-16 | Mission Control / Memory / AI Capacity removed | Dashboards beside the agents, not systems aware of them; rebuilt correctly as F5/F7 on top of F1 runtime truth. |
+| 2026-07-27 | UI genome adopted (achromatic surfaces + alpha hairlines + neutral solid controls), derived from a study of stablyai/orca | An agent workbench is mostly someone else's colour — terminal output, syntax, diffs, CI status. Chrome that competes with that turns the window into noise. Documented in `docs/UI_GENOME.md`. |
 | 2026-07-16 | Roadmap created; F1 chosen as first build | Agent awareness is the single defining gap; all differentiating features depend on it. |

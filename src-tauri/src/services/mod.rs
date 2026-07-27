@@ -12,6 +12,7 @@ pub mod swarm_service;
 pub mod terminal_manager;
 pub mod update_service;
 pub mod usage_service;
+pub mod window_chrome;
 pub mod window_registry;
 
 pub use agent_detector::AgentDetector;

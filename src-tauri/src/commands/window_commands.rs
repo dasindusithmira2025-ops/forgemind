@@ -189,7 +189,15 @@ pub async fn detach_workspace(
     match built {
         // The window displays its loading shell while the renderer restores layout + bounded
         // terminal replay. The old view retains its lease until the renderer reports ready.
-        Ok(_window) => Ok(ticket),
+        Ok(window) => {
+            // The loading shell paints the dark defaults, so the native frame is set to match
+            // before the window is on screen; the renderer corrects it for light themes.
+            crate::services::window_chrome::apply(
+                &window.as_ref().window(),
+                &crate::services::window_chrome::WindowChrome::dark_default(),
+            );
+            Ok(ticket)
+        }
         Err(error) => {
             // Destination failed to start: roll back so the Workspace stays attached & visible.
             state.windows.rollback_handoff(&ticket.operation_id)?;

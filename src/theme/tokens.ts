@@ -78,6 +78,38 @@ export interface AccentTokens {
   contrast: string
 }
 
+/**
+ * The control layer.
+ *
+ * Solid controls are deliberately *achromatic*: the highest-emphasis button in the app is a
+ * neutral fill (near-white on dark, near-black on light), not the brand accent. Chroma is spent
+ * only on meaning — state edges, agent actions, status and diff — so a screen full of buttons
+ * never competes with a screen full of signal. `card` / `popover` name the two floating surfaces
+ * so menus, dialogs and cards share one elevation instead of drifting apart per feature.
+ */
+export interface ControlTokens {
+  /** Highest-emphasis solid control fill. Neutral, never the accent hue. */
+  primary: string
+  /** Hover state for {@link primary}. */
+  primaryHover: string
+  /** Pressed state for {@link primary}. */
+  primaryActive: string
+  /** Text/icon drawn on top of {@link primary}. */
+  onPrimary: string
+  /** Quiet filled control (segmented controls, chips, secondary actions). */
+  secondary: string
+  /** Hover state for {@link secondary}. */
+  secondaryHover: string
+  /** Text/icon drawn on top of {@link secondary}. */
+  onSecondary: string
+  /** Card / panel surface that floats above the canvas. */
+  card: string
+  /** Menu, popover and dialog surface. */
+  popover: string
+  /** Neutral focus-ring hue. The ring reads as focus, not as brand. */
+  ring: string
+}
+
 export interface StatusTokens {
   success: string
   successSoft: string
@@ -178,6 +210,7 @@ export interface SemanticColors {
   foreground: ForegroundTokens
   border: BorderTokens
   accent: AccentTokens
+  control: ControlTokens
   status: StatusTokens
   git: GitTokens
   agent: AgentTokens
@@ -256,7 +289,7 @@ export interface ThemeDefinition {
  * independent and stay defined in `index.css :root`.
  */
 export function toCssVars(theme: ThemeDefinition): Record<string, string> {
-  const { background: bg, foreground: fg, border, accent, status, git, agent, proof, role, risk, diff, effects } = theme.colors
+  const { background: bg, foreground: fg, border, accent, control, status, git, agent, proof, role, risk, diff, effects } = theme.colors
   const term = theme.terminal
   return {
     '--bg': bg.canvas,
@@ -288,6 +321,17 @@ export function toCssVars(theme: ThemeDefinition): Record<string, string> {
     '--accent-soft': accent.soft,
     '--accent-edge': accent.edge,
     '--on-accent': accent.contrast,
+
+    '--primary': control.primary,
+    '--primary-hover': control.primaryHover,
+    '--primary-active': control.primaryActive,
+    '--on-primary': control.onPrimary,
+    '--secondary': control.secondary,
+    '--secondary-hover': control.secondaryHover,
+    '--on-secondary': control.onSecondary,
+    '--card': control.card,
+    '--popover': control.popover,
+    '--ring': control.ring,
 
     '--success': status.success,
     '--success-soft': status.successSoft,
@@ -363,6 +407,8 @@ export const REQUIRED_CSS_VARS: readonly string[] = [
   '--border', '--border-subtle', '--border-strong', '--accent-border',
   '--text', '--text-strong', '--muted', '--faint', '--disabled',
   '--accent', '--accent-strong', '--accent-active', '--accent-soft', '--accent-edge', '--on-accent',
+  '--primary', '--primary-hover', '--primary-active', '--on-primary',
+  '--secondary', '--secondary-hover', '--on-secondary', '--card', '--popover', '--ring',
   '--success', '--success-soft', '--success-border',
   '--warning', '--warning-soft', '--warning-border', '--warning-text',
   '--danger', '--danger-soft', '--danger-border', '--danger-text', '--info',
@@ -405,6 +451,26 @@ export function toTerminalTheme(theme: ThemeDefinition): Record<string, string> 
     brightMagenta: t.brightMagenta,
     brightCyan: t.brightCyan,
     brightWhite: t.brightWhite,
+  }
+}
+
+/**
+ * The colours for the OS-drawn window frame.
+ *
+ * Deliberately picked from the *opaque* token groups: the platform frame APIs take a solid colour,
+ * so `--border` (an alpha wash) and anything built with `color-mix` cannot be used here. The
+ * caption takes the card surface so the frame reads as the top edge of the app panel rather than
+ * as a separate window decoration.
+ */
+export function toWindowChrome(theme: ThemeDefinition): {
+  caption: string
+  text: string
+  border: string
+} {
+  return {
+    caption: theme.colors.control.card,
+    text: theme.colors.foreground.primary,
+    border: theme.colors.background.surfaceOverlay,
   }
 }
 

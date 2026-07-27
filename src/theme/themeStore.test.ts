@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({
   setThemePreference: vi.fn(() => Promise.resolve()),
   getThemePreference: vi.fn(() => Promise.resolve('ember')),
+  applyWindowChrome: vi.fn((_chrome: { caption: string; text: string; border: string }) => Promise.resolve()),
   onThemeChanged: vi.fn((_handler: (id: string) => void) => Promise.resolve(() => {})),
   lastThemeHandler: undefined as ((id: string) => void) | undefined,
 }))
@@ -11,6 +12,7 @@ vi.mock('../native/commands', () => ({
   native: {
     setThemePreference: mocks.setThemePreference,
     getThemePreference: mocks.getThemePreference,
+    applyWindowChrome: mocks.applyWindowChrome,
   },
 }))
 
@@ -30,6 +32,7 @@ describe('theme store', () => {
     localStorage.clear()
     mocks.setThemePreference.mockClear()
     mocks.getThemePreference.mockClear()
+    mocks.applyWindowChrome.mockClear()
     mocks.onThemeChanged.mockClear()
     mocks.lastThemeHandler = undefined
     useThemeStore.setState({ selectedId: 'paralith-dark', prefersDark: true, persistError: undefined })
@@ -94,5 +97,27 @@ describe('theme store', () => {
     await flush()
     expect(useThemeStore.getState().selectedId).toBe('obsidian')
     expect(useThemeStore.getState().persistError).toBeTruthy()
+  })
+
+  it('repaints the native window frame with opaque colours on every theme change', () => {
+    // The OS draws the frame, so it can only be updated by pushing colours to the backend — and
+    // the platform APIs take a solid colour, so an alpha or color-mix token would be rejected and
+    // silently leave the caption in the system accent.
+    mocks.applyWindowChrome.mockClear()
+    useThemeStore.getState().setTheme('arctic-light')
+    expect(mocks.applyWindowChrome).toHaveBeenCalledOnce()
+    const chrome = mocks.applyWindowChrome.mock.calls[0][0]
+    for (const key of ['caption', 'text', 'border'] as const) {
+      expect(chrome[key], `${key} must be an opaque hex`).toMatch(/^#[0-9a-f]{6}$/i)
+    }
+  })
+
+  it('keeps the theme applied when the native frame cannot be repainted', async () => {
+    // A frame repaint failing (older Windows, or a window that has already closed) is cosmetic.
+    mocks.applyWindowChrome.mockImplementationOnce(() => Promise.reject(new Error('no dwm')))
+    useThemeStore.getState().setTheme('ember')
+    await flush()
+    expect(useThemeStore.getState().selectedId).toBe('ember')
+    expect(document.documentElement.getAttribute('data-theme')).toBe('ember')
   })
 })
