@@ -27,7 +27,9 @@ const MAX_TIMEOUT_SECONDS: u64 = 900;
 
 #[derive(Clone)]
 pub struct RepositoryService {
-    database: Arc<DatabaseService>,
+    // Visible to the sibling `repository_intelligence` extractor, which builds its projection
+    // from the same database handle and Git helpers this service already owns.
+    pub(super) database: Arc<DatabaseService>,
     managed_worktree_root: Arc<PathBuf>,
     mutation_locks: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
     cancellations: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
@@ -1986,7 +1988,7 @@ impl RepositoryService {
         Ok(json!({"leaseId":lease_id,"worktreeRemoved":true,"branchDeleted":merged}))
     }
 
-    fn inspect_validated(
+    pub(super) fn inspect_validated(
         &self,
         project_id: &str,
         repository: &Path,
@@ -2089,7 +2091,7 @@ impl RepositoryService {
         })
     }
 
-    fn validate_repository_path(
+    pub(super) fn validate_repository_path(
         &self,
         project: &Project,
         requested: Option<&str>,
@@ -2143,7 +2145,7 @@ impl RepositoryService {
         Ok(root)
     }
 
-    fn validate_worktree_path(
+    pub(super) fn validate_worktree_path(
         &self,
         project_id: &str,
         repository: &Path,
@@ -2577,7 +2579,7 @@ impl RepositoryService {
         .any(|entry| path.join(entry).exists())
     }
 
-    fn git_text(
+    pub(super) fn git_text(
         &self,
         directory: &Path,
         args: &[&str],

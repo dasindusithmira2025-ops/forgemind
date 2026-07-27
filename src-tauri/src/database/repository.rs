@@ -2,9 +2,10 @@ use super::DatabaseService;
 use crate::errors::{AppError, AppResult};
 use crate::models::{
     RemoteProjectionObject, RemoteSyncStatus, RepositoryActor, RepositoryApprovalRequest,
-    RepositoryGraphSnapshot, RepositoryOperationRecord, RepositoryOperationStatus, RepositoryPolicyDecision,
-    RepositoryPolicyDecisionKind, RepositoryPolicyProfile, RepositorySnapshot,
-    RepositoryWorktreeLease,
+    RepositoryGraphEdge, RepositoryGraphEdgeKind, RepositoryGraphNode, RepositoryGraphNodeKind,
+    RepositoryGraphSnapshot, RepositoryIntelligence, RepositoryOperationRecord,
+    RepositoryOperationStatus, RepositoryPolicyDecision, RepositoryPolicyDecisionKind,
+    RepositoryPolicyProfile, RepositorySnapshot, RepositoryWorktreeLease,
 };
 use chrono::Utc;
 use rusqlite::{params, OptionalExtension};
@@ -680,6 +681,160 @@ impl DatabaseService {
             .map_err(AppError::database)?;
         transaction.commit().map_err(AppError::database)
     }
+
+    /// Read back the newest persisted graph projection for a repository, or `None` when the
+    /// extractor has never run for it. The projection is a derived cache, so a missing row is an
+    /// ordinary empty state rather than an error — callers refresh to populate it.
+    pub(crate) fn latest_repository_intelligence(
+        &self,
+        project_id: &str,
+        repository_id: &str,
+    ) -> AppResult<Option<RepositoryIntelligence>> {
+        let connection = self.connection.lock();
+        let header = connection
+            .query_row(
+                "SELECT id,worktree_path,head_sha,status_hash,extractor_version,impact_json,created_at \
+                 FROM repository_graph_snapshots WHERE project_id=?1 AND repository_id=?2 \
+                 ORDER BY created_at DESC, rowid DESC LIMIT 1",
+                params![project_id, repository_id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, String>(5)?,
+                        row.get::<_, String>(6)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(AppError::database)?;
+        let Some((
+            snapshot_id,
+            worktree_path,
+            head_sha,
+            status_hash,
+            extractor_version,
+            impact_json,
+            created_at,
+        )) = header
+        else {
+            return Ok(None);
+        };
+
+        let mut node_statement = connection
+            .prepare(
+                "SELECT id,repository_id,node_type,external_key,display_label,metadata_json,content_hash,provenance_json \
+                 FROM repository_graph_nodes WHERE snapshot_id=?1 ORDER BY node_type, external_key",
+            )
+            .map_err(AppError::database)?;
+        let nodes = node_statement
+            .query_map([&snapshot_id], map_graph_node)
+            .map_err(AppError::database)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(AppError::database)?;
+        drop(node_statement);
+
+        let mut edge_statement = connection
+            .prepare(
+                "SELECT id,repository_id,source_node_id,target_node_id,edge_type,metadata_json,provenance_json \
+                 FROM repository_graph_edges WHERE snapshot_id=?1 ORDER BY edge_type, source_node_id",
+            )
+            .map_err(AppError::database)?;
+        let edges = edge_statement
+            .query_map([&snapshot_id], map_graph_edge)
+            .map_err(AppError::database)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(AppError::database)?;
+        drop(edge_statement);
+
+        let impact = serde_json::from_str(&impact_json).map_err(|error| {
+            AppError::new(
+                "repository_graph_corrupt",
+                "The stored repository intelligence could not be read.",
+                true,
+            )
+            .detail(error.to_string())
+            .layer("repository_graph")
+        })?;
+
+        Ok(Some(RepositoryIntelligence {
+            project_id: project_id.to_owned(),
+            repository_id: repository_id.to_owned(),
+            worktree_path: worktree_path.clone(),
+            head_sha: head_sha.clone(),
+            status_hash: status_hash.clone(),
+            graph: RepositoryGraphSnapshot {
+                id: snapshot_id,
+                repository_id: repository_id.to_owned(),
+                project_id: project_id.to_owned(),
+                worktree_path,
+                head_sha,
+                status_hash,
+                extractor_version,
+                created_at,
+                nodes,
+                edges,
+            },
+            impact,
+        }))
+    }
+}
+
+fn graph_kind_error(column: usize, value: &str) -> rusqlite::Error {
+    rusqlite::Error::FromSqlConversionFailure(
+        column,
+        rusqlite::types::Type::Text,
+        Box::new(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("unrecognized repository graph kind: {value}"),
+        )),
+    )
+}
+
+fn graph_json<T: serde::de::DeserializeOwned>(column: usize, raw: &str) -> rusqlite::Result<T> {
+    serde_json::from_str(raw).map_err(|error| {
+        rusqlite::Error::FromSqlConversionFailure(
+            column,
+            rusqlite::types::Type::Text,
+            Box::new(error),
+        )
+    })
+}
+
+fn map_graph_node(row: &rusqlite::Row<'_>) -> rusqlite::Result<RepositoryGraphNode> {
+    let node_type: String = row.get(2)?;
+    let metadata: String = row.get(5)?;
+    let provenance: String = row.get(7)?;
+    Ok(RepositoryGraphNode {
+        id: row.get(0)?,
+        repository_id: row.get(1)?,
+        node_type: RepositoryGraphNodeKind::parse(&node_type)
+            .ok_or_else(|| graph_kind_error(2, &node_type))?,
+        external_key: row.get(3)?,
+        label: row.get(4)?,
+        metadata: graph_json(5, &metadata)?,
+        content_hash: row.get(6)?,
+        provenance: graph_json(7, &provenance)?,
+    })
+}
+
+fn map_graph_edge(row: &rusqlite::Row<'_>) -> rusqlite::Result<RepositoryGraphEdge> {
+    let edge_type: String = row.get(4)?;
+    let metadata: String = row.get(5)?;
+    let provenance: String = row.get(6)?;
+    Ok(RepositoryGraphEdge {
+        id: row.get(0)?,
+        repository_id: row.get(1)?,
+        source_node_id: row.get(2)?,
+        target_node_id: row.get(3)?,
+        edge_type: RepositoryGraphEdgeKind::parse(&edge_type)
+            .ok_or_else(|| graph_kind_error(4, &edge_type))?,
+        metadata: graph_json(5, &metadata)?,
+        provenance: graph_json(6, &provenance)?,
+    })
 }
 
 fn map_operation(row: &rusqlite::Row<'_>) -> rusqlite::Result<RepositoryOperationRecord> {
@@ -776,5 +931,139 @@ fn policy_kind(value: &RepositoryPolicyDecisionKind) -> &'static str {
         RepositoryPolicyDecisionKind::Allowed => "allowed",
         RepositoryPolicyDecisionKind::ApprovalRequired => "approval_required",
         RepositoryPolicyDecisionKind::Blocked => "blocked",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::{
+        RepositoryGraphEdge, RepositoryGraphEdgeKind, RepositoryGraphNode, RepositoryGraphNodeKind,
+        RepositoryGraphProvenance, RepositoryGraphSourceKind,
+    };
+    use serde_json::json;
+
+    // The repository-intelligence graph tables are provisioned by schema migration v23, which
+    // `DatabaseService::in_memory` runs like any other migration. Exercising the real migrated
+    // schema here (rather than a hand-rolled copy) is what keeps the writer's `ON CONFLICT`
+    // clauses and the migration's UNIQUE constraints from silently drifting apart.
+    fn provisioned_db() -> DatabaseService {
+        DatabaseService::in_memory().expect("open in-memory database")
+    }
+
+    fn provenance() -> RepositoryGraphProvenance {
+        RepositoryGraphProvenance {
+            source: RepositoryGraphSourceKind::Git,
+            repository_id: "repo-1".into(),
+            snapshot: "snap-1".into(),
+            observed_at: "2026-07-24T00:00:00Z".into(),
+            extractor_version: "extractor-v1".into(),
+            confidence: 0.9,
+            evidence_ref: None,
+        }
+    }
+
+    // Regression guard for the security review: every value written by
+    // `replace_repository_graph_snapshot` must be bound as a SQL parameter, never interpolated
+    // into the statement text. A malicious repository (crafted branch/file/label/path names) must
+    // not be able to break out of the string literal and execute attacker-controlled SQL. We push
+    // a classic injection payload through every user-influenced string column and assert it is
+    // stored verbatim and that no table was dropped or otherwise mutated by the payload.
+    #[test]
+    fn replace_repository_graph_snapshot_binds_parameters_and_resists_sql_injection() {
+        let db = provisioned_db();
+        let payload = "x'); DROP TABLE repository_graph_nodes;--";
+
+        let node = RepositoryGraphNode {
+            id: "node-1".into(),
+            repository_id: "repo-1".into(),
+            node_type: RepositoryGraphNodeKind::File,
+            external_key: payload.into(),
+            label: payload.into(),
+            metadata: json!({ "note": payload }),
+            content_hash: "content-hash".into(),
+            provenance: provenance(),
+        };
+        let edge = RepositoryGraphEdge {
+            id: "edge-1".into(),
+            repository_id: "repo-1".into(),
+            source_node_id: "node-1".into(),
+            target_node_id: "node-1".into(),
+            edge_type: RepositoryGraphEdgeKind::DependsOn,
+            metadata: json!({ "note": payload }),
+            provenance: provenance(),
+        };
+        let snapshot = RepositoryGraphSnapshot {
+            id: "snap-1".into(),
+            repository_id: "repo-1".into(),
+            project_id: payload.into(),
+            worktree_path: payload.into(),
+            head_sha: "head-sha".into(),
+            status_hash: "status-hash".into(),
+            extractor_version: "extractor-v1".into(),
+            created_at: "2026-07-24T00:00:00Z".into(),
+            nodes: vec![node],
+            edges: vec![edge],
+        };
+
+        db.replace_repository_graph_snapshot(&snapshot, &json!({ "changed": payload }))
+            .expect("write graph snapshot");
+
+        let connection = db.connection.lock();
+
+        // The nodes table still exists (the payload did not execute as a DROP) and holds one row.
+        let node_rows: i64 = connection
+            .query_row("SELECT count(*) FROM repository_graph_nodes", [], |row| {
+                row.get(0)
+            })
+            .expect("nodes table still present after write");
+        assert_eq!(node_rows, 1, "exactly one node row was inserted");
+
+        // Every injected string was stored literally, proving it was bound, not interpolated.
+        let stored_label: String = connection
+            .query_row(
+                "SELECT display_label FROM repository_graph_nodes WHERE id=?1",
+                ["node-1"],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(stored_label, payload);
+
+        let stored_external_key: String = connection
+            .query_row(
+                "SELECT external_key FROM repository_graph_nodes WHERE id=?1",
+                ["node-1"],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(stored_external_key, payload);
+
+        let stored_project: String = connection
+            .query_row(
+                "SELECT project_id FROM repository_graph_snapshots WHERE id=?1",
+                ["snap-1"],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(stored_project, payload);
+
+        let stored_impact: String = connection
+            .query_row(
+                "SELECT impact_json FROM repository_graph_snapshots WHERE id=?1",
+                ["snap-1"],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(stored_impact, json!({ "changed": payload }).to_string());
+
+        // The index-state upsert recorded the counts against the (injected) project key literally.
+        let (node_count, edge_count): (i64, i64) = connection
+            .query_row(
+                "SELECT node_count, edge_count FROM repository_graph_index_state WHERE project_id=?1",
+                [payload],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("index-state row keyed by the literal project id");
+        assert_eq!((node_count, edge_count), (1, 1));
     }
 }

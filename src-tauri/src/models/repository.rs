@@ -628,6 +628,25 @@ impl RepositoryGraphNodeKind {
             Self::Risk => "risk",
         }
     }
+
+    /// Inverse of [`Self::as_str`], used when rehydrating a persisted graph projection. Returns
+    /// `None` for values this build does not know so the caller can reject the row rather than
+    /// silently coercing an unrecognized kind into a valid-looking one.
+    pub fn parse(value: &str) -> Option<Self> {
+        Some(match value {
+            "repository" => Self::Repository,
+            "worktree" => Self::Worktree,
+            "branch" => Self::Branch,
+            "commit" => Self::Commit,
+            "change_set" => Self::ChangeSet,
+            "file" => Self::File,
+            "symbol" => Self::Symbol,
+            "test" => Self::Test,
+            "workflow" => Self::Workflow,
+            "risk" => Self::Risk,
+            _ => return None,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -660,6 +679,24 @@ impl RepositoryGraphEdgeKind {
             Self::VerifiedBy => "verified_by",
         }
     }
+
+    /// Inverse of [`Self::as_str`]; see [`RepositoryGraphNodeKind::parse`] for why unknown values
+    /// return `None` instead of a fallback variant.
+    pub fn parse(value: &str) -> Option<Self> {
+        Some(match value {
+            "contains" => Self::Contains,
+            "points_to" => Self::PointsTo,
+            "modifies" => Self::Modifies,
+            "declares" => Self::Declares,
+            "depends_on" => Self::DependsOn,
+            "tests" => Self::Tests,
+            "builds" => Self::Builds,
+            "blocked_by" => Self::BlockedBy,
+            "supported_by" => Self::SupportedBy,
+            "verified_by" => Self::VerifiedBy,
+            _ => return None,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -673,21 +710,6 @@ pub enum RepositoryGraphSourceKind {
     Test,
     Agent,
     Memory,
-}
-
-impl RepositoryGraphSourceKind {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Git => "git",
-            Self::Filesystem => "filesystem",
-            Self::Ast => "ast",
-            Self::Github => "github",
-            Self::Workflow => "workflow",
-            Self::Test => "test",
-            Self::Agent => "agent",
-            Self::Memory => "memory",
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -1,7 +1,7 @@
 use crate::errors::{AppError, AppResult};
 use rusqlite::{params, Connection};
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 22;
+pub const CURRENT_SCHEMA_VERSION: i64 = 26;
 
 const MIGRATION_1: &str = r#"
 CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
@@ -878,6 +878,13 @@ pub fn apply(connection: &Connection) -> AppResult<()> {
     if current < 22 || !table_exists(connection, "orchestration_sessions")? {
         migrate_v22(connection)?;
     }
+    // Numbered 26 rather than 23 because `main` already ships migrations 23-25 for unrelated
+    // features. The feature check is what makes the ordering safe: this branch's databases jump
+    // 22 -> 26, and `main`'s 23/24/25 each carry their own `table_exists`/`column_exists` guard,
+    // so they still repair themselves after the branches meet regardless of arrival order.
+    if current < 26 || !table_exists(connection, "repository_graph_nodes")? {
+        migrate_v26(connection)?;
+    }
     Ok(())
 }
 
@@ -915,7 +922,8 @@ pub fn requires_migration(connection: &Connection) -> AppResult<bool> {
         || !table_exists(connection, "swarm_attention_requests")?
         || !column_exists(connection, "swarms", "revision")?
         || !column_exists(connection, "swarm_events", "sequence")?
-        || !table_exists(connection, "orchestration_sessions")?)
+        || !table_exists(connection, "orchestration_sessions")?
+        || !table_exists(connection, "repository_graph_nodes")?)
 }
 
 fn table_exists(connection: &Connection, table: &str) -> AppResult<bool> {
@@ -2189,6 +2197,97 @@ CREATE INDEX IF NOT EXISTS idx_orch_exec_session
     finish_migration_transaction(connection, result, 22)
 }
 
+/// Provision the repository-intelligence graph projection. These four tables back
+/// [`crate::database::DatabaseService::replace_repository_graph_snapshot`], whose `ON CONFLICT`
+/// clauses depend on the exact uniqueness constraints declared here — the writer upserts nodes by
+/// `(project_id, repository_id, node_type, external_key, snapshot_id)` and edges by
+/// `(project_id, repository_id, source_node_id, target_node_id, edge_type, snapshot_id)`, so those
+/// tuples must stay unique or the upsert degrades into a duplicate insert.
+///
+/// The projection is a derived cache: it is rebuilt from Git by the extractor and carries no
+/// user-authored data, so a rebuild is always safe and no backfill is required.
+fn migrate_v26(connection: &Connection) -> AppResult<()> {
+    connection
+        .execute_batch("BEGIN IMMEDIATE;")
+        .map_err(AppError::database)?;
+    let result = (|| {
+        connection
+            .execute_batch(
+                r#"
+CREATE TABLE IF NOT EXISTS repository_graph_snapshots(
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  repository_id TEXT NOT NULL,
+  worktree_path TEXT NOT NULL,
+  head_sha TEXT NOT NULL,
+  status_hash TEXT NOT NULL,
+  extractor_version TEXT NOT NULL,
+  impact_json TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_repo_graph_snapshots_recent
+  ON repository_graph_snapshots(project_id, repository_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS repository_graph_nodes(
+  id TEXT PRIMARY KEY,
+  snapshot_id TEXT NOT NULL,
+  project_id TEXT NOT NULL,
+  repository_id TEXT NOT NULL,
+  node_type TEXT NOT NULL,
+  external_key TEXT NOT NULL,
+  display_label TEXT NOT NULL,
+  metadata_json TEXT NOT NULL,
+  content_hash TEXT NOT NULL,
+  provenance_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(project_id, repository_id, node_type, external_key, snapshot_id)
+);
+CREATE INDEX IF NOT EXISTS idx_repo_graph_nodes_snapshot
+  ON repository_graph_nodes(snapshot_id, node_type);
+
+CREATE TABLE IF NOT EXISTS repository_graph_edges(
+  id TEXT PRIMARY KEY,
+  snapshot_id TEXT NOT NULL,
+  project_id TEXT NOT NULL,
+  repository_id TEXT NOT NULL,
+  source_node_id TEXT NOT NULL,
+  target_node_id TEXT NOT NULL,
+  edge_type TEXT NOT NULL,
+  metadata_json TEXT NOT NULL,
+  provenance_json TEXT NOT NULL,
+  confidence REAL NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(project_id, repository_id, source_node_id, target_node_id, edge_type, snapshot_id)
+);
+CREATE INDEX IF NOT EXISTS idx_repo_graph_edges_snapshot
+  ON repository_graph_edges(snapshot_id, edge_type);
+CREATE INDEX IF NOT EXISTS idx_repo_graph_edges_source
+  ON repository_graph_edges(snapshot_id, source_node_id);
+
+CREATE TABLE IF NOT EXISTS repository_graph_index_state(
+  project_id TEXT NOT NULL,
+  repository_id TEXT NOT NULL,
+  worktree_path TEXT NOT NULL,
+  head_sha TEXT NOT NULL,
+  status_hash TEXT NOT NULL,
+  last_success_at TEXT,
+  extractor_version TEXT NOT NULL,
+  node_count INTEGER NOT NULL,
+  edge_count INTEGER NOT NULL,
+  error_code TEXT,
+  error_message TEXT,
+  UNIQUE(project_id, repository_id, worktree_path)
+);
+"#,
+            )
+            .map_err(AppError::database)?;
+        record_migration(connection, 26)
+    })();
+    finish_migration_transaction(connection, result, 26)
+}
+
 /// Rewrite every stored preset's `config_json` into the role-pool allocation shape. User presets
 /// are upgraded in place (no data loss); built-in presets are refreshed to the canonical
 /// composition from [`crate::models::swarm::builtin_presets`], which is where the Feature Team and
@@ -2608,6 +2707,10 @@ mod tests {
             "swarm_runs",
             "swarm_agent_runs",
             "swarm_attention_requests",
+            "repository_graph_snapshots",
+            "repository_graph_nodes",
+            "repository_graph_edges",
+            "repository_graph_index_state",
         ] {
             assert!(table_exists(&connection, table).unwrap(), "missing {table}");
         }

@@ -376,6 +376,52 @@ export interface MergeReadiness {
   ready: boolean; blockingReasons: string[]; warnings: string[]; requiredActions: string[]; evidence: unknown
   evaluatedAt: string; sourceHeadSha: string; sourceUpdatedAt?: string
 }
+export type RepositoryGraphNodeKind =
+  | 'repository' | 'worktree' | 'branch' | 'commit' | 'change_set' | 'file' | 'symbol' | 'test' | 'workflow' | 'risk'
+export type RepositoryGraphEdgeKind =
+  | 'contains' | 'points_to' | 'modifies' | 'declares' | 'depends_on' | 'tests' | 'builds' | 'blocked_by'
+  | 'supported_by' | 'verified_by'
+export type RepositoryGraphSourceKind =
+  | 'git' | 'filesystem' | 'ast' | 'github' | 'workflow' | 'test' | 'agent' | 'memory'
+/**
+ * How a node or edge came to exist. `confidence` below 1 marks a heuristic relationship (stem
+ * matching, textual reference) rather than an exact one — the UI must present those as leads.
+ */
+export interface RepositoryGraphProvenance {
+  source: RepositoryGraphSourceKind; repositoryId: string; snapshot: string; observedAt: string
+  extractorVersion: string; confidence: number; evidenceRef?: string
+}
+export interface RepositoryGraphNode {
+  id: string; repositoryId: string; nodeType: RepositoryGraphNodeKind; externalKey: string; label: string
+  metadata: unknown; contentHash: string; provenance: RepositoryGraphProvenance
+}
+export interface RepositoryGraphEdge {
+  id: string; repositoryId: string; sourceNodeId: string; targetNodeId: string; edgeType: RepositoryGraphEdgeKind
+  metadata: unknown; provenance: RepositoryGraphProvenance
+}
+export interface RepositoryGraphSnapshot {
+  id: string; repositoryId: string; projectId: string; worktreePath: string; headSha: string; statusHash: string
+  extractorVersion: string; createdAt: string; nodes: RepositoryGraphNode[]; edges: RepositoryGraphEdge[]
+}
+export interface RepositoryImpactItem { path: string; reason: string; confidence: number; evidence: string[] }
+export interface RepositoryRiskSignal {
+  code: string; severity: 'critical' | 'high' | 'medium' | 'low'; summary: string; evidence: string[]
+}
+export interface RepositoryImpactExplanation {
+  targetType: string; target: string; relationship: string; reason: string; evidence: string[]; confidence: number
+}
+export interface RepositoryImpactSummary {
+  changedFiles: string[]; changedSymbols: RepositoryImpactItem[]; directDependents: RepositoryImpactItem[]
+  relatedTests: RepositoryImpactItem[]; relatedWorkflows: RepositoryImpactItem[]; riskSignals: RepositoryRiskSignal[]
+  missingTestSignals: RepositoryRiskSignal[]; explanations: RepositoryImpactExplanation[]; generatedAt: string
+}
+export interface RepositoryIntelligenceRequest {
+  projectId: string; repositoryPath?: string; worktreePath?: string; paths?: string[]; depth?: number
+}
+export interface RepositoryIntelligence {
+  projectId: string; repositoryId: string; worktreePath: string; headSha: string; statusHash: string
+  graph: RepositoryGraphSnapshot; impact: RepositoryImpactSummary
+}
 export interface ProviderAccountStatus { provider: string; host: string; authenticated: boolean; accountLogin?: string; authenticationSource: string; permissions: string[]; message: string }
 export interface WorktreeConflictRisk { leftLeaseId: string; rightLeaseId: string; overlappingPaths: string[]; inferred: boolean }
 export interface RemoteProjectionRequest { projectId: string; repositoryPath?: string }

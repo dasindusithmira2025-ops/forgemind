@@ -16,6 +16,7 @@ import type {
   RepositoryOperation,
   RepositoryOperationEvent,
   RepositoryOperationRecord,
+  RepositoryIntelligence,
   RepositorySnapshot,
   RepositoryWorktreeLease,
   WorktreeConflictRisk,
@@ -70,6 +71,10 @@ interface RepositoryState {
   progress: Record<string, RepositoryOperationEvent>
   pending: Record<string, boolean>
   actionError?: string
+  /** Last persisted graph projection; `undefined` until loaded, `null` when never extracted. */
+  intelligence?: RepositoryIntelligence | null
+  intelligenceLoading: boolean
+  intelligenceError?: string
 
   reset: () => void
   loadProject: (projectId: string) => Promise<void>
@@ -85,6 +90,8 @@ interface RepositoryState {
   clearActionError: () => void
   subscribe: () => () => void
   reloadApprovals: () => Promise<void>
+  loadIntelligence: () => Promise<void>
+  refreshIntelligence: () => Promise<void>
 }
 
 export const useRepositoryStore = create<RepositoryState>((set, get) => ({
@@ -105,6 +112,7 @@ export const useRepositoryStore = create<RepositoryState>((set, get) => ({
   operations: [],
   progress: {},
   pending: {},
+  intelligenceLoading: false,
 
   reset: () => set({
     projectId: undefined,
@@ -129,6 +137,9 @@ export const useRepositoryStore = create<RepositoryState>((set, get) => ({
     progress: {},
     pending: {},
     actionError: undefined,
+    intelligence: undefined,
+    intelligenceLoading: false,
+    intelligenceError: undefined,
   }),
 
   loadProject: async (projectId) => {
@@ -201,6 +212,43 @@ export const useRepositoryStore = create<RepositoryState>((set, get) => ({
     } catch (caught) {
       if (get().projectId !== projectId) return
       set({ remoteLoading: false, remoteError: asNativeError(caught).message })
+    }
+  },
+
+  /**
+   * Read the stored projection. Cheap (one indexed query, no Git), so the Intelligence section
+   * calls it on mount. A `null` result means the extractor has never run — an empty state, not an
+   * error.
+   */
+  loadIntelligence: async () => {
+    const projectId = get().projectId
+    if (!projectId) return
+    set({ intelligenceLoading: true, intelligenceError: undefined })
+    try {
+      const intelligence = await native.getRepositoryIntelligence(projectId)
+      if (get().projectId !== projectId) return
+      set({ intelligence, intelligenceLoading: false })
+    } catch (caught) {
+      if (get().projectId !== projectId) return
+      set({ intelligenceLoading: false, intelligenceError: asNativeError(caught).message })
+    }
+  },
+
+  /**
+   * Re-extract the graph from Git. This shells out repeatedly and is bounded but not instant, so
+   * it is only ever user-initiated — never polled.
+   */
+  refreshIntelligence: async () => {
+    const projectId = get().projectId
+    if (!projectId || get().intelligenceLoading) return
+    set({ intelligenceLoading: true, intelligenceError: undefined })
+    try {
+      const intelligence = await native.refreshRepositoryIntelligence({ projectId })
+      if (get().projectId !== projectId) return
+      set({ intelligence, intelligenceLoading: false })
+    } catch (caught) {
+      if (get().projectId !== projectId) return
+      set({ intelligenceLoading: false, intelligenceError: asNativeError(caught).message })
     }
   },
 
