@@ -8,6 +8,13 @@ interface SidebarGroupProps {
   label: string
   /** Optional count shown as a pill next to the label; hidden when 0 or undefined. */
   count?: number
+  /**
+   * Secondary text rendered beside the label inside the toggle — a Project's branch, a runtime
+   * summary. Part of the toggle so the whole identity stays one click target.
+   */
+  meta?: ReactNode
+  /** Marks the group as the focused entity, which draws the accent state edge. */
+  active?: boolean
   /** Right-aligned header controls (e.g. a "＋ New" button). Clicks never toggle the group. */
   actions?: ReactNode
   /** Collapsed on first run, before the user has expressed a preference for this group. */
@@ -34,6 +41,8 @@ export function SidebarGroup({
   id,
   label,
   count,
+  meta,
+  active = false,
   actions,
   defaultCollapsed = false,
   forceExpanded = false,
@@ -46,7 +55,10 @@ export function SidebarGroup({
   const collapsed = forceExpanded ? false : persistedCollapsed
 
   return (
-    <section className={`sb-group ${collapsed ? 'is-collapsed' : ''} ${className}`.trim()} aria-label={label}>
+    <section
+      className={`sb-group ${collapsed ? 'is-collapsed' : ''} ${active ? 'is-active' : ''} ${className}`.trim()}
+      aria-label={label}
+    >
       <div className="sb-group-head">
         <button
           type="button"
@@ -56,6 +68,7 @@ export function SidebarGroup({
         >
           <ChevronRight size={13} className="sb-group-chevron" aria-hidden />
           <span className="section-label">{label}</span>
+          {meta && <span className="sb-group-meta">{meta}</span>}
           {count != null && count > 0 && <span className="sb-group-count">{count}</span>}
         </button>
         {actions && <div className="sb-group-actions">{actions}</div>}

@@ -482,47 +482,55 @@ html[data-theme-swapping] *, html[data-theme-swapping] *::before, html[data-them
 .workspace-switching .terminal-canvas { opacity: .68; pointer-events: none; }
 
 /* ---- Sidebar ------------------------------------------------------------------ */
-/* Four stacked zones, ordered by how often they are touched: a pinned brand header, a pinned
-   Project rail (identity), ONE scrolling body holding the primary lists, and a pinned utilities
-   rail. Group headers stick to the top of that scroll region, so with a long Workspace list the
-   section a row belongs to — and that section's own actions — never scroll out of reach. */
+/* Four fixed bands around ONE scrolling body: a nav zone of destinations, the list header, the
+   scroll region holding the primary lists, and a pinned toolbar. Group headers stick to the top
+   of that scroll region, so with a long Workspace list the section a row belongs to — and that
+   section's own actions — never scroll out of reach. */
 .forge-sidebar { position: relative; flex: 0 0 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--sidebar-bg); border-right: 1px solid var(--border); }
 .forge-sidebar.is-collapsed { width: var(--sidebar-collapsed-width); }
 
-.sidebar-brand { flex: 0 0 auto; height: var(--header-height); padding: 0 6px 0 12px; display: flex; align-items: center; justify-content: space-between; gap: 8px; border-bottom: 1px solid var(--border-subtle); }
-.sidebar-brand .brand--monochrome .brand-logo { width: 124px; height: 30px; }
-.sidebar-collapse-btn { flex: 0 0 auto; width: var(--icon-btn); height: var(--icon-btn); display: grid; place-items: center; color: var(--faint); background: transparent; border: 1px solid transparent; border-radius: var(--radius); cursor: pointer; transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out); }
-.sidebar-collapse-btn:hover { color: var(--text); background: var(--surface-2); border-color: var(--border); }
+/* ---- Nav zone: the sidebar's destinations, never its entities ------------------------------ */
+.sb-nav { flex: 0 0 auto; padding: 8px 6px 6px; display: flex; flex-direction: column; gap: 2px; }
 
-/* ---- Project rail: which Project is focused, and what else is still running ---------------- */
-.sb-project-rail { position: relative; flex: 0 0 auto; padding: 5px; border-bottom: 1px solid var(--border-subtle); }
-.sb-project-current { width: 100%; min-height: var(--row-h); padding: 4px 6px 4px 8px; display: flex; align-items: center; gap: 9px; color: var(--text); background: transparent; border: 1px solid transparent; border-radius: var(--radius); text-align: left; cursor: pointer; transition: background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out); }
-.sb-project-current:hover, .sb-project-current[aria-expanded="true"] { background: var(--surface-2); border-color: var(--border); }
-.sb-project-icon { flex: 0 0 auto; display: grid; place-items: center; color: var(--accent-strong); }
-.sb-project-current.is-missing .sb-project-icon { color: var(--warning); }
-.sb-project-identity { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-.sb-project-name { overflow: hidden; color: var(--text-strong); font-size: var(--text-sm); font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
-.sb-project-sub { overflow: hidden; color: var(--faint); font-size: var(--text-xs); text-overflow: ellipsis; white-space: nowrap; }
-.sb-project-current.is-missing .sb-project-sub { color: var(--warning); }
-.sb-project-more { flex: 0 0 auto; padding: 0 6px; color: var(--accent-strong); background: var(--accent-soft); border-radius: var(--radius-pill); font-size: var(--text-xs); font-weight: 650; line-height: 17px; font-variant-numeric: tabular-nums; }
-.sb-project-chevron { flex: 0 0 auto; color: var(--faint); transition: transform var(--dur-fast) var(--ease-out); }
-.sb-project-current[aria-expanded="true"] .sb-project-chevron { transform: rotate(180deg); }
-.sb-project-locate { margin: 3px 0 1px 8px; padding: 0; color: var(--warning); background: none; border: 0; font-size: var(--text-xs); text-decoration: underline; cursor: pointer; }
+/* The one row grammar every nav row resolves to. Icon recedes, label carries, the active row
+   gains a surface and full-strength text — no accent, so a colour in the sidebar always means
+   state rather than "you are here". */
+.sb-nav-row { width: 100%; min-height: var(--control-h); padding: 0 8px; display: flex; align-items: center; gap: 9px; color: var(--muted); background: transparent; border: 0; border-radius: var(--radius); font-size: var(--text-sm); font-weight: 550; text-align: left; cursor: pointer; transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out); }
+.sb-nav-row:hover { color: var(--text); background: var(--surface-hover); }
+.sb-nav-row[aria-current="page"] { color: var(--text-strong); background: var(--bg-selected); }
+.sb-nav-icon { flex: 0 0 auto; color: var(--faint); transition: color var(--dur-fast) var(--ease-out); }
+.sb-nav-row:hover .sb-nav-icon, .sb-nav-row[aria-current="page"] .sb-nav-icon { color: var(--muted); }
+.sb-nav-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.sb-project-background { list-style: none; margin: 3px 0 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
-.sb-project-background li { display: flex; align-items: center; gap: 2px; border-radius: var(--radius-sm); }
-.sb-project-background-main { flex: 1; min-width: 0; min-height: calc(26px * var(--ui-scale)); padding: 0 6px 0 10px; display: flex; align-items: center; gap: 8px; color: var(--muted); background: transparent; border: 0; border-radius: var(--radius-sm); text-align: left; cursor: pointer; transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out); }
-.sb-project-background-main:hover { color: var(--text); background: var(--surface-hover); }
-.sb-project-dot { flex: 0 0 auto; width: 6px; height: 6px; box-sizing: border-box; border-radius: 50%; background: var(--success); }
-.sb-project-dot.is-missing { background: transparent; border: 1.5px solid var(--warning); }
-.sb-project-background-name { min-width: 0; overflow: hidden; font-size: var(--text-sm); text-overflow: ellipsis; white-space: nowrap; }
-.sb-project-background-state { flex: 0 0 auto; margin-left: auto; color: var(--faint); font-size: var(--text-xs); }
-.sb-project-background-close { flex: 0 0 auto; width: calc(24px * var(--ui-scale)); height: calc(24px * var(--ui-scale)); display: grid; place-items: center; color: var(--faint); background: transparent; border: 0; border-radius: var(--radius-sm); opacity: 0; cursor: pointer; }
-.sb-project-background li:hover .sb-project-background-close, .sb-project-background-close:focus-visible { opacity: 1; }
-.sb-project-background-close:hover { color: var(--danger); background: var(--surface-3); }
+/* A button dressed as a field: it opens the Orchestrator panel rather than accepting text. The
+   shortcut keycaps stay hidden until hover so the resting sidebar shows names, not chrome. */
+.sb-nav-search { position: relative; width: 100%; min-height: var(--control-h); padding: 0 6px 0 26px; display: flex; align-items: center; color: var(--faint); background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius); font-size: var(--text-sm); text-align: left; cursor: pointer; transition: background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out); }
+.sb-nav-search:hover { color: var(--muted); background: var(--surface-hover); border-color: var(--border-strong); }
+.sb-nav-search-icon { position: absolute; left: 8px; top: 50%; transform: translateY(-50%); pointer-events: none; }
+.sb-nav-search-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sb-nav-keys { flex: 0 0 auto; display: none; align-items: center; gap: 3px; }
+.sb-nav-search:hover .sb-nav-keys, .sb-nav-search:focus-visible .sb-nav-keys { display: inline-flex; }
+.sb-nav-keys kbd { padding: 1px 4px; color: var(--faint); background: var(--surface-3); border: 1px solid var(--border); border-radius: var(--radius-sm); font-family: inherit; font-size: var(--text-2xs); line-height: 1.4; }
+
+/* ---- List header: what the list is, and the controls scoped to it -------------------------- */
+.sb-list-header { position: relative; flex: 0 0 auto; min-height: calc(30px * var(--ui-scale)); padding: 2px 6px 2px 12px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.sb-list-title { min-width: 0; overflow: hidden; color: var(--faint); font-size: var(--text-xs); font-weight: 700; letter-spacing: var(--tracking-label); text-transform: uppercase; text-overflow: ellipsis; white-space: nowrap; user-select: none; }
+.sb-list-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 1px; }
+.sb-list-action { width: var(--icon-btn); height: var(--icon-btn); display: grid; place-items: center; color: var(--faint); background: transparent; border: 0; border-radius: var(--radius-sm); cursor: pointer; transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out); }
+.sb-list-action:hover, .sb-list-action[aria-expanded="true"] { color: var(--text); background: var(--surface-hover); }
+
+/* Grouping and order. Anchored to the header — outside the scroll region — so it never clips. */
+.sb-options-popover { position: absolute; z-index: var(--z-menu); top: calc(100% - 2px); right: 6px; width: max(228px, calc(100% - 12px)); padding: 8px; display: flex; flex-direction: column; gap: 10px; background: var(--popover); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-lg); animation: pl-pop-in .14s var(--ease-out) both; }
+.sb-options-group { display: flex; flex-direction: column; gap: 5px; }
+.sb-options-heading { margin: 0 2px; color: var(--faint); font-size: var(--text-xs); font-weight: 700; letter-spacing: var(--tracking-label); text-transform: uppercase; }
+.sb-options-note { margin: 0 2px; color: var(--faint); font-size: var(--text-xs); }
+.sb-segmented { display: flex; padding: 2px; gap: 2px; background: var(--surface-3); border-radius: var(--radius); }
+.sb-segment { flex: 1 1 0; min-width: 0; min-height: calc(24px * var(--ui-scale)); padding: 0 6px; color: var(--muted); background: transparent; border: 0; border-radius: var(--radius-sm); font-size: var(--text-xs); font-weight: 600; cursor: pointer; transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out); }
+.sb-segment:hover { color: var(--text); background: var(--surface-hover); }
+.sb-segment.is-selected { color: var(--text-strong); background: var(--bg-selected); }
 
 /* The one Project surface: switch sessions, act on the active Project, search recents, open a
-   folder. Anchored to the rail — which sits outside the scroll region — so it never clips. */
+   folder. Anchored to the list header — outside the scroll region — so it never clips. */
 .sb-project-popover { position: absolute; z-index: var(--z-menu); top: calc(100% - 3px); left: 6px; width: max(292px, calc(100% - 12px)); max-height: min(70vh, 560px); display: flex; flex-direction: column; overflow: hidden; background: var(--popover); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-lg); animation: pl-pop-in .14s var(--ease-out) both; }
 .sb-pop-section { min-height: 0; display: flex; flex-direction: column; padding: 6px; }
 .sb-pop-section + .sb-pop-section { border-top: 1px solid var(--border); }
@@ -575,10 +583,17 @@ html[data-theme-swapping] *, html[data-theme-swapping] *::before, html[data-them
 .sb-group-toggle { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; padding: 3px 5px; color: var(--muted); background: none; border: 0; border-radius: var(--radius-sm); cursor: pointer; text-align: left; transition: background-color var(--dur-fast) var(--ease-out); }
 .sb-group-toggle:hover { background: var(--surface-2); }
 .sb-group-toggle:hover .section-label { color: var(--text); }
-.sb-group .section-label { color: var(--faint); font-size: var(--text-2xs); font-weight: 600; letter-spacing: .055em; transition: color var(--dur-fast) var(--ease-out); }
+.sb-group .section-label { flex: 0 1 auto; min-width: 0; overflow: hidden; color: var(--faint); font-size: var(--text-xs); font-weight: 700; letter-spacing: .055em; text-overflow: ellipsis; white-space: nowrap; transition: color var(--dur-fast) var(--ease-out); }
 .sb-group-chevron { flex: 0 0 auto; color: var(--faint); transform: rotate(90deg); transition: transform var(--dur-fast) var(--ease-out); }
 .sb-group.is-collapsed .sb-group-chevron { transform: rotate(0deg); }
-.sb-group-count { flex: 0 0 auto; min-width: 17px; height: 15px; padding: 0 5px; display: grid; place-items: center; color: var(--muted); background: var(--surface-2); border-radius: var(--radius-pill); font-size: var(--text-xs); font-weight: 600; font-variant-numeric: tabular-nums; }
+/* A Project group's secondary line — its branch, or why it is unavailable. Truncates first, so a
+   long branch name never pushes the count or the create button off the row. */
+.sb-group-meta { flex: 1 1 auto; min-width: 0; overflow: hidden; color: var(--faint); font-size: var(--text-xs); font-weight: 500; letter-spacing: normal; text-transform: none; text-overflow: ellipsis; white-space: nowrap; }
+.sb-group-warn { display: inline-flex; align-items: center; gap: 3px; color: var(--warning); }
+/* The focused Project carries the accent as a 2px state edge — the genome's one accented mark. */
+.sb-group.is-active > .sb-group-head { box-shadow: inset 2px 0 0 var(--accent); }
+.sb-group.is-active > .sb-group-head .section-label { color: var(--text-strong); }
+.sb-group-count { flex: 0 0 auto; min-width: 19px; height: 17px; padding: 0 6px; display: grid; place-items: center; color: var(--muted); background: var(--surface-2); border-radius: var(--radius-pill); font-size: var(--text-xs); font-weight: 600; font-variant-numeric: tabular-nums; }
 .sb-group-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 2px; }
 .sb-group-body { display: flex; flex-direction: column; padding: 0 0 2px; animation: pl-fade-in var(--dur) var(--ease-out); }
 
@@ -605,6 +620,10 @@ html[data-theme-swapping] *, html[data-theme-swapping] *::before, html[data-them
 .ws-pane-badge { flex: 0 0 auto; min-width: 20px; height: 17px; padding: 0 5px; display: grid; place-items: center; color: var(--muted); background: var(--surface-3); border-radius: var(--radius-pill); font-size: var(--text-xs); font-weight: 600; }
 .ws-row.is-active .ws-pane-badge { color: var(--accent-strong); background: var(--accent-soft); }
 .ws-row-secondary { overflow: hidden; color: var(--faint); font-size: var(--text-xs); text-overflow: ellipsis; white-space: nowrap; }
+/* Only rendered by the flat list, where rows from several Projects sit together and the row's
+   own name is not enough to identify it. */
+.ws-row-project { color: var(--muted); font-weight: 600; }
+.ws-row-project::after { content: " · "; color: var(--faint); font-weight: 400; }
 .ws-row-handle { display: flex; align-items: center; padding: 0 1px; color: var(--faint); opacity: 0; cursor: grab; }
 .ws-row:hover .ws-row-handle { opacity: .6; }
 .ws-row-menu { width: var(--icon-btn); height: var(--icon-btn); margin-right: 3px; display: grid; place-items: center; color: var(--muted); background: transparent; border: 0; border-radius: var(--radius); opacity: 0; cursor: pointer; }
@@ -632,9 +651,16 @@ html[data-theme-swapping] *, html[data-theme-swapping] *::before, html[data-them
 .ws-context-menu { position: fixed; right: auto; top: auto; width: 232px; }
 
 /* Pinned utilities: one icon rail, not four labelled rows. */
-.sidebar-utilities { flex: 0 0 auto; padding: 4px 6px; display: flex; align-items: center; gap: 2px; border-top: 1px solid var(--border-subtle); background: color-mix(in srgb, var(--sidebar-bg) 88%, #000); }
-.sidebar-util { width: var(--icon-btn); height: var(--icon-btn); display: grid; place-items: center; color: var(--faint); background: transparent; border: 1px solid transparent; border-radius: var(--radius); cursor: pointer; transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out); }
-.sidebar-util:hover { color: var(--text); background: var(--surface-hover); border-color: var(--border); }
+/* ---- Toolbar: identity left, the least-used controls right --------------------------------- */
+.sb-toolbar { flex: 0 0 auto; padding: 4px 6px; display: flex; align-items: center; justify-content: space-between; gap: 8px; border-top: 1px solid var(--border-subtle); background: color-mix(in srgb, var(--sidebar-bg) 88%, #000); }
+.sb-toolbar-brand { min-width: 0; padding: 0 6px; min-height: var(--icon-btn); display: flex; align-items: center; gap: 6px; background: transparent; border: 0; border-radius: var(--radius-sm); cursor: pointer; transition: background-color var(--dur-fast) var(--ease-out); }
+.sb-toolbar-brand:hover { background: var(--surface-hover); }
+.sb-toolbar-brand .brand--monochrome .brand-logo { width: 92px; height: 22px; }
+.sb-toolbar-brand-icon { flex: 0 0 auto; color: var(--faint); opacity: 0; transition: opacity var(--dur-fast) var(--ease-out); }
+.sb-toolbar-brand:hover .sb-toolbar-brand-icon, .sb-toolbar-brand:focus-visible .sb-toolbar-brand-icon { opacity: 1; }
+.sb-toolbar-tools { flex: 0 0 auto; display: flex; align-items: center; gap: 1px; }
+.sb-toolbar-btn { width: var(--icon-btn); height: var(--icon-btn); display: grid; place-items: center; color: var(--faint); background: transparent; border: 0; border-radius: var(--radius-sm); cursor: pointer; transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out); }
+.sb-toolbar-btn:hover { color: var(--text); background: var(--surface-hover); }
 
 .sidebar-resize-handle { position: absolute; top: 0; right: -3px; width: 6px; height: 100%; z-index: 6; cursor: col-resize; }
 .sidebar-resize-handle:hover { background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--accent) 25%, transparent)); }

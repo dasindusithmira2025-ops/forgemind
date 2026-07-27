@@ -56,6 +56,23 @@ export interface SidebarOpenProject {
   runtimeSummary?: string
 }
 
+/**
+ * One open Project together with its Workspaces, as the grouped sidebar list renders it.
+ *
+ * This is the unit the sidebar's primary list is built from since the Project rail was absorbed
+ * into group headers: the list spans every open Project rather than only the active one, so a
+ * background Project's Workspaces are reachable without switching first.
+ */
+export interface SidebarProjectGroup {
+  project: Project
+  isActive: boolean
+  folderMissing: boolean
+  /** This Project's Workspaces in persisted order, each with derived runtime facts. */
+  workspaces: SidebarWorkspace[]
+  /** Short human summary of the Project's live terminals, shown in the group header. */
+  runtimeSummary?: string
+}
+
 /** Inputs the runtime derivation needs; kept explicit so the selector stays pure/testable. */
 export interface RuntimeDerivationInput {
   workspaceId: string
@@ -133,4 +150,10 @@ export interface ForgeSpaceSidebarProps {
   /** Every Project currently open in the main window (the "Current Projects" section). When
    *  omitted the section falls back to showing just the single active `project`. */
   openProjects?: SidebarOpenProject[]
+  /**
+   * Every open Project with its own Workspaces — the source for the grouped primary list. When
+   * omitted (the detached window, tests) the sidebar synthesises a single group from `project`
+   * and `workspaces`, so the list degrades to the previous single-Project behaviour.
+   */
+  groups?: SidebarProjectGroup[]
 }

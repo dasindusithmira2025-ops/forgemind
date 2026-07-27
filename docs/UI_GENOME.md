@@ -151,6 +151,37 @@ glyph metrics match what the OS ships.
 
 ---
 
+## The sidebar IA, cloned from Orca
+
+The genome above governs *colour*. The sidebar additionally clones Orca's **information
+architecture** (`src/renderer/src/components/sidebar/index.tsx`): four fixed bands around exactly
+one scroll region.
+
+| Band | Ours | Orca's |
+| --- | --- | --- |
+| Nav | `SidebarNav` — Search, Repository | `SidebarNav` — Tasks, Automations, Agents, Mobile, Search |
+| List header | `SidebarListHeader` — title + groupBy/sort + Project + New | `SidebarHeader` — title + options + Add Project + New |
+| List | `WorkspaceListSection` — Workspaces across every open Project | `WorktreeList` — worktrees across every repo |
+| Toolbar | `SidebarToolbar` — brand, scroll-to-active, Diagnostics, Settings, Collapse | `SidebarToolbar` — profile, settings/help, scroll-to-current, board |
+
+Three ideas carry it, and all three are worth preserving:
+
+1. **Destinations are separated from entities.** Everything above the list header is a route;
+   everything below it is a thing you work in. A nav row without a real destination teaches the
+   user that the whole band is decorative, so rows are only added when the route already exists.
+2. **The title names the grouping.** "Projects" vs "Workspaces" is the one-word answer to why the
+   list is shaped the way it is — it is state, not a caption.
+3. **One row grammar.** Nav rows, list rows and group headers resolve to the same shape: icon at
+   `--faint`, label at `--muted`, active gaining a neutral surface and `--text-strong`. Per rule 4
+   the accent appears only as the 2px state edge on the focused Project.
+
+Where we diverge: Orca's list holds one entity type, so its scroll region is a single list. Ours
+also carries Swarms and detached Workspaces, which stay as sibling `SidebarGroup`s below the
+Workspace list rather than being flattened into it or demoted to nav rows that would lose their
+per-row actions.
+
+---
+
 ## Where Paralith deliberately differs from Orca
 
 | | Orca | Paralith | Why |

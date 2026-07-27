@@ -13,6 +13,12 @@ interface WorkspaceRowProps {
   menuOpen: boolean
   /** False while a filter is narrowing the list, where a drop index would be meaningless. */
   reorderable: boolean
+  /**
+   * The owning Project's name, shown only when the row's group does not already state it — i.e.
+   * the flat list spanning several open Projects. Without it two Workspaces called "main" from
+   * different Projects are indistinguishable.
+   */
+  projectName?: string
   actions: SidebarActions
   onOpenMenu: (id?: string, anchor?: { x: number; y: number }) => void
   onDragStart: (id: string) => void
@@ -33,6 +39,7 @@ function WorkspaceRowImpl({
   dropTarget,
   menuOpen,
   reorderable,
+  projectName,
   actions,
   onOpenMenu,
   onDragStart,
@@ -81,7 +88,7 @@ function WorkspaceRowImpl({
       <button
         type="button"
         className="ws-row-main"
-        aria-label={`${workspace.name}, ${runtime.status}, ${paneCount} panes`}
+        aria-label={`${workspace.name}${projectName ? ` in ${projectName}` : ''}, ${runtime.status}, ${paneCount} panes`}
         onClick={() => !active && actions.onSelectWorkspace(workspace.id)}
         onDoubleClick={(event) => event.preventDefault()}
         onKeyDown={onKeyDown}
@@ -99,6 +106,7 @@ function WorkspaceRowImpl({
             </span>
           </span>
           <span className="ws-row-secondary" title={providers.labels.join(' · ')}>
+            {projectName && <span className="ws-row-project">{projectName}</span>}
             {runtime.status === 'closed' ? providers.text || 'Not running' : runtimeStatusText(runtime)}
           </span>
         </span>
