@@ -165,6 +165,13 @@ export const native = {
   getThemePreference: () => invoke<string>('get_theme_preference'),
   /** Persist the selected theme id and broadcast a `theme-changed` event to every window. Main window only. */
   setThemePreference: (themeId: string) => invoke<void>('set_theme_preference', { themeId }),
+  /**
+   * Paint the OS-drawn window frame (caption fill, caption text, border) from the active theme.
+   * CSS cannot reach the frame, so without this the caption keeps the system accent colour.
+   * Applies to every window, so detached workspaces follow a theme change too.
+   */
+  applyWindowChrome: (chrome: { caption: string; text: string; border: string }) =>
+    invoke<void>('apply_window_chrome', { chrome }),
   listAgentProfiles: () => invoke<AgentProfile[]>('list_agent_profiles'),
   listAgentSessions: (workspaceId: string) => invoke<AgentSession[]>('list_agent_sessions', { workspaceId }),
   getDiagnostics: () => invoke<DiagnosticsSnapshot>('get_diagnostics'),

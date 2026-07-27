@@ -1,5 +1,6 @@
 use crate::errors::AppResult;
 use crate::models::AppSettings;
+use crate::services;
 use crate::AppState;
 use tauri::{AppHandle, Emitter, State, Window};
 
@@ -47,4 +48,18 @@ pub fn set_theme_preference(
     state.database.save_settings(&settings)?;
     let _ = app.emit("theme-changed", theme_id);
     Ok(())
+}
+
+/// Paint the native window frame — caption fill, caption text, border — from the active theme.
+///
+/// The operating system draws the frame, so CSS cannot reach it; without this the caption keeps
+/// whatever colour the OS chose (on Windows, the user's system accent) and reads as a bright
+/// stripe above chrome that is deliberately achromatic. Applied to *every* window rather than the
+/// caller's, so detached workspace windows follow a theme change without each having to ask.
+///
+/// Callable from any window: it is a presentation-only change to windows this application already
+/// owns, and detached windows apply their own theme on startup.
+#[tauri::command]
+pub fn apply_window_chrome(chrome: services::window_chrome::WindowChrome, app: AppHandle) {
+    services::window_chrome::apply_to_all(&app, &chrome);
 }

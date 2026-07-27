@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import indexCss from '../index.css?raw'
+import indexHtml from '../../index.html?raw'
 import {
   REQUIRED_CSS_VARS, monacoThemeName, toCssVars, toMonacoColors, toTerminalTheme,
 } from './tokens'
@@ -8,7 +9,64 @@ import {
   DEFAULT_THEME_ID, allConcreteThemes, coerceThemeId, isValidThemeId, listThemes,
   missingCssVars, resolveSystemConcreteId, resolveTheme,
 } from './registry'
-import { applyTheme, cachedThemeId, STORAGE_KEYS } from './applyTheme'
+import { applyTheme, cachedThemeId, STORAGE_KEYS, TOKEN_REVISION } from './applyTheme'
+
+/** Parse `#rgb` / `#rrggbb` into 0-255 channels. Returns null for non-hex token values. */
+function hexChannels(value: string): [number, number, number] | null {
+  const match = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(value.trim())
+  if (!match) return null
+  const hex = match[1].length === 3 ? match[1].replace(/./g, (c) => c + c) : match[1]
+  return [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16)) as [number, number, number]
+}
+
+/** Max channel spread. 0 is a perfect grey; the genome caps control fills well below chroma. */
+function chroma(value: string): number {
+  const rgb = hexChannels(value)
+  if (!rgb) return 0
+  return Math.max(...rgb) - Math.min(...rgb)
+}
+
+/** Relative luminance per WCAG 2.x, for contrast assertions on the control layer. */
+function luminance(value: string): number {
+  const rgb = hexChannels(value)
+  if (!rgb) return 0
+  const [r, g, b] = rgb.map((channel) => {
+    const c = channel / 255
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4
+  })
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b
+}
+
+function contrastRatio(a: string, b: string): number {
+  const [light, dark] = [luminance(a), luminance(b)].sort((x, y) => y - x)
+  return (light + 0.05) / (dark + 0.05)
+}
+
+/**
+ * Chroma budget for anything in the control layer, as a 0-255 channel spread.
+ *
+ * 14 (≈5% of the range) leaves room for the deliberately tinted neutral ramps — zinc runs cool,
+ * stone runs warm, and both land around 9-12 — while still rejecting anything that reads as a
+ * hue. For scale: the iris accent is 111 and the amber accent is 191.
+ */
+const CONTROL_CHROMA_BUDGET = 14
+
+/** How far apart two neutral surfaces are, as a 0-255 mean-channel distance. */
+function step(a: string, b: string): number {
+  const [left, right] = [hexChannels(a), hexChannels(b)]
+  if (!left || !right) return Number.POSITIVE_INFINITY
+  const mean = (rgb: [number, number, number]) => (rgb[0] + rgb[1] + rgb[2]) / 3
+  return Math.abs(mean(left) - mean(right))
+}
+
+/**
+ * The smallest surface step that is still legible as a change of state.
+ *
+ * 8/255 (≈3%) is roughly where a filled row stops reading as "the same colour, maybe" on a
+ * typical laptop panel at a normal brightness. Below that a hover is technically present and
+ * practically invisible.
+ */
+const MIN_SURFACE_STEP = 8
 
 describe('theme registry', () => {
   it('exposes every concrete theme plus a System option, all with unique ids', () => {
@@ -78,6 +136,105 @@ describe('theme registry', () => {
   })
 })
 
+describe('design genome', () => {
+  it('keeps solid controls achromatic so chroma stays reserved for meaning', () => {
+    // A primary button tinted toward the accent makes every screen with a save button look like
+    // the accent is the subject. The control layer is therefore held to near-grey.
+    for (const theme of CONCRETE_THEME_ORDER) {
+      const { primary, primaryHover, primaryActive, secondary } = theme.colors.control
+      for (const [name, value] of Object.entries({ primary, primaryHover, primaryActive, secondary })) {
+        expect(chroma(value), `${theme.id}.control.${name} (${value}) carries chroma`).toBeLessThanOrEqual(CONTROL_CHROMA_BUDGET)
+      }
+    }
+  })
+
+  it('keeps label text on a solid control readable', () => {
+    for (const theme of CONCRETE_THEME_ORDER) {
+      const { primary, onPrimary, secondary, onSecondary } = theme.colors.control
+      expect(contrastRatio(primary, onPrimary), `${theme.id} primary label`).toBeGreaterThanOrEqual(4.5)
+      expect(contrastRatio(secondary, onSecondary), `${theme.id} secondary label`).toBeGreaterThanOrEqual(4.5)
+    }
+  })
+
+  it('draws dividers as an alpha wash rather than an opaque grey', () => {
+    // One border value has to sit correctly on canvas, card and popover. An opaque grey cannot:
+    // it reads heavy on the canvas and disappears on a raised surface.
+    for (const theme of CONCRETE_THEME_ORDER) {
+      const { default: base, subtle, strong } = theme.colors.border
+      for (const [name, value] of Object.entries({ default: base, subtle, strong })) {
+        expect(value, `${theme.id}.border.${name} is not translucent`).toMatch(/^rgb\(|^rgba\(|color-mix/)
+      }
+    }
+  })
+
+  it('keeps the focus ring neutral so a focused control is never confused with an accented one', () => {
+    for (const theme of CONCRETE_THEME_ORDER) {
+      expect(chroma(theme.colors.control.ring), `${theme.id} ring`).toBeLessThanOrEqual(CONTROL_CHROMA_BUDGET)
+      expect(theme.colors.effects.focusRing).toBe(theme.colors.control.ring)
+    }
+  })
+
+  it('keeps every interaction fill visible on every surface it can be painted on', () => {
+    // The bug this catches: `--surface-hover` and `--surface-3` collapsing onto the same value,
+    // which makes hover invisible on chips, badges and the active pane header while still looking
+    // correct on the canvas — so it reads as "hover is broken on some rows" rather than as a
+    // palette mistake. A hover can land on any surface in the ladder, so it has to clear all of
+    // them, not just the canvas.
+    for (const theme of CONCRETE_THEME_ORDER) {
+      const { canvas, surface, surfaceRaised, surfaceOverlay, sidebar, hover, pressed, selected } =
+        theme.colors.background
+      const ladder = { canvas, surface, surfaceRaised, surfaceOverlay, sidebar }
+      for (const [stateName, state] of Object.entries({ hover, pressed, selected })) {
+        for (const [surfaceName, base] of Object.entries(ladder)) {
+          expect(
+            step(state, base),
+            `${theme.id}: ${stateName} (${state}) is indistinguishable from ${surfaceName} (${base})`,
+          ).toBeGreaterThanOrEqual(MIN_SURFACE_STEP)
+        }
+      }
+    }
+  })
+
+  it('separates the three interaction fills from each other', () => {
+    for (const theme of CONCRETE_THEME_ORDER) {
+      const { hover, pressed, selected } = theme.colors.background
+      expect(step(hover, pressed), `${theme.id}: hover vs pressed`).toBeGreaterThanOrEqual(MIN_SURFACE_STEP)
+      expect(step(pressed, selected), `${theme.id}: pressed vs selected`).toBeGreaterThanOrEqual(MIN_SURFACE_STEP)
+    }
+  })
+
+  it('floats a popover clear of the sidebar it opens over', () => {
+    // Our one Project popover opens directly on top of the sidebar. Orca gives popover, card and
+    // sidebar a single surface, which works there but would leave our menu carried entirely by a
+    // 7%-alpha border, so the popover takes one step of elevation.
+    //
+    // Dark themes only: on a light theme the card is already white and there is nowhere above it
+    // to go, so a light popover's elevation is carried by its shadow instead — which is exactly
+    // where a drop shadow reads best.
+    for (const theme of CONCRETE_THEME_ORDER.filter((entry) => entry.category === 'dark')) {
+      expect(
+        step(theme.colors.control.popover, theme.colors.background.sidebar),
+        `${theme.id}: popover sits flat on the sidebar`,
+      ).toBeGreaterThanOrEqual(MIN_SURFACE_STEP)
+    }
+  })
+
+  it('keeps every role hue distinguishable from every other role hue', () => {
+    // Roles are identity, not status: two roles that render as the same dot are unreadable in the
+    // swarm graph regardless of how pleasant the palette is.
+    for (const theme of CONCRETE_THEME_ORDER) {
+      const entries = Object.entries(theme.colors.role)
+      for (let i = 0; i < entries.length; i += 1) {
+        for (let j = i + 1; j < entries.length; j += 1) {
+          const [aName, a] = entries[i]
+          const [bName, b] = entries[j]
+          expect(a, `${theme.id}: ${aName} and ${bName} share a hue`).not.toBe(b)
+        }
+      }
+    }
+  })
+})
+
 describe('terminal + editor mapping', () => {
   it('converts a theme into a full xterm palette (16 ANSI colours + core colours)', () => {
     const term = toTerminalTheme(CONCRETE_THEME_ORDER[0])
@@ -124,6 +281,15 @@ describe('applyTheme', () => {
     expect(cachedThemeId()).toBe('graphite')
     const cached = JSON.parse(localStorage.getItem(STORAGE_KEYS.vars) ?? '{}')
     expect(cached['--bg']).toBe(theme.colors.background.canvas)
+    expect(cached['--primary']).toBe(theme.colors.control.primary)
+  })
+
+  it('stamps the cache with the token revision the index.html bootstrap gates on', () => {
+    // The bootstrap replays the cache only when the stamps match. If this literal drifts from the
+    // one in index.html, an upgraded install paints a frame of the previous palette.
+    applyTheme(resolveTheme('paralith-dark', true), 'paralith-dark')
+    expect(localStorage.getItem(STORAGE_KEYS.rev)).toBe(TOKEN_REVISION)
+    expect(indexHtml).toContain(`localStorage.getItem('paralith.theme.rev') === '${TOKEN_REVISION}'`)
   })
 
   it('stores the user selection (system), not the resolved id, so the choice survives restart', () => {

@@ -429,21 +429,26 @@ pub fn run() {
                     width: 1200,
                     height: 800,
                 });
-                if let Err(error) =
-                    WebviewWindowBuilder::new(app, &label, WebviewUrl::App("index.html".into()))
-                        .title("PARALITH Workspace")
-                        .inner_size(geometry.width as f64, geometry.height as f64)
-                        .min_inner_size(640.0, 420.0)
-                        .position(geometry.x as f64, geometry.y as f64)
-                        // Keep restored detached windows visible so their WebView2 renderer
-                        // initializes and can reclaim the persisted Workspace lease.
-                        .visible(true)
-                        .build()
+                match WebviewWindowBuilder::new(app, &label, WebviewUrl::App("index.html".into()))
+                    .title("PARALITH Workspace")
+                    .inner_size(geometry.width as f64, geometry.height as f64)
+                    .min_inner_size(640.0, 420.0)
+                    .position(geometry.x as f64, geometry.y as f64)
+                    // Keep restored detached windows visible so their WebView2 renderer
+                    // initializes and can reclaim the persisted Workspace lease.
+                    .visible(true)
+                    .build()
                 {
-                    log::warn!(
+                    // Paint the native frame before the window is on screen, so a restored
+                    // window never shows one frame of the OS caption colour.
+                    Ok(window) => services::window_chrome::apply(
+                        &window.as_ref().window(),
+                        &services::window_chrome::WindowChrome::dark_default(),
+                    ),
+                    Err(error) => log::warn!(
                         "could not restore detached workspace {}: {error}",
                         placement.workspace_id
-                    );
+                    ),
                 }
             }
             if !recovery_mode {
@@ -463,7 +468,7 @@ pub fn run() {
                         "The packaged Tauri configuration has no main window.",
                     )
                 });
-            WebviewWindowBuilder::from_config(app.handle(), &main_window_config)
+            let main_window = WebviewWindowBuilder::from_config(app.handle(), &main_window_config)
                 .and_then(|builder| builder.build())
                 .unwrap_or_else(|error| {
                     fatal_startup(
@@ -472,6 +477,10 @@ pub fn run() {
                         &error.to_string(),
                     )
                 });
+            services::window_chrome::apply(
+                &main_window.as_ref().window(),
+                &services::window_chrome::WindowChrome::dark_default(),
+            );
             log::info!("PARALITH initialized (data dir: {})", data_dir.display());
             startup_diagnostic("ready", "main window created and backend initialized");
             Ok(())
@@ -566,6 +575,7 @@ pub fn run() {
             commands::save_settings,
             commands::get_theme_preference,
             commands::set_theme_preference,
+            commands::apply_window_chrome,
             commands::list_swarm_presets,
             commands::list_swarm_runtime_readiness,
             commands::list_swarm_model_registry,
