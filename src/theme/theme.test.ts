@@ -51,6 +51,23 @@ function contrastRatio(a: string, b: string): number {
  */
 const CONTROL_CHROMA_BUDGET = 14
 
+/** How far apart two neutral surfaces are, as a 0-255 mean-channel distance. */
+function step(a: string, b: string): number {
+  const [left, right] = [hexChannels(a), hexChannels(b)]
+  if (!left || !right) return Number.POSITIVE_INFINITY
+  const mean = (rgb: [number, number, number]) => (rgb[0] + rgb[1] + rgb[2]) / 3
+  return Math.abs(mean(left) - mean(right))
+}
+
+/**
+ * The smallest surface step that is still legible as a change of state.
+ *
+ * 8/255 (≈3%) is roughly where a filled row stops reading as "the same colour, maybe" on a
+ * typical laptop panel at a normal brightness. Below that a hover is technically present and
+ * practically invisible.
+ */
+const MIN_SURFACE_STEP = 8
+
 describe('theme registry', () => {
   it('exposes every concrete theme plus a System option, all with unique ids', () => {
     const listed = listThemes()
@@ -157,9 +174,48 @@ describe('design genome', () => {
     }
   })
 
-  it('gives card and popover the same elevation surface', () => {
+  it('keeps every interaction fill visible on every surface it can be painted on', () => {
+    // The bug this catches: `--surface-hover` and `--surface-3` collapsing onto the same value,
+    // which makes hover invisible on chips, badges and the active pane header while still looking
+    // correct on the canvas — so it reads as "hover is broken on some rows" rather than as a
+    // palette mistake. A hover can land on any surface in the ladder, so it has to clear all of
+    // them, not just the canvas.
     for (const theme of CONCRETE_THEME_ORDER) {
-      expect(theme.colors.control.card, `${theme.id}`).toBe(theme.colors.control.popover)
+      const { canvas, surface, surfaceRaised, surfaceOverlay, sidebar, hover, pressed, selected } =
+        theme.colors.background
+      const ladder = { canvas, surface, surfaceRaised, surfaceOverlay, sidebar }
+      for (const [stateName, state] of Object.entries({ hover, pressed, selected })) {
+        for (const [surfaceName, base] of Object.entries(ladder)) {
+          expect(
+            step(state, base),
+            `${theme.id}: ${stateName} (${state}) is indistinguishable from ${surfaceName} (${base})`,
+          ).toBeGreaterThanOrEqual(MIN_SURFACE_STEP)
+        }
+      }
+    }
+  })
+
+  it('separates the three interaction fills from each other', () => {
+    for (const theme of CONCRETE_THEME_ORDER) {
+      const { hover, pressed, selected } = theme.colors.background
+      expect(step(hover, pressed), `${theme.id}: hover vs pressed`).toBeGreaterThanOrEqual(MIN_SURFACE_STEP)
+      expect(step(pressed, selected), `${theme.id}: pressed vs selected`).toBeGreaterThanOrEqual(MIN_SURFACE_STEP)
+    }
+  })
+
+  it('floats a popover clear of the sidebar it opens over', () => {
+    // Our one Project popover opens directly on top of the sidebar. Orca gives popover, card and
+    // sidebar a single surface, which works there but would leave our menu carried entirely by a
+    // 7%-alpha border, so the popover takes one step of elevation.
+    //
+    // Dark themes only: on a light theme the card is already white and there is nowhere above it
+    // to go, so a light popover's elevation is carried by its shadow instead — which is exactly
+    // where a drop shadow reads best.
+    for (const theme of CONCRETE_THEME_ORDER.filter((entry) => entry.category === 'dark')) {
+      expect(
+        step(theme.colors.control.popover, theme.colors.background.sidebar),
+        `${theme.id}: popover sits flat on the sidebar`,
+      ).toBeGreaterThanOrEqual(MIN_SURFACE_STEP)
     }
   })
 

@@ -44,12 +44,14 @@
   --surface: #171717;
   --surface-2: #1f1f1f;
   --surface-3: #262626;
-  --surface-hover: #262626;
-  --surface-pressed: #2e2e2e;
+  /* Interaction fills sit clear of every ladder step above, so a hover reads on a chip or an
+     active pane header and not only against the canvas. */
+  --surface-hover: #2e2e2e;
+  --surface-pressed: #383838;
   --surface-disabled: #1a1a1a;
   --sidebar-bg: #171717;
-  --bg-input: #1c1c1c;
-  --bg-selected: #363636;
+  --bg-input: #212121;
+  --bg-selected: #454545;
   /* Alpha hairlines: one value that reads correctly on canvas, card and popover alike. */
   --border: rgb(255 255 255 / 0.07);
   --border-subtle: rgb(255 255 255 / 0.045);
@@ -80,7 +82,7 @@
   --secondary-hover: #333333;
   --on-secondary: #fafafa;
   --card: #171717;
-  --popover: #171717;
+  --popover: #1f1f1f;
   --ring: #737373;
 
   /* Semantic state */

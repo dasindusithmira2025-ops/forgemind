@@ -41,8 +41,8 @@ const paralithDark: ThemeDefinition = {
   colors: {
     background: {
       canvas: '#0a0a0a', surface: '#171717', surfaceRaised: '#1f1f1f', surfaceOverlay: '#262626',
-      sidebar: '#171717', input: '#1c1c1c', hover: '#262626', selected: '#363636',
-      pressed: '#2e2e2e', disabled: '#1a1a1a',
+      sidebar: '#171717', input: '#212121', hover: '#2e2e2e', selected: '#454545',
+      pressed: '#383838', disabled: '#1a1a1a',
     },
     foreground: {
       primary: '#fafafa', strong: '#ffffff', secondary: '#d4d4d4', muted: '#a1a1a1',
@@ -60,7 +60,7 @@ const paralithDark: ThemeDefinition = {
     control: {
       primary: '#e5e5e5', primaryHover: '#f5f5f5', primaryActive: '#cfcfcf', onPrimary: '#171717',
       secondary: '#262626', secondaryHover: '#333333', onSecondary: '#fafafa',
-      card: '#171717', popover: '#171717', ring: '#737373',
+      card: '#171717', popover: '#1f1f1f', ring: '#737373',
     },
     status: {
       success: '#86efac',
@@ -130,8 +130,8 @@ const graphite: ThemeDefinition = {
   colors: {
     background: {
       canvas: '#0c0c0e', surface: '#18181b', surfaceRaised: '#212124', surfaceOverlay: '#27272a',
-      sidebar: '#18181b', input: '#1e1e21', hover: '#27272a', selected: '#38383d',
-      pressed: '#303034', disabled: '#1b1b1e',
+      sidebar: '#18181b', input: '#232326', hover: '#2f2f33', selected: '#46464c',
+      pressed: '#3a3a3f', disabled: '#1b1b1e',
     },
     foreground: {
       primary: '#fafafa', strong: '#ffffff', secondary: '#d4d4d8', muted: '#a1a1aa',
@@ -151,7 +151,7 @@ const graphite: ThemeDefinition = {
     control: {
       primary: '#e4e4e7', primaryHover: '#f4f4f5', primaryActive: '#c9c9ce', onPrimary: '#18181b',
       secondary: '#27272a', secondaryHover: '#34343a', onSecondary: '#fafafa',
-      card: '#18181b', popover: '#18181b', ring: '#71717a',
+      card: '#18181b', popover: '#212124', ring: '#71717a',
     },
     status: {
       success: '#86efac',
@@ -221,8 +221,8 @@ const obsidian: ThemeDefinition = {
   colors: {
     background: {
       canvas: '#000000', surface: '#0d0d0d', surfaceRaised: '#161616', surfaceOverlay: '#1f1f1f',
-      sidebar: '#0d0d0d', input: '#141414', hover: '#1f1f1f', selected: '#303030',
-      pressed: '#282828', disabled: '#121212',
+      sidebar: '#0d0d0d', input: '#1a1a1a', hover: '#2a2a2a', selected: '#414141',
+      pressed: '#343434', disabled: '#121212',
     },
     foreground: {
       primary: '#ffffff', strong: '#ffffff', secondary: '#dcdcdc', muted: '#adadad',
@@ -242,7 +242,7 @@ const obsidian: ThemeDefinition = {
     control: {
       primary: '#f5f5f5', primaryHover: '#ffffff', primaryActive: '#dcdcdc', onPrimary: '#0d0d0d',
       secondary: '#1f1f1f', secondaryHover: '#2c2c2c', onSecondary: '#ffffff',
-      card: '#0d0d0d', popover: '#0d0d0d', ring: '#8a8a8a',
+      card: '#0d0d0d', popover: '#161616', ring: '#8a8a8a',
     },
     status: {
       success: '#8ff5b6',
@@ -312,8 +312,8 @@ const ember: ThemeDefinition = {
   colors: {
     background: {
       canvas: '#0c0a09', surface: '#1c1917', surfaceRaised: '#23201d', surfaceOverlay: '#292524',
-      sidebar: '#1c1917', input: '#211e1b', hover: '#292524', selected: '#3a3532',
-      pressed: '#322d2a', disabled: '#1e1b19',
+      sidebar: '#1c1917', input: '#262220', hover: '#332e2b', selected: '#4a4441',
+      pressed: '#3d3835', disabled: '#1e1b19',
     },
     foreground: {
       primary: '#fafaf9', strong: '#ffffff', secondary: '#d6d3d1', muted: '#a8a29e',
@@ -331,7 +331,7 @@ const ember: ThemeDefinition = {
     control: {
       primary: '#e7e5e4', primaryHover: '#f5f5f4', primaryActive: '#d6d3d1', onPrimary: '#1c1917',
       secondary: '#292524', secondaryHover: '#36302e', onSecondary: '#fafaf9',
-      card: '#1c1917', popover: '#1c1917', ring: '#a8a29e',
+      card: '#1c1917', popover: '#272320', ring: '#a8a29e',
     },
     status: {
       success: '#86efac',
@@ -402,9 +402,9 @@ const arcticLight: ThemeDefinition = {
   preview: { hint: 'Paper white, near-black primary' },
   colors: {
     background: {
-      canvas: '#ffffff', surface: '#ffffff', surfaceRaised: '#fafafa', surfaceOverlay: '#f5f5f5',
-      sidebar: '#fafafa', input: '#ffffff', hover: '#f5f5f5', selected: '#e8e8e8',
-      pressed: '#ebebeb', disabled: '#f5f5f5',
+      canvas: '#f7f7f7', surface: '#ffffff', surfaceRaised: '#fafafa', surfaceOverlay: '#f2f2f2',
+      sidebar: '#fafafa', input: '#ffffff', hover: '#e9e9e9', selected: '#d4d4d4',
+      pressed: '#dfdfdf', disabled: '#f2f2f2',
     },
     foreground: {
       primary: '#0a0a0a', strong: '#000000', secondary: '#525252', muted: '#737373',
@@ -423,7 +423,7 @@ const arcticLight: ThemeDefinition = {
     },
     control: {
       primary: '#171717', primaryHover: '#000000', primaryActive: '#333333', onPrimary: '#fafafa',
-      secondary: '#f5f5f5', secondaryHover: '#ebebeb', onSecondary: '#171717',
+      secondary: '#f2f2f2', secondaryHover: '#e9e9e9', onSecondary: '#171717',
       card: '#ffffff', popover: '#ffffff', ring: '#a1a1a1',
     },
     status: {
