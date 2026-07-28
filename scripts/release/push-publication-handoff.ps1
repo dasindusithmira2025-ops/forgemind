@@ -29,10 +29,14 @@ $runnerTemp = [System.IO.Path]::GetFullPath($env:RUNNER_TEMP)
 $handoffRoot = Join-Path $runnerTemp "paralith-update-handoff-$([guid]::NewGuid().ToString('N'))"
 $keyPath = Join-Path $handoffRoot 'deploy-key'
 $clonePath = Join-Path $handoffRoot 'repository'
+$account = $null
 
 try {
   New-Item -ItemType Directory -Path $handoffRoot | Out-Null
-  Set-Content -LiteralPath $keyPath -Value $env:PARALITH_UPDATES_DEPLOY_KEY -NoNewline
+  # GitHub preserves multiline secrets, but the Windows environment and PowerShell native pipeline
+  # can introduce CRLF or a BOM. OpenSSH's libcrypto loader rejects that representation.
+  $normalizedKey = ($env:PARALITH_UPDATES_DEPLOY_KEY -replace "`r`n", "`n").TrimEnd() + "`n"
+  [System.IO.File]::WriteAllText($keyPath, $normalizedKey, [System.Text.UTF8Encoding]::new($false))
 
   if ($IsWindows) {
     $account = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
@@ -70,6 +74,9 @@ try {
   Remove-Item Env:\PARALITH_UPDATES_DEPLOY_KEY -ErrorAction SilentlyContinue
   $resolvedHandoff = [System.IO.Path]::GetFullPath($handoffRoot)
   if ($resolvedHandoff.StartsWith($runnerTemp, [System.StringComparison]::OrdinalIgnoreCase) -and (Test-Path -LiteralPath $resolvedHandoff)) {
+    if ($IsWindows -and $account -and (Test-Path -LiteralPath $keyPath)) {
+      & icacls.exe $keyPath /grant:r "${account}:(F)" | Out-Null
+    }
     Remove-Item -LiteralPath $resolvedHandoff -Recurse -Force
   }
 }

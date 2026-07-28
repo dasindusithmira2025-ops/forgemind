@@ -120,6 +120,13 @@ describe('public update repository contract', () => {
     }
   })
 
+  it('writes the deploy key as LF UTF-8 without a BOM and restores cleanup access', async () => {
+    const script = await readFile(join(process.cwd(), 'scripts', 'release', 'push-publication-handoff.ps1'), 'utf8')
+    expect(script).toContain('-replace "`r`n", "`n"')
+    expect(script).toContain('[System.Text.UTF8Encoding]::new($false)')
+    expect(script).toContain('"${account}:(F)"')
+  })
+
   it('rejects databases, credentials, nested files, and missing signed installers', () => {
     expect(validatePublicArtifactNames(['state.db', '../secret.json', 'credentials.txt'])).toEqual(expect.arrayContaining([
       expect.stringContaining('not permitted'),
