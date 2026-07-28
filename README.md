@@ -4,6 +4,29 @@ PARALITH is a native multi-agent terminal workspace built with Tauri 2, Rust, Re
 
 The durable product model, runtime boundaries, restoration policy, and persistence rules are documented in [Architecture](docs/ARCHITECTURE.md). The refactor baseline and decisions are recorded in [Engineering Audit](docs/ENGINEERING_AUDIT.md).
 
+## Repository layout
+
+This repository holds more than one product of Corelith Technologies:
+
+| Path | Package | What it is |
+| --- | --- | --- |
+| repository root | `paralith` | The PARALITH desktop application (React + Tauri + Rust). Everything below in this README refers to it. |
+| [`corelith-web/`](corelith-web/README.md) | `corelith_web` | The Corelith Technologies company website (Next.js 16 + Tailwind 4). Independent npm package, own lockfile, own [validation workflow](.github/workflows/web-ci.yml). |
+
+Each package installs and builds from its own directory:
+
+```powershell
+Set-Location corelith-web
+npm install
+npm run dev      # http://localhost:3000
+```
+
+The website deliberately does not use npm workspaces, so the root lockfile that the PARALITH
+release pipeline installs with `npm ci` is never rewritten by a website dependency change. For
+the same reason the website pins its Next.js workspace root in `corelith-web/next.config.ts`:
+without it, Next walks up to the repository root and resolves the website's imports against
+PARALITH's `node_modules`.
+
 ## Development
 
 ```powershell

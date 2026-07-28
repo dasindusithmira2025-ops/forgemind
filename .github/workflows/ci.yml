@@ -19,6 +19,9 @@ on:
       - 'LICENSE'
       - '.gitignore'
       - '.github/ISSUE_TEMPLATE/**'
+      # The company website is an independent package with its own lockfile and its own
+      # workflow (web-ci.yml); nothing it contains reaches the desktop build.
+      - 'corelith-web/**'
   push:
     # `integration` is preserved from the previous configuration alongside `main`.
     branches: [main, integration]
@@ -28,6 +31,7 @@ on:
       - 'LICENSE'
       - '.gitignore'
       - '.github/ISSUE_TEMPLATE/**'
+      - 'corelith-web/**'
 
 # No `workflow_call` entry point. The release workflows used to call this one and then compile
 # the same commit a second time for real; they now run the shared check script inline instead,

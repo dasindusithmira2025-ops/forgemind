@@ -1,0 +1,73 @@
+name: Validate website
+
+# Validation for corelith-web (the Corelith Technologies company website), a Next.js app that
+# lives in this repository next to the Paralith desktop app but is an independent npm package
+# with its own lockfile. It is a separate workflow so a copy change on the website does not
+# trigger the 90-minute Tauri compile in Validate, and a Rust change does not rebuild the site.
+#
+# Like every other workflow here, it runs on the repository-scoped self-hosted Windows runner:
+# this account's GitHub-hosted Actions allowance is exhausted, so hosted jobs are refused before
+# a runner is ever assigned. See docs/CI_SELF_HOSTED_RUNNER.md.
+
+on:
+  pull_request:
+    paths:
+      - 'corelith-web/**'
+      - '.github/workflows/web-ci.yml'
+  push:
+    branches: [main, integration]
+    paths:
+      - 'corelith-web/**'
+      - '.github/workflows/web-ci.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validate-web-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-web:
+    name: Validate website (self-hosted Windows)
+    runs-on: [self-hosted, Windows, X64, paralith]
+    timeout-minutes: 20
+
+    # SECURITY GATE. The runner is the maintainer's personal PC, so fork-originated code must
+    # never execute on it. Same-repository branches are trusted; anything else is skipped.
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: corelith-web
+
+    steps:
+      # clean: false preserves the dependency caches on the persistent runner; the prepare step
+      # below does the precise cleaning. A `git clean -ffdx` here would delete Paralith's
+      # node_modules and its ~75 GB Rust target directory.
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          clean: false
+
+      - name: Prepare workspace
+        working-directory: .
+        run: pwsh -NoProfile -File scripts/ci/prepare-workspace.ps1 -ExpectedSha "$env:GITHUB_SHA"
+
+      # Deterministic install from corelith-web/package-lock.json. The root lockfile belongs to
+      # the desktop app and is deliberately not touched here.
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      # `next build` runs the TypeScript check and then compiles every route, so it is both the
+      # type gate and the proof that the site still produces a publishable bundle. There is no
+      # test suite in this package yet; when one is added, add the step here.
+      - name: Build
+        run: npm run build
