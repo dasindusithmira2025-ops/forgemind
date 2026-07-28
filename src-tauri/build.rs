@@ -31,6 +31,7 @@ fn main() {
         println!("cargo:rerun-if-env-changed={name}");
     }
     println!("cargo:rerun-if-changed=../release/updater.pubkey");
+    println!("cargo:rerun-if-changed=../release/updater.stable.pubkey");
     println!("cargo:rerun-if-changed=../release/generated/current-release.json");
     println!("cargo:rerun-if-changed=../release/version.json");
 
@@ -67,8 +68,12 @@ fn main() {
         .ok()
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| {
-            fs::read_to_string(PathBuf::from("..").join("release").join("updater.pubkey"))
-                .unwrap_or_default()
+            let file = if edition == "stable" {
+                "updater.stable.pubkey"
+            } else {
+                "updater.pubkey"
+            };
+            fs::read_to_string(PathBuf::from("..").join("release").join(file)).unwrap_or_default()
         })
         .trim()
         .to_owned();
