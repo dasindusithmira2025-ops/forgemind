@@ -41,6 +41,45 @@ const MACHINE_PROTOCOL_ROWS: u16 = 128;
 const CURSOR_POSITION_QUERY: &[u8] = b"\x1b[6n";
 const CURSOR_POSITION_RESPONSE: &[u8] = b"\x1b[1;1R";
 
+/// Environment variables that tell a CLI to render without colour, paired with the values that
+/// actually mean "off". `None` means the variable disables colour whatever it is set to.
+const COLOUR_SUPPRESSION_VARS: &[(&str, Option<&[&str]>)] = &[
+    // https://no-color.org — any value at all disables colour.
+    ("NO_COLOR", None),
+    // `supports-color` (chalk/Ink, so Claude Code) reads these; only the falsy values disable.
+    ("FORCE_COLOR", Some(&["0", "false", "none"])),
+    ("CLICOLOR", Some(&["0"])),
+];
+
+/// Strip inherited colour-suppression variables so each pane gets its provider's default palette.
+///
+/// A PTY child inherits PARALITH's own environment. When PARALITH is itself launched from a
+/// non-interactive tool runner — a coding agent's shell, a CI step, a script — that parent has
+/// usually exported `NO_COLOR=1` or `FORCE_COLOR=0` to keep *its* captured output clean. Those
+/// markers then leak all the way down into every agent pane, and Claude Code and Codex both
+/// honour them: the TUIs still draw their boxes and keep bold/dim/underline, so the workspace
+/// looks intentionally designed rather than broken, but every pane renders greyscale.
+///
+/// A pane is a real colour-capable terminal surface, so the suppression never applies here.
+/// `TERM`/`COLORTERM` are set separately and already advertise full colour support.
+fn clear_inherited_colour_suppression(command: &mut CommandBuilder) {
+    for (name, disabling_values) in COLOUR_SUPPRESSION_VARS {
+        let Some(current) = command.get_env(name) else {
+            continue;
+        };
+        let remove = match disabling_values {
+            None => true,
+            Some(values) => {
+                let current = current.to_string_lossy().trim().to_ascii_lowercase();
+                values.contains(&current.as_str())
+            }
+        };
+        if remove {
+            command.env_remove(name);
+        }
+    }
+}
+
 struct TerminalLog {
     path: PathBuf,
     file: File,
@@ -212,6 +251,7 @@ impl TerminalManager {
         command.cwd(&spec.working_directory);
         command.env("TERM", "xterm-256color");
         command.env("COLORTERM", "truecolor");
+        clear_inherited_colour_suppression(&mut command);
         for (key, value) in spec.environment_overrides {
             command.env(key, value);
         }
@@ -1121,6 +1161,108 @@ mod tests {
             rows: 24,
             restoration_attempt: false,
         }
+    }
+
+    /// A pane inherits PARALITH's environment, so a `NO_COLOR=1` exported by whatever launched
+    /// PARALITH would otherwise render every agent TUI in greyscale.
+    #[test]
+    fn inherited_colour_suppression_is_cleared_for_pane_processes() {
+        let mut command = CommandBuilder::new("echo");
+        command.env("NO_COLOR", "1");
+        command.env("FORCE_COLOR", "0");
+        command.env("CLICOLOR", "0");
+        clear_inherited_colour_suppression(&mut command);
+        assert!(command.get_env("NO_COLOR").is_none());
+        assert!(command.get_env("FORCE_COLOR").is_none());
+        assert!(command.get_env("CLICOLOR").is_none());
+    }
+
+    #[test]
+    fn empty_no_color_and_uppercase_falsy_values_are_still_cleared() {
+        let mut command = CommandBuilder::new("echo");
+        command.env("NO_COLOR", "");
+        command.env("FORCE_COLOR", "False");
+        clear_inherited_colour_suppression(&mut command);
+        assert!(command.get_env("NO_COLOR").is_none());
+        assert!(command.get_env("FORCE_COLOR").is_none());
+    }
+
+    /// Only the values that mean "off" are stripped: an inherited request for *more* colour, and
+    /// every unrelated variable, must reach the agent untouched.
+    #[test]
+    fn colour_enabling_and_unrelated_variables_are_preserved() {
+        let mut command = CommandBuilder::new("echo");
+        command.env("FORCE_COLOR", "3");
+        command.env("CLICOLOR", "1");
+        command.env("PATH", "/usr/bin");
+        clear_inherited_colour_suppression(&mut command);
+        assert_eq!(command.get_env("FORCE_COLOR").unwrap(), "3");
+        assert_eq!(command.get_env("CLICOLOR").unwrap(), "1");
+        assert_eq!(command.get_env("PATH").unwrap(), "/usr/bin");
+    }
+
+    /// End-to-end proof over a real PTY: the marker exists in this process's environment and must
+    /// not survive into the child, otherwise agent TUIs render greyscale inside every pane.
+    #[test]
+    fn a_spawned_pane_process_does_not_inherit_no_color() {
+        std::env::set_var("NO_COLOR", "1");
+        let manager = TerminalManager::for_test();
+        #[cfg(windows)]
+        let (executable, args) = (
+            PathBuf::from(
+                std::env::var("COMSPEC")
+                    .unwrap_or_else(|_| "C:\\Windows\\System32\\cmd.exe".into()),
+            ),
+            vec!["/c".into(), "echo SUPPRESSION=[%NO_COLOR%]".into()],
+        );
+        #[cfg(not(windows))]
+        let (executable, args) = (
+            PathBuf::from("/bin/sh"),
+            vec![
+                "-c".into(),
+                "printf 'SUPPRESSION=[%s]\\n' \"$NO_COLOR\"".into(),
+            ],
+        );
+        let session = manager
+            .create_session(CreateTerminalRequest {
+                project_id: "project".into(),
+                workspace_id: "colour".into(),
+                pane_id: "pane".into(),
+                provider: AgentProvider::CommandPrompt,
+                title: "Colour test".into(),
+                executable_path: executable.to_string_lossy().to_string(),
+                args,
+                working_directory: std::env::temp_dir().to_string_lossy().to_string(),
+                cols: 80,
+                rows: 24,
+                restoration_attempt: false,
+            })
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut output = String::new();
+        while Instant::now() < deadline {
+            #[cfg(windows)]
+            let _ = manager.write_input(&session.id, CURSOR_POSITION_RESPONSE);
+            if let Ok(status) = manager.session_status(&session.id) {
+                output = String::from_utf8_lossy(&status.output_tail).into_owned();
+                if output.contains("SUPPRESSION=[") {
+                    break;
+                }
+            }
+            thread::sleep(Duration::from_millis(30));
+        }
+        let _ = manager.terminate_session(&session.id);
+        std::env::remove_var("NO_COLOR");
+        // `cmd.exe` leaves `%VAR%` unexpanded when the variable does not exist; `sh` expands an
+        // unset variable to the empty string. Either way the value must never arrive as `1`.
+        #[cfg(windows)]
+        let unset = "SUPPRESSION=[%NO_COLOR%]";
+        #[cfg(not(windows))]
+        let unset = "SUPPRESSION=[]";
+        assert!(
+            output.contains(unset),
+            "the pane process inherited a colour-suppression marker: {output:?}"
+        );
     }
 
     #[test]
