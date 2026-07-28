@@ -303,22 +303,7 @@ jobs:
       # the exact path the action exports.
       - name: Remove temporary credential files
         if: always()
-        run: |
-          $removed = 0
-          $targets = @($env:GOOGLE_GHA_CREDS_PATH) | Where-Object { $_ }
-          foreach ($dir in @($env:GITHUB_WORKSPACE, $env:RUNNER_TEMP) | Where-Object { $_ -and (Test-Path -LiteralPath $_) }) {
-            $targets += (Get-ChildItem -LiteralPath $dir -Filter 'gha-creds-*.json' -File -ErrorAction SilentlyContinue |
-              ForEach-Object { $_.FullName })
-          }
-          foreach ($path in ($targets | Sort-Object -Unique)) {
-            if (Test-Path -LiteralPath $path) {
-              Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
-              # Filename only. The path is safe to print; the contents are never read.
-              Write-Host "removed $(Split-Path -Leaf $path)"
-              $removed++
-            }
-          }
-          Write-Host "Credential sweep complete; removed $removed file(s)."
+        run: pwsh -NoProfile -File scripts/ci/sweep-credentials.ps1
 
       - name: Clean up abandoned build processes
         if: always()
