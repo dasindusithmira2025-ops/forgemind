@@ -1,5 +1,15 @@
 name: Release Windows (reusable)
 
+# Tag-driven edition release (preview-v* / stable-v*). Runs on the repository-scoped
+# self-hosted Windows runner.
+#
+# The former `validate` job -- a `workflow_call` into ci.yml with `full: true` -- has been
+# removed for two reasons. It compiled the crate a second time for the same commit that this
+# job compiles for real, and in `workflow_dispatch` mode it validated the WRONG commit:
+# ci.yml resolves `github.sha` to the dispatched branch, not to the `inputs.tag` this job
+# actually builds. The checks now run inline, against the tagged checkout, via the shared
+# scripts/ci/run-checks.ps1.
+
 on:
   workflow_call:
     inputs:
@@ -13,48 +23,55 @@ on:
 permissions:
   contents: write
 
+# A release publishes artifacts and mutates an updater manifest. Never cancel one in flight — a
+# half-published manifest is worse than a queued one — so this lock serialises instead.
+concurrency:
+  group: release-windows-${{ inputs.edition }}-${{ inputs.tag }}
+  cancel-in-progress: false
+
 jobs:
-  validate:
-    uses: ./.github/workflows/ci.yml
   release:
-    needs: validate
-    runs-on: windows-latest
-    timeout-minutes: 60
+    name: Build and publish ${{ inputs.edition }} ${{ inputs.tag }}
+    runs-on: [self-hosted, Windows, X64, paralith, paralith-release]
+    timeout-minutes: 120
     environment: ${{ inputs.edition }}-release
+    defaults:
+      run:
+        shell: pwsh
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
           ref: ${{ inputs.tag }}
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
+          clean: false
+
+      # Clears .artifacts and target/release/bundle so nothing from a previous run can be
+      # published, and confirms the tagged tree is clean.
+      - name: Prepare workspace
+        run: pwsh -NoProfile -File scripts/ci/prepare-workspace.ps1 -ReleaseBuild
+
+      - name: Runner preflight (release)
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: pwsh -NoProfile -File scripts/ci/check-self-hosted-runner.ps1 -ReleaseBuild
+
       - run: npm ci
+
       - name: Validate protected release tag
-        shell: pwsh
-        run: |
-          npm run release:check
-          npm run typecheck
-          npm run lint
-          npm test -- --run
-          npm run build
-          Push-Location src-tauri
-          cargo fmt --all -- --check
-          cargo clippy --all-targets --all-features -- -D warnings
-          cargo test --all-targets --all-features
-          Pop-Location
+        run: npm run release:check
+
       - name: Verify clean tagged source and release identity
-        shell: pwsh
         run: |
           if (git status --porcelain) { throw 'Release checkout is not clean.' }
           node scripts/release/verify-release.mjs '${{ inputs.edition }}' '${{ inputs.tag }}'
+
+      # The full suite against the tagged commit, minus the throwaway compile: the signed
+      # bundle build below is the compile proof.
+      - name: Run validation suite
+        run: pwsh -NoProfile -File scripts/ci/run-checks.ps1 -SummaryTitle 'Pre-release validation (${{ inputs.tag }})'
+
       - name: Build signed MSI, NSIS, and updater artifacts
-        shell: pwsh
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -76,15 +93,28 @@ jobs:
           $config = node scripts/release/render-tauri-config.mjs '${{ inputs.edition }}' release | Select-Object -Last 1
           npm run tauri -- build --bundles msi,nsis --config $config
           node scripts/release/assemble-release.mjs '${{ inputs.edition }}'
+
+      # Confirms both installer formats were genuinely produced before anything is published.
+      - name: Verify packaged installers
+        run: |
+          $dir = Get-ChildItem '.artifacts/release/${{ inputs.edition }}' -Directory | Select-Object -First 1
+          if (-not $dir) { throw 'No assembled release directory was produced.' }
+          $files = Get-ChildItem $dir.FullName -File
+          foreach ($ext in @('.msi', '.exe')) {
+            $match = $files | Where-Object { $_.Extension -eq $ext }
+            if (-not $match) { throw "No $ext installer was produced in $($dir.FullName)." }
+            foreach ($m in $match) { Write-Host ("{0}  {1} MB" -f $m.Name, [math]::Round($m.Length / 1MB, 2)) }
+          }
+
       - name: Archive workflow artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: paralith-${{ inputs.edition }}-${{ inputs.tag }}
           path: .artifacts/release/${{ inputs.edition }}/**
           if-no-files-found: error
           retention-days: 90
+
       - name: Create private repository release
-        shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -94,9 +124,9 @@ jobs:
           $pre = if ('${{ inputs.edition }}' -eq 'preview') { '--prerelease' } else { $null }
           $commit = (git rev-parse HEAD).Trim()
           gh release create '${{ inputs.tag }}' $assets --title "PARALITH ${{ inputs.edition }} $($dir.Name)" --notes-file $notes --target $commit $pre
+
       - name: Detect internal publication configuration
         id: publication
-        shell: pwsh
         env:
           PUBLISH_TARGET: ${{ secrets.PARALITH_UPDATE_PUBLISH_TARGET }}
         run: |
@@ -105,11 +135,15 @@ jobs:
           } else {
             'enabled=false' | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           }
+
       - name: Publish to internal update endpoint
         if: steps.publication.outputs.enabled == 'true'
-        shell: pwsh
         env:
           PARALITH_UPDATE_PUBLISH_TARGET: ${{ secrets.PARALITH_UPDATE_PUBLISH_TARGET }}
           PARALITH_UPDATE_PUBLISH_PROVIDER: ${{ vars.PARALITH_UPDATE_PUBLISH_PROVIDER }}
           PARALITH_UPDATE_PUBLISH_TOKEN: ${{ secrets.PARALITH_UPDATE_PUBLISH_TOKEN }}
         run: ./scripts/release/publish-internal-update.ps1
+
+      - name: Clean up abandoned build processes
+        if: always()
+        run: pwsh -NoProfile -File scripts/ci/cleanup-runner-processes.ps1
