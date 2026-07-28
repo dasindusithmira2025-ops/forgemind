@@ -8,6 +8,8 @@ Before the legacy-ID migration, every database migration, and every update insta
 
 If migration or health confirmation fails, or three first launches remain unconfirmed, PARALITH opens Safe Recovery instead of restarting repeatedly. Recovery shows the failing app/schema, updater diagnostics, the validated backup, and the previous installer URL. Restoring a backup is explicit; PARALITH never automatically downgrades a migrated database.
 
+Live update backups include the authoritative SQLite database, PARALITH configuration, updater state, and local diagnostics. They exclude the active WebView runtime profile because it is rebuildable browser state and contains files that WebView2 locks while the application is running.
+
 ## Reproducible A to B validation
 
 Use disposable Windows VMs or office test machines, never the only copy of production data.

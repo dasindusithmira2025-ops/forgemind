@@ -73,6 +73,27 @@ pub fn create_pre_migration_backup(
 }
 
 #[allow(clippy::too_many_arguments)]
+pub fn create_live_update_backup(
+    database_path: &Path,
+    roots: BackupRoots<'_>,
+    app_version: &str,
+    edition: &str,
+    schema_version: i64,
+    target_schema_version: i64,
+) -> AppResult<PathBuf> {
+    create_recovery_backup_with_options(
+        database_path,
+        roots,
+        app_version,
+        edition,
+        schema_version,
+        target_schema_version,
+        "pre-update-installation",
+        false,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
 pub fn create_recovery_backup(
     database_path: &Path,
     roots: BackupRoots<'_>,
@@ -81,6 +102,29 @@ pub fn create_recovery_backup(
     schema_version: i64,
     target_schema_version: i64,
     reason: &str,
+) -> AppResult<PathBuf> {
+    create_recovery_backup_with_options(
+        database_path,
+        roots,
+        app_version,
+        edition,
+        schema_version,
+        target_schema_version,
+        reason,
+        true,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn create_recovery_backup_with_options(
+    database_path: &Path,
+    roots: BackupRoots<'_>,
+    app_version: &str,
+    edition: &str,
+    schema_version: i64,
+    target_schema_version: i64,
+    reason: &str,
+    include_webview_profile: bool,
 ) -> AppResult<PathBuf> {
     let timestamp = Utc::now();
     let backup_root = roots.backup_base.join(edition).join(format!(
@@ -130,12 +174,14 @@ pub fn create_recovery_backup(
         &backup_root.join("config"),
         Some(database_path),
         roots.backup_base,
+        true,
     )?;
     copy_state_tree(
         roots.app_local_data,
         &backup_root.join("local-state"),
         Some(database_path),
         roots.backup_base,
+        include_webview_profile,
     )?;
     if roots.app_data != roots.app_local_data {
         copy_state_tree(
@@ -143,6 +189,7 @@ pub fn create_recovery_backup(
             &backup_root.join("data-state"),
             Some(database_path),
             roots.backup_base,
+            true,
         )?;
     }
 
@@ -175,6 +222,7 @@ fn copy_state_tree(
     destination: &Path,
     database_path: Option<&Path>,
     backup_base: &Path,
+    include_webview_profile: bool,
 ) -> AppResult<()> {
     if !source.exists() {
         return Ok(());
@@ -183,7 +231,7 @@ fn copy_state_tree(
         let entry = entry.map_err(backup_error)?;
         let path = entry.path();
         if database_path.is_some_and(|database| is_database_sidecar(&path, database))
-            || is_excluded(&path)
+            || is_excluded(&path, include_webview_profile)
             || path.starts_with(backup_base)
             || path.starts_with(destination)
         {
@@ -192,7 +240,13 @@ fn copy_state_tree(
         let target = destination.join(entry.file_name());
         if path.is_dir() {
             fs::create_dir_all(&target).map_err(backup_error)?;
-            copy_state_tree(&path, &target, database_path, backup_base)?;
+            copy_state_tree(
+                &path,
+                &target,
+                database_path,
+                backup_base,
+                include_webview_profile,
+            )?;
         } else if path.is_file() {
             if let Some(parent) = target.parent() {
                 fs::create_dir_all(parent).map_err(backup_error)?;
@@ -203,25 +257,26 @@ fn copy_state_tree(
     Ok(())
 }
 
-fn is_excluded(path: &Path) -> bool {
+fn is_excluded(path: &Path, include_webview_profile: bool) -> bool {
     let name = path
         .file_name()
         .and_then(|value| value.to_str())
         .unwrap_or_default();
-    matches!(
-        name.to_ascii_lowercase().as_str(),
-        "recovery-backups"
-            | "cache"
-            | "code cache"
-            | "gpucache"
-            | "dawncache"
-            | "dawngraphitecache"
-            | "dawnwebgpucache"
-            | "crashpad"
-            | "service worker"
-            | "shadercache"
-            | "worktrees"
-    )
+    (!include_webview_profile && name.eq_ignore_ascii_case("EBWebView"))
+        || matches!(
+            name.to_ascii_lowercase().as_str(),
+            "recovery-backups"
+                | "cache"
+                | "code cache"
+                | "gpucache"
+                | "dawncache"
+                | "dawngraphitecache"
+                | "dawnwebgpucache"
+                | "crashpad"
+                | "service worker"
+                | "shadercache"
+                | "worktrees"
+        )
 }
 
 fn is_database_sidecar(path: &Path, database: &Path) -> bool {
@@ -483,6 +538,69 @@ mod tests {
             fs::read_to_string(project.join("source.txt")).unwrap(),
             "untouched"
         );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn live_update_backup_excludes_the_active_webview_profile() {
+        let root = std::env::temp_dir().join(format!("paralith-live-backup-{}", Uuid::new_v4()));
+        let data = root.join("data");
+        let config = root.join("config");
+        let local = root.join("local");
+        let backup_base = root.join("backups");
+        fs::create_dir_all(&data).unwrap();
+        fs::create_dir_all(&config).unwrap();
+        fs::create_dir_all(local.join("EBWebView/Default/Local Storage")).unwrap();
+        fs::create_dir_all(local.join("logs")).unwrap();
+        fs::write(config.join("settings.json"), "{}").unwrap();
+        fs::write(
+            local.join("EBWebView/Default/Local Storage/LOCK"),
+            "browser-owned",
+        )
+        .unwrap();
+        fs::write(local.join("logs/paralith.log"), "diagnostic log").unwrap();
+
+        let database_path = data.join(DATABASE_FILENAME);
+        let connection = Connection::open(&database_path).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE preserved(value TEXT); \
+                 INSERT INTO preserved VALUES('yes'); \
+                 PRAGMA user_version=26;",
+            )
+            .unwrap();
+        drop(connection);
+
+        let backup = create_live_update_backup(
+            &database_path,
+            BackupRoots {
+                app_data: &data,
+                app_config: &config,
+                app_local_data: &local,
+                backup_base: &backup_base,
+            },
+            "1.0.0",
+            "preview",
+            26,
+            26,
+        )
+        .unwrap();
+        let manifest = validate_backup_manifest(&backup).unwrap();
+
+        assert!(!backup.join("local-state/EBWebView").exists());
+        assert_eq!(
+            fs::read_to_string(backup.join("local-state/logs/paralith.log")).unwrap(),
+            "diagnostic log"
+        );
+        assert!(manifest
+            .files
+            .iter()
+            .all(|file| !file.path.contains("EBWebView")));
+        assert!(manifest
+            .files
+            .iter()
+            .any(|file| file.path.ends_with(DATABASE_FILENAME)));
+
         let _ = fs::remove_dir_all(root);
     }
 }

@@ -212,7 +212,7 @@ pub(crate) fn perform_install(app: &AppHandle, state: &AppState, on_exit: bool) 
         }
     }
     let schema_version = state.database.health_report()?.schema_version;
-    let backup_path = backup::create_recovery_backup(
+    let backup_path = backup::create_live_update_backup(
         state.database.path().ok_or_else(|| {
             AppError::new(
                 "update_backup_failed",
@@ -239,7 +239,6 @@ pub(crate) fn perform_install(app: &AppHandle, state: &AppState, on_exit: bool) 
             .journal
             .target_schema_version
             .unwrap_or(schema_version),
-        "pre-update-installation",
     )?;
     state.updates.set_backup(&backup_path)?;
     let Some((update, bytes)) = state.updates.take_for_install(on_exit)? else {
