@@ -295,16 +295,30 @@ jobs:
           PARALITH_PREVIEW_UPDATE_ENDPOINT: ${{ vars.PARALITH_PREVIEW_UPDATE_ENDPOINT }}
         run: node scripts/release/verify-published-manifest.mjs preview "$env:PARALITH_PREVIEW_UPDATE_ENDPOINT" "${{ steps.version.outputs.version }}"
 
-      # Secret-safe cleanup. Any credential file the Google auth action wrote into RUNNER_TEMP is
-      # removed here rather than left on a machine that keeps its disk between jobs.
+      # Secret-safe cleanup, and a genuine backstop rather than decoration. The Google auth
+      # action normally deletes its own credential file in its post step, but that post step
+      # does not always run (a hard-cancelled job can skip it), and this machine keeps its disk
+      # between jobs. Observed behaviour: the action writes the file into GITHUB_WORKSPACE, not
+      # RUNNER_TEMP, so sweeping only RUNNER_TEMP would clean nothing at all. Sweep both, plus
+      # the exact path the action exports.
       - name: Remove temporary credential files
         if: always()
         run: |
-          if ($env:RUNNER_TEMP -and (Test-Path -LiteralPath $env:RUNNER_TEMP)) {
-            Get-ChildItem -LiteralPath $env:RUNNER_TEMP -Filter 'gha-creds-*.json' -File -ErrorAction SilentlyContinue |
-              ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue; Write-Host "removed $($_.Name)" }
+          $removed = 0
+          $targets = @($env:GOOGLE_GHA_CREDS_PATH) | Where-Object { $_ }
+          foreach ($dir in @($env:GITHUB_WORKSPACE, $env:RUNNER_TEMP) | Where-Object { $_ -and (Test-Path -LiteralPath $_) }) {
+            $targets += (Get-ChildItem -LiteralPath $dir -Filter 'gha-creds-*.json' -File -ErrorAction SilentlyContinue |
+              ForEach-Object { $_.FullName })
           }
-          Write-Host 'Temporary credential sweep complete.'
+          foreach ($path in ($targets | Sort-Object -Unique)) {
+            if (Test-Path -LiteralPath $path) {
+              Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+              # Filename only. The path is safe to print; the contents are never read.
+              Write-Host "removed $(Split-Path -Leaf $path)"
+              $removed++
+            }
+          }
+          Write-Host "Credential sweep complete; removed $removed file(s)."
 
       - name: Clean up abandoned build processes
         if: always()
