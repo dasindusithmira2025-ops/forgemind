@@ -2,138 +2,109 @@ import Link from 'next/link';
 import { BrandLogo } from './BrandLogo';
 import { footerLinks } from '@/data/navigation';
 import { siteConfig } from '@/config/site';
-import { Github, Twitter, Linkedin, ShieldCheck } from 'lucide-react';
+
+type FooterLink = { label: string; href: string; badge?: string };
+
+const COLUMNS: { heading: string; links: FooterLink[] }[] = [
+  { heading: 'Paralith', links: footerLinks.products },
+  { heading: 'Company', links: footerLinks.company },
+  { heading: 'Trust', links: footerLinks.trust },
+];
+
+const SOCIAL = [
+  { label: 'GitHub', href: siteConfig.social.github },
+  { label: 'X', href: siteConfig.social.twitter },
+  { label: 'LinkedIn', href: siteConfig.social.linkedin },
+];
 
 export function Footer() {
   return (
-    <footer className="bg-[#08090c] border-t border-white/10 pt-16 pb-12 relative overflow-hidden">
-      {/* Background ambient lighting */}
-      <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-3/4 h-32 bg-indigo-600/5 blur-3xl rounded-full pointer-events-none" />
+    <footer className="tone-panel relative isolate overflow-hidden border-t border-[var(--hair)]">
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-x-0 bottom-0 -z-10 h-64 bg-[radial-gradient(60%_100%_at_50%_100%,rgba(122,92,255,0.16)_0%,transparent_70%)]"
+      />
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
-        <div className="grid grid-cols-1 md:grid-cols-12 gap-10 pb-12 border-b border-white/10">
-          {/* Brand & Mission column */}
-          <div className="md:col-span-5 space-y-4">
+      <div className="mx-auto max-w-[var(--measure)] px-6 lg:px-10">
+        <div className="grid grid-cols-12 gap-x-8 gap-y-12 py-16">
+          <div className="col-span-12 space-y-6 lg:col-span-4">
             <BrandLogo size="lg" showTagline />
-            <p className="text-gray-400 text-sm max-w-sm leading-relaxed">
-              {siteConfig.description}
+            <p className="text-mute max-w-sm text-sm">{siteConfig.description}</p>
+            <p className="stamp text-signal flex items-center gap-2.5">
+              <span aria-hidden="true" className="bg-signal pulse inline-block h-1.5 w-1.5 rounded-full" />
+              All systems operational
             </p>
-            
-            {/* System Status Pill */}
-            <div className="pt-2">
-              <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-[#141722] border border-white/10 text-xs font-mono text-gray-300">
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                <span>All Corelith Systems Operational</span>
-              </div>
-            </div>
           </div>
 
-          {/* Products Column */}
-          <div className="md:col-span-3 space-y-3">
-            <h3 className="text-xs uppercase tracking-wider text-white font-mono font-semibold">
-              Paralith
-            </h3>
-            <ul className="space-y-2">
-              {footerLinks.products.map((link) => (
-                <li key={link.href}>
-                  <Link
-                    href={link.href}
-                    className="text-sm text-gray-400 hover:text-white transition-colors inline-flex items-center gap-2"
-                  >
-                    <span>{link.label}</span>
-                    {link.badge && (
-                      <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                        {link.badge}
-                      </span>
-                    )}
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </div>
+          {COLUMNS.map((column) => (
+            <nav key={column.heading} aria-label={column.heading} className="col-span-6 lg:col-span-2">
+              <h2 className="stamp text-faint border-b border-[var(--hair)] pb-3">
+                {column.heading}
+              </h2>
+              <ul className="mt-4 space-y-3">
+                {column.links.map((link) => (
+                  <li key={link.href}>
+                    {/* Inline, not inline-flex: a flex anchor makes the label and
+                        the badge separate items, and the badge jumps to the end of
+                        the first line as soon as the label wraps. */}
+                    <Link
+                      href={link.href}
+                      className="text-mute hover:text-lume text-sm transition-colors"
+                    >
+                      {link.label}
+                      {link.badge && (
+                        <span className="stamp text-iris-lift ml-2 whitespace-nowrap">
+                          [{link.badge}]
+                        </span>
+                      )}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </nav>
+          ))}
 
-          {/* Company Column */}
-          <div className="md:col-span-2 space-y-3">
-            <h3 className="text-xs uppercase tracking-wider text-white font-mono font-semibold">
-              Company
-            </h3>
-            <ul className="space-y-2">
-              {footerLinks.company.map((link) => (
-                <li key={link.href}>
-                  <Link
-                    href={link.href}
-                    className="text-sm text-gray-400 hover:text-white transition-colors"
+          <div className="col-span-12 lg:col-span-2">
+            <h2 className="stamp text-faint border-b border-[var(--hair)] pb-3">Elsewhere</h2>
+            <ul className="mt-4 space-y-3">
+              {SOCIAL.map((social) => (
+                <li key={social.label}>
+                  <a
+                    href={social.href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-mute hover:text-lume text-sm transition-colors"
                   >
-                    {link.label}
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </div>
-
-          {/* Security & Trust Column */}
-          <div className="md:col-span-2 space-y-3">
-            <h3 className="text-xs uppercase tracking-wider text-white font-mono font-semibold">
-              Security & Trust
-            </h3>
-            <ul className="space-y-2">
-              {footerLinks.trust.map((link) => (
-                <li key={link.href}>
-                  <Link
-                    href={link.href}
-                    className="text-sm text-gray-400 hover:text-white transition-colors"
-                  >
-                    {link.label}
-                  </Link>
+                    {social.label} <span aria-hidden="true">↗</span>
+                  </a>
                 </li>
               ))}
             </ul>
           </div>
         </div>
 
-        {/* Bottom Bar */}
-        <div className="pt-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-gray-400 font-mono">
-          <div className="flex flex-wrap items-center gap-4">
-            <span>&copy; {new Date().getFullYear()} {siteConfig.name}. All rights reserved.</span>
-            <span className="hidden sm:inline text-gray-400">•</span>
-            <span className="flex items-center gap-1 text-gray-400">
-              <ShieldCheck className="w-3.5 h-3.5 text-indigo-400" />
-              Verified Domain: {siteConfig.domain.replace('https://www.', '')}
+        <div className="stamp text-faint flex flex-col gap-3 border-t border-[var(--hair)] py-6 sm:flex-row sm:items-center sm:justify-between">
+          <p>
+            © {new Date().getFullYear()} {siteConfig.name}
+          </p>
+          <p className="flex flex-wrap items-center gap-3">
+            <span>{siteConfig.domain.replace('https://www.', '')}</span>
+            <span aria-hidden="true" className="text-iris">
+              ◆
             </span>
-          </div>
-
-          {/* Social Links */}
-          <div className="flex items-center gap-4 text-gray-400">
-            <a
-              href={siteConfig.social.github}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="hover:text-white transition-colors p-1"
-              aria-label="Corelith Technologies GitHub"
-            >
-              <Github className="w-4 h-4" />
-            </a>
-            <a
-              href={siteConfig.social.twitter}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="hover:text-white transition-colors p-1"
-              aria-label="Corelith Technologies Twitter"
-            >
-              <Twitter className="w-4 h-4" />
-            </a>
-            <a
-              href={siteConfig.social.linkedin}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="hover:text-white transition-colors p-1"
-              aria-label="Corelith Technologies LinkedIn"
-            >
-              <Linkedin className="w-4 h-4" />
-            </a>
-          </div>
+            <span>{siteConfig.legal.jurisdiction}</span>
+          </p>
         </div>
       </div>
+
+      {/* Wordmark bled off the bottom edge — the last thing on the page is the
+          name, set as large as the sheet allows and faded into the canvas. */}
+      <p
+        aria-hidden="true"
+        className="font-display text-lume -mb-[0.17em] w-full text-center text-[clamp(3rem,15vw,14rem)] leading-[0.75] font-semibold tracking-[-0.05em] uppercase opacity-[0.045] select-none"
+      >
+        Corelith
+      </p>
     </footer>
   );
 }

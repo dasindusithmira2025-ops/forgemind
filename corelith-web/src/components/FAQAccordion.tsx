@@ -1,55 +1,75 @@
 'use client';
 
-import { useState } from 'react';
-import { ChevronDown } from 'lucide-react';
+import { useId, useState } from 'react';
 
 interface FAQItem {
   question: string;
   answer: string;
 }
 
-interface FAQAccordionProps {
-  faqs: FAQItem[];
-}
-
-export function FAQAccordion({ faqs }: FAQAccordionProps) {
+/**
+ * Ruled accordion. Rows are separated by hairlines rather than boxed into
+ * cards, and the open/closed affordance is a plus that becomes a minus — a
+ * chevron rotating on a rounded card is the pattern this replaces.
+ */
+export function FAQAccordion({ faqs }: { faqs: FAQItem[] }) {
   const [openIndex, setOpenIndex] = useState<number | null>(0);
-
-  const toggle = (idx: number) => {
-    setOpenIndex(openIndex === idx ? null : idx);
-  };
+  const baseId = useId();
 
   return (
-    <div className="w-full max-w-3xl mx-auto space-y-3">
+    <div className="border-t border-[var(--hair-strong)]">
       {faqs.map((faq, idx) => {
         const isOpen = openIndex === idx;
-        return (
-          <div
-            key={idx}
-            className={`corelith-card transition-all overflow-hidden ${
-              isOpen ? 'border-indigo-500/40 bg-[#141722]' : 'bg-[#0e1017]'
-            }`}
-          >
-            <button
-              onClick={() => toggle(idx)}
-              className="w-full p-5 text-left flex items-center justify-between gap-4 focus:outline-none"
-              aria-expanded={isOpen}
-            >
-              <span className="font-heading font-semibold text-base text-white">
-                {faq.question}
-              </span>
-              <ChevronDown
-                className={`w-5 h-5 text-indigo-400 shrink-0 transition-transform duration-200 ${
-                  isOpen ? 'rotate-180' : ''
-                }`}
-              />
-            </button>
+        const panelId = `${baseId}-panel-${idx}`;
+        const triggerId = `${baseId}-trigger-${idx}`;
 
-            {isOpen && (
-              <div className="px-5 pb-5 text-sm text-gray-400 leading-relaxed border-t border-white/5 pt-3 animate-in fade-in duration-200">
-                {faq.answer}
-              </div>
-            )}
+        return (
+          <div key={faq.question} className="border-b border-[var(--hair)]">
+            <h3>
+              <button
+                type="button"
+                id={triggerId}
+                aria-expanded={isOpen}
+                aria-controls={panelId}
+                onClick={() => setOpenIndex(isOpen ? null : idx)}
+                className="group flex w-full items-start gap-4 py-6 text-left sm:gap-6"
+              >
+                <span aria-hidden="true" className="stamp text-[var(--kicker)] w-6 shrink-0 pt-1.5">
+                  {String(idx + 1).padStart(2, '0')}
+                </span>
+
+                <span
+                  className={`font-display flex-1 text-lg font-semibold tracking-tight transition-colors ${
+                    isOpen ? 'text-[var(--kicker)]' : 'text-[var(--fg)] group-hover:text-[var(--kicker)]'
+                  }`}
+                >
+                  {faq.question}
+                </span>
+
+                {/* Plus → minus, drawn from two rules. */}
+                <span
+                  aria-hidden="true"
+                  className="relative mt-2 block h-3 w-3 shrink-0 text-[var(--fg)]"
+                >
+                  <span className="absolute top-1/2 left-0 h-0.5 w-full -translate-y-1/2 bg-current" />
+                  <span
+                    className={`absolute top-0 left-1/2 h-full w-0.5 -translate-x-1/2 bg-current transition-transform duration-150 ${
+                      isOpen ? 'scale-y-0' : 'scale-y-100'
+                    }`}
+                  />
+                </span>
+              </button>
+            </h3>
+
+            <div
+              id={panelId}
+              role="region"
+              aria-labelledby={triggerId}
+              hidden={!isOpen}
+              className="pb-8 sm:pl-12"
+            >
+              <p className="max-w-2xl text-base text-[var(--fg-soft)]">{faq.answer}</p>
+            </div>
           </div>
         );
       })}

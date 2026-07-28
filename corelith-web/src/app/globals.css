@@ -1,130 +1,519 @@
 @import "tailwindcss";
 
+/* ============================================================================
+   CORELITH — OBSIDIAN
+   A dark, instrument-grade system for a developer product. The page is one
+   continuous near-black canvas; hierarchy comes from layered surfaces, hairline
+   rules, and a single iris accent that is allowed to emit light. Every value
+   below is a token — components must not hardcode colour, radius, or type size.
+   ========================================================================== */
+
+@theme {
+  /* --- Surfaces -----------------------------------------------------------
+     void is the page. panel/panel-2/panel-3 are the three elevations above it.
+     Nothing in the system uses pure black (#000) — it kills the sense of depth
+     the glows depend on — and nothing uses pure white. */
+  --color-void: #06070a;
+  --color-void-2: #090b11;
+  --color-panel: #0e1017;
+  --color-panel-2: #14171f;
+  --color-panel-3: #1c202b;
+  --color-edge: #272c39;
+
+  /* --- Foreground ---------------------------------------------------------
+     lume is body/heading text (14.8:1 on void). mute is secondary copy
+     (7.1:1). faint is for micro-labels only, never for prose. */
+  --color-lume: #f3f4f8;
+  --color-mute: #a3aabd;
+  --color-faint: #6b7285;
+
+  /* --- Accent -------------------------------------------------------------
+     Iris is the product accent, carried over from Paralith's own UI so the
+     site and the application read as one brand. iris-lift is the on-dark text
+     tint — raw iris only reaches 4.0:1 on void and fails AA for copy. */
+  --color-iris: #7a5cff;
+  --color-iris-lift: #a993ff;
+  --color-iris-deep: #2c1f6b;
+
+  --color-signal: #45e39b;
+  --color-warn: #f2b23b;
+  --color-danger: #ff6b6b;
+
+  /* --- Type ---------------------------------------------------------------
+     Space Grotesk sets display and headings, Inter sets copy, JetBrains Mono
+     sets every stamp, metric, and machine value. Display sizes are fluid so a
+     headline never has to be re-authored per breakpoint. */
+  --font-display: var(--font-grotesk), "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-inter), "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains), "JetBrains Mono", ui-monospace, monospace;
+
+  --text-xs: 0.75rem;
+  --text-xs--line-height: 1.5;
+  --text-sm: 0.875rem;
+  --text-sm--line-height: 1.6;
+  --text-base: 1rem;
+  --text-base--line-height: 1.7;
+  --text-lg: 1.1875rem;
+  --text-lg--line-height: 1.5;
+  --text-xl: 1.5rem;
+  --text-xl--line-height: 1.3;
+  --text-2xl: clamp(1.625rem, 3vw, 2.25rem);
+  --text-2xl--line-height: 1.12;
+  --text-3xl: clamp(2rem, 4.4vw, 3rem);
+  --text-3xl--line-height: 1.06;
+  --text-4xl: clamp(2.25rem, 6vw, 4rem);
+  --text-4xl--line-height: 1;
+  --text-5xl: clamp(2.625rem, 7.4vw, 5.5rem);
+  --text-5xl--line-height: 0.96;
+
+  /* --- Radius -------------------------------------------------------------
+     Soft but never pill-shaped. lg is the card/panel radius; xl is reserved
+     for the full-width product plates. */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-xl: 22px;
+
+  --spacing: 4px;
+}
+
 @layer base {
   :root {
-    --bg-canvas: #08090c;
-    --bg-surface: #0e1017;
-    --bg-card: #141722;
-    --bg-elevated: #1a1e2c;
+    color-scheme: dark;
 
-    --border-subtle: rgba(255, 255, 255, 0.08);
-    --border-strong: rgba(255, 255, 255, 0.16);
-    --border-accent: rgba(99, 102, 241, 0.4);
+    /* Hairlines. Every rule, grid line, and card border in the system comes
+       from one of these two — that consistency is what stops a dark page from
+       turning into visual mush. */
+    --hair: rgba(255, 255, 255, 0.07);
+    --hair-strong: rgba(255, 255, 255, 0.13);
 
-    --text-primary: #f3f4f6;
-    --text-secondary: #9ca3af;
-    --text-muted: #6b7280;
+    /* Depth. A dark surface reads as raised only when it is lit from above and
+       drops a shadow that is wider than it is tall. */
+    --lift-1: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 1px 2px rgba(0, 0, 0, 0.6);
+    --lift-2:
+      inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 24px 60px -32px rgba(0, 0, 0, 0.95);
+    --lift-iris: 0 24px 70px -34px rgba(122, 92, 255, 0.75);
 
-    --accent-indigo: #6366f1;
-    --accent-indigo-hover: #4f46e5;
-    --accent-cyan: #06b6d4;
-    --accent-emerald: #10b981;
-    --accent-amber: #f59e0b;
+    --band: clamp(72px, 9vw, 136px);
+    --measure: 84rem;
+  }
 
-    --font-heading: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    --font-body: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    --font-mono: 'JetBrains Mono', monospace;
+  html {
+    background-color: var(--color-void);
+    color: var(--color-lume);
+    font-family: var(--font-sans);
+    scroll-behavior: smooth;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    background-color: var(--color-void);
+    color: var(--color-lume);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-family: var(--font-display);
+    font-weight: 600;
+    letter-spacing: -0.032em;
+    text-wrap: balance;
+  }
+
+  ::selection {
+    background-color: var(--color-iris);
+    color: #ffffff;
+  }
+
+  *:focus-visible {
+    outline: 2px solid var(--color-iris-lift);
+    outline-offset: 3px;
+    border-radius: var(--radius-sm);
+  }
+
+  ::-webkit-scrollbar {
+    width: 12px;
+    height: 12px;
+  }
+  ::-webkit-scrollbar-track {
+    background: var(--color-void);
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-panel-3);
+    border: 3px solid var(--color-void);
+    border-radius: 99px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--color-edge);
   }
 }
 
-html {
-  color-scheme: dark;
-  scroll-behavior: smooth;
-  background-color: var(--bg-canvas);
-  color: var(--text-primary);
-  font-family: var(--font-body);
+/* ============================================================================
+   BAND TONES
+   The page is a single dark canvas, so bands differentiate by elevation rather
+   than by flipping polarity. Each band declares a tone and children read their
+   foreground roles from these variables instead of hardcoding a colour — that
+   is what lets one component sit in any band and stay legible.
+   ========================================================================== */
+
+.tone-void {
+  --fg: var(--color-lume);
+  --fg-soft: var(--color-mute);
+  --kicker: var(--color-iris-lift);
+  background-color: var(--color-void);
+  color: var(--color-lume);
 }
 
-body {
-  background-color: var(--bg-canvas);
-  color: var(--text-primary);
-  min-height: 100vh;
-  overflow-x: hidden;
-  line-height: 1.6;
+/* One step up: used to separate adjacent sections without a hard edge. */
+.tone-panel {
+  --fg: var(--color-lume);
+  --fg-soft: var(--color-mute);
+  --kicker: var(--color-iris-lift);
+  background-color: var(--color-void-2);
+  color: var(--color-lume);
 }
 
-/* Background Grids & Ambient Lighting */
-.bg-grid-pattern {
-  background-size: 36px 36px;
-  background-image: 
-    linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+/* The loud band. Iris-lit, used at most once per page for the statement that
+   the page is actually built around. */
+.tone-iris {
+  --fg: var(--color-lume);
+  --fg-soft: color-mix(in srgb, var(--color-lume) 72%, transparent);
+  --kicker: var(--color-iris-lift);
+  --hair: rgba(255, 255, 255, 0.1);
+  --hair-strong: rgba(255, 255, 255, 0.18);
+  background-color: #0b0817;
+  color: var(--color-lume);
 }
 
-.ambient-radial-glow {
-  background: radial-gradient(
-    600px circle at var(--mouse-x, 50%) var(--mouse-y, 30%),
-    rgba(99, 102, 241, 0.08),
-    transparent 70%
-  );
-}
+/* ============================================================================
+   SIGNATURE UTILITIES
+   ========================================================================== */
 
-.hero-glow {
-  background: radial-gradient(
-    ellipse 80% 50% at 50% -20%,
-    rgba(99, 102, 241, 0.18),
-    rgba(6, 182, 212, 0.05) 50%,
-    transparent 80%
-  );
-}
-
-/* Card Surface Styling */
-.corelith-card {
-  background: var(--bg-surface);
-  border: 1px solid var(--border-subtle);
-  border-radius: 12px;
-  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.corelith-card:hover {
-  border-color: var(--border-accent);
-  box-shadow: 0 8px 32px -8px rgba(0, 0, 0, 0.5), 0 0 20px -4px rgba(99, 102, 241, 0.15);
-}
-
-/* Custom Scrollbar */
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-::-webkit-scrollbar-track {
-  background: #08090c;
-}
-::-webkit-scrollbar-thumb {
-  background: #1f2430;
-  border-radius: 4px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: #374151;
-}
-
-/* Selection */
-::selection {
-  background-color: rgba(99, 102, 241, 0.3);
-  color: #ffffff;
-}
-
-/* Typography styles */
-h1, h2, h3, h4, h5, h6 {
-  font-family: var(--font-heading);
-  letter-spacing: -0.02em;
-}
-
-.font-mono-code {
+/* Mono micro-label. Every kicker, tag, metric key, and status line in the
+   system uses this exact treatment — it is the connective tissue. */
+.stamp {
   font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  line-height: 1;
 }
 
-/* Focus styles */
-*:focus-visible {
-  outline: 2px solid var(--accent-indigo);
-  outline-offset: 2px;
+/* Outlined numeral used as a section index.
+
+   Knocking the fill out with `-webkit-text-fill-color` rather than `color` is
+   load-bearing: `color: transparent` would also make the `currentColor` stroke
+   transparent and the numeral would disappear entirely. */
+.numeral {
+  font-family: var(--font-display);
+  font-weight: 600;
+  line-height: 0.8;
+  -webkit-text-fill-color: transparent;
+  -webkit-text-stroke: 1px currentColor;
+  opacity: 0.55;
 }
 
-/* Reduced Motion */
+@supports not (-webkit-text-stroke: 1px black) {
+  .numeral {
+    -webkit-text-fill-color: currentColor;
+    opacity: 0.2;
+  }
+}
+
+/* Backlit emphasis for one run of words in a headline. The glow does the work
+   that a gradient-fill would otherwise do, without the washed-out midtones
+   gradient text produces on a dark background. */
+.flare {
+  color: var(--color-iris-lift);
+  text-shadow:
+    0 0 28px rgba(122, 92, 255, 0.55),
+    0 0 72px rgba(122, 92, 255, 0.28);
+}
+
+/* --- Surfaces ------------------------------------------------------------ */
+
+/* The standard card: one elevation up, hairline border, lit top edge. */
+.panel {
+  background-color: var(--color-panel);
+  border: 1px solid var(--hair-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--lift-2);
+}
+
+.panel-hover {
+  transition:
+    border-color 180ms ease,
+    transform 180ms cubic-bezier(0.2, 0, 0, 1),
+    box-shadow 180ms ease;
+}
+
+.panel-hover:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--color-iris) 45%, transparent);
+  box-shadow: var(--lift-2), var(--lift-iris);
+}
+
+/* Inset well — for code, checksums, and anything quoting a machine. */
+.well {
+  background-color: rgba(0, 0, 0, 0.45);
+  border: 1px solid var(--hair);
+  border-radius: var(--radius-md);
+}
+
+/* --- Light ---------------------------------------------------------------
+   Three decorative layers, all pointer-events-none and aria-hidden at the call
+   site. They are what make the canvas feel like a lit room rather than a flat
+   fill, and they are deliberately cheap: no filters, no canvas, no JS. */
+
+/* Wide iris bloom, anchored top-centre of a section. */
+.aurora {
+  background:
+    radial-gradient(58% 46% at 50% 0%, rgba(122, 92, 255, 0.3) 0%, transparent 68%),
+    radial-gradient(38% 34% at 78% 12%, rgba(69, 227, 155, 0.09) 0%, transparent 70%);
+}
+
+/* Engineering graph paper, faded out toward the edges. */
+.mesh {
+  background-image:
+    linear-gradient(to right, var(--hair) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--hair) 1px, transparent 1px);
+  background-size: 72px 72px;
+  mask-image: radial-gradient(72% 60% at 50% 30%, #000 0%, transparent 100%);
+  -webkit-mask-image: radial-gradient(72% 60% at 50% 30%, #000 0%, transparent 100%);
+}
+
+/* A rule that fades at both ends — the system's section divider. */
+.rule {
+  height: 1px;
+  border: 0;
+  background: linear-gradient(
+    to right,
+    transparent 0%,
+    var(--hair-strong) 18%,
+    var(--hair-strong) 82%,
+    transparent 100%
+  );
+}
+
+/* Lit node used at the head of every section index. */
+.node {
+  position: relative;
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 99px;
+  background-color: var(--color-iris);
+  box-shadow: 0 0 0 4px rgba(122, 92, 255, 0.16), 0 0 18px rgba(122, 92, 255, 0.85);
+}
+
+/* --- Buttons -------------------------------------------------------------
+   One geometry, three weights. Labels are sentence-case sans — mono uppercase
+   is reserved for stamps, and using it on buttons too flattens the hierarchy
+   between "instruction" and "label". */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 11px 18px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  letter-spacing: -0.005em;
+  line-height: 1;
+  white-space: nowrap;
+  transition:
+    transform 160ms cubic-bezier(0.2, 0, 0, 1),
+    box-shadow 160ms ease,
+    background-color 160ms ease,
+    border-color 160ms ease,
+    color 160ms ease;
+}
+
+.btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.btn:disabled,
+.btn[aria-disabled='true'] {
+  cursor: not-allowed;
+  opacity: 0.45;
+  transform: none;
+  box-shadow: none;
+}
+
+/* The single strongest action on a page. Lit iris fill. */
+.btn-primary {
+  background-image: linear-gradient(180deg, #8f74ff 0%, #6a49f5 100%);
+  border-color: rgba(255, 255, 255, 0.16);
+  color: #ffffff;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.28),
+    0 10px 30px -12px rgba(122, 92, 255, 0.9);
+}
+
+.btn-primary:hover:not(:disabled) {
+  background-image: linear-gradient(180deg, #9d85ff 0%, #7a5cff 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.32),
+    0 16px 40px -14px rgba(122, 92, 255, 1);
+}
+
+/* Secondary weight, same footprint: glass over the canvas. */
+.btn-secondary {
+  background-color: rgba(255, 255, 255, 0.04);
+  border-color: var(--hair-strong);
+  color: var(--color-lume);
+  box-shadow: var(--lift-1);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background-color: rgba(255, 255, 255, 0.08);
+  border-color: color-mix(in srgb, var(--color-iris) 55%, transparent);
+}
+
+/* Quietest weight — inline actions that must not compete. */
+.btn-ghost {
+  background-color: transparent;
+  color: var(--color-mute);
+}
+
+.btn-ghost:hover:not(:disabled) {
+  background-color: rgba(255, 255, 255, 0.06);
+  color: var(--color-lume);
+}
+
+.btn-lg {
+  padding: 14px 24px;
+  font-size: var(--text-base);
+}
+
+/* --- Fields --------------------------------------------------------------
+   Dark wells with a hairline that lights to iris on focus. No inner glow: on a
+   dark canvas a focus ring plus a border colour change is already unambiguous. */
+.field {
+  width: 100%;
+  padding: 11px 14px;
+  background-color: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--hair-strong);
+  border-radius: var(--radius-md);
+  color: var(--color-lume);
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  line-height: 1.5;
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    background-color 160ms ease;
+}
+
+.field::placeholder {
+  color: var(--color-faint);
+}
+
+.field:focus {
+  outline: none;
+  background-color: rgba(255, 255, 255, 0.05);
+  border-color: var(--color-iris);
+  box-shadow: 0 0 0 3px rgba(122, 92, 255, 0.22);
+}
+
+.field[aria-invalid='true'] {
+  border-color: var(--color-danger);
+  box-shadow: 0 0 0 3px rgba(255, 107, 107, 0.18);
+}
+
+/* Native select arrows are drawn light-on-light by some engines; the dark
+   colour-scheme declaration is what keeps the control legible here. */
+select.field {
+  color-scheme: dark;
+  cursor: pointer;
+}
+
+/* --- Chips --------------------------------------------------------------- */
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border: 1px solid var(--hair-strong);
+  border-radius: 99px;
+  background-color: rgba(255, 255, 255, 0.03);
+}
+
+/* --- Ticker -------------------------------------------------------------- */
+
+@keyframes marquee-slide {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+.marquee {
+  mask-image: linear-gradient(to right, transparent, #000 8%, #000 92%, transparent);
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 8%, #000 92%, transparent);
+}
+
+.marquee-track {
+  display: inline-flex;
+  min-width: 200%;
+  animation: marquee-slide 48s linear infinite;
+  will-change: transform;
+}
+
+.marquee:hover .marquee-track,
+.marquee:focus-within .marquee-track {
+  animation-play-state: paused;
+}
+
+/* Slow breathing pulse for live status markers. Amplitude is deliberately
+   small — a hard blink reads as an error state. */
+@keyframes node-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+.pulse {
+  animation: node-pulse 2.4s ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  *, ::before, ::after {
+  *,
+  ::before,
+  ::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
+  }
+
+  .marquee-track {
+    animation: none;
+    min-width: 0;
+  }
+
+  .panel-hover:hover,
+  .btn:hover:not(:disabled) {
+    transform: none;
   }
 }

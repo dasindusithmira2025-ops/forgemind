@@ -1,25 +1,28 @@
-import type { Metadata } from 'next';
-import { Inter, Outfit, JetBrains_Mono } from 'next/font/google';
+import type { Metadata, Viewport } from 'next';
+import { Space_Grotesk, Inter, JetBrains_Mono } from 'next/font/google';
 import './globals.css';
 import { Header } from '@/components/Header';
 import { Footer } from '@/components/Footer';
 import { siteConfig } from '@/config/site';
 
+// Display face: tight, slightly mechanical grotesk for headlines and product names.
+const grotesk = Space_Grotesk({
+  subsets: ['latin'],
+  variable: '--font-grotesk',
+  display: 'swap',
+});
+
+// Reading face: everything that is a sentence.
 const inter = Inter({
   subsets: ['latin'],
-  variable: '--font-body',
+  variable: '--font-inter',
   display: 'swap',
 });
 
-const outfit = Outfit({
-  subsets: ['latin'],
-  variable: '--font-heading',
-  display: 'swap',
-});
-
+// Machine face: stamps, metrics, paths, checksums, terminal output.
 const jetbrainsMono = JetBrains_Mono({
   subsets: ['latin'],
-  variable: '--font-mono',
+  variable: '--font-jetbrains',
   display: 'swap',
 });
 
@@ -68,6 +71,13 @@ export const metadata: Metadata = {
   },
 };
 
+// The site is dark-only, so the UA chrome is told as much up front: without
+// this the browser paints a white background behind the page during navigation.
+export const viewport: Viewport = {
+  colorScheme: 'dark',
+  themeColor: '#06070a',
+};
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -84,16 +94,27 @@ export default function RootLayout({
   };
 
   return (
-    <html lang="en" className={`${inter.variable} ${outfit.variable} ${jetbrainsMono.variable}`}>
+    <html
+      lang="en"
+      className={`${grotesk.variable} ${inter.variable} ${jetbrainsMono.variable}`}
+    >
       <head>
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
         />
       </head>
-      <body className="bg-[#08090c] text-[#f3f4f6] antialiased flex flex-col min-h-screen">
+      <body className="bg-void text-lume flex min-h-screen flex-col antialiased">
+        <a
+          href="#main"
+          className="btn btn-secondary sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-[60]"
+        >
+          Skip to content
+        </a>
         <Header />
-        <main className="flex-grow pt-24">{children}</main>
+        <main id="main" className="flex-grow">
+          {children}
+        </main>
         <Footer />
       </body>
     </html>

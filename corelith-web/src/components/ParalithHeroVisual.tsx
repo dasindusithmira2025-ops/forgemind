@@ -1,210 +1,331 @@
 'use client';
 
 import { useState } from 'react';
-import { Terminal, ShieldCheck, Cpu, Code2, GitBranch, CheckCircle2, Play, Activity } from 'lucide-react';
 
+type View = 'agents' | 'terminal' | 'verification';
+
+const VIEWS: { id: View; label: string }[] = [
+  { id: 'agents', label: 'Agent canvas' },
+  { id: 'terminal', label: 'Terminal' },
+  { id: 'verification', label: 'Verification' },
+];
+
+const INDEXED = [
+  { path: 'src/core/agent_engine.rs', nodes: 412 },
+  { path: 'src/pty/terminal.ts', nodes: 268 },
+  { path: 'src/memory/graph.rs', nodes: 349 },
+  { path: 'tests/verification.rs', nodes: 191 },
+];
+
+const AGENTS = [
+  { name: 'alpha', role: 'refactor', state: 'running', progress: 68 },
+  { name: 'beta', role: 'verifier', state: 'running', progress: 41 },
+  { name: 'gamma', role: 'indexer', state: 'idle', progress: 100 },
+];
+
+const DIFF: { gutter: '+' | '-' | ' '; text: string; tone: 'add' | 'del' | 'ctx' }[] = [
+  { gutter: ' ', text: 'impl AgentEngine {', tone: 'ctx' },
+  { gutter: '-', text: '    pub fn execute(&self, task: &TaskSpec) -> Result<()> {', tone: 'del' },
+  { gutter: '+', text: '    pub async fn execute_verified(', tone: 'add' },
+  { gutter: '+', text: '        &self,', tone: 'add' },
+  { gutter: '+', text: '        task: &TaskSpec,', tone: 'add' },
+  { gutter: '+', text: '    ) -> Result<ExecutionReport> {', tone: 'add' },
+  { gutter: '+', text: '        let ctx = self.memory.query_ast(&task.symbols).await?;', tone: 'add' },
+  { gutter: '+', text: '        let pty = self.terminals.acquire_isolated().await?;', tone: 'add' },
+  { gutter: '+', text: '        let report = self.verifier.run_suite(&pty).await?;', tone: 'add' },
+  { gutter: '+', text: '        Ok(ExecutionReport::new(ctx, report))', tone: 'add' },
+  { gutter: ' ', text: '    }', tone: 'ctx' },
+  { gutter: ' ', text: '}', tone: 'ctx' },
+];
+
+const TERMINAL: { kind: 'cmd' | 'info' | 'pass' | 'warn'; text: string }[] = [
+  { kind: 'cmd', text: 'paralith verify --strict' },
+  { kind: 'info', text: 'loading local memory graph … 1,420 nodes' },
+  { kind: 'info', text: 'worker pool online … 8 threads' },
+  { kind: 'pass', text: 'cargo test --all … 142 passed in 0.84s' },
+  { kind: 'pass', text: 'eslint · tsc --noEmit … 0 diagnostics' },
+  { kind: 'warn', text: 'rm -rf ./dist held — destructive call needs approval' },
+  { kind: 'pass', text: 'sha256 generated and signed' },
+];
+
+const CHECKS = [
+  { label: 'Unit & integration', value: '142/142', pct: 100 },
+  { label: 'Coverage', value: '94.8%', pct: 95 },
+  { label: 'Memory latency', value: '1.2 ms', pct: 88 },
+];
+
+const TONE: Record<'add' | 'del' | 'ctx', string> = {
+  add: 'text-signal',
+  del: 'text-danger/80',
+  ctx: 'text-mute',
+};
+
+/**
+ * The product plate: Paralith's own surface, drawn rather than screenshotted so
+ * it stays crisp at any width and can be read by a screen reader. Three real
+ * views of the application share one frame — the tab strip is what makes the
+ * point that these are panels in one workspace, not three separate tools.
+ */
 export function ParalithHeroVisual() {
-  const [activeTab, setActiveTab] = useState<'agent' | 'terminal' | 'verification'>('agent');
+  const [view, setView] = useState<View>('agents');
 
   return (
-    <div className="w-full max-w-5xl mx-auto rounded-2xl bg-[#0e1017] border border-white/15 shadow-2xl shadow-indigo-950/40 overflow-hidden text-left relative group">
-      {/* Top Window Bar */}
-      <div className="bg-[#141722] border-b border-white/10 px-4 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded-full bg-red-500/80" />
-          <div className="w-3 h-3 rounded-full bg-yellow-500/80" />
-          <div className="w-3 h-3 rounded-full bg-green-500/80" />
-          <span className="ml-3 text-xs font-mono text-gray-400 flex items-center gap-1.5">
-            <GitBranch className="w-3.5 h-3.5 text-indigo-400" />
-            paralith-workspace // corelith_v0.9.4
-          </span>
-        </div>
+    <div className="relative">
+      {/* Ground glow. Sits behind the frame and gives the plate its weight. */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute -inset-x-10 -bottom-10 -z-10 h-48 rounded-[50%] bg-iris/25 blur-[80px]"
+      />
 
-        {/* View Switcher Tabs */}
-        <div className="flex items-center gap-1 bg-[#08090c] p-1 rounded-lg border border-white/5 text-xs font-mono">
-          <button
-            onClick={() => setActiveTab('agent')}
-            className={`px-2.5 py-1 rounded-md transition-colors flex items-center gap-1.5 ${
-              activeTab === 'agent' ? 'bg-indigo-600 text-white font-medium' : 'text-gray-400 hover:text-white'
-            }`}
-          >
-            <Cpu className="w-3.5 h-3.5" />
-            <span>Agent Canvas</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('terminal')}
-            className={`px-2.5 py-1 rounded-md transition-colors flex items-center gap-1.5 ${
-              activeTab === 'terminal' ? 'bg-indigo-600 text-white font-medium' : 'text-gray-400 hover:text-white'
-            }`}
-          >
-            <Terminal className="w-3.5 h-3.5" />
-            <span>Integrated Terminal</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('verification')}
-            className={`px-2.5 py-1 rounded-md transition-colors flex items-center gap-1.5 ${
-              activeTab === 'verification' ? 'bg-indigo-600 text-white font-medium' : 'text-gray-400 hover:text-white'
-            }`}
-          >
-            <ShieldCheck className="w-3.5 h-3.5" />
-            <span>Verification Pipeline</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Main Interactive Canvas Area */}
-      <div className="grid grid-cols-1 md:grid-cols-12 min-h-[380px] bg-[#08090c]/90 text-xs font-mono">
-        {/* Left Sidebar: AST Memory & Workspaces */}
-        <div className="md:col-span-3 border-r border-white/10 p-3 space-y-4 bg-[#0e1017]/60">
-          <div>
-            <div className="text-[11px] uppercase tracking-wider text-gray-400 font-semibold mb-2 flex items-center justify-between">
-              <span>Project Memory Graph</span>
-              <Activity className="w-3 h-3 text-emerald-400 animate-pulse" />
-            </div>
-            <div className="space-y-1.5">
-              <div className="p-2 rounded bg-indigo-500/10 border border-indigo-500/20 text-indigo-300 flex items-center justify-between">
-                <span className="truncate">src/core/agent_engine.rs</span>
-                <span className="text-[10px] text-emerald-400">Indexed</span>
-              </div>
-              <div className="p-2 rounded bg-white/5 border border-white/5 text-gray-400 flex items-center justify-between">
-                <span className="truncate">src/pty/terminal.ts</span>
-                <span className="text-[10px] text-emerald-400">Indexed</span>
-              </div>
-              <div className="p-2 rounded bg-white/5 border border-white/5 text-gray-400 flex items-center justify-between">
-                <span className="truncate">tests/verification.rs</span>
-                <span className="text-[10px] text-emerald-400">Indexed</span>
-              </div>
-            </div>
-          </div>
-
-          <div className="pt-2 border-t border-white/10">
-            <div className="text-[11px] uppercase tracking-wider text-gray-400 font-semibold mb-2">Active Agents</div>
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between p-2 rounded bg-white/5 text-gray-300">
-                <span className="flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-indigo-400 animate-ping" />
-                  Agent-Alpha (Refactor)
-                </span>
-                <span className="text-gray-400">Busy</span>
-              </div>
-              <div className="flex items-center justify-between p-2 rounded bg-white/5 text-gray-400">
-                <span className="flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400" />
-                  Agent-Beta (Verifier)
-                </span>
-                <span className="text-emerald-400">Idle</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Center Panel: Content changes based on Active Tab */}
-        <div className="md:col-span-9 p-4 flex flex-col justify-between">
-          {activeTab === 'agent' && (
-            <div className="space-y-3 animate-in fade-in duration-200">
-              <div className="flex items-center justify-between pb-2 border-b border-white/10">
-                <span className="text-indigo-400 font-semibold flex items-center gap-2">
-                  <Code2 className="w-4 h-4" />
-                  Agent Execution Stream // Target: src/core/agent_engine.rs
-                </span>
-                <span className="text-[10px] px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                  Strict Validation Mode
-                </span>
-              </div>
-
-              <div className="bg-[#050608] p-3 rounded-lg border border-white/10 font-mono text-gray-300 space-y-1 text-[11.5px] overflow-x-auto">
-                {/* Braced strings: these are lines of displayed sample code, not JSX comments. */}
-                <p className="text-gray-400">{'// Paralith Agent generating atomic patch with memory context...'}</p>
-                <p className="text-emerald-400">+ pub async fn execute_verified_task(task: &TaskSpec) -&gt; Result&lt;ExecutionReport&gt; &#123;</p>
-                <p className="text-emerald-400">+     let memory_ctx = self.project_memory.query_ast(&task.symbols).await?;</p>
-                <p className="text-emerald-400">+     let pty_session = self.terminal_pool.acquire_isolated_pty().await?;</p>
-                <p className="text-gray-400">{'      // Continuous empirical verification check'}</p>
-                <p className="text-emerald-400">+     let verification = self.verifier.run_test_suite(&pty_session).await?;</p>
-                <p className="text-emerald-400">+     Ok(ExecutionReport::new(memory_ctx, verification))</p>
-                <p className="text-emerald-400">+ &#125;</p>
-              </div>
-
-              <div className="flex items-center gap-3 pt-2 text-gray-400">
-                <span className="flex items-center gap-1 text-emerald-400">
-                  <CheckCircle2 className="w-3.5 h-3.5" /> AST Context Validated
-                </span>
-                <span>•</span>
-                <span className="flex items-center gap-1 text-emerald-400">
-                  <CheckCircle2 className="w-3.5 h-3.5" /> Zero Lint Diagnostics
-                </span>
-              </div>
-            </div>
-          )}
-
-          {activeTab === 'terminal' && (
-            <div className="space-y-3 animate-in fade-in duration-200">
-              <div className="flex items-center justify-between pb-2 border-b border-white/10">
-                <span className="text-emerald-400 font-semibold flex items-center gap-2">
-                  <Terminal className="w-4 h-4" />
-                  PTY Shell Session 1 (pwsh / bash)
-                </span>
-                <span className="text-[10px] text-gray-400">PID: 4892 • PAGER=cat</span>
-              </div>
-
-              <div className="bg-[#050608] p-3 rounded-lg border border-white/10 font-mono text-gray-300 space-y-1.5 text-[11.5px]">
-                <p className="text-gray-400">$ paralith-cli verify --workspace ./ --strict</p>
-                <p className="text-indigo-400">[INFO] Loading local project AST memory graph... done (1,420 nodes)</p>
-                <p className="text-indigo-400">[INFO] Spawning background worker thread pool (8 threads)...</p>
-                <p className="text-emerald-400">[PASS] cargo test --all (142 tests passed in 0.84s)</p>
-                <p className="text-emerald-400">[PASS] binary SHA256 checksum generated & signed.</p>
-                <div className="flex items-center gap-1 text-gray-400 pt-1">
-                  <span>$</span>
-                  <span className="w-2 h-4 bg-indigo-500 animate-pulse" />
-                </div>
-              </div>
-            </div>
-          )}
-
-          {activeTab === 'verification' && (
-            <div className="space-y-3 animate-in fade-in duration-200">
-              <div className="flex items-center justify-between pb-2 border-b border-white/10">
-                <span className="text-cyan-400 font-semibold flex items-center gap-2">
-                  <ShieldCheck className="w-4 h-4" />
-                  Automated Verification Suite Results
-                </span>
-                <span className="text-emerald-400 font-bold">100% VERIFIED</span>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div className="p-3 rounded bg-white/5 border border-white/10">
-                  <div className="text-gray-400 text-[10px]">UNIT & INTEGRATION</div>
-                  <div className="text-lg font-bold text-white mt-1">142 / 142</div>
-                  <div className="text-emerald-400 text-[10px] flex items-center gap-1 mt-1">
-                    <CheckCircle2 className="w-3 h-3" /> All Passing
-                  </div>
-                </div>
-                <div className="p-3 rounded bg-white/5 border border-white/10">
-                  <div className="text-gray-400 text-[10px]">MEMORY LATENCY</div>
-                  <div className="text-lg font-bold text-white mt-1">1.2 ms</div>
-                  <div className="text-cyan-400 text-[10px] flex items-center gap-1 mt-1">
-                    <Activity className="w-3 h-3" /> Zero Leak
-                  </div>
-                </div>
-                <div className="p-3 rounded bg-white/5 border border-white/10">
-                  <div className="text-gray-400 text-[10px]">CODE COVERAGE</div>
-                  <div className="text-lg font-bold text-white mt-1">94.8%</div>
-                  <div className="text-indigo-400 text-[10px] flex items-center gap-1 mt-1">
-                    <ShieldCheck className="w-3 h-3" /> Strict Threshold
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Bottom Bar inside canvas */}
-          <div className="pt-3 border-t border-white/10 flex items-center justify-between text-gray-400 text-[11px]">
-            <span className="flex items-center gap-2">
-              <Play className="w-3 h-3 text-indigo-400" />
-              Paralith Agent Environment v0.9.4 Preview
+      <div className="panel overflow-hidden rounded-xl">
+        {/* Window chrome */}
+        <div className="flex flex-col gap-3 border-b border-[var(--hair)] bg-white/[0.02] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-3">
+            <span className="chip stamp text-mute py-1.5">
+              <span aria-hidden="true" className="node" />
+              corelith
+              <span aria-hidden="true" className="text-faint">
+                /
+              </span>
+              main
             </span>
-            <span className="text-gray-400">Local-First • Air-Gapped Mode Active</span>
+            <span className="stamp text-faint hidden sm:inline">Workspace · Delivery</span>
+          </div>
+
+          <div role="tablist" aria-label="Paralith view" className="flex items-center gap-1">
+            {VIEWS.map((v) => {
+              const active = view === v.id;
+              return (
+                <button
+                  key={v.id}
+                  type="button"
+                  role="tab"
+                  id={`plate-tab-${v.id}`}
+                  aria-selected={active}
+                  aria-controls="plate-panel"
+                  onClick={() => setView(v.id)}
+                  className={`stamp rounded-md px-3 py-2 transition-colors ${
+                    active
+                      ? 'text-lume bg-white/[0.08]'
+                      : 'text-faint hover:text-mute hover:bg-white/[0.04]'
+                  }`}
+                >
+                  {v.label}
+                </button>
+              );
+            })}
           </div>
         </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-12">
+          {/* Left rail — indexed sources and the agent roster. */}
+          <aside className="col-span-12 border-b border-[var(--hair)] lg:col-span-4 lg:border-r lg:border-b-0 xl:col-span-3">
+            <div className="p-4">
+              <p className="stamp text-faint mb-3">Project memory</p>
+              <ul className="space-y-2">
+                {INDEXED.map((file) => (
+                  <li key={file.path} className="flex items-baseline justify-between gap-3">
+                    <span className="text-mute truncate font-mono text-xs">{file.path}</span>
+                    <span className="text-faint shrink-0 font-mono text-xs">{file.nodes}</span>
+                  </li>
+                ))}
+              </ul>
+              <p className="stamp text-faint mt-3 border-t border-[var(--hair)] pt-3">
+                1,420 nodes · local
+              </p>
+            </div>
+
+            <div className="border-t border-[var(--hair)] p-4">
+              <p className="stamp text-faint mb-3">Agents</p>
+              <ul className="space-y-3.5">
+                {AGENTS.map((agent) => {
+                  const running = agent.state === 'running';
+                  return (
+                    <li key={agent.name}>
+                      <div className="flex items-baseline justify-between gap-3">
+                        <span className="text-lume flex items-center gap-2 font-mono text-xs">
+                          <span
+                            aria-hidden="true"
+                            className={`inline-block h-1.5 w-1.5 rounded-full ${
+                              running ? 'bg-iris pulse' : 'bg-signal'
+                            }`}
+                          />
+                          {agent.name}
+                          <span className="text-faint">{agent.role}</span>
+                        </span>
+                        <span
+                          className={`stamp shrink-0 ${running ? 'text-iris-lift' : 'text-signal'}`}
+                        >
+                          {agent.state}
+                        </span>
+                      </div>
+                      <div
+                        aria-hidden="true"
+                        className="mt-2 h-0.5 w-full overflow-hidden rounded-full bg-white/[0.07]"
+                      >
+                        <span
+                          className={`block h-full rounded-full ${
+                            running ? 'bg-iris' : 'bg-signal'
+                          }`}
+                          style={{ width: `${agent.progress}%` }}
+                        />
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          </aside>
+
+          {/* Active panel */}
+          <div
+            id="plate-panel"
+            role="tabpanel"
+            aria-labelledby={`plate-tab-${view}`}
+            className="col-span-12 min-h-[22rem] p-4 lg:col-span-8 xl:col-span-9"
+          >
+            {view === 'agents' && (
+              <div className="space-y-3">
+                <p className="stamp text-faint flex flex-wrap items-center gap-2">
+                  Patch stream
+                  <span aria-hidden="true" className="text-iris">
+                    →
+                  </span>
+                  <span className="text-mute">src/core/agent_engine.rs</span>
+                </p>
+
+                <div className="well overflow-x-auto p-4">
+                  <pre className="font-mono text-xs leading-relaxed">
+                    <code>
+                      {DIFF.map((line, i) => (
+                        <span key={i} className={`block ${TONE[line.tone]}`}>
+                          <span aria-hidden="true" className="text-faint mr-3 inline-block w-6 text-right select-none">
+                            {i + 41}
+                          </span>
+                          <span className="inline-block w-3 select-none">{line.gutter}</span>
+                          {line.text}
+                        </span>
+                      ))}
+                    </code>
+                  </pre>
+                </div>
+
+                <p className="stamp text-signal flex flex-wrap items-center gap-x-3 gap-y-2">
+                  <span>AST context resolved</span>
+                  <span aria-hidden="true" className="text-faint">
+                    ◆
+                  </span>
+                  <span>0 diagnostics</span>
+                  <span aria-hidden="true" className="text-faint">
+                    ◆
+                  </span>
+                  <span className="text-iris-lift">Patch held for review</span>
+                </p>
+              </div>
+            )}
+
+            {view === 'terminal' && (
+              <div className="space-y-3">
+                <p className="stamp text-faint">PTY session 1 · pid 4892 · pwsh</p>
+
+                <div className="well overflow-x-auto p-4">
+                  <pre className="font-mono text-xs leading-relaxed">
+                    <code>
+                      {TERMINAL.map((line, i) => (
+                        <span key={i} className="block">
+                          {line.kind === 'cmd' ? (
+                            <>
+                              <span className="text-iris" aria-hidden="true">
+                                ❯{' '}
+                              </span>
+                              <span className="text-lume">{line.text}</span>
+                            </>
+                          ) : (
+                            <>
+                              <span
+                                className={
+                                  line.kind === 'pass'
+                                    ? 'text-signal'
+                                    : line.kind === 'warn'
+                                      ? 'text-warn'
+                                      : 'text-faint'
+                                }
+                              >
+                                [{line.kind === 'info' ? 'info' : line.kind}]
+                              </span>{' '}
+                              <span className="text-mute">{line.text}</span>
+                            </>
+                          )}
+                        </span>
+                      ))}
+                      <span className="block">
+                        <span className="text-iris" aria-hidden="true">
+                          ❯{' '}
+                        </span>
+                        <span
+                          aria-hidden="true"
+                          className="bg-iris pulse inline-block h-3.5 w-1.5 align-middle"
+                        />
+                      </span>
+                    </code>
+                  </pre>
+                </div>
+
+                <p className="stamp text-warn">Destructive commands require explicit approval</p>
+              </div>
+            )}
+
+            {view === 'verification' && (
+              <div className="space-y-3">
+                <p className="stamp text-faint">Verification gate · run 2 191</p>
+
+                <div className="well divide-y divide-[var(--hair)]">
+                  {CHECKS.map((check) => (
+                    <div key={check.label} className="p-4">
+                      <div className="flex items-baseline justify-between gap-4">
+                        <p className="stamp text-mute">{check.label}</p>
+                        <p className="font-display text-lume text-lg font-semibold">
+                          {check.value}
+                        </p>
+                      </div>
+                      <div
+                        aria-hidden="true"
+                        className="mt-3 h-1 w-full overflow-hidden rounded-full bg-white/[0.07]"
+                      >
+                        <span
+                          className="bg-signal block h-full rounded-full"
+                          style={{ width: `${check.pct}%` }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <p className="stamp text-signal">
+                  Gate is fail-closed — no agent edit reaches a branch until every check is green
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Status bar */}
+        <dl className="grid grid-cols-2 border-t border-[var(--hair)] bg-white/[0.02] sm:grid-cols-4">
+          {[
+            { k: 'Build', v: 'v0.9.4-preview' },
+            { k: 'Targets', v: 'Win · macOS · Linux' },
+            { k: 'Network', v: 'No egress' },
+            { k: 'Memory', v: 'Local, encrypted' },
+          ].map((cell) => (
+            <div
+              key={cell.k}
+              className="border-r border-[var(--hair)] px-4 py-3 last:border-r-0"
+            >
+              <dt className="stamp text-faint">{cell.k}</dt>
+              <dd className="text-mute mt-1.5 font-mono text-xs">{cell.v}</dd>
+            </div>
+          ))}
+        </dl>
       </div>
     </div>
   );

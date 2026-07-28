@@ -1,120 +1,155 @@
 'use client';
 
 import { useState } from 'react';
-import { Database, Cpu, Terminal, ShieldCheck, ArrowRight, Lock, Server } from 'lucide-react';
 
+const STAGES = [
+  {
+    id: 1,
+    title: 'Local index',
+    tag: 'On disk',
+    description:
+      'Syntax trees and Git lineage are indexed into encrypted local storage. Nothing about the shape of your codebase leaves the machine to make this work.',
+    specs: [
+      { k: 'Storage', v: 'AES-256-GCM, local' },
+      { k: 'Scope', v: 'Per workspace' },
+      { k: 'Egress', v: 'None' },
+    ],
+  },
+  {
+    id: 2,
+    title: 'Agent controller',
+    tag: 'Parallel',
+    description:
+      'Agents resolve intent against the local index and compose atomic diff patches. Work is scheduled across a bounded pool so one long task cannot starve the rest.',
+    specs: [
+      { k: 'Concurrency', v: 'Bounded pool' },
+      { k: 'Output', v: 'Atomic patches' },
+      { k: 'Context', v: 'Indexed symbols' },
+    ],
+  },
+  {
+    id: 3,
+    title: 'PTY sandbox',
+    tag: 'Isolated',
+    description:
+      'Commands execute inside native pseudo-terminals under explicit permission boundaries. Destructive calls stop and wait for a human decision.',
+    specs: [
+      { k: 'Boundary', v: 'Native PTY' },
+      { k: 'Approval', v: 'Explicit' },
+      { k: 'Audit', v: 'Full transcript' },
+    ],
+  },
+  {
+    id: 4,
+    title: 'Verification',
+    tag: 'Gate',
+    description:
+      'Lint, build, and unit suites run before anything reaches a branch. A red suite holds the patch in review; there is no path around this stage.',
+    specs: [
+      { k: 'Gate', v: 'Fail-closed' },
+      { k: 'Rollback', v: 'Deterministic' },
+      { k: 'Evidence', v: 'Logs retained' },
+    ],
+  },
+];
+
+/**
+ * The execution pipeline as a signal-flow diagram: four ruled stages on a
+ * connector rail, one open at a time. Tone-agnostic — it reads its foreground
+ * roles from the band it sits in.
+ */
 export function TechDiagram() {
-  const [activeStep, setActiveStep] = useState<number>(1);
-
-  const steps = [
-    {
-      id: 1,
-      title: 'Local AST & Memory Index',
-      description: 'Code syntax trees and Git history graph are indexed locally in encrypted SQLite storage.',
-      icon: Database,
-      tag: 'Local Storage',
-    },
-    {
-      id: 2,
-      title: 'Agentic Execution Controller',
-      description: 'Agents process prompt intents, reference local memory, and formulate atomic diff patches.',
-      icon: Cpu,
-      tag: 'Parallel Threads',
-    },
-    {
-      id: 3,
-      title: 'PTY Terminal & Process Sandbox',
-      description: 'Commands execute inside isolated native PTY shells with strict user-configured permissions.',
-      icon: Terminal,
-      tag: 'Sandboxed PTY',
-    },
-    {
-      id: 4,
-      title: 'Empirical Verification Engine',
-      description: 'Linter, build passes, and unit tests verify changes before committing to Git branch.',
-      icon: ShieldCheck,
-      tag: '100% Verifiable',
-    },
-  ];
+  const [activeId, setActiveId] = useState(1);
+  const active = STAGES.find((s) => s.id === activeId)!;
 
   return (
-    <div className="w-full max-w-5xl mx-auto rounded-2xl bg-[#0e1017] border border-white/15 p-6 sm:p-8 space-y-8 text-left shadow-2xl">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/10 pb-6">
-        <div>
-          <h3 className="text-xl font-bold text-white font-heading">
-            Corelith Agentic Execution Pipeline
-          </h3>
-          <p className="text-sm text-gray-400 mt-1">
-            Click each phase to inspect technical security and data isolation boundaries.
-          </p>
-        </div>
-        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 font-mono text-xs">
-          <Lock className="w-3.5 h-3.5" />
-          <span>Local-First Boundary Enforced</span>
-        </div>
+    <div>
+      {/* Connector rail — the stages are a signal path, so the diagram says so
+          before the tabs do. */}
+      <div aria-hidden="true" className="relative h-6">
+        <span className="rule absolute top-1/2 right-0 left-0" />
+        <span className="absolute inset-x-0 top-1/2 flex justify-between">
+          {STAGES.map((stage) => (
+            <span
+              key={stage.id}
+              className={`h-1.5 w-1.5 -translate-y-1/2 rounded-full transition-colors ${
+                stage.id === activeId ? 'bg-iris shadow-[0_0_12px_var(--color-iris)]' : 'bg-edge'
+              }`}
+            />
+          ))}
+        </span>
       </div>
 
-      {/* Interactive Step Navigator */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {steps.map((step) => {
-          const StepIcon = step.icon;
-          const isActive = activeStep === step.id;
+      <div
+        role="tablist"
+        aria-label="Execution pipeline stage"
+        className="grid grid-cols-1 overflow-hidden rounded-t-lg border-t border-l border-[var(--hair-strong)] sm:grid-cols-2 lg:grid-cols-4"
+      >
+        {STAGES.map((stage) => {
+          const isActive = stage.id === activeId;
           return (
             <button
-              key={step.id}
-              onClick={() => setActiveStep(step.id)}
-              className={`p-4 rounded-xl border text-left transition-all ${
+              key={stage.id}
+              type="button"
+              role="tab"
+              id={`stage-tab-${stage.id}`}
+              aria-selected={isActive}
+              aria-controls="stage-panel"
+              onClick={() => setActiveId(stage.id)}
+              className={`relative flex flex-col gap-3 border-r border-b border-[var(--hair-strong)] p-5 text-left transition-colors ${
                 isActive
-                  ? 'bg-indigo-600/15 border-indigo-500 text-white shadow-lg shadow-indigo-600/20'
-                  : 'bg-[#08090c] border-white/10 text-gray-400 hover:border-white/20 hover:text-gray-200'
+                  ? 'bg-iris/[0.12] text-iris-lift'
+                  : 'text-[var(--fg-soft)] hover:bg-white/[0.03] hover:text-[var(--fg)]'
               }`}
             >
-              <div className="flex items-center justify-between mb-3">
-                <div
-                  className={`p-2 rounded-lg ${
-                    isActive ? 'bg-indigo-600 text-white' : 'bg-white/5 text-indigo-400'
-                  }`}
-                >
-                  <StepIcon className="w-5 h-5" />
-                </div>
-                <span className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded bg-white/5 border border-white/10">
-                  Step 0{step.id}
+              {/* Active marker rides the top edge so the panel below reads as
+                  hanging off this stage rather than floating beside it. */}
+              <span
+                aria-hidden="true"
+                className={`bg-iris absolute inset-x-0 top-0 h-px transition-opacity ${
+                  isActive ? 'opacity-100' : 'opacity-0'
+                }`}
+              />
+              <span className="flex items-baseline justify-between gap-3">
+                <span className="stamp">Stage {String(stage.id).padStart(2, '0')}</span>
+                <span aria-hidden="true" className="stamp">
+                  {stage.id < STAGES.length ? '→' : '■'}
                 </span>
-              </div>
-              <div className="font-heading font-bold text-sm text-white">{step.title}</div>
-              <div className="text-[11px] font-mono text-indigo-400 mt-1">{step.tag}</div>
+              </span>
+              <span
+                className={`font-display text-lg font-semibold tracking-tight ${
+                  isActive ? 'text-lume' : 'text-[var(--fg)]'
+                }`}
+              >
+                {stage.title}
+              </span>
+              <span className="stamp">{stage.tag}</span>
             </button>
           );
         })}
       </div>
 
-      {/* Detailed Inspection Box */}
-      <div className="bg-[#08090c] p-6 rounded-xl border border-white/10 space-y-4">
-        <div className="flex items-center justify-between border-b border-white/10 pb-3 font-mono text-xs">
-          <span className="text-indigo-400 font-bold flex items-center gap-2">
-            <Server className="w-4 h-4" />
-            Phase 0{activeStep} Specification Details
-          </span>
-          <span className="text-gray-400">Zero Code Telemetry Leakage</span>
-        </div>
-        <p className="text-sm text-gray-300 leading-relaxed font-body">
-          {steps.find((s) => s.id === activeStep)?.description}
+      <div
+        id="stage-panel"
+        role="tabpanel"
+        aria-labelledby={`stage-tab-${activeId}`}
+        className="grid grid-cols-12 gap-x-8 gap-y-6 rounded-b-lg border-r border-b border-l border-[var(--hair-strong)] bg-white/[0.02] p-5 lg:p-8"
+      >
+        <p className="col-span-12 text-base text-[var(--fg)] lg:col-span-7">
+          {active.description}
         </p>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 font-mono text-xs text-gray-400 pt-2">
-          <div className="p-3 rounded bg-[#141722] border border-white/5">
-            <span className="text-gray-400 block text-[10px]">ENCRYPTION</span>
-            <span className="text-white font-semibold mt-1 block">AES-256-GCM / Local</span>
-          </div>
-          <div className="p-3 rounded bg-[#141722] border border-white/5">
-            <span className="text-gray-400 block text-[10px]">NETWORK BOUNDARY</span>
-            <span className="text-white font-semibold mt-1 block">TLS 1.3 Strict Proxy</span>
-          </div>
-          <div className="p-3 rounded bg-[#141722] border border-white/5">
-            <span className="text-gray-400 block text-[10px]">ROLLBACK GUARANTEE</span>
-            <span className="text-emerald-400 font-semibold mt-1 block">100% Deterministic</span>
-          </div>
-        </div>
+        <dl className="col-span-12 lg:col-span-4 lg:col-start-9">
+          {active.specs.map((spec) => (
+            <div
+              key={spec.k}
+              className="flex items-baseline justify-between gap-4 border-b border-[var(--hair)] py-2.5 first:border-t"
+            >
+              <dt className="stamp text-[var(--fg-soft)]">{spec.k}</dt>
+              <dd className="font-mono text-xs text-[var(--fg)]">{spec.v}</dd>
+            </div>
+          ))}
+        </dl>
       </div>
     </div>
   );

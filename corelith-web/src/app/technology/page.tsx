@@ -1,72 +1,139 @@
 import { Metadata } from 'next';
+import Link from 'next/link';
 import { TechDiagram } from '@/components/TechDiagram';
-import { Cpu, Terminal, ShieldCheck, Database, Lock, Server } from 'lucide-react';
+import { Band, ClosingBand, PageMasthead, SectionMark } from '@/components/Editorial';
 
 export const metadata: Metadata = {
   title: 'Technology & Architecture',
   description:
-    'Deep-dive into Corelith Technologies engineering architecture: Agentic execution engines, persistent AST memory graphs, sandboxed PTY runtime, and zero-telemetry security.',
+    'Deep-dive into Corelith Technologies engineering architecture: agentic execution engines, persistent AST memory graphs, sandboxed PTY runtime, and zero-telemetry security.',
 };
+
+const PILLARS = [
+  {
+    kicker: 'Memory',
+    title: 'Persistent AST graph',
+    body: 'An incremental syntax-tree graph is built on local disk. Agents resolve symbol relationships, import edges, and Git diffs by lookup instead of re-reading the tree on every request.',
+    facts: [
+      { k: 'Languages', v: 'Rust · TS · Python · Go' },
+      { k: 'Storage', v: 'Encrypted SQLite' },
+      { k: 'Refresh', v: 'Incremental' },
+    ],
+  },
+  {
+    kicker: 'Execution',
+    title: 'Native PTY sandbox',
+    body: 'Terminal sessions run inside asynchronous pseudo-terminal boundaries. Output is audited, and file-destructive operations stop for an explicit decision rather than proceeding on a heuristic.',
+    facts: [
+      { k: 'Shells', v: 'pwsh · bash · zsh' },
+      { k: 'Isolation', v: 'Per session' },
+      { k: 'Approval', v: 'Explicit' },
+    ],
+  },
+  {
+    kicker: 'Integrity',
+    title: 'Empirical verification',
+    body: 'Static analysis, lint, build, and unit suites gate every agent-authored change. The gate is fail-closed: a suite that cannot run counts as a suite that did not pass.',
+    facts: [
+      { k: 'Gate', v: 'Fail-closed' },
+      { k: 'Evidence', v: 'Logs retained' },
+      { k: 'Rollback', v: 'Deterministic' },
+    ],
+  },
+];
 
 export default function TechnologyPage() {
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-20 pb-20">
-      {/* HERO */}
-      <div className="text-center max-w-4xl mx-auto space-y-4 pt-6">
-        <div className="text-xs uppercase tracking-wider text-indigo-400 font-mono font-bold">
-          Technology Foundation
-        </div>
-        <h1 className="text-4xl sm:text-6xl font-extrabold text-white font-heading tracking-tight">
-          Intelligent systems built on rigorous software architecture.
-        </h1>
-        <p className="text-lg text-gray-300 max-w-3xl mx-auto leading-relaxed">
-          Corelith combines local-first AST indexing, parallel multi-agent orchestrators, native PTY terminal integration, and continuous empirical verification engines.
-        </p>
-      </div>
+    <>
+      <PageMasthead
+        kicker="Technology foundation"
+        title={
+          <>
+            Intelligent systems on <span className="flare">rigorous</span> architecture.
+          </>
+        }
+        deck="Local-first AST indexing, parallel agent orchestration, native terminal integration, and continuous verification — four engines, one boundary."
+        meta={[
+          { key: 'Index', value: 'Local, encrypted', accent: true },
+          { key: 'Runtime', value: 'Native PTY' },
+          { key: 'Egress', value: 'Strict proxy' },
+          { key: 'Telemetry', value: 'Opt-in only' },
+        ]}
+      />
 
-      {/* INTERACTIVE DIAGRAM */}
-      <section className="space-y-4 text-center">
-        <TechDiagram />
-      </section>
+      {/* ── Pipeline ─────────────────────────────────────────────────────── */}
+      <Band tone="panel" divider>
+        <SectionMark
+          index="01"
+          kicker="Execution pipeline"
+          title="Four stages, one boundary."
+          deck="Select a stage to inspect its isolation guarantees. Nothing crosses the local boundary to make any of it work."
+        />
 
-      {/* DETAILED PILLARS */}
-      <section className="grid grid-cols-1 md:grid-cols-3 gap-8">
-        <div className="corelith-card p-6 text-left space-y-3">
-          <div className="w-10 h-10 rounded-xl bg-indigo-600/10 border border-indigo-500/30 flex items-center justify-center text-indigo-400">
-            <Database className="w-5 h-5" />
-          </div>
-          <h3 className="text-lg font-bold text-white font-heading">
-            Persistent AST Memory Graph
-          </h3>
-          <p className="text-xs text-gray-400 leading-relaxed">
-            Our engines build an incremental abstract syntax tree (AST) graph locally on disk. Agents reference symbol relationships, import dependencies, and Git diffs without re-scanning files.
-          </p>
+        <div className="mt-14">
+          <TechDiagram />
         </div>
+      </Band>
 
-        <div className="corelith-card p-6 text-left space-y-3">
-          <div className="w-10 h-10 rounded-xl bg-cyan-600/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400">
-            <Terminal className="w-5 h-5" />
-          </div>
-          <h3 className="text-lg font-bold text-white font-heading">
-            Native PTY Shell Sandbox
-          </h3>
-          <p className="text-xs text-gray-400 leading-relaxed">
-            Embedded terminal sessions run inside asynchronous pseudo-terminal (PTY) boundaries. Command outputs are audited and filtered to prevent destructive file operations.
-          </p>
-        </div>
+      {/* ── Pillars ──────────────────────────────────────────────────────── */}
+      <Band tone="void">
+        <SectionMark
+          index="02"
+          kicker="Engine detail"
+          title="What each engine actually does."
+          deck="Three subsystems carry the weight. Everything else in Paralith is coordination around them."
+        />
 
-        <div className="corelith-card p-6 text-left space-y-3">
-          <div className="w-10 h-10 rounded-xl bg-emerald-600/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
-            <ShieldCheck className="w-5 h-5" />
-          </div>
-          <h3 className="text-lg font-bold text-white font-heading">
-            Empirical Verification
-          </h3>
-          <p className="text-xs text-gray-400 leading-relaxed">
-            Code changes must pass strict automated static analysis, linter checks, and unit test suites before landing in active workspaces.
-          </p>
+        <div className="mt-14 border-t border-[var(--hair-strong)]">
+          {PILLARS.map((pillar, i) => (
+            <article
+              key={pillar.title}
+              className="grid grid-cols-12 gap-x-8 gap-y-6 border-b border-[var(--hair)] py-10"
+            >
+              <div className="col-span-12 flex items-baseline gap-4 lg:col-span-3 lg:flex-col lg:gap-3">
+                <span aria-hidden="true" className="numeral text-lume text-xl lg:text-2xl">
+                  {String(i + 1).padStart(2, '0')}
+                </span>
+                <p className="stamp text-iris-lift">{pillar.kicker}</p>
+              </div>
+
+              <div className="col-span-12 lg:col-span-5">
+                <h3 className="text-lg lg:text-xl">{pillar.title}</h3>
+                <p className="text-mute mt-4 text-base">{pillar.body}</p>
+              </div>
+
+              <dl className="col-span-12 lg:col-span-3 lg:col-start-10">
+                {pillar.facts.map((fact) => (
+                  <div
+                    key={fact.k}
+                    className="flex items-baseline justify-between gap-4 border-b border-[var(--hair)] py-2.5 first:border-t"
+                  >
+                    <dt className="stamp text-faint">{fact.k}</dt>
+                    <dd className="text-lume font-mono text-xs">{fact.v}</dd>
+                  </div>
+                ))}
+              </dl>
+            </article>
+          ))}
         </div>
-      </section>
-    </div>
+      </Band>
+
+      <ClosingBand
+        title={
+          <>
+            The boundary is the <span className="flare">product</span>.
+          </>
+        }
+        body="Read how the same guarantees are enforced in distribution, disclosure, and day-to-day data handling."
+      >
+        <Link href="/security" className="btn btn-primary btn-lg">
+          Security posture
+          <span aria-hidden="true">→</span>
+        </Link>
+        <Link href="/products/paralith" className="btn btn-secondary btn-lg">
+          See it in Paralith
+        </Link>
+      </ClosingBand>
+    </>
   );
 }
