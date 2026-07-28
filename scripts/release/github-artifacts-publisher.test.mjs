@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   PUBLICATION_CONCURRENCY_GROUP,
   channelManifestUrl,
+  githubReleaseAssetName,
   publishPreparedRelease,
   releaseAssetBaseUrl,
   stagePublicationHandoff,
@@ -25,9 +26,9 @@ function manifest(overrides = {}) {
     notes: 'Signed one-click updates',
     pub_date: '2026-07-28T00:00:00Z',
     platforms: {
-      'windows-x86_64': { url: `${base}/PARALITH%20Preview_${version}_x64-setup.exe`, signature: 'sig' },
-      'windows-x86_64-nsis': { url: `${base}/PARALITH%20Preview_${version}_x64-setup.exe`, signature: 'sig' },
-      'windows-x86_64-msi': { url: `${base}/PARALITH%20Preview_${version}_x64_en-US.msi`, signature: 'sig' },
+      'windows-x86_64': { url: `${base}/PARALITH.Preview_${version}_x64-setup.exe`, signature: 'sig' },
+      'windows-x86_64-nsis': { url: `${base}/PARALITH.Preview_${version}_x64-setup.exe`, signature: 'sig' },
+      'windows-x86_64-msi': { url: `${base}/PARALITH.Preview_${version}_x64_en-US.msi`, signature: 'sig' },
     },
     paralith: { edition: 'preview', channel: 'preview', schemaVersion: 22 },
     ...overrides,
@@ -35,10 +36,10 @@ function manifest(overrides = {}) {
 }
 
 const artifacts = [
-  { name: `PARALITH Preview_${version}_x64-setup.exe`, bytes: Buffer.from('exe') },
-  { name: `PARALITH Preview_${version}_x64-setup.exe.sig`, bytes: Buffer.from('sig') },
-  { name: `PARALITH Preview_${version}_x64_en-US.msi`, bytes: Buffer.from('msi') },
-  { name: `PARALITH Preview_${version}_x64_en-US.msi.sig`, bytes: Buffer.from('sig') },
+  { name: `PARALITH.Preview_${version}_x64-setup.exe`, bytes: Buffer.from('exe') },
+  { name: `PARALITH.Preview_${version}_x64-setup.exe.sig`, bytes: Buffer.from('sig') },
+  { name: `PARALITH.Preview_${version}_x64_en-US.msi`, bytes: Buffer.from('msi') },
+  { name: `PARALITH.Preview_${version}_x64_en-US.msi.sig`, bytes: Buffer.from('sig') },
   { name: 'checksums.sha256', bytes: Buffer.from('checksums') },
   { name: 'release-manifest.json', bytes: Buffer.from('{}') },
   { name: 'release-notes.md', bytes: Buffer.from('# Notes') },
@@ -110,6 +111,16 @@ describe('public update repository contract', () => {
   it('builds public release and channel URLs without exposing the source repository', () => {
     expect(base).toBe(`https://github.com/${repository}/releases/download/${tag}`)
     expect(channelManifestUrl(repository, 'preview')).toBe(`https://raw.githubusercontent.com/${repository}/main/channels/preview/latest.json`)
+  })
+
+  it('canonicalizes filenames exactly as GitHub Release asset storage does', () => {
+    expect(githubReleaseAssetName(`PARALITH Preview_${version}_x64-setup.exe`))
+      .toBe(`PARALITH.Preview_${version}_x64-setup.exe`)
+    expect(validatePublicArtifactNames(artifacts.map((artifact) => artifact.name))).toEqual([])
+    expect(validatePublicArtifactNames([
+      ...artifacts.map((artifact) => artifact.name),
+      `PARALITH Preview_${version}_x64-setup.exe`,
+    ])).toContainEqual(expect.stringContaining('canonical GitHub Release filename'))
   })
 
   it('serializes Preview and Stable manifest publication through the shared workflow lock', async () => {

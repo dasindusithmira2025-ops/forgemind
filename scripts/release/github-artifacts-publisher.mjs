@@ -25,6 +25,12 @@ export function channelManifestUrl(repository, channel, branch = 'main') {
   return `https://raw.githubusercontent.com/${repository}/${encodeURIComponent(branch)}/channels/${channel}/latest.json`
 }
 
+export function githubReleaseAssetName(name) {
+  // GitHub replaces spaces with dots when it creates a Release asset. Canonicalize before hashing
+  // and manifest generation so the signed payload, public Release, and Firebase bridge share a URL.
+  return name.replaceAll(' ', '.')
+}
+
 export function validatePublicArtifactNames(names) {
   const problems = []
   const unique = new Set()
@@ -33,6 +39,9 @@ export function validatePublicArtifactNames(names) {
     if (name !== basename(name) || name.includes('/') || name.includes('\\')) {
       problems.push(`artifact "${name}" is not a flat filename`)
       continue
+    }
+    if (githubReleaseAssetName(name) !== name) {
+      problems.push(`artifact "${name}" is not a canonical GitHub Release filename`)
     }
     if (unique.has(name)) problems.push(`artifact "${name}" is duplicated`)
     unique.add(name)
