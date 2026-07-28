@@ -24,7 +24,7 @@ export const companyData = {
       title: 'Security by design',
       subtitle: 'LOCAL-FIRST TRUST',
       description:
-        'Treat user privacy and code isolation as non-negotiable foundations. Local storage, air-gapped support, data minimization, and encrypted pipelines come standard across our product suite.',
+        'Treat user privacy and code isolation as non-negotiable foundations. Local storage, air-gapped support, data minimization, and encrypted pipelines come standard in Paralith.',
     },
     {
       title: 'Performance as a primary feature',
@@ -58,14 +58,14 @@ export const companyData = {
         'Native desktop tools, low-latency terminal integration, multi-window layout engines, and cross-platform native binaries.',
     },
     {
-      category: 'System Performance Engineering',
+      category: 'Verification & Code Integrity',
       description:
-        'Hardware-aware OS scheduling, I/O latency reduction, safe memory management, and baseline benchmark tracking.',
+        'Automated static analysis, test suite orchestration, reproducible build checks, and auditable change history for every agent edit.',
     },
     {
-      category: 'Enterprise Operations Software',
+      category: 'Local-First Security Engineering',
       description:
-        'Multi-tenant entity governance, immutable audit logging, role-based security access, and financial reporting workflows.',
+        'On-device project memory, sandboxed command execution, strict outbound network controls, and cryptographically signed releases.',
     },
   ],
 };

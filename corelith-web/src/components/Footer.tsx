@@ -31,7 +31,7 @@ export function Footer() {
           {/* Products Column */}
           <div className="md:col-span-3 space-y-3">
             <h3 className="text-xs uppercase tracking-wider text-white font-mono font-semibold">
-              Software Products
+              Paralith
             </h3>
             <ul className="space-y-2">
               {footerLinks.products.map((link) => (

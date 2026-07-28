@@ -11,6 +11,18 @@ const nextConfig: NextConfig = {
     root: path.resolve(import.meta.dirname),
   },
   outputFileTracingRoot: path.resolve(import.meta.dirname),
+
+  // Paralith is the only product, so there is no portfolio index to land on. Anything still
+  // pointing at /products (old links, search results) goes straight to the product page.
+  async redirects() {
+    return [
+      {
+        source: '/products',
+        destination: '/products/paralith',
+        permanent: true,
+      },
+    ];
+  },
 };
 
 export default nextConfig;

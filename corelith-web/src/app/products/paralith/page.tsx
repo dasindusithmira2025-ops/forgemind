@@ -51,7 +51,7 @@ export default function ParalithPage() {
 
         {/* Download Selector Component */}
         {product.downloads && (
-          <div className="pt-6">
+          <div id="download" className="pt-6 scroll-mt-28">
             <DownloadSelector productName={product.name} downloads={product.downloads} />
           </div>
         )}
