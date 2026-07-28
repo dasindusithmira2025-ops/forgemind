@@ -1,37 +1,64 @@
 name: Validate
 
+# Cost-shaped validation. Everything that is not genuinely Windows-specific runs on
+# `ubuntu-latest` (1x billing multiplier); `windows-latest` (2x) is reserved for the Tauri
+# Windows compilation and the Windows-only runtime behaviour of the PTY/process layer.
+#
+# The Windows job is gated behind the Linux jobs, so a lint or type error never spends a
+# single 2x minute.
+
 on:
   pull_request:
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'LICENSE'
+      - '.gitignore'
   push:
-    branches: [main, integration]
+    branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'LICENSE'
+      - '.gitignore'
   workflow_call:
+    inputs:
+      full:
+        description: >-
+          Run the Windows compilation job in addition to the Linux checks. Release workflows
+          must leave this at `true`; the post-merge guard on `main` runs Linux-only.
+        type: boolean
+        default: true
 
 permissions:
   contents: read
 
+# Superseded validation is wasted money: a new push to the same ref cancels the previous run.
 concurrency:
   group: validate-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  NODE_VERSION: '22'
+
 jobs:
-  validate:
-    runs-on: windows-latest
-    timeout-minutes: 45
+  # ---------------------------------------------------------------------------------------
+  # Linux, 1x. Lint, types, frontend tests, production bundle, generated-file drift.
+  # ---------------------------------------------------------------------------------------
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: ${{ env.NODE_VERSION }}
           cache: npm
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
       - run: npm ci
+
       - name: Canonical release metadata
         run: npm run release:check
       - name: TypeScript
@@ -42,6 +69,60 @@ jobs:
         run: npm test -- --run
       - name: Production frontend build
         run: npm run build
+
+      - name: Generated files and clean diff
+        run: |
+          npm run release:sync
+          git diff --exit-code -- package.json src-tauri/Cargo.toml src-tauri/tauri.conf.json release/generated/current-release.json
+
+      # `tauri::generate_context!` embeds `frontendDist`, so every Rust job needs a real bundle.
+      # Building it once here keeps the Windows job from re-running the whole frontend at 2x.
+      - name: Upload frontend bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ github.run_id }}
+          path: dist
+          if-no-files-found: error
+          retention-days: 1
+
+  # ---------------------------------------------------------------------------------------
+  # Linux, 1x. Formatting, clippy, and the full Rust suite. Every Windows-specific path in
+  # this crate is `#[cfg]`-gated with a `not(windows)` counterpart, so the suite is portable.
+  # ---------------------------------------------------------------------------------------
+  rust:
+    name: Rust (Linux)
+    runs-on: ubuntu-latest
+    needs: frontend
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      # Tauri's Linux backend links against WebKitGTK; without these the crate cannot build.
+      - name: Install Tauri Linux system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev \
+            libjavascriptcoregtk-4.1-dev \
+            libsoup-3.0-dev \
+            libgtk-3-dev \
+            librsvg2-dev \
+            patchelf
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          prefix-key: v1-linux
+
+      - name: Restore frontend bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: dist-${{ github.run_id }}
+          path: dist
+
       - name: Rust formatting
         working-directory: src-tauri
         run: cargo fmt --all -- --check
@@ -51,15 +132,49 @@ jobs:
       - name: Rust and migration tests
         working-directory: src-tauri
         run: cargo test --all-targets --all-features
-      - name: Tauri compilation
+
+  # ---------------------------------------------------------------------------------------
+  # Windows, 2x. Only what genuinely cannot be proven on Linux:
+  #   * the Windows Tauri compilation (WebView2, windows-sys, the `#[cfg(windows)]` arms)
+  #   * the lib unit tests, which parameterise onto cmd.exe / powershell.exe and exercise the
+  #     real ConPTY spawn path rather than the /bin/sh arm covered on Linux
+  # Gated on both Linux jobs so 2x minutes are only ever spent on an otherwise-green tree.
+  # ---------------------------------------------------------------------------------------
+  windows:
+    name: Windows (Tauri compile + smoke)
+    runs-on: windows-latest
+    needs: [frontend, rust]
+    # Direct pushes to `main` arrive via an already-validated PR, so they get the Linux guard
+    # only. Release workflows call this workflow with `full: true` and always compile.
+    if: github.event_name != 'push' || inputs.full
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          prefix-key: v1-windows
+      - run: npm ci
+
+      - name: Restore frontend bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: dist-${{ github.run_id }}
+          path: dist
+
+      - name: Windows smoke tests
+        working-directory: src-tauri
+        run: cargo test --lib --all-features
+
+      - name: Tauri Windows compilation
         shell: pwsh
-        run: |
-          $env:PARALITH_EDITION='stable'
-          $env:PARALITH_RELEASE_CHANNEL='stable'
-          $env:PARALITH_UPDATE_ENDPOINT='https://updates.invalid/paralith/stable/latest.json'
-          npm run tauri -- build --no-bundle --config src-tauri/tauri.stable.conf.json
-      - name: Generated files and clean diff
-        shell: pwsh
-        run: |
-          npm run release:sync
-          git diff --exit-code -- package.json src-tauri/Cargo.toml src-tauri/tauri.conf.json release/generated/current-release.json
+        env:
+          PARALITH_EDITION: stable
+          PARALITH_RELEASE_CHANNEL: stable
+          PARALITH_UPDATE_ENDPOINT: https://updates.invalid/paralith/stable/latest.json
+        run: npm run tauri -- build --no-bundle --config src-tauri/tauri.stable.conf.json

@@ -13,6 +13,9 @@
 //! not be recoloured is still a perfectly usable window, so nothing here returns an error.
 
 /// The frame colours for one window, as `#rrggbb` strings taken from the active theme.
+// Only the Windows DWM backend reads these fields; the no-op backend on every other target
+// ignores them, which would otherwise make the whole struct look dead.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WindowChrome {

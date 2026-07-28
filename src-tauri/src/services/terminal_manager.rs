@@ -746,6 +746,9 @@ impl TerminalManager {
         }
         handle.cancelled.store(true, Ordering::Release);
         handle.metadata.write().status = "terminating".into();
+        // Only the Windows tree-kill below reads this; binding it unconditionally makes the
+        // variable dead on every other target.
+        #[cfg(windows)]
         let process_id = handle.metadata.read().process_id;
 
         // On Windows a coding agent (e.g. node.exe) spawns a whole subtree that

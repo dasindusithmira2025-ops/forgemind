@@ -4764,9 +4764,22 @@ impl SwarmService {
 }
 
 fn is_safe_project_relative(value: &str) -> bool {
-    let path = Path::new(value);
-    !value.trim().is_empty()
-        && !path.is_absolute()
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    // Task paths are agent-authored strings, not host paths, so this guard must not inherit the
+    // host's path syntax — otherwise the identical task spec is an escape on one target and a
+    // plain filename on another. `Path` only treats `C:\…` as absolute and `\` as a separator when
+    // it is compiled for Windows, so both are handled explicitly here instead.
+    let mut chars = trimmed.chars();
+    if matches!((chars.next(), chars.next()), (Some(drive), Some(':')) if drive.is_ascii_alphabetic())
+    {
+        return false;
+    }
+    let normalized = trimmed.replace('\\', "/");
+    let path = Path::new(&normalized);
+    !path.is_absolute()
         && path
             .components()
             .all(|component| matches!(component, Component::Normal(_)))

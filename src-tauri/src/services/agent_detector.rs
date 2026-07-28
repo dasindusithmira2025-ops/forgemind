@@ -333,6 +333,8 @@ fn stable_profile_id(name: &str, executable_path: &str, args: &[String]) -> Stri
     format!("detected-{hash:016x}")
 }
 
+// `wsl.exe` only exists on Windows, and the sole caller sits in a `#[cfg(windows)]` block.
+#[cfg(windows)]
 fn wsl_distributions(wsl: &Path) -> Vec<String> {
     // Hidden probe: a plain spawn from the GUI-subsystem app pops a visible console window.
     let mut child = match background_command(wsl)
@@ -370,6 +372,9 @@ fn wsl_distributions(wsl: &Path) -> Vec<String> {
         .collect()
 }
 
+// Off Windows the only caller is the encoding unit test, which is deliberately cross-platform —
+// the UTF-16 decoding is pure byte logic and is worth proving on every runner.
+#[cfg_attr(not(windows), allow(dead_code))]
 fn decode_wsl_output(bytes: &[u8]) -> String {
     let looks_utf16 = bytes.starts_with(&[0xff, 0xfe])
         || bytes.iter().filter(|byte| **byte == 0).count() > bytes.len() / 4;

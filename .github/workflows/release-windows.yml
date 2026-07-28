@@ -13,9 +13,17 @@ on:
 permissions:
   contents: write
 
+# A release publishes artifacts and mutates an updater manifest. Never cancel one in flight — a
+# half-published manifest is worse than a queued one — so this lock serialises instead.
+concurrency:
+  group: release-windows-${{ inputs.edition }}-${{ inputs.tag }}
+  cancel-in-progress: false
+
 jobs:
   validate:
     uses: ./.github/workflows/ci.yml
+    with:
+      full: true
   release:
     needs: validate
     runs-on: windows-latest
@@ -35,19 +43,12 @@ jobs:
         with:
           workspaces: src-tauri
       - run: npm ci
+      # The lint/type/test/clippy suite already ran in the `validate` job this job depends on —
+      # re-running it here duplicated the entire suite at the 2x Windows rate. Only the
+      # release-identity checks, which are meaningless outside a tagged checkout, remain.
       - name: Validate protected release tag
         shell: pwsh
-        run: |
-          npm run release:check
-          npm run typecheck
-          npm run lint
-          npm test -- --run
-          npm run build
-          Push-Location src-tauri
-          cargo fmt --all -- --check
-          cargo clippy --all-targets --all-features -- -D warnings
-          cargo test --all-targets --all-features
-          Pop-Location
+        run: npm run release:check
       - name: Verify clean tagged source and release identity
         shell: pwsh
         run: |

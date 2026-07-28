@@ -6,13 +6,12 @@ name: Release Internal
 # required. Stable customers are never affected — they read a different edition/endpoint and only
 # receive tag-driven `stable-v*` releases (see release-stable.yml).
 
+# Deliberately NOT triggered by every push to `main`. Cutting a signed Windows build per merge
+# consumed the bulk of this account's Actions allowance while most merges never needed to reach a
+# tester. Internal delivery is now an explicit act: dispatch this workflow when you actually want
+# installed internal builds to move forward. Everything downstream is unchanged — the run still
+# generates its own ephemeral version, so no tagging or version editing is required.
 on:
-  push:
-    branches: [main]
-    # Skip pushes that only touch docs/CI so we don't cut a build with no user-facing change.
-    paths-ignore:
-      - '**/*.md'
-      - 'docs/**'
   workflow_dispatch:
 
 permissions:
@@ -30,8 +29,11 @@ concurrency:
 
 jobs:
   # Full CI gate — a failed check here prevents the release job from ever running.
+  # `full: true` forces the Windows compilation job; a release must never ship on Linux-only proof.
   validate:
     uses: ./.github/workflows/ci.yml
+    with:
+      full: true
 
   release:
     needs: validate
