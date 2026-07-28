@@ -1,4 +1,5 @@
-import { readFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import {
@@ -6,8 +7,10 @@ import {
   channelManifestUrl,
   publishPreparedRelease,
   releaseAssetBaseUrl,
+  stagePublicationHandoff,
   validateGithubManifest,
   validatePublicArtifactNames,
+  verifyAnonymousPublication,
 } from './github-artifacts-publisher.mjs'
 import { invalidPublishConfiguration, missingPublishKeys } from './preflight-publish.mjs'
 
@@ -82,7 +85,7 @@ async function publish(client, next = manifest()) {
 }
 
 describe('public update repository contract', () => {
-  it('requires the scoped cross-repository token and both canonical/bridge endpoints', () => {
+  it('accepts either scoped API publication or a repository deploy key', () => {
     const env = {
       TAURI_SIGNING_PRIVATE_KEY: 'signing-key',
       PARALITH_PREVIEW_UPDATE_ENDPOINT: channelManifestUrl(repository, 'preview'),
@@ -99,7 +102,9 @@ describe('public update repository contract', () => {
     }
     expect(missingPublishKeys(env)).toEqual([])
     expect(invalidPublishConfiguration(env, { version: '0.4.1-1001', schemaVersion: 22 })).toEqual([])
-    expect(missingPublishKeys({ ...env, PARALITH_UPDATES_TOKEN: '' })).toContain('PARALITH_UPDATES_TOKEN')
+    expect(missingPublishKeys({ ...env, PARALITH_UPDATES_TOKEN: '', PARALITH_UPDATES_DEPLOY_KEY: 'key' })).toEqual([])
+    expect(missingPublishKeys({ ...env, PARALITH_UPDATES_TOKEN: '', PARALITH_UPDATES_DEPLOY_KEY: '' }))
+      .toContain('PARALITH_UPDATES_TOKEN or PARALITH_UPDATES_DEPLOY_KEY')
   })
 
   it('builds public release and channel URLs without exposing the source repository', () => {
@@ -137,6 +142,48 @@ describe('public update repository contract', () => {
       expect.stringContaining('edition'),
       expect.stringContaining('does not reference release'),
     ]))
+  })
+
+  it('stages only a validated public release handoff', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'paralith-handoff-'))
+    const source = join(root, 'source')
+    const destination = join(root, 'destination')
+    await mkdir(source)
+    for (const artifact of [...artifacts, { name: 'latest.json', bytes: Buffer.from(JSON.stringify(manifest())) }]) {
+      await writeFile(join(source, artifact.name), artifact.bytes)
+    }
+    const request = await stagePublicationHandoff({
+      repository,
+      tag,
+      channel: 'preview',
+      version,
+      sourceDirectory: source,
+      destinationDirectory: destination,
+    })
+    expect(request).toMatchObject({ schemaVersion: 1, repository, tag, channel: 'preview', version, prerelease: true })
+    expect(request.manifestSha256).toMatch(/^[a-f0-9]{64}$/)
+    expect(JSON.parse(await readFile(join(destination, 'request.json'), 'utf8'))).toEqual(request)
+  })
+
+  it('waits for and anonymously verifies the public handoff result', async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(new Response('not found', { status: 404 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(manifest()), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }))
+      .mockResolvedValueOnce(new Response('', {
+        status: 200,
+        headers: { 'content-length': '100' },
+      }))
+    await expect(verifyAnonymousPublication({
+      repository,
+      channel: 'preview',
+      version,
+      fetchImpl,
+      attempts: 2,
+      delay: vi.fn(),
+    })).resolves.toMatchObject({ version })
   })
 })
 

@@ -21,8 +21,14 @@ export function missingPublishKeys(env) {
   const missing = REQUIRED.filter((key) => !env[key] || String(env[key]).trim() === '')
   const provider = String(env.PARALITH_UPDATE_PUBLISH_PROVIDER || '').trim()
   if (provider === 'github-artifacts') {
-    for (const key of ['PARALITH_UPDATES_REPOSITORY', 'PARALITH_UPDATES_TOKEN', 'PARALITH_PREVIEW_BRIDGE_ENDPOINT', 'FIREBASE_PROJECT_ID', 'FIREBASE_HOSTING_SITE', 'GITHUB_REPOSITORY', 'PARALITH_INTERNAL_BUILD_NUMBER']) {
+    for (const key of ['PARALITH_UPDATES_REPOSITORY', 'PARALITH_PREVIEW_BRIDGE_ENDPOINT', 'FIREBASE_PROJECT_ID', 'FIREBASE_HOSTING_SITE', 'GITHUB_REPOSITORY', 'PARALITH_INTERNAL_BUILD_NUMBER']) {
       if (!env[key] || String(env[key]).trim() === '') missing.push(key)
+    }
+    if (
+      !String(env.PARALITH_UPDATES_TOKEN || '').trim()
+      && !String(env.PARALITH_UPDATES_DEPLOY_KEY || '').trim()
+    ) {
+      missing.push('PARALITH_UPDATES_TOKEN or PARALITH_UPDATES_DEPLOY_KEY')
     }
     const hasWif = Boolean(String(env.GCP_WORKLOAD_IDENTITY_PROVIDER || '').trim() && String(env.GCP_SERVICE_ACCOUNT || '').trim())
     const hasServiceAccount = Boolean(String(env.FIREBASE_SERVICE_ACCOUNT_JSON || '').trim())

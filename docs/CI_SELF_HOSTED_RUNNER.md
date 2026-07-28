@@ -352,10 +352,12 @@ https://firebase.google.com/support/faq#hosting-exe-restrictions
 
 Signed MSI/NSIS updater payloads now publish as anonymous GitHub Release assets in the public,
 artifact-only `dasindusithmira2025-ops/paralith-updates` repository. Channel manifests activate
-through an optimistic Contents API write only after anonymous payload verification. Firebase keeps
-only a JSON compatibility manifest for installed Preview `0.4.1-1023`; Spark therefore never sees
-an executable.
+through an optimistic blob-SHA-checked commit only after anonymous payload verification. Firebase
+keeps only a JSON compatibility manifest for installed Preview `0.4.1-1023`; Spark therefore never
+sees an executable.
 
-The remaining administrator step is to provision `PARALITH_UPDATES_TOKEN` in the Preview and Stable
-release environments. It must be a fine-grained credential limited to Contents and Releases writes
-in `paralith-updates`. Do not reuse a broad personal token or expose it to application builds.
+Provision `PARALITH_UPDATES_DEPLOY_KEY` in the Preview and Stable release environments from a
+write-enabled deploy key attached only to `paralith-updates`. The private workflow can then stage a
+validated publication batch, while the public repository's own Actions token creates Releases and
+activates manifests. Do not reuse a broad personal token or expose the deploy key to application
+builds.

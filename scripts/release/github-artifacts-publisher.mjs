@@ -1,4 +1,5 @@
-import { readFile, readdir, stat } from 'node:fs/promises'
+import { copyFile, mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
 import { basename, join } from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
@@ -71,6 +72,77 @@ export function assertVersionAdvances(currentManifest, nextManifest) {
   if (comparePrecedence(nextManifest.version, currentManifest.version) <= 0) {
     throw new Error(`refusing to replace ${currentManifest.version} with non-advancing ${nextManifest.version}`)
   }
+}
+
+export async function stagePublicationHandoff({
+  repository,
+  tag,
+  channel,
+  version,
+  sourceDirectory,
+  destinationDirectory,
+}) {
+  const artifacts = await loadArtifacts(sourceDirectory)
+  const problems = validatePublicArtifactNames(artifacts.map((artifact) => artifact.name))
+  if (problems.length) throw new Error(problems.join('; '))
+
+  const manifestArtifact = artifacts.find((artifact) => artifact.name === 'latest.json')
+  if (!manifestArtifact) throw new Error('latest.json is required for publication handoff')
+  let manifest
+  try {
+    manifest = JSON.parse(manifestArtifact.bytes.toString('utf8'))
+  } catch (error) {
+    throw new Error(`latest.json is malformed: ${error.message}`)
+  }
+  const manifestProblems = validateGithubManifest(manifest, { repository, tag, channel, version })
+  if (manifestProblems.length) throw new Error(manifestProblems.join('; '))
+
+  await mkdir(destinationDirectory, { recursive: true })
+  for (const artifact of artifacts) {
+    await copyFile(join(sourceDirectory, artifact.name), join(destinationDirectory, artifact.name))
+  }
+  const request = {
+    schemaVersion: 1,
+    repository,
+    tag,
+    channel,
+    version,
+    title: `PARALITH ${channel === 'stable' ? 'Stable' : 'Preview'} ${version}`,
+    prerelease: channel === 'preview',
+    manifestSha256: createHash('sha256').update(manifestArtifact.bytes).digest('hex'),
+  }
+  await writeFile(join(destinationDirectory, 'request.json'), `${JSON.stringify(request, null, 2)}\n`)
+  return request
+}
+
+export async function verifyAnonymousPublication({
+  repository,
+  channel,
+  version,
+  fetchImpl = fetch,
+  attempts = 60,
+  delay = () => new Promise((resolve) => setTimeout(resolve, 10_000)),
+}) {
+  const endpoint = channelManifestUrl(repository, channel)
+  let lastError
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      const response = await fetchImpl(`${endpoint}?release=${encodeURIComponent(version)}&attempt=${attempt}`, {
+        redirect: 'follow',
+        cache: 'no-store',
+      })
+      await requireResponse(response, [200], 'anonymous channel manifest verification')
+      const manifest = await response.json()
+      const problems = validateManifest(manifest, { expectedVersion: version, edition: channel })
+      if (problems.length) throw new Error(problems.join('; '))
+      await fetchArtifact(manifest.platforms['windows-x86_64'].url, fetchImpl)
+      return manifest
+    } catch (error) {
+      lastError = error
+      if (attempt < attempts) await delay(attempt)
+    }
+  }
+  throw new Error(`anonymous ${channel} verification failed after ${attempts} attempts: ${lastError.message}`)
 }
 
 export async function publishPreparedRelease({
@@ -337,11 +409,40 @@ async function loadArtifacts(directory) {
 }
 
 async function main() {
-  const [command, channel, tag, sourceDirectory, version] = process.argv.slice(2)
-  if (command !== 'publish' || !['preview', 'stable'].includes(channel) || !tag || !sourceDirectory || !version) {
-    throw new Error('usage: github-artifacts-publisher publish <preview|stable> <tag> <release-directory> <version>')
+  const [command, channel, ...args] = process.argv.slice(2)
+  if (!['preview', 'stable'].includes(channel)) {
+    throw new Error('channel must be preview or stable')
   }
   const repository = process.env.PARALITH_UPDATES_REPOSITORY
+  if (command === 'stage') {
+    const [tag, sourceDirectory, version, destinationDirectory] = args
+    if (!tag || !sourceDirectory || !version || !destinationDirectory) {
+      throw new Error('usage: github-artifacts-publisher stage <preview|stable> <tag> <release-directory> <version> <destination-directory>')
+    }
+    const request = await stagePublicationHandoff({
+      repository,
+      tag,
+      channel,
+      version,
+      sourceDirectory,
+      destinationDirectory,
+    })
+    console.log(`Staged ${request.channel} ${request.version} for scoped deploy-key publication.`)
+    return
+  }
+  if (command === 'verify') {
+    const [version] = args
+    if (!version) {
+      throw new Error('usage: github-artifacts-publisher verify <preview|stable> <version>')
+    }
+    await verifyAnonymousPublication({ repository, channel, version })
+    console.log(`Anonymously verified ${channel} ${version} through ${repository}.`)
+    return
+  }
+  const [tag, sourceDirectory, version] = args
+  if (command !== 'publish' || !tag || !sourceDirectory || !version) {
+    throw new Error('usage: github-artifacts-publisher publish <preview|stable> <tag> <release-directory> <version>')
+  }
   const token = process.env.PARALITH_UPDATES_TOKEN
   const artifacts = await loadArtifacts(sourceDirectory)
   const manifestBytes = await readFile(join(sourceDirectory, 'latest.json'))

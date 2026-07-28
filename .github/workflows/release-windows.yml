@@ -66,12 +66,13 @@ jobs:
           PARALITH_UPDATE_PUBLISH_PROVIDER: ${{ vars.PARALITH_UPDATE_PUBLISH_PROVIDER }}
           PARALITH_UPDATES_REPOSITORY: ${{ vars.PARALITH_UPDATES_REPOSITORY }}
           PARALITH_UPDATES_TOKEN: ${{ secrets.PARALITH_UPDATES_TOKEN }}
+          PARALITH_UPDATES_DEPLOY_KEY: ${{ secrets.PARALITH_UPDATES_DEPLOY_KEY }}
           PARALITH_STABLE_UPDATE_ENDPOINT: ${{ vars.PARALITH_STABLE_UPDATE_ENDPOINT }}
           PARALITH_PREVIEW_UPDATE_ENDPOINT: ${{ vars.PARALITH_PREVIEW_UPDATE_ENDPOINT }}
         run: |
           if ($env:PARALITH_UPDATE_PUBLISH_PROVIDER -ne 'github-artifacts') { throw 'Protected channel releases require PARALITH_UPDATE_PUBLISH_PROVIDER=github-artifacts.' }
           if (-not $env:PARALITH_UPDATES_REPOSITORY) { throw 'PARALITH_UPDATES_REPOSITORY is required.' }
-          if (-not $env:PARALITH_UPDATES_TOKEN) { throw 'PARALITH_UPDATES_TOKEN is required.' }
+          if (-not $env:PARALITH_UPDATES_TOKEN -and -not $env:PARALITH_UPDATES_DEPLOY_KEY) { throw 'PARALITH_UPDATES_TOKEN or PARALITH_UPDATES_DEPLOY_KEY is required.' }
           $endpoint = if ('${{ inputs.edition }}' -eq 'stable') { $env:PARALITH_STABLE_UPDATE_ENDPOINT } else { $env:PARALITH_PREVIEW_UPDATE_ENDPOINT }
           $expected = "https://raw.githubusercontent.com/$env:PARALITH_UPDATES_REPOSITORY/main/channels/${{ inputs.edition }}/latest.json"
           if ($endpoint -ne $expected) { throw "The ${{ inputs.edition }} endpoint must be the public channel manifest URL." }
@@ -149,9 +150,14 @@ jobs:
         env:
           PARALITH_UPDATES_REPOSITORY: ${{ vars.PARALITH_UPDATES_REPOSITORY }}
           PARALITH_UPDATES_TOKEN: ${{ secrets.PARALITH_UPDATES_TOKEN }}
+          PARALITH_UPDATES_DEPLOY_KEY: ${{ secrets.PARALITH_UPDATES_DEPLOY_KEY }}
         run: |
           $dir = Get-ChildItem '.artifacts/release/${{ inputs.edition }}' -Directory | Select-Object -First 1
-          node scripts/release/github-artifacts-publisher.mjs publish '${{ inputs.edition }}' '${{ inputs.tag }}' "$($dir.FullName)" "$($dir.Name)"
+          if ($env:PARALITH_UPDATES_DEPLOY_KEY) {
+            pwsh -NoProfile -File scripts/release/push-publication-handoff.ps1 -Channel '${{ inputs.edition }}' -Tag '${{ inputs.tag }}' -SourceDirectory "$($dir.FullName)" -Version "$($dir.Name)"
+          } else {
+            node scripts/release/github-artifacts-publisher.mjs publish '${{ inputs.edition }}' '${{ inputs.tag }}' "$($dir.FullName)" "$($dir.Name)"
+          }
 
       - name: Clean up abandoned build processes
         if: always()

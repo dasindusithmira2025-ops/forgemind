@@ -7,7 +7,7 @@ Versioned binaries are immutable GitHub Release assets. The discoverable manifes
 - Preview: `https://raw.githubusercontent.com/dasindusithmira2025-ops/paralith-updates/main/channels/preview/latest.json`
 - Stable: `https://raw.githubusercontent.com/dasindusithmira2025-ops/paralith-updates/main/channels/stable/latest.json`
 
-The publisher uploads every signed payload, proves anonymous reachability, then updates only the selected channel manifest through the GitHub Contents API using the current blob SHA. A stale or concurrent activation fails instead of overwriting a newer manifest. The private source-repository release remains the authenticated engineering archive.
+The private workflow validates each signed payload and pushes a publication batch with a repository-scoped deploy key. The public repository's own workflow creates the GitHub Release, proves anonymous reachability, then updates only the selected channel manifest after comparing the current blob SHA. A stale or concurrent activation fails instead of overwriting a newer manifest. The private source-repository release remains the authenticated engineering archive.
 
 ## Editions and data isolation
 
@@ -43,7 +43,7 @@ Required GitHub Actions configuration:
 - Variable `PARALITH_PREVIEW_UPDATE_ENDPOINT`: Preview HTTPS `latest.json` URL.
 - Variable `PARALITH_UPDATES_REPOSITORY`: `dasindusithmira2025-ops/paralith-updates`.
 - Variable `PARALITH_UPDATE_PUBLISH_PROVIDER`: `github-artifacts`.
-- Secret `PARALITH_UPDATES_TOKEN`: fine-grained token limited to Contents and Releases write access in `paralith-updates`. It is used only by release jobs and is never bundled.
+- Secret `PARALITH_UPDATES_DEPLOY_KEY`: private half of a write-enabled deploy key attached only to `paralith-updates`. The source workflow can stage publication batches but cannot use it to read the private source repository or access any other repository. A fine-grained `PARALITH_UPDATES_TOKEN` with Contents and Releases write access remains supported as a fallback.
 - Variable `PARALITH_PREVIEW_BRIDGE_ENDPOINT`: `https://corelith-paralith-updates.web.app/preview/latest.json`, retained only for the installed `0.4.1-1023` migration bridge.
 - Variable `PARALITH_UPDATE_ARTIFACT_BASE_URL`: legacy static-host provider input. GitHub publication derives the versioned Release URL inside the workflow.
 - Secret `PARALITH_UPDATE_PUBLISH_TARGET`: provider destination. It may contain private infrastructure routing but must not be bundled.
@@ -140,7 +140,7 @@ Stable follows the same one-time bootstrap using a `stable` build; after that, `
 
 ## Testing the push-to-main automatic flow
 
-1. Configure the `preview-release` environment with the signing key, public manifest endpoint, `PARALITH_UPDATES_REPOSITORY`, narrowly scoped `PARALITH_UPDATES_TOKEN`, `PARALITH_UPDATE_PUBLISH_PROVIDER=github-artifacts`, bridge endpoint, and Firebase WIF variables (or the service-account fallback) listed above.
+1. Configure the `preview-release` environment with the signing key, public manifest endpoint, `PARALITH_UPDATES_REPOSITORY`, repository-scoped `PARALITH_UPDATES_DEPLOY_KEY`, `PARALITH_UPDATE_PUBLISH_PROVIDER=github-artifacts`, bridge endpoint, and Firebase WIF variables (or the service-account fallback) listed above.
 2. Push a trivial change to `main`.
 3. Watch **Actions → Release Internal**: validation runs before the signed build, public payload verification, optimistic manifest activation, and Firebase JSON bridge.
 4. On installed Preview `0.4.1-1023`, confirm the bridge discovers the release, **Update now** shows real progress, signature verification succeeds, the safe-restart gate is respected, and the restarted application confirms a healthy database and workspace state.

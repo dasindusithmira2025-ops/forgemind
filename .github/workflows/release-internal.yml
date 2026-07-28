@@ -98,6 +98,7 @@ jobs:
           PARALITH_UPDATE_PUBLISH_PROVIDER: ${{ vars.PARALITH_UPDATE_PUBLISH_PROVIDER }}
           PARALITH_UPDATES_REPOSITORY: ${{ vars.PARALITH_UPDATES_REPOSITORY }}
           PARALITH_UPDATES_TOKEN: ${{ secrets.PARALITH_UPDATES_TOKEN }}
+          PARALITH_UPDATES_DEPLOY_KEY: ${{ secrets.PARALITH_UPDATES_DEPLOY_KEY }}
           PARALITH_PREVIEW_BRIDGE_ENDPOINT: ${{ vars.PARALITH_PREVIEW_BRIDGE_ENDPOINT }}
           FIREBASE_PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID }}
           FIREBASE_HOSTING_SITE: ${{ vars.FIREBASE_HOSTING_SITE }}
@@ -209,9 +210,14 @@ jobs:
         env:
           PARALITH_UPDATES_REPOSITORY: ${{ vars.PARALITH_UPDATES_REPOSITORY }}
           PARALITH_UPDATES_TOKEN: ${{ secrets.PARALITH_UPDATES_TOKEN }}
+          PARALITH_UPDATES_DEPLOY_KEY: ${{ secrets.PARALITH_UPDATES_DEPLOY_KEY }}
         run: |
           $dir = Get-ChildItem '.artifacts/release/preview' -Directory | Select-Object -First 1
-          node scripts/release/github-artifacts-publisher.mjs publish preview "${{ steps.version.outputs.tag }}" "$($dir.FullName)" "${{ steps.version.outputs.version }}"
+          if ($env:PARALITH_UPDATES_DEPLOY_KEY) {
+            pwsh -NoProfile -File scripts/release/push-publication-handoff.ps1 -Channel preview -Tag "${{ steps.version.outputs.tag }}" -SourceDirectory "$($dir.FullName)" -Version "${{ steps.version.outputs.version }}"
+          } else {
+            node scripts/release/github-artifacts-publisher.mjs publish preview "${{ steps.version.outputs.tag }}" "$($dir.FullName)" "${{ steps.version.outputs.version }}"
+          }
 
       - name: Authenticate to Google Cloud with Workload Identity Federation
         if: vars.GCP_WORKLOAD_IDENTITY_PROVIDER != '' && vars.GCP_SERVICE_ACCOUNT != ''
