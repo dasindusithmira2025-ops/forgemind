@@ -320,7 +320,26 @@ Still open, and unchanged by this work:
 - custom update manifests or a redesigned updater;
 - migrating away from GitHub Releases.
 
-Known external blocker: the Firebase Hosting deploy for Preview requires the
-`corelithwebsite` project on the **Blaze** plan. Spark rejects `.exe`/`.msi` uploads, so the
-Firebase publish steps of Release Internal cannot succeed until that upgrade happens. That is a
-billing action outside this repository.
+### Known external blocker — Firebase Spark plan
+
+The Firebase Hosting deploy for Preview requires the `corelithwebsite` project on the **Blaze**
+plan. Confirmed on the self-hosted runner in run
+[30336795016](https://github.com/dasindusithmira2025-ops/forgemind/actions/runs/30336795016),
+step *Deploy signed Preview updater artifacts to Firebase Hosting*:
+
+```
+HTTP Error: 400, Executable files are forbidden on the Spark billing plan
+https://firebase.google.com/support/faq#hosting-exe-restrictions
+```
+
+Everything up to that point succeeds, including Google Workload Identity Federation auth, so
+this is purely a Firebase billing upgrade and nothing in this repository can work around it.
+
+**What already works without it:** the signed MSI and NSIS installers are built and verified,
+and the internal GitHub prerelease is published with both installers, their `.sig` files, and
+`latest.json` attached. What does not work is the *public* Hosting endpoint that installed
+Preview builds poll — so installed apps will not see the update until Blaze is enabled and
+Release Internal is dispatched again.
+
+To resume: upgrade `corelithwebsite` to Blaze, then
+`gh workflow run "Release Internal" --repo dasindusithmira2025-ops/forgemind --ref main`.
