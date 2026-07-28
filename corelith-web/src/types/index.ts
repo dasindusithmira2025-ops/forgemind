@@ -36,7 +36,7 @@ export interface Product {
   capabilities: ProductFeature[];
   platforms: Platform[];
   downloads?: ProductDownload[];
-  heroVisualType: 'paralith-system' | 'performance-metrics' | 'operations-matrix' | 'workspace-canvas';
+  heroVisualType: 'paralith-system';
   faqs: { question: string; answer: string }[];
   primaryCtaText: string;
   secondaryCtaText?: string;

@@ -1,16 +1,10 @@
 import Link from 'next/link';
-import { products } from '@/data/products';
-import { companyData } from '@/data/company';
 import { ParalithHeroVisual } from '@/components/ParalithHeroVisual';
-import { ProductCard } from '@/components/ProductCard';
 import { CapabilitiesGrid } from '@/components/CapabilitiesGrid';
 import { PrinciplesGrid } from '@/components/PrinciplesGrid';
-import { ArrowRight, ShieldCheck, Cpu, Terminal, Sparkles, CheckCircle2 } from 'lucide-react';
+import { ArrowRight, Terminal, Sparkles, CheckCircle2 } from 'lucide-react';
 
 export default function HomePage() {
-  const paralith = products.find((p) => p.id === 'paralith')!;
-  const otherProducts = products.filter((p) => p.id !== 'paralith');
-
   return (
     <div className="space-y-24 pb-20">
       {/* SECTION 1: HERO */}
@@ -35,17 +29,17 @@ export default function HomePage() {
               </span>
             </h1>
             <p className="text-lg sm:text-xl text-gray-300 max-w-2xl mx-auto font-normal leading-relaxed">
-              Corelith Technologies creates intelligent developer platforms, productivity systems, and software products designed to turn complex work into focused execution.
+              Corelith Technologies builds Paralith — an agentic development environment designed to turn complex engineering work into focused execution.
             </p>
           </div>
 
           {/* Action CTAs */}
           <div className="flex flex-wrap items-center justify-center gap-4 pt-2">
             <Link
-              href="/products"
+              href="/products/paralith#download"
               className="inline-flex items-center gap-2 px-6 py-3.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-sm shadow-xl shadow-indigo-600/30 transition-all hover:scale-[1.02]"
             >
-              <span>Explore All Products</span>
+              <span>Download Paralith Preview</span>
               <ArrowRight className="w-4 h-4" />
             </Link>
             <Link
@@ -68,7 +62,7 @@ export default function HomePage() {
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-12">
         <div className="text-center max-w-3xl mx-auto space-y-3">
           <div className="text-xs uppercase tracking-wider text-indigo-400 font-mono font-bold">
-            Flagship Software Platform
+            Our Software Platform
           </div>
           <h2 className="text-3xl sm:text-4xl font-bold text-white font-heading">
             Development, coordinated.
@@ -109,7 +103,7 @@ export default function HomePage() {
 
             <div className="pt-2 flex items-center gap-4">
               <Link
-                href="/products/paralith"
+                href="/products/paralith#download"
                 className="inline-flex items-center gap-2 px-5 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs shadow-lg shadow-indigo-600/30"
               >
                 <span>Download Paralith Preview</span>
@@ -133,30 +127,7 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* SECTION 3: PRODUCT ECOSYSTEM */}
-      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-12">
-        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b border-white/10 pb-6">
-          <div>
-            <div className="text-xs uppercase tracking-wider text-indigo-400 font-mono font-bold">
-              Software Ecosystem
-            </div>
-            <h2 className="text-3xl font-bold text-white font-heading mt-1">
-              Corelith Software Portfolio
-            </h2>
-          </div>
-          <Link href="/products" className="text-xs font-mono text-indigo-400 hover:text-indigo-300 flex items-center gap-1">
-            View All Products &rarr;
-          </Link>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {otherProducts.map((p) => (
-            <ProductCard key={p.id} product={p} />
-          ))}
-        </div>
-      </section>
-
-      {/* SECTION 4: CAPABILITIES */}
+      {/* SECTION 3: CAPABILITIES */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-10">
         <div className="text-center max-w-2xl mx-auto space-y-2">
           <div className="text-xs uppercase tracking-wider text-indigo-400 font-mono font-bold">
@@ -173,7 +144,7 @@ export default function HomePage() {
         <CapabilitiesGrid />
       </section>
 
-      {/* SECTION 5: HOW CORELITH BUILDS (PRINCIPLES) */}
+      {/* SECTION 4: HOW CORELITH BUILDS (PRINCIPLES) */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-10">
         <div className="text-center max-w-2xl mx-auto space-y-2">
           <div className="text-xs uppercase tracking-wider text-indigo-400 font-mono font-bold">
@@ -190,7 +161,7 @@ export default function HomePage() {
         <PrinciplesGrid />
       </section>
 
-      {/* SECTION 6: EDITORIAL COMPANY STATEMENT */}
+      {/* SECTION 5: EDITORIAL COMPANY STATEMENT */}
       <section className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="corelith-card p-8 sm:p-12 text-center space-y-6 bg-gradient-to-b from-[#141722] to-[#08090c] border-indigo-500/30">
           <div className="w-12 h-12 rounded-full bg-indigo-600/10 border border-indigo-500/30 flex items-center justify-center mx-auto text-indigo-400">
@@ -205,21 +176,21 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* SECTION 7: FINAL CALL TO ACTION */}
+      {/* SECTION 6: FINAL CALL TO ACTION */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="rounded-2xl bg-indigo-600/15 border border-indigo-500/40 p-8 sm:p-12 text-center space-y-6">
           <h2 className="text-3xl font-bold text-white font-heading">
             Explore what Corelith is building.
           </h2>
           <p className="text-gray-300 text-sm max-w-xl mx-auto">
-            Discover our flagship developer platform, explore our software portfolio, or connect directly with our engineering team.
+            Read the Paralith specification, download the preview build, or connect directly with our engineering team.
           </p>
           <div className="flex flex-wrap items-center justify-center gap-4 pt-2">
             <Link
-              href="/products"
+              href="/products/paralith"
               className="px-6 py-3.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-sm shadow-xl shadow-indigo-600/30"
             >
-              View Products Portfolio
+              Explore Paralith
             </Link>
             <Link
               href="/contact"

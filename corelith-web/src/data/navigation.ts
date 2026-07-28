@@ -2,9 +2,9 @@ import { NavLink } from '@/types';
 
 export const mainNavLinks: NavLink[] = [
   {
-    label: 'Products',
-    href: '/products',
-    description: 'Explore the Corelith software suite',
+    label: 'Paralith',
+    href: '/products/paralith',
+    description: 'Our agentic development environment',
   },
   {
     label: 'Technology',
@@ -30,11 +30,10 @@ export const mainNavLinks: NavLink[] = [
 
 export const footerLinks = {
   products: [
-    { label: 'Paralith (Flagship)', href: '/products/paralith', badge: 'Preview' },
-    { label: 'PulseBoost', href: '/products/pulseboost' },
-    { label: 'TyoTrack', href: '/products/tyotrack', badge: 'Beta' },
-    { label: 'LaunchForge AI', href: '/products/launchforge', badge: 'Dev' },
-    { label: 'All Products', href: '/products' },
+    { label: 'Paralith Overview', href: '/products/paralith', badge: 'Preview' },
+    { label: 'Downloads', href: '/products/paralith#download' },
+    { label: 'Release Notes', href: '/products/paralith#release-notes' },
+    { label: 'Technology', href: '/technology' },
   ],
   company: [
     { label: 'About Corelith', href: '/company' },
