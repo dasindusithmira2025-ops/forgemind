@@ -2,6 +2,7 @@ import { Gauge, RefreshCw } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { aiUsageStore, useAiUsage } from './aiUsageStore'
+import { POPOVER_WIDTH, VIEWPORT_MARGIN, placeUsagePopover, type PopoverPosition } from './usagePopoverPlacement'
 import type { ProviderUsageSnapshot, UsageWindow, UsageWindowKind } from '../../native/types'
 
 export function AiUsageStatusBar() {
@@ -47,7 +48,7 @@ function ProviderCompact({ snapshot }: { snapshot: ProviderUsageSnapshot }) {
 
 function UsagePopover({ snapshots, isRefreshing, anchor, onClose }: { snapshots: ProviderUsageSnapshot[]; isRefreshing: boolean; anchor: HTMLButtonElement | null; onClose: (restoreFocus?: boolean) => void }) {
   const ref = useRef<HTMLDivElement>(null)
-  const [position, setPosition] = useState({ left: 12, top: 12 })
+  const [position, setPosition] = useState<PopoverPosition | null>(null)
   const [now, setNow] = useState(Date.now())
   const sorted = useMemo(() => [...snapshots].sort((a, b) => urgency(b) - urgency(a)), [snapshots])
 
@@ -55,12 +56,11 @@ function UsagePopover({ snapshots, isRefreshing, anchor, onClose }: { snapshots:
     const place = () => {
       if (!anchor) return
       const rect = anchor.getBoundingClientRect()
-      const width = Math.min(392, window.innerWidth - 24)
-      const height = ref.current?.offsetHeight ?? 280
-      setPosition({
-        left: Math.max(12, Math.min(rect.right - width, window.innerWidth - width - 12)),
-        top: Math.max(height + 12, rect.top - 8),
-      })
+      setPosition(placeUsagePopover(
+        rect,
+        { width: window.innerWidth, height: window.innerHeight },
+        { width: Math.min(POPOVER_WIDTH, window.innerWidth - VIEWPORT_MARGIN * 2), height: ref.current?.offsetHeight ?? 280 },
+      ))
     }
     place()
     const frame = window.requestAnimationFrame(place)
@@ -92,7 +92,7 @@ function UsagePopover({ snapshots, isRefreshing, anchor, onClose }: { snapshots:
       className="ai-usage-popover"
       role="dialog"
       aria-labelledby="ai-usage-title"
-      style={{ left: position.left, top: position.top, transform: 'translateY(-100%)' }}
+      style={{ left: position?.left ?? 0, top: position?.top ?? 0, visibility: position ? undefined : 'hidden' }}
     >
       <header className="ai-usage-popover-header">
         <div>

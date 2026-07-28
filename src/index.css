@@ -465,7 +465,7 @@ html[data-theme-swapping] *, html[data-theme-swapping] *::before, html[data-them
 .ai-usage-compact-provider.is-codex > span { color: var(--agent-codex); }
 .ai-usage-trigger-state { color: var(--faint); font-family: var(--font-mono); }
 
-.ai-usage-popover { position: fixed; z-index: 200; width: min(392px, calc(100vw - 24px)); max-height: calc(100vh - 24px); overflow: auto; color: var(--text); background: var(--popover); border: 1px solid var(--border-strong); border-radius: var(--radius-lg); box-shadow: var(--shadow-lg); animation: pl-pop-in .14s var(--ease-out) both; }
+.ai-usage-popover { position: fixed; z-index: var(--z-toast); width: min(392px, calc(100vw - 24px)); max-height: calc(100vh - 24px); overflow: auto; color: var(--text); background: var(--popover); border: 1px solid var(--border-strong); border-radius: var(--radius-lg); box-shadow: var(--shadow-lg); animation: pl-pop-in .14s var(--ease-out) both; }
 .ai-usage-popover-header { min-height: 52px; padding: 9px 10px 9px 13px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border); }
 .ai-usage-popover-header > div { display: flex; flex-direction: column; gap: 3px; }
 .ai-usage-popover-header strong { font-size: var(--text-sm); font-weight: 650; }
