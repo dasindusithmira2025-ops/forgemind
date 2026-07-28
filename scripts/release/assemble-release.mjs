@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { cp, mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises'
 import { basename, join, relative } from 'node:path'
 import process from 'node:process'
+import { githubReleaseAssetName } from './github-artifacts-publisher.mjs'
 
 const edition = process.env.PARALITH_EDITION || process.argv[2]
 if (!['stable', 'preview'].includes(edition)) throw new Error('Set PARALITH_EDITION to stable or preview')
@@ -29,7 +30,8 @@ if (installers.length !== 2) throw new Error(`Expected exactly one MSI and one N
 const sha256 = async (path) => createHash('sha256').update(await readFile(path)).digest('hex')
 const files = []
 for (const source of candidates.filter((path) => installers.includes(path) || path.endsWith('.sig'))) {
-  const name = basename(source)
+  const sourceName = basename(source)
+  const name = flatArtifactLayout ? githubReleaseAssetName(sourceName) : sourceName
   await cp(source, join(output, name))
   await cp(source, join(siteVersion, name))
   files.push({ name, size: (await stat(source)).size, sha256: await sha256(source) })
