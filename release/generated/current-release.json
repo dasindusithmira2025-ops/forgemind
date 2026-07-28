@@ -3,11 +3,15 @@
   "channel": "preview",
   "date": "2026-07-22",
   "highlights": [
+    "Direct signed one-click updates with live download progress, safe-restart review, and actionable retry states",
+    "Public artifact-only update distribution with isolated Preview and Stable channel manifests",
     "Role pools that combine Claude, Codex, and automatic runtime allocations within one Swarm role",
     "Allocation-aware Swarm staffing with stable worker provenance across persistence and restart",
     "A dense team editor for adding, removing, sizing, and duplicating mixed-runtime role pools"
   ],
   "fixes": [
+    "Move executable updater payloads off Firebase Spark while retaining a JSON-only bridge for installed Preview 0.4.1-1023 builds",
+    "Keep Preview publication automatic after validated main merges while Stable remains protected-tag only",
     "Reject duplicate runtime allocations, empty enabled roles, negative counts, and teams above the capacity limit",
     "Block Swarm launch with actionable errors when an explicitly selected runtime is unavailable",
     "Preserve immutable launch-time team snapshots when source presets are edited later"
@@ -20,7 +24,7 @@
   "knownIssues": [
     "GitHub App installation-token exchange and public webhook ingress require the separately deployed Corelith backend service",
     "Remote synchronization is explicit-refresh only; native repository watching and background event-relay synchronization are not included",
-    "Production update publication remains disabled until administrators provision the updater signing key and internal HTTPS endpoint"
+    "Live cross-repository publication remains blocked until administrators provision the narrowly scoped PARALITH_UPDATES_TOKEN in each release environment"
   ],
   "requiredManualActions": [],
   "internal": {

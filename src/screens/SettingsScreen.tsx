@@ -1,5 +1,4 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { listen } from '@tauri-apps/api/event'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { open } from '@tauri-apps/plugin-dialog'
 import { openPath } from '@tauri-apps/plugin-opener'
@@ -9,10 +8,11 @@ import { Button } from '../components/ui/Button'
 import { ErrorNotice } from '../components/ui/ErrorNotice'
 import { TextPromptDialog } from '../components/ui/TextPromptDialog'
 import { asNativeError, native } from '../native/commands'
-import type { AgentProfile, AgentProvider, AppSettings, DiagnosticsSnapshot, SafeRestartAssessment, SafeRestartClientState, ShellProfile, UpdateStatus } from '../native/types'
+import type { AgentProfile, AgentProvider, AppSettings, DiagnosticsSnapshot, SafeRestartClientState, ShellProfile } from '../native/types'
 import { defaultSettings, useAppStore } from '../stores/appStore'
 import { ThemeGallery } from '../theme/ThemeGallery'
 import { useThemeStore } from '../theme/themeStore'
+import { useUpdateController } from '../features/updates/updateController'
 
 type Section = 'appearance' | 'terminal' | 'agents' | 'workspace' | 'updates' | 'diagnostics'
 const sections: Array<{ id: Section; label: string }> = [
@@ -42,19 +42,18 @@ export function SettingsScreen() {
   const [shells, setShells] = useState<ShellProfile[]>([])
   const [profiles, setProfiles] = useState<AgentProfile[]>([])
   const [diagnostics, setDiagnostics] = useState<DiagnosticsSnapshot>()
-  const [updateStatus, setUpdateStatus] = useState<UpdateStatus>()
-  const [updating, setUpdating] = useState(false)
-  const [assessment, setAssessment] = useState<SafeRestartAssessment>()
-
-  // The Rust update coordinator broadcasts every lifecycle change and download-progress tick to
-  // all windows, so the panel stays live (including cross-window installs) without polling.
-  useEffect(() => {
-    let cancelled = false
-    let stop: (() => void) | undefined
-    void listen<UpdateStatus>('update-status', (event) => setUpdateStatus(event.payload))
-      .then((unlisten) => { if (cancelled) unlisten(); else stop = unlisten })
-    return () => { cancelled = true; stop?.() }
-  }, [])
+  const {
+    status: updateStatus,
+    assessment,
+    operation: updateOperation,
+    error: updateError,
+    check: checkForUpdates,
+    download: downloadUpdate,
+    updateNow,
+    installOnExit: scheduleUpdate,
+    retry: retryUpdate,
+  } = useUpdateController()
+  const updating = Boolean(updateOperation)
 
   useEffect(() => {
     document.documentElement.style.setProperty('--ui-scale', String(settings.uiScale))
@@ -67,9 +66,9 @@ export function SettingsScreen() {
   }, [settings.uiDensity, stored.uiDensity])
 
   useEffect(() => {
-    void Promise.all([native.detectShells(), native.listAgentProfiles(), native.getDiagnostics(), native.getUpdateStatus()])
-      .then(([nextShells, nextProfiles, nextDiagnostics, nextUpdateStatus]) => {
-        setShells(nextShells); setProfiles(nextProfiles); setDiagnostics(nextDiagnostics); setUpdateStatus(nextUpdateStatus)
+    void Promise.all([native.detectShells(), native.listAgentProfiles(), native.getDiagnostics()])
+      .then(([nextShells, nextProfiles, nextDiagnostics]) => {
+        setShells(nextShells); setProfiles(nextProfiles); setDiagnostics(nextDiagnostics)
       })
       .catch(() => undefined)
   }, [])
@@ -124,40 +123,40 @@ export function SettingsScreen() {
     try { const path = await native.exportRedactedSupportBundle(); setStatus('Redacted support bundle created'); await openPath(path) }
     catch (caught) { setError(asNativeError(caught).message) }
   }
-  const withUpdate = async (label: string, action: () => Promise<UpdateStatus>) => {
+  const withUpdate = async (label: string, action: () => Promise<unknown>) => {
     if (updating) return
-    setUpdating(true); setError(''); setStatus(label)
-    try { const result = await action(); setUpdateStatus(result); setStatus(result.journal.lastResult || label) }
+    setError(''); setStatus(label)
+    try {
+      await action()
+      const controller = useUpdateController.getState()
+      if (controller.error) setError(controller.error)
+      setStatus(controller.status?.journal.lastResult || label)
+    }
     catch (caught) { setError(asNativeError(caught).message); setStatus('Update operation failed') }
-    finally { setUpdating(false) }
   }
   const restartClientState = (): SafeRestartClientState => {
     return { unsavedEditorState: false, unsavedSettings: status === 'Unsaved changes', unsavedBrowserState: false }
   }
   const reviewActiveWork = async () => {
-    try { const next = await native.assessSafeRestart(restartClientState()); setAssessment(next); setStatus(next.safe ? 'No active work is blocking an update' : `${next.blockers.length + next.hardBlockers.length} item(s) to review`) }
-    catch (caught) { setError(asNativeError(caught).message) }
-  }
-  // Returns the assessment and whether the install may proceed. A hard block (in-flight Git
-  // mutation) can never be overridden; soft blockers require an explicit confirmation.
-  const confirmRestart = async () => {
-    const client = restartClientState()
-    const next = await native.assessSafeRestart(client)
-    setAssessment(next)
-    if (next.hardBlocked) {
-      setError(`PARALITH cannot update while a Git operation is in progress.\n${next.hardBlockers.join('\n')}`)
-      return { client, next, confirmed: false }
+    try {
+      const next = await native.assessSafeRestart(restartClientState())
+      useUpdateController.setState({ assessment: next })
+      setStatus(next.safe ? 'No active work is blocking an update' : `${next.blockers.length + next.hardBlockers.length} item(s) to review`)
     }
-    const confirmed = next.safe || window.confirm(`PARALITH must safely stop active work before updating.\n\n${next.blockers.join('\n')}\n\nAgents and Swarms will checkpoint, terminals will stop, and your workspace layout will be restored after restart.\n\nUpdate now?`)
-    return { client, next, confirmed }
+    catch (caught) { setError(asNativeError(caught).message) }
   }
   const installNow = async () => {
-    try { const request = await confirmRestart(); if (!request.confirmed) return; await native.installDownloadedUpdate(request.client, !request.next.safe) }
-    catch (caught) { setError(asNativeError(caught).message) }
+    const client = restartClientState()
+    await updateNow(client, (next) => window.confirm(`PARALITH must safely stop active work before updating.\n\n${next.blockers.join('\n')}\n\nAgents and Swarms will checkpoint, terminals will stop, and your workspace layout will be restored after restart.\n\nUpdate now?`))
+    const controller = useUpdateController.getState()
+    if (controller.error) setError(controller.error)
   }
   const installOnExit = async () => {
-    try { const request = await confirmRestart(); if (!request.confirmed) return; setUpdateStatus(await native.installUpdateOnExit(request.client, !request.next.safe)); setStatus('Verified update will install when PARALITH exits') }
-    catch (caught) { setError(asNativeError(caught).message) }
+    const client = restartClientState()
+    await scheduleUpdate(client, (next) => window.confirm(`PARALITH will install only after active work is safely stopped.\n\n${next.blockers.join('\n')}\n\nSchedule this update?`))
+    const controller = useUpdateController.getState()
+    if (controller.error) setError(controller.error)
+    else if (controller.status?.journal.installOnExit) setStatus('Verified update will install when PARALITH exits')
   }
   const viewReleaseNotes = () => {
     const notes = updateStatus?.journal.available?.releaseNotes
@@ -169,7 +168,7 @@ export function SettingsScreen() {
     <header className="settings-titlebar"><Button variant="ghost" icon={<ArrowLeft size={15} />} onClick={() => navigate(-1)}>Back</Button><Brand compact /><h1>Settings</h1><div className="titlebar-spacer" /><span role="status" aria-live="polite">{status}</span><Button variant="primary" icon={<Save size={15} />} onClick={() => void save()} disabled={saving}>{saving ? 'Saving' : 'Save'}</Button></header>
     <div className="settings-layout">
       <nav className="settings-nav" aria-label="Settings sections">{sections.map((item) => <button key={item.id} className={section === item.id ? 'active' : ''} aria-current={section === item.id ? 'page' : undefined} onClick={() => setSection(item.id)}>{item.label}</button>)}</nav>
-      <section className="settings-panel">{error && <ErrorNotice message={error} />}
+      <section className="settings-panel">{(error || updateError) && <ErrorNotice message={error || updateError || ''} />}
         {section === 'appearance' && <>
         <div className="focused-section"><header><h2>Theme</h2><p>Choose how PARALITH looks. Themes apply instantly across every window, terminal, and editor — no save needed.</p></header><ThemeGallery /></div>
         <SettingsSection title="Interface &amp; terminal" description="Density and terminal rendering update immediately.">
@@ -218,13 +217,13 @@ export function SettingsScreen() {
           {updateStatus?.journal.available?.releaseNotes && <div className="update-notes"><strong>Release notes · {updateStatus.journal.available.version}</strong><p>{updateStatus.journal.available.releaseNotes}</p></div>}
           {assessment && !assessment.safe && <div className="update-notes attention"><strong>{assessment.hardBlocked ? <><AlertTriangle size={14} /> Update blocked by active Git work</> : 'Active work to review before updating'}</strong><p>{[...assessment.hardBlockers, ...assessment.blockers].map((item) => `• ${item}`).join('\n')}</p></div>}
           <div className="diagnostic-actions">
-            <Button icon={<RefreshCw className={updating ? 'is-spinning' : ''} size={14} />} disabled={updating || !updateStatus?.endpointConfigured} onClick={() => void withUpdate('Checking for updates', native.checkForUpdates)}>Check for Updates</Button>
-            <Button icon={<Download size={14} />} disabled={updating || updateStatus?.journal.phase !== 'available'} onClick={() => void withUpdate('Downloading signed update', native.downloadUpdate)}>Download Update</Button>
+            <Button icon={<RefreshCw className={updating ? 'is-spinning' : ''} size={14} />} disabled={updating || !updateStatus?.endpointConfigured} onClick={() => void withUpdate('Checking for updates', checkForUpdates)}>Check for Updates</Button>
+            <Button icon={<Download size={14} />} disabled={updating || updateStatus?.journal.phase !== 'available'} onClick={() => void withUpdate('Downloading signed update', downloadUpdate)}>Download Update</Button>
             <Button variant="primary" disabled={!updateStatus?.journal.signatureVerified} onClick={() => void installNow()}>Update Now</Button>
             <Button disabled={!updateStatus?.journal.signatureVerified} onClick={() => void installOnExit()}>Update When Idle</Button>
             <Button icon={<ShieldCheck size={14} />} onClick={() => void reviewActiveWork()}>Review Active Work</Button>
             <Button disabled={!updateStatus?.journal.available?.releaseNotes} onClick={() => viewReleaseNotes()}>View Release Notes</Button>
-            <Button icon={<RotateCcw size={14} />} disabled={updating || updateStatus?.journal.phase !== 'failed'} onClick={() => void withUpdate('Retrying update', native.retryUpdate)}>Retry</Button>
+            <Button icon={<RotateCcw size={14} />} disabled={updating || updateStatus?.journal.phase !== 'failed'} onClick={() => void withUpdate('Retrying update', retryUpdate)}>Retry</Button>
             <Button variant="ghost" onClick={() => setSection('diagnostics')}>View Diagnostics</Button>
           </div>
         </SettingsSection>}

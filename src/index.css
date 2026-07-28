@@ -1187,6 +1187,20 @@ html[data-theme-swapping] *, html[data-theme-swapping] *::before, html[data-them
 .update-toast-actions { display: flex; gap: 8px; justify-content: flex-end; }
 .update-toast-actions a, .update-toast-actions button { min-height: var(--control-h); padding: 0 12px; display: inline-flex; align-items: center; font-size: var(--text-xs); color: var(--text); text-decoration: none; background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: var(--radius); cursor: pointer; }
 .update-toast-actions a { color: var(--accent); border-color: var(--accent); }
+.update-toast-progressive { width: min(520px, calc(100vw - 40px)); display: grid; grid-template-columns: 26px minmax(0, 1fr); padding: 14px; gap: 8px 10px; }
+.update-toast-progressive.attention { border-color: var(--warning-border); }
+.update-toast-icon { width: 26px; height: 26px; display: grid; place-items: center; color: var(--accent); background: var(--accent-soft); border-radius: var(--radius); }
+.update-toast.attention .update-toast-icon { color: var(--warning); background: var(--warning-soft); }
+.update-toast-copy { min-width: 0; }
+.update-toast-copy > span { margin-top: 3px; }
+.update-toast-copy > small { display: block; margin-top: 7px; color: var(--faint); font-size: var(--text-xs); line-height: var(--lh-body); }
+.update-toast-copy .update-hard-block { color: var(--danger); }
+.update-toast-progressive .update-download { margin-top: 9px; }
+.update-toast-progressive .update-progress { margin: 0 0 5px; }
+.update-toast-progressive .update-progress span { margin-top: 0; }
+.update-toast-progressive .update-toast-actions { grid-column: 1 / -1; flex-wrap: wrap; }
+.update-toast-progressive .update-toast-actions .button-primary { color: var(--accent-contrast); background: var(--accent); border-color: var(--accent); gap: 6px; }
+.update-toast-progressive .update-toast-actions button:disabled { cursor: default; opacity: .55; }
 
 /* ---- Detached workspace windows ---------------------------------------------------- */
 .detached-shell .app-canvas { padding: 0; }

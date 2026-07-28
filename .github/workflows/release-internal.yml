@@ -1,9 +1,9 @@
 name: Release Internal
 
-# Explicit internal delivery. A dispatch produces a unique, signed internal (preview-edition)
-# build and publishes it to the internal update endpoint; installed internal builds pick it up
-# on the next safe restart. Stable customers are unaffected -- they read a different
-# edition/endpoint and only receive tag-driven `stable-v*` releases (see release-stable.yml).
+# Automatic internal delivery. Every validated main merge produces a unique, signed Preview build,
+# publishes its payloads to the public artifact-only repository, and atomically activates the
+# Preview manifest. Stable customers are unaffected: they read a separate manifest and only receive
+# protected tag-driven `stable-v*` releases (see release-stable.yml).
 #
 # Runs on the repository-scoped self-hosted Windows runner. The previous `validate` job (a
 # `workflow_call` into ci.yml with `full: true`) has been removed: it performed a second
@@ -13,18 +13,13 @@ name: Release Internal
 # happens. A successful signed bundle build is a strictly stronger compile proof than the
 # discarded --no-bundle compile it replaces.
 
-# TRIGGER CHANGE, deliberate and reversible. This previously also fired on every push to
-# `main`. It is now dispatch-only, for two reasons:
-#   1. There is one runner. An automatic signed release per merge occupies this PC for the best
-#      part of an hour and blocks the validation of any subsequent push behind it.
-#   2. The Firebase Hosting publish step cannot currently succeed (the `corelithwebsite`
-#      project is on the Spark plan, which rejects .exe/.msi uploads), so an automatic release
-#      per merge would produce a guaranteed red run on every single merge.
-# To restore automatic internal delivery once Firebase is on Blaze, re-add:
-#   push:
-#     branches: [main]
-#     paths-ignore: ['**/*.md', 'docs/**']
 on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'LICENSE'
   workflow_dispatch:
 
 permissions:
@@ -46,13 +41,10 @@ jobs:
     runs-on: [self-hosted, Windows, X64, paralith, paralith-release]
     timeout-minutes: 120
     environment: preview-release
-    # Reserved shared deployment lock: any future Firebase-backed Stable publisher must use this
-    # exact group so Preview and Stable can never replace the Hosting site concurrently. This is
-    # a different axis from the workflow-level `release-internal` lock above -- that one serialises
-    # internal releases, this one serialises Firebase Hosting deployments across all workflows.
-    # scripts/release/firebase-hosting-publisher.test.mjs asserts this group is present.
+    # Preview and Stable both mutate the artifact repository's release/manifest state. Serialise the
+    # final publication across every channel; optimistic blob-SHA activation is the second guard.
     concurrency:
-      group: firebase-hosting-update-site
+      group: paralith-update-publication
       cancel-in-progress: false
     defaults:
       run:
@@ -88,8 +80,8 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           PARALITH_PREVIEW_UPDATE_ENDPOINT: ${{ vars.PARALITH_PREVIEW_UPDATE_ENDPOINT }}
-          PARALITH_UPDATE_ARTIFACT_BASE_URL: ${{ vars.PARALITH_UPDATE_ARTIFACT_BASE_URL }}
           PARALITH_UPDATE_PUBLISH_PROVIDER: ${{ vars.PARALITH_UPDATE_PUBLISH_PROVIDER }}
+          PARALITH_UPDATES_REPOSITORY: ${{ vars.PARALITH_UPDATES_REPOSITORY }}
           FIREBASE_PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID }}
           FIREBASE_HOSTING_SITE: ${{ vars.FIREBASE_HOSTING_SITE }}
         run: pwsh -NoProfile -File scripts/ci/check-self-hosted-runner.ps1 -ReleaseBuild
@@ -103,10 +95,11 @@ jobs:
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           PARALITH_PREVIEW_UPDATE_ENDPOINT: ${{ vars.PARALITH_PREVIEW_UPDATE_ENDPOINT }}
-          PARALITH_UPDATE_ARTIFACT_BASE_URL: ${{ vars.PARALITH_UPDATE_ARTIFACT_BASE_URL }}
           PARALITH_UPDATE_PUBLISH_PROVIDER: ${{ vars.PARALITH_UPDATE_PUBLISH_PROVIDER }}
-          PARALITH_UPDATE_PUBLISH_TARGET: ${{ secrets.PARALITH_UPDATE_PUBLISH_TARGET }}
-          PARALITH_UPDATE_PUBLISH_TOKEN: ${{ secrets.PARALITH_UPDATE_PUBLISH_TOKEN }}
+          PARALITH_UPDATES_REPOSITORY: ${{ vars.PARALITH_UPDATES_REPOSITORY }}
+          PARALITH_UPDATES_TOKEN: ${{ secrets.PARALITH_UPDATES_TOKEN }}
+          PARALITH_UPDATES_DEPLOY_KEY: ${{ secrets.PARALITH_UPDATES_DEPLOY_KEY }}
+          PARALITH_PREVIEW_BRIDGE_ENDPOINT: ${{ vars.PARALITH_PREVIEW_BRIDGE_ENDPOINT }}
           FIREBASE_PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID }}
           FIREBASE_HOSTING_SITE: ${{ vars.FIREBASE_HOSTING_SITE }}
           GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
@@ -134,14 +127,15 @@ jobs:
           npm run release:sync
 
       - name: Confirm generated version is newer than installed Preview
-        run: node scripts/release/firebase-hosting-publisher.mjs version "${{ steps.version.outputs.version }}" '0.4.1-1001'
+        run: node scripts/release/firebase-hosting-publisher.mjs version "${{ steps.version.outputs.version }}" '0.4.1-1023'
 
       - name: Build signed internal MSI, NSIS, and updater artifacts
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           PARALITH_PREVIEW_UPDATE_ENDPOINT: ${{ vars.PARALITH_PREVIEW_UPDATE_ENDPOINT }}
-          PARALITH_UPDATE_ARTIFACT_BASE_URL: ${{ vars.PARALITH_UPDATE_ARTIFACT_BASE_URL }}
+          PARALITH_UPDATE_PUBLISH_PROVIDER: ${{ vars.PARALITH_UPDATE_PUBLISH_PROVIDER }}
+          PARALITH_UPDATES_REPOSITORY: ${{ vars.PARALITH_UPDATES_REPOSITORY }}
           PARALITH_PREVIOUS_INSTALLER_URL: ${{ vars.PARALITH_PREVIOUS_INSTALLER_URL }}
           PARALITH_ROLLOUT_PERCENT: ${{ vars.PARALITH_ROLLOUT_PERCENT }}
           PARALITH_WINDOWS_SIGN_COMMAND: ${{ secrets.PARALITH_WINDOWS_SIGN_COMMAND }}
@@ -152,9 +146,9 @@ jobs:
           $env:PARALITH_RELEASE_CHANNEL='preview'
           $env:PARALITH_GIT_COMMIT=(git rev-parse HEAD).Trim()
           $env:PARALITH_BUILD_TIMESTAMP=(Get-Date).ToUniversalTime().ToString('o')
-          # This private repository's GitHub assets are not anonymously downloadable by installed
-          # applications. Firebase therefore hosts the signed payload files; GitHub prereleases
-          # remain the authenticated archive and release record.
+          if ($env:PARALITH_UPDATE_PUBLISH_PROVIDER -ne 'github-artifacts') { throw 'Preview releases require the github-artifacts publisher.' }
+          if (-not $env:PARALITH_UPDATES_REPOSITORY) { throw 'PARALITH_UPDATES_REPOSITORY is required.' }
+          $env:PARALITH_UPDATE_ARTIFACT_BASE_URL="https://github.com/$env:PARALITH_UPDATES_REPOSITORY/releases/download/${{ steps.version.outputs.tag }}"
           if (-not $env:PARALITH_PREVIEW_UPDATE_ENDPOINT) { throw 'PARALITH_PREVIEW_UPDATE_ENDPOINT repository variable is required.' }
           $env:PARALITH_UPDATE_ENDPOINT=$env:PARALITH_PREVIEW_UPDATE_ENDPOINT
           $config = node scripts/release/render-tauri-config.mjs preview release | Select-Object -Last 1
@@ -212,17 +206,21 @@ jobs:
             --target '${{ github.sha }}' `
             --prerelease
 
-      - name: Stage Firebase Hosting artifacts and preserve live manifests
-        if: vars.PARALITH_UPDATE_PUBLISH_PROVIDER == 'firebase-hosting'
+      - name: Publish public signed updater assets and activate Preview manifest
         env:
-          PARALITH_PREVIEW_UPDATE_ENDPOINT: ${{ vars.PARALITH_PREVIEW_UPDATE_ENDPOINT }}
-        # The Hosting public dir MUST live beside the generated deploy config: firebase-tools
-        # resolves `hosting.public` relative to the --config file's directory (.artifacts), not the
-        # process CWD. Staging anywhere else yields "Directory 'update-site-dist' does not exist".
-        run: node scripts/release/firebase-hosting-publisher.mjs stage ".artifacts/update-site/preview" "$env:PARALITH_PREVIEW_UPDATE_ENDPOINT" ".artifacts/update-site-dist" ".artifacts/firebase-hosting-state.json"
+          PARALITH_UPDATES_REPOSITORY: ${{ vars.PARALITH_UPDATES_REPOSITORY }}
+          PARALITH_UPDATES_TOKEN: ${{ secrets.PARALITH_UPDATES_TOKEN }}
+          PARALITH_UPDATES_DEPLOY_KEY: ${{ secrets.PARALITH_UPDATES_DEPLOY_KEY }}
+        run: |
+          $dir = Get-ChildItem '.artifacts/release/preview' -Directory | Select-Object -First 1
+          if ($env:PARALITH_UPDATES_DEPLOY_KEY) {
+            pwsh -NoProfile -File scripts/release/push-publication-handoff.ps1 -Channel preview -Tag "${{ steps.version.outputs.tag }}" -SourceDirectory "$($dir.FullName)" -Version "${{ steps.version.outputs.version }}"
+          } else {
+            node scripts/release/github-artifacts-publisher.mjs publish preview "${{ steps.version.outputs.tag }}" "$($dir.FullName)" "${{ steps.version.outputs.version }}"
+          }
 
       - name: Authenticate to Google Cloud with Workload Identity Federation
-        if: vars.PARALITH_UPDATE_PUBLISH_PROVIDER == 'firebase-hosting' && vars.GCP_WORKLOAD_IDENTITY_PROVIDER != '' && vars.GCP_SERVICE_ACCOUNT != ''
+        if: vars.GCP_WORKLOAD_IDENTITY_PROVIDER != '' && vars.GCP_SERVICE_ACCOUNT != ''
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
         with:
           project_id: ${{ vars.FIREBASE_PROJECT_ID }}
@@ -230,70 +228,37 @@ jobs:
           service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
 
       - name: Authenticate to Google Cloud with service-account fallback
-        if: vars.PARALITH_UPDATE_PUBLISH_PROVIDER == 'firebase-hosting' && (vars.GCP_WORKLOAD_IDENTITY_PROVIDER == '' || vars.GCP_SERVICE_ACCOUNT == '')
+        if: vars.GCP_WORKLOAD_IDENTITY_PROVIDER == '' || vars.GCP_SERVICE_ACCOUNT == ''
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
         with:
           project_id: ${{ vars.FIREBASE_PROJECT_ID }}
           credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
 
-      - name: Generate Firebase deploy config bound to the staged Hosting directory
-        if: vars.PARALITH_UPDATE_PUBLISH_PROVIDER == 'firebase-hosting'
+      - name: Stage JSON-only Firebase bridge for installed Preview 0.4.1-1023
+        env:
+          PARALITH_PREVIEW_BRIDGE_ENDPOINT: ${{ vars.PARALITH_PREVIEW_BRIDGE_ENDPOINT }}
+          PARALITH_UPDATES_REPOSITORY: ${{ vars.PARALITH_UPDATES_REPOSITORY }}
+        run: |
+          node scripts/release/firebase-manifest-bridge.mjs stage ".artifacts/update-site/preview/latest.json" "$env:PARALITH_PREVIEW_BRIDGE_ENDPOINT" ".artifacts/update-bridge-dist" ".artifacts/firebase-bridge-state.json" "${{ steps.version.outputs.version }}" "$env:PARALITH_UPDATES_REPOSITORY"
+
+      - name: Generate Firebase deploy config for the JSON-only bridge
         env:
           FIREBASE_HOSTING_SITE: ${{ vars.FIREBASE_HOSTING_SITE }}
-        # The 4th argument is the staged Hosting directory. firebase-tools resolves hosting.public as
-        # path.join(<config dir>, public), so the config is generated INSIDE .artifacts and its public
-        # is derived as the relative path (update-site-dist) that joins back onto the staged directory.
-        run: node scripts/release/firebase-hosting-publisher.mjs config "$env:FIREBASE_HOSTING_SITE" "firebase.json" ".artifacts/firebase-hosting.json" ".artifacts/update-site-dist"
+        run: node scripts/release/firebase-hosting-publisher.mjs config "$env:FIREBASE_HOSTING_SITE" "firebase.json" ".artifacts/firebase-hosting.json" ".artifacts/update-bridge-dist"
 
-      - name: Assert Firebase deploy readiness before invoking the Firebase CLI
-        if: vars.PARALITH_UPDATE_PUBLISH_PROVIDER == 'firebase-hosting'
-        # Fail fast with safe diagnostics (paths, filenames, sizes — never secrets) if the staged
-        # Hosting site, signed payloads, manifest state, or config public path are not coherent.
-        run: node scripts/release/firebase-hosting-publisher.mjs assert-deploy-ready ".artifacts/update-site-dist" ".artifacts/update-site/preview/latest.json" ".artifacts/firebase-hosting.json"
+      - name: Assert Firebase bridge contains no executable payloads
+        run: node scripts/release/firebase-manifest-bridge.mjs assert-json-only ".artifacts/update-bridge-dist"
 
-      - name: Deploy signed Preview updater artifacts to Firebase Hosting
-        if: vars.PARALITH_UPDATE_PUBLISH_PROVIDER == 'firebase-hosting'
+      - name: Deploy JSON-only Preview compatibility bridge to Firebase Hosting
         env:
           FIREBASE_PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID }}
         run: npm exec --yes "--package=firebase-tools@${{ env.FIREBASE_CLI_VERSION }}" -- firebase deploy --only hosting --project "$env:FIREBASE_PROJECT_ID" --config ".artifacts/firebase-hosting.json" --non-interactive
 
-      - name: Verify Firebase Hosting updater artifacts before manifest activation
-        if: vars.PARALITH_UPDATE_PUBLISH_PROVIDER == 'firebase-hosting'
-        run: node scripts/release/firebase-hosting-publisher.mjs verify-artifacts ".artifacts/update-site/preview/latest.json" "${{ steps.version.outputs.version }}"
-
-      - name: Activate the new Preview manifest as the final release switch
-        if: vars.PARALITH_UPDATE_PUBLISH_PROVIDER == 'firebase-hosting'
-        run: |
-          node scripts/release/firebase-hosting-publisher.mjs activate ".artifacts/update-site/preview/latest.json" ".artifacts/update-site-dist"
-          if ($LASTEXITCODE -ne 0) { throw "Preview manifest activation failed with exit code $LASTEXITCODE" }
-          npm exec --yes "--package=firebase-tools@${{ env.FIREBASE_CLI_VERSION }}" -- firebase deploy --only hosting --project "${{ vars.FIREBASE_PROJECT_ID }}" --config ".artifacts/firebase-hosting.json" --non-interactive
-
-      - name: Verify Firebase Hosting Preview manifest and Stable preservation
-        if: vars.PARALITH_UPDATE_PUBLISH_PROVIDER == 'firebase-hosting'
+      - name: Verify installed Preview bridge and public payload anonymously
         env:
-          PARALITH_PREVIEW_UPDATE_ENDPOINT: ${{ vars.PARALITH_PREVIEW_UPDATE_ENDPOINT }}
-          FIREBASE_DEPLOY_VERIFY_ATTEMPTS: '4'
-          FIREBASE_DEPLOY_VERIFY_DELAY_MS: '3000'
-        run: node scripts/release/firebase-hosting-publisher.mjs verify "$env:PARALITH_PREVIEW_UPDATE_ENDPOINT" "${{ steps.version.outputs.version }}" ".artifacts/firebase-hosting-state.json"
-
-      # Publishing is mandatory for a preview release. The preflight above already guaranteed the
-      # required configuration is present, so this must run — it is never conditionally skipped.
-      - name: Publish to internal update endpoint
-        if: vars.PARALITH_UPDATE_PUBLISH_PROVIDER != 'firebase-hosting'
-        env:
-          PARALITH_UPDATE_PUBLISH_TARGET: ${{ secrets.PARALITH_UPDATE_PUBLISH_TARGET }}
-          PARALITH_UPDATE_PUBLISH_PROVIDER: ${{ vars.PARALITH_UPDATE_PUBLISH_PROVIDER }}
-          PARALITH_UPDATE_PUBLISH_TOKEN: ${{ secrets.PARALITH_UPDATE_PUBLISH_TOKEN }}
-        run: ./scripts/release/publish-internal-update.ps1
-
-      # Prove the update is genuinely usable by an installed app: fetch the REAL published manifest
-      # over HTTP and fail the release if it is not 200, not the just-released version, wrong channel,
-      # or missing a reachable signed Windows artifact. A locally-correct manifest is not evidence.
-      - name: Verify published preview manifest
-        if: vars.PARALITH_UPDATE_PUBLISH_PROVIDER != 'firebase-hosting'
-        env:
-          PARALITH_PREVIEW_UPDATE_ENDPOINT: ${{ vars.PARALITH_PREVIEW_UPDATE_ENDPOINT }}
-        run: node scripts/release/verify-published-manifest.mjs preview "$env:PARALITH_PREVIEW_UPDATE_ENDPOINT" "${{ steps.version.outputs.version }}"
+          PARALITH_PREVIEW_BRIDGE_ENDPOINT: ${{ vars.PARALITH_PREVIEW_BRIDGE_ENDPOINT }}
+          PARALITH_UPDATES_REPOSITORY: ${{ vars.PARALITH_UPDATES_REPOSITORY }}
+        run: node scripts/release/firebase-manifest-bridge.mjs verify "$env:PARALITH_PREVIEW_BRIDGE_ENDPOINT" "${{ steps.version.outputs.version }}" "$env:PARALITH_UPDATES_REPOSITORY" ".artifacts/firebase-bridge-state.json"
 
       # Secret-safe cleanup, and a genuine backstop rather than decoration. The Google auth
       # action normally deletes its own credential file in its post step, but that post step

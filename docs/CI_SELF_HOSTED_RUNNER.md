@@ -338,22 +338,10 @@ The pull-request Validate run is the gate by convention, not by enforcement.
 
 Documentation-only changes still skip validation via `paths-ignore`.
 
-## Deferred — external HTTPS hosting
+## Public updater distribution
 
-**Not implemented, intentionally out of scope.** Preview updater payloads are still published to
-Firebase Hosting exactly as before; this work changed only *where jobs execute*.
-
-Still open, and unchanged by this work:
-
-- the friend's file-hosting server;
-- any HTTP/HTTPS update server, S3-compatible storage, or CDN;
-- custom update manifests or a redesigned updater;
-- migrating away from GitHub Releases.
-
-### Known external blocker — Firebase Spark plan
-
-The Firebase Hosting deploy for Preview requires the `corelithwebsite` project on the **Blaze**
-plan. Confirmed on the self-hosted runner in run
+Firebase Spark cannot host Windows executable updater payloads. This was confirmed on the
+self-hosted runner in run
 [30336795016](https://github.com/dasindusithmira2025-ops/forgemind/actions/runs/30336795016),
 step *Deploy signed Preview updater artifacts to Firebase Hosting*:
 
@@ -362,14 +350,14 @@ HTTP Error: 400, Executable files are forbidden on the Spark billing plan
 https://firebase.google.com/support/faq#hosting-exe-restrictions
 ```
 
-Everything up to that point succeeds, including Google Workload Identity Federation auth, so
-this is purely a Firebase billing upgrade and nothing in this repository can work around it.
+Signed MSI/NSIS updater payloads now publish as anonymous GitHub Release assets in the public,
+artifact-only `dasindusithmira2025-ops/paralith-updates` repository. Channel manifests activate
+through an optimistic blob-SHA-checked commit only after anonymous payload verification. Firebase
+keeps only a JSON compatibility manifest for installed Preview `0.4.1-1023`; Spark therefore never
+sees an executable.
 
-**What already works without it:** the signed MSI and NSIS installers are built and verified,
-and the internal GitHub prerelease is published with both installers, their `.sig` files, and
-`latest.json` attached. What does not work is the *public* Hosting endpoint that installed
-Preview builds poll — so installed apps will not see the update until Blaze is enabled and
-Release Internal is dispatched again.
-
-To resume: upgrade `corelithwebsite` to Blaze, then
-`gh workflow run "Release Internal" --repo dasindusithmira2025-ops/forgemind --ref main`.
+Provision `PARALITH_UPDATES_DEPLOY_KEY` in the Preview and Stable release environments from a
+write-enabled deploy key attached only to `paralith-updates`. The private workflow can then stage a
+validated publication batch, while the public repository's own Actions token creates Releases and
+activates manifests. Do not reuse a broad personal token or expose the deploy key to application
+builds.
