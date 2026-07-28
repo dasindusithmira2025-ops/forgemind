@@ -12,6 +12,7 @@ const version = canonical.version
 const commit = process.env.PARALITH_GIT_COMMIT || process.env.GITHUB_SHA || (await import('node:child_process')).execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
 const buildTimestamp = process.env.PARALITH_BUILD_TIMESTAMP || new Date().toISOString()
 const artifactBase = (process.env.PARALITH_UPDATE_ARTIFACT_BASE_URL || `http://127.0.0.1:4179/${edition}`).replace(/\/$/, '')
+const flatArtifactLayout = process.env.PARALITH_UPDATE_PUBLISH_PROVIDER === 'github-artifacts'
 const bundleRoot = process.env.PARALITH_BUNDLE_DIR || join(root, 'src-tauri', 'target', 'release', 'bundle')
 const output = join(root, '.artifacts', 'release', edition, version)
 const siteVersion = join(root, '.artifacts', 'update-site', edition, version)
@@ -40,7 +41,9 @@ const msiSig = files.find((file) => file.name === `${msi?.name}.sig`)
 const nsisSig = files.find((file) => file.name === `${nsis?.name}.sig`)
 if (!msi || !nsis || !msiSig || !nsisSig) throw new Error('Signed MSI/NSIS updater artifacts are incomplete')
 const signature = async (file) => (await readFile(join(output, file.name), 'utf8')).trim()
-const url = (file) => `${artifactBase}/${version}/${encodeURIComponent(file.name)}`
+// Static update sites keep payloads under <channel>/<version>/. GitHub Release assets are flat
+// under releases/download/<tag>/ and cannot contain path separators.
+const url = (file) => `${artifactBase}/${flatArtifactLayout ? '' : `${version}/`}${encodeURIComponent(file.name)}`
 
 const releaseManifest = {
   formatVersion: 1,

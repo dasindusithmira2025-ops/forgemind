@@ -5,7 +5,6 @@ import { describe, expect, it } from 'vitest'
 import { formatMissingPublishKeys, invalidPublishConfiguration, missingPublishKeys } from './preflight-publish.mjs'
 import {
   FIREBASE_CLI_VERSION,
-  FIREBASE_DEPLOYMENT_CONCURRENCY_GROUP,
   assertDeployReady,
   assertDeploySucceeded,
   firebaseDeployInvocation,
@@ -149,6 +148,7 @@ describe('Firebase configuration and deployment command', () => {
     expect(config.hosting.public).toBe('update-site-dist')
     expect(config.hosting.rewrites).toBeUndefined()
     expect(config.hosting.headers[0].source).toBe('/preview/latest.json')
+    expect(config.hosting.headers[1].source).toBe('/stable/latest.json')
     expect(config.hosting.headers[0].headers).toEqual(expect.arrayContaining([
       { key: 'Cache-Control', value: 'no-cache, no-store, must-revalidate' },
       { key: 'Content-Type', value: 'application/json; charset=utf-8' },
@@ -171,11 +171,6 @@ describe('Firebase configuration and deployment command', () => {
     }
   })
 
-  it('uses the shared Firebase deployment concurrency group', async () => {
-    expect(FIREBASE_DEPLOYMENT_CONCURRENCY_GROUP).toBe('firebase-hosting-update-site')
-    const workflow = await readFile(join(process.cwd(), '.github', 'workflows', 'release-internal.yml'), 'utf8')
-    expect(workflow).toContain(`group: ${FIREBASE_DEPLOYMENT_CONCURRENCY_GROUP}`)
-  })
 })
 
 describe('release and live deployment verification', () => {
@@ -403,13 +398,12 @@ describe('idempotent internal release publication', () => {
 })
 
 describe('release workflow wiring', () => {
-  it('stages, generates config, asserts, deploys, and activates against one .artifacts staging root', async () => {
+  it('publishes public payloads first, then deploys a JSON-only Firebase compatibility bridge', async () => {
     const workflow = await readFile(join(process.cwd(), '.github', 'workflows', 'release-internal.yml'), 'utf8')
-    const stagingReferences = workflow.match(/\.artifacts\/update-site-dist/g) || []
-    expect(stagingReferences.length).toBeGreaterThanOrEqual(4)
-    // The fail-fast readiness assertion must run before the first Firebase deploy.
-    expect(workflow.indexOf('assert-deploy-ready')).toBeGreaterThan(-1)
-    expect(workflow.indexOf('assert-deploy-ready')).toBeLessThan(workflow.indexOf('firebase deploy --only hosting'))
+    const stagingReferences = workflow.match(/\.artifacts\/update-bridge-dist/g) || []
+    expect(stagingReferences.length).toBeGreaterThanOrEqual(3)
+    expect(workflow.indexOf('github-artifacts-publisher.mjs publish')).toBeLessThan(workflow.indexOf('firebase-manifest-bridge.mjs stage'))
+    expect(workflow.indexOf('assert-json-only')).toBeLessThan(workflow.indexOf('firebase deploy --only hosting'))
   })
 
   it('publishes the internal prerelease idempotently by superseding an existing tag', async () => {

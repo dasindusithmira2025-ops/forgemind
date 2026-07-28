@@ -1,6 +1,13 @@
 # PARALITH internal Windows releases
 
-PARALITH is distributed only inside the company. The private GitHub repository archives source and release artifacts; installed applications never authenticate to GitHub. GitHub release-asset URLs from this private repository return HTTP 404 anonymously, so Firebase Hosting publishes the signed updater payload files and `latest.json` for installed clients.
+PARALITH source remains private in `dasindusithmira2025-ops/forgemind`. Signed installers, updater signatures, checksums, release notes, and channel manifests are distributed from the public artifact-only repository [`dasindusithmira2025-ops/paralith-updates`](https://github.com/dasindusithmira2025-ops/paralith-updates). Installed applications use anonymous HTTPS and never receive a GitHub credential.
+
+Versioned binaries are immutable GitHub Release assets. The discoverable manifests are:
+
+- Preview: `https://raw.githubusercontent.com/dasindusithmira2025-ops/paralith-updates/main/channels/preview/latest.json`
+- Stable: `https://raw.githubusercontent.com/dasindusithmira2025-ops/paralith-updates/main/channels/stable/latest.json`
+
+The publisher uploads every signed payload, proves anonymous reachability, then updates only the selected channel manifest through the GitHub Contents API using the current blob SHA. A stale or concurrent activation fails instead of overwriting a newer manifest. The private source-repository release remains the authenticated engineering archive.
 
 ## Editions and data isolation
 
@@ -34,8 +41,11 @@ Required GitHub Actions configuration:
 - Secret `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`: updater key password; configure an empty value only if the offline key intentionally has no password.
 - Variable `PARALITH_STABLE_UPDATE_ENDPOINT`: Stable HTTPS `latest.json` URL.
 - Variable `PARALITH_PREVIEW_UPDATE_ENDPOINT`: Preview HTTPS `latest.json` URL.
-- Variable `PARALITH_UPDATE_ARTIFACT_BASE_URL`: public HTTPS base used inside manifests. For Firebase Preview this is `https://corelith-paralith-updates.web.app/preview`.
-- Variable `PARALITH_UPDATE_PUBLISH_PROVIDER`: `firebase-hosting` for the installed Preview bootstrap endpoint; legacy `filesystem`, `s3`, `ssh`, and `http` remain supported for non-Firebase publishing.
+- Variable `PARALITH_UPDATES_REPOSITORY`: `dasindusithmira2025-ops/paralith-updates`.
+- Variable `PARALITH_UPDATE_PUBLISH_PROVIDER`: `github-artifacts`.
+- Secret `PARALITH_UPDATES_TOKEN`: fine-grained token limited to Contents and Releases write access in `paralith-updates`. It is used only by release jobs and is never bundled.
+- Variable `PARALITH_PREVIEW_BRIDGE_ENDPOINT`: `https://corelith-paralith-updates.web.app/preview/latest.json`, retained only for the installed `0.4.1-1023` migration bridge.
+- Variable `PARALITH_UPDATE_ARTIFACT_BASE_URL`: legacy static-host provider input. GitHub publication derives the versioned Release URL inside the workflow.
 - Secret `PARALITH_UPDATE_PUBLISH_TARGET`: provider destination. It may contain private infrastructure routing but must not be bundled.
 - Secret `PARALITH_UPDATE_PUBLISH_TOKEN`: required only by the HTTP PUT adapter.
 - Variable `PARALITH_ROLLOUT_PERCENT`: integer 0-100; start Preview at 100 and Stable with the approved office cohort.
@@ -44,13 +54,14 @@ Required GitHub Actions configuration:
 
 GitHub's generated `GITHUB_TOKEN` is used only by Actions to create the private repository release. It is never compiled into PARALITH.
 
-### Firebase Preview publisher
+### Firebase Preview compatibility bridge
 
-The installed Preview 0.4.1-1001 application polls `https://corelith-paralith-updates.web.app/preview/latest.json`; do not repoint this endpoint. The internal release workflow creates a GitHub prerelease as the authenticated archive, then publishes the signed Windows payload files and final `preview/latest.json` to Firebase Hosting. The manifest is activated only after the payload paths are reachable.
+Installed Preview `0.4.1-1023` polls `https://corelith-paralith-updates.web.app/preview/latest.json`. The first migrated release therefore deploys the same signed manifest to that URL after the public GitHub assets and canonical public Preview manifest are live. Firebase receives JSON only; `.exe`, `.msi`, and signature payloads never enter Firebase Hosting.
 
 Set these **preview-release environment variables**:
 
-- `PARALITH_UPDATE_PUBLISH_PROVIDER=firebase-hosting`
+- `PARALITH_UPDATE_PUBLISH_PROVIDER=github-artifacts`
+- `PARALITH_PREVIEW_BRIDGE_ENDPOINT=https://corelith-paralith-updates.web.app/preview/latest.json`
 - `FIREBASE_PROJECT_ID`: Firebase project ID supplied by the Firebase administrator.
 - `FIREBASE_HOSTING_SITE`: Firebase Hosting site ID supplied by the Firebase administrator.
 - `GCP_WORKLOAD_IDENTITY_PROVIDER`: full Workload Identity Provider resource name.
@@ -58,9 +69,9 @@ Set these **preview-release environment variables**:
 
 The preferred authentication method is Workload Identity Federation. The workflow requests `id-token: write` and uses `google-github-actions/auth@v3` immediately before deployment. Restrict the provider to `dasindusithmira2025-ops/forgemind` and the `preview-release` environment. Grant the deployer service account exactly `roles/firebasehosting.admin` and `roles/serviceusage.apiKeysViewer` (the latter is required by Firebase CLI deployment); grant the GitHub Workload Identity principal only `roles/iam.workloadIdentityUser` on that service account. If WIF cannot be provisioned, leave both WIF variables unset and set only the `FIREBASE_SERVICE_ACCOUNT_JSON` secret with credentials for that same least-privilege deployer service account.
 
-No `PARALITH_UPDATE_PUBLISH_TARGET` or `PARALITH_UPDATE_PUBLISH_TOKEN` is used for `firebase-hosting`. Credential files emitted by Google authentication and generated Firebase deployment configuration are ignored and never packaged.
+No updater executable is staged in the Firebase public directory. Credential files emitted by Google authentication and generated Firebase deployment configuration are ignored and never packaged.
 
-The deployment stages the new Preview payload files while preserving the exact current Preview and Stable manifests. It reads `/stable/latest.json` before every deploy: HTTP 200 is copied byte-for-byte and checked by SHA-256 afterward; HTTP 404 remains absent; any other response fails before deployment. It then deploys the new `preview/latest.json` as the final release switch, with `Cache-Control: no-cache, no-store, must-revalidate` and `Content-Type: application/json; charset=utf-8`. There is no SPA rewrite. Firebase deployments use the shared `firebase-hosting-update-site` concurrency group; any future Firebase-backed Stable publisher must use the same group.
+The bridge reads `/stable/latest.json` before deployment: HTTP 200 is preserved byte-for-byte and checked by SHA-256 afterward; HTTP 404 remains absent; any other response fails closed. The staged tree is rejected if it contains anything except channel `latest.json` files. There is no SPA rewrite.
 
 Protect the `stable-release` and `preview-release` environments with required reviewers. Protect `stable-v*` and `preview-v*` tags. Require the `Validate` workflow on `integration` and `main`.
 
@@ -75,7 +86,7 @@ The **internal channel is delivered on the `preview` edition** (separate identif
 
 ## Automatic internal releases (push to `main`)
 
-Every merge or push to `main` runs `release-internal.yml`: full CI validation (`ci.yml`) gates a build job that generates a unique internal version, builds the signed `preview` installer + updater artifacts, publishes a non-draft GitHub prerelease, deploys Firebase payload files, then activates the signed `latest.json` manifest. Installed internal builds detect it on their next check and install on the next safe restart. No manual tagging or version editing is required.
+Every merge or push to `main` runs `release-internal.yml`: validation gates a unique internal version and signed Preview bundles; the private repository receives the engineering archive; the public artifact repository receives the immutable assets; anonymous verification passes; the public Preview manifest activates with optimistic SHA protection; and the JSON-only Firebase bridge is refreshed for the migration cohort. No manual tagging or version editing is required.
 
 - **Versioning.** `scripts/release/internal-version.mjs` derives `X.Y.(Z+1)-<1001 + github.run_number>` from the shipped stable base in `release/version.json`. The `1001` floor keeps every automatic build strictly above the updater bootstrap version while the numeric prerelease remains MSI-compatible. Each build is therefore a valid upgrade over the previous one, sorts above the current stable, and sorts below the eventual stable release of that patch (`0.4.1-1002 < 0.4.1-1003 < 0.4.1`).
 - **Ephemeral, never committed.** The version bump and its generated changelog are written only inside the runner and are never committed back to `main`, so `main` stays on its canonical stable version.
@@ -86,7 +97,7 @@ Every merge or push to `main` runs `release-internal.yml`: full CI validation (`
 
 1. Work on a short feature or fix branch.
 2. Open a pull request; CI validation (`ci.yml`) runs on the PR and must pass. No release is produced from a PR.
-3. Merge to `main`. This automatically produces and publishes a signed **internal** build — no tag needed.
+3. Merge to `main`. This automatically produces and publishes a signed **Preview** build — no tag needed.
 4. To cut a **stable** release, set `release/version.json`, add its single `release/changelog/` entry, land it on `main`, then create the protected `stable-vX.Y.Z` tag. Stable tags must point to a committed, clean tree.
 
 The release workflows build MSI, NSIS, updater signatures, checksums, `latest.json`, release manifest, release notes, build metadata, and schema metadata. They archive all files in the private GitHub release and then run the configured internal publication adapter.
@@ -129,13 +140,15 @@ Stable follows the same one-time bootstrap using a `stable` build; after that, `
 
 ## Testing the push-to-main automatic flow
 
-1. Configure the `preview-release` environment with the signing key, `PARALITH_PREVIEW_UPDATE_ENDPOINT`, `PARALITH_UPDATE_ARTIFACT_BASE_URL`, `PARALITH_UPDATE_PUBLISH_PROVIDER=firebase-hosting`, and the Firebase WIF variables (or the service-account fallback) listed above.
+1. Configure the `preview-release` environment with the signing key, public manifest endpoint, `PARALITH_UPDATES_REPOSITORY`, narrowly scoped `PARALITH_UPDATES_TOKEN`, `PARALITH_UPDATE_PUBLISH_PROVIDER=github-artifacts`, bridge endpoint, and Firebase WIF variables (or the service-account fallback) listed above.
 2. Push a trivial change to `main`.
-3. Watch **Actions → Release Internal**: `validate` runs full CI, then `release` builds `X.Y.(Z+1)-<run>`, publishes the prerelease, and syncs `latest.json`.
-4. On a bootstrapped internal install, confirm the new version is detected on the next check and installs on the next safe restart.
+3. Watch **Actions → Release Internal**: validation runs before the signed build, public payload verification, optimistic manifest activation, and Firebase JSON bridge.
+4. On installed Preview `0.4.1-1023`, confirm the bridge discovers the release, **Update now** shows real progress, signature verification succeeds, the safe-restart gate is respected, and the restarted application confirms a healthy database and workspace state.
 
 ## Publishing a stable release
 
 1. Land the release commit on `main` with `release/version.json` at the target `X.Y.Z` and a matching `stable` changelog entry (CI's `release:check` enforces consistency).
 2. Create and push the protected tag: `git tag stable-vX.Y.Z && git push origin stable-vX.Y.Z`.
-3. `release-stable.yml` runs full validation, verifies the tag matches the version on a clean tree, builds signed artifacts, and publishes a non-draft stable release plus the stable `latest.json` after the `stable-release` environment approval gate.
+3. `release-stable.yml` runs full validation, verifies the tag matches the version on a clean tree, builds signed artifacts, publishes both the private archive and public immutable assets, anonymously verifies them, then activates only the Stable manifest after the `stable-release` environment approval gate.
+
+Ordinary pushes and Preview releases never update `channels/stable/latest.json`. This feature does not create a Stable tag or customer release.

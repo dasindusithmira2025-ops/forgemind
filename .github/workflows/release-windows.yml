@@ -35,6 +35,9 @@ jobs:
     runs-on: [self-hosted, Windows, X64, paralith, paralith-release]
     timeout-minutes: 120
     environment: ${{ inputs.edition }}-release
+    concurrency:
+      group: paralith-update-publication
+      cancel-in-progress: false
     defaults:
       run:
         shell: pwsh
@@ -58,6 +61,21 @@ jobs:
 
       - run: npm ci
 
+      - name: Public updater publication preflight
+        env:
+          PARALITH_UPDATE_PUBLISH_PROVIDER: ${{ vars.PARALITH_UPDATE_PUBLISH_PROVIDER }}
+          PARALITH_UPDATES_REPOSITORY: ${{ vars.PARALITH_UPDATES_REPOSITORY }}
+          PARALITH_UPDATES_TOKEN: ${{ secrets.PARALITH_UPDATES_TOKEN }}
+          PARALITH_STABLE_UPDATE_ENDPOINT: ${{ vars.PARALITH_STABLE_UPDATE_ENDPOINT }}
+          PARALITH_PREVIEW_UPDATE_ENDPOINT: ${{ vars.PARALITH_PREVIEW_UPDATE_ENDPOINT }}
+        run: |
+          if ($env:PARALITH_UPDATE_PUBLISH_PROVIDER -ne 'github-artifacts') { throw 'Protected channel releases require PARALITH_UPDATE_PUBLISH_PROVIDER=github-artifacts.' }
+          if (-not $env:PARALITH_UPDATES_REPOSITORY) { throw 'PARALITH_UPDATES_REPOSITORY is required.' }
+          if (-not $env:PARALITH_UPDATES_TOKEN) { throw 'PARALITH_UPDATES_TOKEN is required.' }
+          $endpoint = if ('${{ inputs.edition }}' -eq 'stable') { $env:PARALITH_STABLE_UPDATE_ENDPOINT } else { $env:PARALITH_PREVIEW_UPDATE_ENDPOINT }
+          $expected = "https://raw.githubusercontent.com/$env:PARALITH_UPDATES_REPOSITORY/main/channels/${{ inputs.edition }}/latest.json"
+          if ($endpoint -ne $expected) { throw "The ${{ inputs.edition }} endpoint must be the public channel manifest URL." }
+
       - name: Validate protected release tag
         run: npm run release:check
 
@@ -77,7 +95,8 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           PARALITH_STABLE_UPDATE_ENDPOINT: ${{ vars.PARALITH_STABLE_UPDATE_ENDPOINT }}
           PARALITH_PREVIEW_UPDATE_ENDPOINT: ${{ vars.PARALITH_PREVIEW_UPDATE_ENDPOINT }}
-          PARALITH_UPDATE_ARTIFACT_BASE_URL: ${{ vars.PARALITH_UPDATE_ARTIFACT_BASE_URL }}
+          PARALITH_UPDATE_PUBLISH_PROVIDER: ${{ vars.PARALITH_UPDATE_PUBLISH_PROVIDER }}
+          PARALITH_UPDATES_REPOSITORY: ${{ vars.PARALITH_UPDATES_REPOSITORY }}
           PARALITH_PREVIOUS_INSTALLER_URL: ${{ vars.PARALITH_PREVIOUS_INSTALLER_URL }}
           PARALITH_ROLLOUT_PERCENT: ${{ vars.PARALITH_ROLLOUT_PERCENT }}
           PARALITH_WINDOWS_SIGN_COMMAND: ${{ secrets.PARALITH_WINDOWS_SIGN_COMMAND }}
@@ -87,6 +106,7 @@ jobs:
           $env:PARALITH_RELEASE_CHANNEL='${{ inputs.edition }}'
           $env:PARALITH_GIT_COMMIT=(git rev-parse HEAD).Trim()
           $env:PARALITH_BUILD_TIMESTAMP=(Get-Date).ToUniversalTime().ToString('o')
+          $env:PARALITH_UPDATE_ARTIFACT_BASE_URL="https://github.com/$env:PARALITH_UPDATES_REPOSITORY/releases/download/${{ inputs.tag }}"
           $endpoint = if ('${{ inputs.edition }}' -eq 'stable') { $env:PARALITH_STABLE_UPDATE_ENDPOINT } else { $env:PARALITH_PREVIEW_UPDATE_ENDPOINT }
           if (-not $endpoint) { throw 'Edition update endpoint repository variable is required.' }
           $env:PARALITH_UPDATE_ENDPOINT=$endpoint
@@ -125,24 +145,13 @@ jobs:
           $commit = (git rev-parse HEAD).Trim()
           gh release create '${{ inputs.tag }}' $assets --title "PARALITH ${{ inputs.edition }} $($dir.Name)" --notes-file $notes --target $commit $pre
 
-      - name: Detect internal publication configuration
-        id: publication
+      - name: Publish public signed updater assets and activate channel manifest
         env:
-          PUBLISH_TARGET: ${{ secrets.PARALITH_UPDATE_PUBLISH_TARGET }}
+          PARALITH_UPDATES_REPOSITORY: ${{ vars.PARALITH_UPDATES_REPOSITORY }}
+          PARALITH_UPDATES_TOKEN: ${{ secrets.PARALITH_UPDATES_TOKEN }}
         run: |
-          if ($env:PUBLISH_TARGET) {
-            'enabled=true' | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          } else {
-            'enabled=false' | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          }
-
-      - name: Publish to internal update endpoint
-        if: steps.publication.outputs.enabled == 'true'
-        env:
-          PARALITH_UPDATE_PUBLISH_TARGET: ${{ secrets.PARALITH_UPDATE_PUBLISH_TARGET }}
-          PARALITH_UPDATE_PUBLISH_PROVIDER: ${{ vars.PARALITH_UPDATE_PUBLISH_PROVIDER }}
-          PARALITH_UPDATE_PUBLISH_TOKEN: ${{ secrets.PARALITH_UPDATE_PUBLISH_TOKEN }}
-        run: ./scripts/release/publish-internal-update.ps1
+          $dir = Get-ChildItem '.artifacts/release/${{ inputs.edition }}' -Directory | Select-Object -First 1
+          node scripts/release/github-artifacts-publisher.mjs publish '${{ inputs.edition }}' '${{ inputs.tag }}' "$($dir.FullName)" "$($dir.Name)"
 
       - name: Clean up abandoned build processes
         if: always()
