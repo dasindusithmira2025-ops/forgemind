@@ -1,65 +1,100 @@
 name: Validate
 
+# Runs entirely on the repository-scoped self-hosted Windows runner
+# (paralith-windows-release). GitHub-hosted runners are not used anywhere: this account's
+# included Actions allowance is exhausted, so hosted jobs are refused by the scheduler
+# before a runner is ever assigned -- on ubuntu-latest exactly as much as on windows-latest.
+#
+# Because there is one runner, work is consolidated into a single job. The old three-job
+# split (frontend -> rust -> windows) existed to keep 2x Windows minutes off the critical
+# path; on a self-hosted machine it only added two extra checkouts, two extra `npm ci`
+# installs, and a dist upload/download round-trip. The checks themselves are unchanged and
+# live in scripts/ci/run-checks.ps1, shared with the release workflows.
+
 on:
   pull_request:
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'LICENSE'
+      - '.gitignore'
+      - '.github/ISSUE_TEMPLATE/**'
   push:
+    # `integration` is preserved from the previous configuration alongside `main`.
     branches: [main, integration]
-  workflow_call:
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'LICENSE'
+      - '.gitignore'
+      - '.github/ISSUE_TEMPLATE/**'
 
+# No `workflow_call` entry point. The release workflows used to call this one and then compile
+# the same commit a second time for real; they now run the shared check script inline instead,
+# so the reusable plumbing here would be dead configuration.
+
+# Least privilege: validation only ever reads the repository.
 permissions:
   contents: read
 
+# A superseded run still occupies the single runner, so cancelling it is what actually frees
+# capacity here.
 concurrency:
-  group: validate-${{ github.workflow }}-${{ github.ref }}
+  group: validate-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   validate:
-    runs-on: windows-latest
-    timeout-minutes: 45
+    name: Validate (self-hosted Windows)
+    # Specific labels only. A bare `self-hosted` would match any future runner.
+    runs-on: [self-hosted, Windows, X64, paralith]
+    timeout-minutes: 90
+
+    # SECURITY GATE. The runner is the maintainer's personal PC, so fork-originated code must
+    # never execute on it. Same-repository branches are trusted; anything else is skipped.
+    # `pull_request_target` is deliberately not used anywhere in this repository.
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+
+    defaults:
+      run:
+        shell: pwsh
+
     steps:
-      - uses: actions/checkout@v4
+      # clean: false preserves node_modules and the ~75 GB Rust target directory -- the whole
+      # point of a persistent runner. prepare-workspace.ps1 then does the precise cleaning.
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
-      - run: npm ci
-      - name: Canonical release metadata
-        run: npm run release:check
-      - name: TypeScript
-        run: npm run typecheck
-      - name: Frontend lint
-        run: npm run lint
-      - name: Frontend tests
-        run: npm test -- --run
-      - name: Production frontend build
-        run: npm run build
-      - name: Rust formatting
-        working-directory: src-tauri
-        run: cargo fmt --all -- --check
-      - name: Rust clippy
-        working-directory: src-tauri
-        run: cargo clippy --all-targets --all-features -- -D warnings
-      - name: Rust and migration tests
-        working-directory: src-tauri
-        run: cargo test --all-targets --all-features
-      - name: Tauri compilation
-        shell: pwsh
+          clean: false
+
+      # Removes stray untracked files and all previous release output, keeps the dependency
+      # caches, and hard-fails if HEAD is not the commit this event was raised for.
+      - name: Prepare workspace
+        run: pwsh -NoProfile -File scripts/ci/prepare-workspace.ps1 -ExpectedSha "$env:GITHUB_SHA"
+
+      # Cheap gate: fail before npm ci if the machine cannot build at all.
+      - name: Runner preflight
+        run: pwsh -NoProfile -File scripts/ci/check-self-hosted-runner.ps1
+
+      # Deterministic install from the lockfile. npm's own cache directory persists on this
+      # machine, so no cache action is needed and nothing is re-downloaded between runs.
+      - name: Install dependencies
+        run: npm ci
+
+      # The pull request is the gate, so it pays for the Tauri Windows compile. A push to main
+      # arrives via an already-validated PR and the tag/internal release workflows compile the
+      # real signed bundle themselves, so re-compiling here would be the third compile of one
+      # commit. Every other check still runs on both events.
+      - name: Run validation suite
         run: |
-          $env:PARALITH_EDITION='stable'
-          $env:PARALITH_RELEASE_CHANNEL='stable'
-          $env:PARALITH_UPDATE_ENDPOINT='https://updates.invalid/paralith/stable/latest.json'
-          npm run tauri -- build --no-bundle --config src-tauri/tauri.stable.conf.json
-      - name: Generated files and clean diff
-        shell: pwsh
-        run: |
-          npm run release:sync
-          git diff --exit-code -- package.json src-tauri/Cargo.toml src-tauri/tauri.conf.json release/generated/current-release.json
+          pwsh -NoProfile -File scripts/ci/run-checks.ps1 `
+            -SummaryTitle 'Validation' `
+            ${{ github.event_name == 'pull_request' && '-IncludeTauriCompile' || '' }}
+
+      # Persistent runner: reclaim file locks even when the job failed or was cancelled.
+      - name: Clean up abandoned build processes
+        if: always()
+        run: pwsh -NoProfile -File scripts/ci/cleanup-runner-processes.ps1

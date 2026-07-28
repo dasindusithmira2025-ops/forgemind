@@ -1,18 +1,30 @@
 name: Release Internal
 
-# Automatic internal delivery: every merge/push to `main` produces a unique, signed internal
-# (preview-edition) build and publishes it to the internal update endpoint. Installed internal
-# builds detect it and update on the next safe restart. No manual tagging or version editing is
-# required. Stable customers are never affected — they read a different edition/endpoint and only
-# receive tag-driven `stable-v*` releases (see release-stable.yml).
+# Explicit internal delivery. A dispatch produces a unique, signed internal (preview-edition)
+# build and publishes it to the internal update endpoint; installed internal builds pick it up
+# on the next safe restart. Stable customers are unaffected -- they read a different
+# edition/endpoint and only receive tag-driven `stable-v*` releases (see release-stable.yml).
+#
+# Runs on the repository-scoped self-hosted Windows runner. The previous `validate` job (a
+# `workflow_call` into ci.yml with `full: true`) has been removed: it performed a second
+# checkout, a second `npm ci`, and a full throwaway Tauri compile of the very same commit that
+# this job then compiles for real. The checks themselves were not dropped -- they run inline
+# below via the shared scripts/ci/run-checks.ps1, before anything expensive or publishable
+# happens. A successful signed bundle build is a strictly stronger compile proof than the
+# discarded --no-bundle compile it replaces.
 
+# TRIGGER CHANGE, deliberate and reversible. This previously also fired on every push to
+# `main`. It is now dispatch-only, for two reasons:
+#   1. There is one runner. An automatic signed release per merge occupies this PC for the best
+#      part of an hour and blocks the validation of any subsequent push behind it.
+#   2. The Firebase Hosting publish step cannot currently succeed (the `corelithwebsite`
+#      project is on the Spark plan, which rejects .exe/.msi uploads), so an automatic release
+#      per merge would produce a guaranteed red run on every single merge.
+# To restore automatic internal delivery once Firebase is on Blaze, re-add:
+#   push:
+#     branches: [main]
+#     paths-ignore: ['**/*.md', 'docs/**']
 on:
-  push:
-    branches: [main]
-    # Skip pushes that only touch docs/CI so we don't cut a build with no user-facing change.
-    paths-ignore:
-      - '**/*.md'
-      - 'docs/**'
   workflow_dispatch:
 
 permissions:
@@ -22,46 +34,72 @@ permissions:
 env:
   FIREBASE_CLI_VERSION: 13.35.1
 
-# One publish per commit. Do not cancel an in-progress publish (a half-published manifest is worse
-# than a queued one); serialize instead so two runs never race on the same commit.
+# One internal release at a time, repository-wide. Never cancel a publish in flight: a
+# half-published manifest is worse than a queued one, so concurrent dispatches serialise.
 concurrency:
-  group: release-internal-${{ github.sha }}
+  group: release-internal
   cancel-in-progress: false
 
 jobs:
-  # Full CI gate — a failed check here prevents the release job from ever running.
-  validate:
-    uses: ./.github/workflows/ci.yml
-
   release:
-    needs: validate
-    runs-on: windows-latest
-    timeout-minutes: 60
+    name: Build and publish internal release
+    runs-on: [self-hosted, Windows, X64, paralith, paralith-release]
+    timeout-minutes: 120
     environment: preview-release
     # Reserved shared deployment lock: any future Firebase-backed Stable publisher must use this
-    # exact group so Preview and Stable can never replace the Hosting site concurrently.
+    # exact group so Preview and Stable can never replace the Hosting site concurrently. This is
+    # a different axis from the workflow-level `release-internal` lock above -- that one serialises
+    # internal releases, this one serialises Firebase Hosting deployments across all workflows.
+    # scripts/release/firebase-hosting-publisher.test.mjs asserts this group is present.
     concurrency:
       group: firebase-hosting-update-site
       cancel-in-progress: false
+    defaults:
+      run:
+        shell: pwsh
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
+          clean: false
+
+      # An internal release must never be cut from a commit that is not on main. Dispatching
+      # this workflow against an arbitrary branch would otherwise publish unreviewed code to
+      # every installed internal build.
+      - name: Confirm the commit is on main
+        run: |
+          git fetch --no-tags origin main
+          $sha = "$env:GITHUB_SHA"
+          git merge-base --is-ancestor $sha origin/main
+          if ($LASTEXITCODE -ne 0) {
+            throw "Commit $sha is not an ancestor of origin/main. Internal releases must ship reviewed, merged code."
+          }
+          Write-Host "$sha is on main."
+
+      # Clears .artifacts and target/release/bundle so no installer from an earlier run can be
+      # globbed into this release, and asserts HEAD is exactly the dispatched commit.
+      - name: Prepare workspace
+        run: pwsh -NoProfile -File scripts/ci/prepare-workspace.ps1 -ExpectedSha "$env:GITHUB_SHA" -ReleaseBuild
+
+      # Release-grade preflight: a much higher disk floor (a full bundle needs far more room
+      # than validation) plus presence-only checks on the signing configuration.
+      - name: Runner preflight (release)
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          PARALITH_PREVIEW_UPDATE_ENDPOINT: ${{ vars.PARALITH_PREVIEW_UPDATE_ENDPOINT }}
+          PARALITH_UPDATE_ARTIFACT_BASE_URL: ${{ vars.PARALITH_UPDATE_ARTIFACT_BASE_URL }}
+          PARALITH_UPDATE_PUBLISH_PROVIDER: ${{ vars.PARALITH_UPDATE_PUBLISH_PROVIDER }}
+          FIREBASE_PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID }}
+          FIREBASE_HOSTING_SITE: ${{ vars.FIREBASE_HOSTING_SITE }}
+        run: pwsh -NoProfile -File scripts/ci/check-self-hosted-runner.ps1 -ReleaseBuild
+
       - run: npm ci
 
       # Fail fast BEFORE the expensive Windows build: a preview release that cannot publish its
       # manifest is worthless, so a missing publish key must stop the release here rather than
       # silently produce a GitHub-only prerelease no installed app can discover. Names only, no values.
       - name: Preview publish preflight
-        shell: pwsh
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           PARALITH_PREVIEW_UPDATE_ENDPOINT: ${{ vars.PARALITH_PREVIEW_UPDATE_ENDPOINT }}
@@ -78,9 +116,13 @@ jobs:
           PARALITH_INTERNAL_BUILD_NUMBER: ${{ github.run_number }}
         run: node scripts/release/preflight-publish.mjs
 
+      # The full suite, minus the throwaway compile. Runs while the tree is still pristine, so
+      # the generated-file drift check is meaningful -- the version rewrite happens next.
+      - name: Run validation suite
+        run: pwsh -NoProfile -File scripts/ci/run-checks.ps1 -SummaryTitle 'Pre-release validation'
+
       - name: Generate ephemeral internal version
         id: version
-        shell: pwsh
         env:
           PARALITH_INTERNAL_BUILD_NUMBER: ${{ github.run_number }}
           PARALITH_GIT_COMMIT: ${{ github.sha }}
@@ -92,11 +134,9 @@ jobs:
           npm run release:sync
 
       - name: Confirm generated version is newer than installed Preview
-        shell: pwsh
         run: node scripts/release/firebase-hosting-publisher.mjs version "${{ steps.version.outputs.version }}" '0.4.1-1001'
 
       - name: Build signed internal MSI, NSIS, and updater artifacts
-        shell: pwsh
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -121,8 +161,28 @@ jobs:
           npm run tauri -- build --bundles msi,nsis --config $config
           node scripts/release/assemble-release.mjs preview
 
+      # Confirms MSI and NSIS were actually produced for THIS version before anything is
+      # published, so a silently missing bundle cannot become a green release.
+      - name: Verify packaged installers
+        run: |
+          $dir = Get-ChildItem '.artifacts/release/preview' -Directory | Select-Object -First 1
+          if (-not $dir) { throw 'No assembled release directory was produced.' }
+          $version = '${{ steps.version.outputs.version }}'
+          $files = Get-ChildItem $dir.FullName -File
+          foreach ($ext in @('.msi', '.exe')) {
+            $match = $files | Where-Object { $_.Extension -eq $ext }
+            if (-not $match) { throw "No $ext installer was produced in $($dir.FullName)." }
+            foreach ($m in $match) { Write-Host ("{0}  {1} MB" -f $m.Name, [math]::Round($m.Length / 1MB, 2)) }
+          }
+          # Stale-artifact guard: every installer must carry the version just generated.
+          $wrong = $files | Where-Object { $_.Extension -in '.msi', '.exe' -and $_.Name -notlike "*$version*" }
+          if ($wrong) {
+            throw "Installer(s) do not carry version ${version}: $($wrong.Name -join ', ')"
+          }
+          Write-Host "MSI and NSIS installers verified for $version."
+
       - name: Archive workflow artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: paralith-internal-${{ steps.version.outputs.version }}
           path: .artifacts/release/preview/**
@@ -130,7 +190,6 @@ jobs:
           retention-days: 30
 
       - name: Publish internal release
-        shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -155,7 +214,6 @@ jobs:
 
       - name: Stage Firebase Hosting artifacts and preserve live manifests
         if: vars.PARALITH_UPDATE_PUBLISH_PROVIDER == 'firebase-hosting'
-        shell: pwsh
         env:
           PARALITH_PREVIEW_UPDATE_ENDPOINT: ${{ vars.PARALITH_PREVIEW_UPDATE_ENDPOINT }}
         # The Hosting public dir MUST live beside the generated deploy config: firebase-tools
@@ -165,7 +223,7 @@ jobs:
 
       - name: Authenticate to Google Cloud with Workload Identity Federation
         if: vars.PARALITH_UPDATE_PUBLISH_PROVIDER == 'firebase-hosting' && vars.GCP_WORKLOAD_IDENTITY_PROVIDER != '' && vars.GCP_SERVICE_ACCOUNT != ''
-        uses: google-github-actions/auth@v3
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
         with:
           project_id: ${{ vars.FIREBASE_PROJECT_ID }}
           workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
@@ -173,14 +231,13 @@ jobs:
 
       - name: Authenticate to Google Cloud with service-account fallback
         if: vars.PARALITH_UPDATE_PUBLISH_PROVIDER == 'firebase-hosting' && (vars.GCP_WORKLOAD_IDENTITY_PROVIDER == '' || vars.GCP_SERVICE_ACCOUNT == '')
-        uses: google-github-actions/auth@v3
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
         with:
           project_id: ${{ vars.FIREBASE_PROJECT_ID }}
           credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
 
       - name: Generate Firebase deploy config bound to the staged Hosting directory
         if: vars.PARALITH_UPDATE_PUBLISH_PROVIDER == 'firebase-hosting'
-        shell: pwsh
         env:
           FIREBASE_HOSTING_SITE: ${{ vars.FIREBASE_HOSTING_SITE }}
         # The 4th argument is the staged Hosting directory. firebase-tools resolves hosting.public as
@@ -190,26 +247,22 @@ jobs:
 
       - name: Assert Firebase deploy readiness before invoking the Firebase CLI
         if: vars.PARALITH_UPDATE_PUBLISH_PROVIDER == 'firebase-hosting'
-        shell: pwsh
         # Fail fast with safe diagnostics (paths, filenames, sizes — never secrets) if the staged
         # Hosting site, signed payloads, manifest state, or config public path are not coherent.
         run: node scripts/release/firebase-hosting-publisher.mjs assert-deploy-ready ".artifacts/update-site-dist" ".artifacts/update-site/preview/latest.json" ".artifacts/firebase-hosting.json"
 
       - name: Deploy signed Preview updater artifacts to Firebase Hosting
         if: vars.PARALITH_UPDATE_PUBLISH_PROVIDER == 'firebase-hosting'
-        shell: pwsh
         env:
           FIREBASE_PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID }}
         run: npm exec --yes "--package=firebase-tools@${{ env.FIREBASE_CLI_VERSION }}" -- firebase deploy --only hosting --project "$env:FIREBASE_PROJECT_ID" --config ".artifacts/firebase-hosting.json" --non-interactive
 
       - name: Verify Firebase Hosting updater artifacts before manifest activation
         if: vars.PARALITH_UPDATE_PUBLISH_PROVIDER == 'firebase-hosting'
-        shell: pwsh
         run: node scripts/release/firebase-hosting-publisher.mjs verify-artifacts ".artifacts/update-site/preview/latest.json" "${{ steps.version.outputs.version }}"
 
       - name: Activate the new Preview manifest as the final release switch
         if: vars.PARALITH_UPDATE_PUBLISH_PROVIDER == 'firebase-hosting'
-        shell: pwsh
         run: |
           node scripts/release/firebase-hosting-publisher.mjs activate ".artifacts/update-site/preview/latest.json" ".artifacts/update-site-dist"
           if ($LASTEXITCODE -ne 0) { throw "Preview manifest activation failed with exit code $LASTEXITCODE" }
@@ -217,7 +270,6 @@ jobs:
 
       - name: Verify Firebase Hosting Preview manifest and Stable preservation
         if: vars.PARALITH_UPDATE_PUBLISH_PROVIDER == 'firebase-hosting'
-        shell: pwsh
         env:
           PARALITH_PREVIEW_UPDATE_ENDPOINT: ${{ vars.PARALITH_PREVIEW_UPDATE_ENDPOINT }}
           FIREBASE_DEPLOY_VERIFY_ATTEMPTS: '4'
@@ -228,7 +280,6 @@ jobs:
       # required configuration is present, so this must run — it is never conditionally skipped.
       - name: Publish to internal update endpoint
         if: vars.PARALITH_UPDATE_PUBLISH_PROVIDER != 'firebase-hosting'
-        shell: pwsh
         env:
           PARALITH_UPDATE_PUBLISH_TARGET: ${{ secrets.PARALITH_UPDATE_PUBLISH_TARGET }}
           PARALITH_UPDATE_PUBLISH_PROVIDER: ${{ vars.PARALITH_UPDATE_PUBLISH_PROVIDER }}
@@ -240,7 +291,21 @@ jobs:
       # or missing a reachable signed Windows artifact. A locally-correct manifest is not evidence.
       - name: Verify published preview manifest
         if: vars.PARALITH_UPDATE_PUBLISH_PROVIDER != 'firebase-hosting'
-        shell: pwsh
         env:
           PARALITH_PREVIEW_UPDATE_ENDPOINT: ${{ vars.PARALITH_PREVIEW_UPDATE_ENDPOINT }}
         run: node scripts/release/verify-published-manifest.mjs preview "$env:PARALITH_PREVIEW_UPDATE_ENDPOINT" "${{ steps.version.outputs.version }}"
+
+      # Secret-safe cleanup. Any credential file the Google auth action wrote into RUNNER_TEMP is
+      # removed here rather than left on a machine that keeps its disk between jobs.
+      - name: Remove temporary credential files
+        if: always()
+        run: |
+          if ($env:RUNNER_TEMP -and (Test-Path -LiteralPath $env:RUNNER_TEMP)) {
+            Get-ChildItem -LiteralPath $env:RUNNER_TEMP -Filter 'gha-creds-*.json' -File -ErrorAction SilentlyContinue |
+              ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue; Write-Host "removed $($_.Name)" }
+          }
+          Write-Host 'Temporary credential sweep complete.'
+
+      - name: Clean up abandoned build processes
+        if: always()
+        run: pwsh -NoProfile -File scripts/ci/cleanup-runner-processes.ps1
