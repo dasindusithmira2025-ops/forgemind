@@ -258,6 +258,36 @@ Start-ScheduledTask -TaskName GitHubActionsRunner-paralith
 Do **not** delete the global `~\.cargo` or npm cache as routine maintenance — they are shared
 with normal development and only worth clearing if corruption is actually proven.
 
+### Heavy local work can fail timing-sensitive tests
+
+This is the one behavioural difference from GitHub-hosted runners that has actually bitten, so
+it is worth knowing before you chase a phantom regression.
+
+The runner shares this PC with normal development. Some Rust tests spawn a real ConPTY child
+shell and assert against a **wall-clock deadline**, so CPU starvation makes them fail even
+though the code is correct. The known case is
+`services::terminal_manager::tests::rapid_output_remains_ordered_and_tail_is_bounded`
+(`src-tauri/src/services/terminal_manager.rs`): it echoes 2200 lines through `cmd.exe` and polls
+just **8 seconds** for the last marker.
+
+Observed on 2026-07-28: run
+[30337634064](https://github.com/dasindusithmira2025-ops/forgemind/actions/runs/30337634064)
+failed that single test with *"last ordered marker was not retained"* at 07:16:01Z, while a
+local `npm run tauri dev` compile was saturating all 24 cores. The identical commit passed on
+re-run once the machine was idle, and had already passed on an idle machine locally and in two
+pull-request runs.
+
+Practical guidance:
+
+- Avoid starting a full `cargo`/`tauri` build while a job is running. Check first:
+  `gh api repos/dasindusithmira2025-ops/forgemind/actions/runners --jq '.runners[].busy'`
+- If a single timing-dependent test fails and nothing about it changed, re-run the job on an
+  idle machine before treating it as a real failure:
+  `gh run rerun <run-id> --failed`
+- The test is a candidate for hardening (a deadline scaled to load, or a fixed line budget) but
+  has deliberately **not** been altered here — weakening a test to make CI green would hide
+  real ordering regressions. It is recorded as follow-up work instead.
+
 ### Abandoned build processes
 
 A cancelled job can leave `cargo`, `rustc`, `node`, or a launched Paralith binary holding locks.
