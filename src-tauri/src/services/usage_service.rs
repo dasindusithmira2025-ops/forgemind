@@ -6,17 +6,26 @@ use crate::models::{
 };
 use chrono::{DateTime, Utc};
 use parking_lot::Mutex;
+use reqwest::blocking::Client;
+use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 use std::fs::{self, File};
-use std::io::{BufRead, BufReader, Seek, SeekFrom};
+use std::io::{BufRead, BufReader, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::sync::mpsc;
 use std::sync::Arc;
-use std::time::Instant;
+use std::thread;
+use std::time::{Duration, Instant};
 
-const PARSER_VERSION: u8 = 1;
+const PARSER_VERSION: u8 = 2;
+const LIVE_USAGE_TIMEOUT: Duration = Duration::from_secs(12);
+const CLAUDE_USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
+const CLAUDE_OAUTH_BETA: &str = "oauth-2025-04-20";
+const CLAUDE_CODE_USER_AGENT: &str = "claude-code/2.1.0";
 
 /// Backend-owned collector. It is deliberately isolated from terminal I/O: all transcript work
 /// happens only when these explicit, debounced commands run on Tauri's blocking pool.
@@ -41,7 +50,6 @@ struct FileCheckpoint {
     offset: u64,
     parser_version: u8,
     records: Vec<SafeRecord>,
-    windows: Vec<SafeWindow>,
     codex_totals: BTreeMap<String, TokenUsageSummary>,
 }
 
@@ -53,19 +61,27 @@ struct SafeRecord {
     tokens: TokenUsageSummary,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SafeWindow {
-    kind: UsageWindowKind,
-    used_percent: u8,
-    resets_at: Option<String>,
-}
-
 struct ParsedFile {
     records: Vec<SafeRecord>,
-    windows: Vec<SafeWindow>,
     codex_totals: BTreeMap<String, TokenUsageSummary>,
     final_offset: u64,
+}
+
+#[derive(Debug)]
+struct LiveUsageError {
+    status: UsageSnapshotStatus,
+    code: &'static str,
+    message: String,
+}
+
+impl LiveUsageError {
+    fn new(status: UsageSnapshotStatus, code: &'static str, message: impl Into<String>) -> Self {
+        Self {
+            status,
+            code,
+            message: message.into(),
+        }
+    }
 }
 
 impl UsageService {
@@ -109,9 +125,15 @@ impl UsageService {
         }
         let result = (|| {
             let mut diagnostics = Vec::new();
+            let previous = self.state.lock().snapshots.clone();
             let snapshots = [UsageProvider::Claude, UsageProvider::Codex]
                 .into_iter()
-                .map(|provider| self.collect_provider(provider, &mut diagnostics))
+                .map(|provider| {
+                    let previous = previous
+                        .iter()
+                        .find(|snapshot| snapshot.provider == provider);
+                    self.collect_provider(provider, previous, &mut diagnostics)
+                })
                 .collect::<Vec<_>>();
             let changed = snapshots != self.state.lock().snapshots;
             for snapshot in &snapshots {
@@ -129,17 +151,16 @@ impl UsageService {
     fn collect_provider(
         &self,
         provider: UsageProvider,
+        previous: Option<&ProviderUsageSnapshot>,
         diagnostics: &mut Vec<AiUsageDiagnostics>,
     ) -> ProviderUsageSnapshot {
         let started = Instant::now();
         let roots = provider_roots(provider);
-        let installed = provider_available(provider);
         let files = roots
             .iter()
             .flat_map(|root| discover_jsonl(root))
             .collect::<Vec<_>>();
         let mut records = Vec::new();
-        let mut windows = Vec::new();
         let mut files_reused = 0u32;
         let mut files_scanned = 0u32;
         for path in files.iter().take(10_000) {
@@ -151,18 +172,12 @@ impl UsageService {
                         files_scanned += 1;
                     }
                     records.extend(checkpoint.records);
-                    windows.extend(checkpoint.windows);
                 }
                 Err(_) => { /* A single malformed/unreadable transcript must not clear valid data. */
                 }
             }
         }
         let now = Utc::now();
-        let status = if files.is_empty() && !installed {
-            UsageSnapshotStatus::Unsupported
-        } else {
-            UsageSnapshotStatus::Ready
-        };
         let mut seen = HashSet::new();
         let tokens = records
             .into_iter()
@@ -171,37 +186,27 @@ impl UsageService {
                 add_tokens(&mut total, &record.tokens);
                 total
             });
-        let newest = windows
-            .into_iter()
-            .filter_map(|window| parse_window(window, now))
-            .fold(HashMap::new(), |mut map, window| {
-                map.insert(window.kind, window);
-                map
-            });
-        let mut windows = newest.into_values().collect::<Vec<_>>();
-        windows.sort_by_key(|window| match window.kind {
-            UsageWindowKind::FiveHour => 0,
-            UsageWindowKind::Daily => 1,
-            UsageWindowKind::Weekly => 2,
-            UsageWindowKind::FableWeekly => 3,
-        });
         let has_tokens =
             tokens.total_tokens > 0 || tokens.input_tokens > 0 || tokens.output_tokens > 0;
-        let snapshot = ProviderUsageSnapshot {
-            provider,
-            collected_at: now.to_rfc3339(),
-            source_updated_at: None,
-            freshness: if status == UsageSnapshotStatus::Unsupported {
-                UsageFreshness::Unavailable
-            } else {
-                UsageFreshness::Live
+        let token_summary = has_tokens.then_some(tokens);
+        let live = match provider {
+            UsageProvider::Claude => fetch_claude_usage(now),
+            UsageProvider::Codex => fetch_codex_usage(now),
+        };
+        let snapshot = match live {
+            Ok((source, windows)) => ProviderUsageSnapshot {
+                provider,
+                collected_at: now.to_rfc3339(),
+                source_updated_at: Some(now.to_rfc3339()),
+                freshness: UsageFreshness::Live,
+                source,
+                windows,
+                token_summary,
+                status: UsageSnapshotStatus::Ready,
+                diagnostic_code: None,
+                diagnostic_message: None,
             },
-            source: UsageSource::LocalSessionState,
-            windows,
-            token_summary: has_tokens.then_some(tokens),
-            status,
-            diagnostic_code: None,
-            diagnostic_message: None,
+            Err(error) => stale_or_failed_snapshot(provider, previous, token_summary, now, error),
         };
         diagnostics.push(AiUsageDiagnostics {
             provider,
@@ -210,7 +215,7 @@ impl UsageService {
             files_scanned,
             elapsed_ms: started.elapsed().as_millis() as u64,
             status: snapshot.status,
-            diagnostic_code: None,
+            diagnostic_code: snapshot.diagnostic_code.clone(),
         });
         snapshot
     }
@@ -252,7 +257,6 @@ impl UsageService {
         };
         let parsed = parse_file(provider, path, offset, checkpoint.codex_totals.clone())?;
         checkpoint.records.extend(parsed.records);
-        checkpoint.windows.extend(parsed.windows);
         checkpoint.codex_totals = parsed.codex_totals;
         checkpoint.offset = parsed.final_offset;
         checkpoint.size = metadata.len();
@@ -291,14 +295,6 @@ fn provider_roots(provider: UsageProvider) -> Vec<PathBuf> {
     }
 }
 
-fn provider_available(provider: UsageProvider) -> bool {
-    let command = match provider {
-        UsageProvider::Claude => "claude",
-        UsageProvider::Codex => "codex",
-    };
-    which::which(command).is_ok() || provider_roots(provider).iter().any(|root| root.exists())
-}
-
 fn discover_jsonl(root: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
     let mut stack = vec![root.to_path_buf()];
@@ -332,7 +328,6 @@ fn parse_file(
     let mut reader = BufReader::new(file);
     let mut bytes = Vec::new();
     let mut records = Vec::new();
-    let mut windows = Vec::new();
     let mut position = offset;
     loop {
         bytes.clear();
@@ -350,7 +345,6 @@ fn parse_file(
         let Ok(value) = serde_json::from_str::<Value>(line) else {
             continue;
         };
-        windows.extend(extract_windows(&value));
         match provider {
             UsageProvider::Claude => {
                 if let Some(record) = parse_claude_record(&value) {
@@ -366,7 +360,6 @@ fn parse_file(
     }
     Ok(ParsedFile {
         records,
-        windows,
         codex_totals,
         final_offset: position,
     })
@@ -522,68 +515,458 @@ fn hash_path(path: &Path) -> String {
     )
 }
 
-fn extract_windows(value: &Value) -> Vec<SafeWindow> {
+fn stale_or_failed_snapshot(
+    provider: UsageProvider,
+    previous: Option<&ProviderUsageSnapshot>,
+    token_summary: Option<TokenUsageSummary>,
+    now: DateTime<Utc>,
+    error: LiveUsageError,
+) -> ProviderUsageSnapshot {
+    if let Some(previous) = previous.filter(|snapshot| !snapshot.windows.is_empty()) {
+        let mut stale = previous.clone();
+        stale.freshness = UsageFreshness::Stale;
+        stale.status = UsageSnapshotStatus::Stale;
+        stale.token_summary = token_summary.or_else(|| previous.token_summary.clone());
+        stale.diagnostic_code = Some(error.code.into());
+        stale.diagnostic_message = Some(format!("Showing the last live limits. {}", error.message));
+        return stale;
+    }
+    ProviderUsageSnapshot {
+        provider,
+        collected_at: now.to_rfc3339(),
+        source_updated_at: None,
+        freshness: UsageFreshness::Unavailable,
+        source: match provider {
+            UsageProvider::Claude => UsageSource::SupportedEndpoint,
+            UsageProvider::Codex => UsageSource::ProviderCli,
+        },
+        windows: Vec::new(),
+        token_summary,
+        status: error.status,
+        diagnostic_code: Some(error.code.into()),
+        diagnostic_message: Some(error.message),
+    }
+}
+
+fn user_home() -> PathBuf {
+    std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from)
+        .unwrap_or_default()
+}
+
+fn fetch_claude_usage(
+    now: DateTime<Utc>,
+) -> Result<(UsageSource, Vec<UsageWindow>), LiveUsageError> {
+    // The bearer token is used only for this provider request. It is never logged, returned to
+    // the frontend, or included in the sanitized SQLite snapshot/checkpoint records.
+    let config_dir = std::env::var_os("CLAUDE_CONFIG_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| user_home().join(".claude"));
+    let credentials_path = config_dir.join(".credentials.json");
+    let credentials = fs::read_to_string(&credentials_path).map_err(|_| {
+        LiveUsageError::new(
+            if which::which("claude").is_ok() {
+                UsageSnapshotStatus::Unauthenticated
+            } else {
+                UsageSnapshotStatus::Unsupported
+            },
+            "claude_credentials_missing",
+            "Sign in to Claude Code to load subscription limits.",
+        )
+    })?;
+    let credentials: Value = serde_json::from_str(&credentials).map_err(|_| {
+        LiveUsageError::new(
+            UsageSnapshotStatus::Unauthenticated,
+            "claude_credentials_invalid",
+            "Claude Code credentials could not be read. Sign in again.",
+        )
+    })?;
+    let token = credentials
+        .pointer("/claudeAiOauth/accessToken")
+        .and_then(Value::as_str)
+        .filter(|token| !token.trim().is_empty())
+        .ok_or_else(|| {
+            LiveUsageError::new(
+                UsageSnapshotStatus::Unauthenticated,
+                "claude_access_token_missing",
+                "Claude Code is not signed in with a subscription account.",
+            )
+        })?;
+    let client = Client::builder()
+        .timeout(LIVE_USAGE_TIMEOUT)
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|_| {
+            LiveUsageError::new(
+                UsageSnapshotStatus::Error,
+                "claude_usage_client_failed",
+                "Claude usage could not be requested.",
+            )
+        })?;
+    let response = client
+        .get(CLAUDE_USAGE_URL)
+        .bearer_auth(token)
+        .header("anthropic-beta", CLAUDE_OAUTH_BETA)
+        .header("User-Agent", CLAUDE_CODE_USER_AGENT)
+        .send()
+        .map_err(|_| {
+            LiveUsageError::new(
+                UsageSnapshotStatus::Error,
+                "claude_usage_network",
+                "Claude usage is temporarily unreachable. Check the network and retry.",
+            )
+        })?;
+    if matches!(
+        response.status(),
+        StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN
+    ) {
+        return Err(LiveUsageError::new(
+            UsageSnapshotStatus::Unauthenticated,
+            "claude_usage_unauthorized",
+            "Claude Code sign-in needs to be refreshed.",
+        ));
+    }
+    if response.status() == StatusCode::TOO_MANY_REQUESTS {
+        return Err(LiveUsageError::new(
+            UsageSnapshotStatus::Error,
+            "claude_usage_rate_limited",
+            "Claude usage refresh is rate-limited. Try again shortly.",
+        ));
+    }
+    if !response.status().is_success() {
+        return Err(LiveUsageError::new(
+            UsageSnapshotStatus::Error,
+            "claude_usage_provider_error",
+            format!("Claude usage returned HTTP {}.", response.status().as_u16()),
+        ));
+    }
+    let payload = response.json::<Value>().map_err(|_| {
+        LiveUsageError::new(
+            UsageSnapshotStatus::Error,
+            "claude_usage_response_invalid",
+            "Claude returned an unreadable usage response.",
+        )
+    })?;
+    let windows = claude_windows_from_payload(&payload, now);
+    if windows.is_empty() {
+        return Err(LiveUsageError::new(
+            UsageSnapshotStatus::Error,
+            "claude_usage_windows_missing",
+            "Claude did not report subscription limit windows.",
+        ));
+    }
+    Ok((UsageSource::SupportedEndpoint, windows))
+}
+
+fn claude_windows_from_payload(payload: &Value, now: DateTime<Utc>) -> Vec<UsageWindow> {
+    let limits = payload.get("limits").and_then(Value::as_array);
+    let scoped = |kinds: &[&str], model: Option<&str>| {
+        limits.and_then(|limits| {
+            limits.iter().find(|limit| {
+                let kind_matches = limit
+                    .get("kind")
+                    .and_then(Value::as_str)
+                    .is_some_and(|kind| kinds.contains(&kind));
+                let model_matches = match model {
+                    None => true,
+                    Some(expected) => limit
+                        .pointer("/scope/model/display_name")
+                        .and_then(Value::as_str)
+                        .is_some_and(|name| name.eq_ignore_ascii_case(expected)),
+                };
+                kind_matches && model_matches
+            })
+        })
+    };
     let candidates = [
-        value.get("rate_limits"),
-        value.pointer("/payload/rate_limits"),
-        value.pointer("/message/rate_limits"),
+        (
+            UsageWindowKind::FiveHour,
+            payload
+                .get("five_hour")
+                .or_else(|| scoped(&["session"], None)),
+        ),
+        (
+            UsageWindowKind::Weekly,
+            payload
+                .get("seven_day")
+                .or_else(|| scoped(&["weekly_all", "weekly"], None)),
+        ),
+        (
+            UsageWindowKind::FableWeekly,
+            payload
+                .get("fable_weekly")
+                .or_else(|| payload.get("fable_seven_day"))
+                .or_else(|| payload.get("seven_day_fable"))
+                .or_else(|| scoped(&["weekly_scoped"], Some("fable"))),
+        ),
     ];
     candidates
         .into_iter()
-        .flatten()
-        .flat_map(|limits| {
-            [
-                ("five_hour", UsageWindowKind::FiveHour),
-                ("fiveHour", UsageWindowKind::FiveHour),
-                ("weekly", UsageWindowKind::Weekly),
-                ("seven_day", UsageWindowKind::Weekly),
-                ("fable_weekly", UsageWindowKind::FableWeekly),
-                ("daily", UsageWindowKind::Daily),
-            ]
-            .into_iter()
-            .filter_map(move |(name, kind)| {
-                let item = limits.get(name)?;
-                let used = item
-                    .get("used_percentage")
-                    .or_else(|| item.get("usedPercent"))
-                    .or_else(|| item.get("used_percent"))
-                    .and_then(Value::as_f64)?;
-                let resets = item
-                    .get("resets_at")
-                    .or_else(|| item.get("resetsAt"))
-                    .and_then(timestamp_from_value);
-                Some(SafeWindow {
-                    kind,
-                    used_percent: clamp_percent(used),
-                    resets_at: resets,
-                })
-            })
-            .chain(
-                [
-                    ("primary", UsageWindowKind::FiveHour),
-                    ("secondary", UsageWindowKind::Weekly),
-                ]
+        .filter_map(|(kind, value)| {
+            let value = value?;
+            let used = ["utilization", "used_percentage", "usedPercent", "percent"]
                 .into_iter()
-                .filter_map(move |(name, kind)| {
-                    let item = limits.get(name)?;
-                    let used = item
-                        .get("used_percent")
-                        .or_else(|| item.get("usedPercent"))
-                        .or_else(|| item.get("used_percentage"))
-                        .and_then(Value::as_f64)?;
-                    let resets = item
-                        .get("resets_at")
-                        .or_else(|| item.get("resetsAt"))
-                        .and_then(timestamp_from_value);
-                    Some(SafeWindow {
-                        kind,
-                        used_percent: clamp_percent(used),
-                        resets_at: resets,
-                    })
-                }),
-            )
+                .find_map(|key| value.get(key).and_then(Value::as_f64))?;
+            let resets_at = value
+                .get("resets_at")
+                .or_else(|| value.get("resetsAt"))
+                .and_then(timestamp_from_value);
+            Some(usage_window(
+                kind,
+                used,
+                resets_at,
+                UsageSource::SupportedEndpoint,
+                now,
+            ))
         })
         .collect()
+}
+
+fn fetch_codex_usage(
+    now: DateTime<Utc>,
+) -> Result<(UsageSource, Vec<UsageWindow>), LiveUsageError> {
+    let codex_home = std::env::var_os("CODEX_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| user_home().join(".codex"));
+    // Only probe auth-file presence here. Codex app-server remains the owner of reading and using
+    // its credentials, so PARALITH never deserializes Codex tokens.
+    if !codex_home.join("auth.json").is_file() {
+        return Err(LiveUsageError::new(
+            UsageSnapshotStatus::Unauthenticated,
+            "codex_auth_missing",
+            "Sign in to Codex CLI to load subscription limits.",
+        ));
+    }
+    let executable = which::which("codex").map_err(|_| {
+        LiveUsageError::new(
+            UsageSnapshotStatus::Unsupported,
+            "codex_cli_missing",
+            "Codex CLI is not installed.",
+        )
+    })?;
+    let mut command = Command::new(executable);
+    command
+        .args(["-s", "read-only", "-a", "untrusted", "app-server"])
+        .env("CODEX_HOME", &codex_home)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000);
+    }
+    let mut child = command.spawn().map_err(|_| {
+        LiveUsageError::new(
+            UsageSnapshotStatus::Error,
+            "codex_usage_launch_failed",
+            "Codex usage service could not be started.",
+        )
+    })?;
+    let Some(mut stdin) = child.stdin.take() else {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(LiveUsageError::new(
+            UsageSnapshotStatus::Error,
+            "codex_usage_stdin_missing",
+            "Codex usage service did not open its request channel.",
+        ));
+    };
+    let Some(stdout) = child.stdout.take() else {
+        drop(stdin);
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(LiveUsageError::new(
+            UsageSnapshotStatus::Error,
+            "codex_usage_stdout_missing",
+            "Codex usage service did not open its response channel.",
+        ));
+    };
+    let (sender, receiver) = mpsc::channel();
+    let reader = thread::spawn(move || {
+        for line in BufReader::new(stdout).lines() {
+            if sender.send(line).is_err() {
+                break;
+            }
+        }
+    });
+    let initialize = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": { "clientInfo": { "name": "paralith", "version": env!("CARGO_PKG_VERSION") } }
+    });
+    if writeln!(stdin, "{initialize}").is_err() {
+        drop(stdin);
+        let _ = child.kill();
+        let _ = child.wait();
+        let _ = reader.join();
+        return Err(LiveUsageError::new(
+            UsageSnapshotStatus::Error,
+            "codex_usage_write_failed",
+            "Codex usage request could not be sent.",
+        ));
+    }
+    let deadline = Instant::now() + LIVE_USAGE_TIMEOUT;
+    let result = loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            break Err(LiveUsageError::new(
+                UsageSnapshotStatus::Error,
+                "codex_usage_timeout",
+                "Codex usage refresh timed out.",
+            ));
+        }
+        let line = match receiver.recv_timeout(remaining) {
+            Ok(Ok(line)) => line,
+            Ok(Err(_)) | Err(mpsc::RecvTimeoutError::Disconnected) => {
+                break Err(LiveUsageError::new(
+                    UsageSnapshotStatus::Error,
+                    "codex_usage_service_closed",
+                    "Codex usage service closed before replying.",
+                ))
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                break Err(LiveUsageError::new(
+                    UsageSnapshotStatus::Error,
+                    "codex_usage_timeout",
+                    "Codex usage refresh timed out.",
+                ))
+            }
+        };
+        let Ok(message) = serde_json::from_str::<Value>(&line) else {
+            continue;
+        };
+        match message.get("id").and_then(Value::as_i64) {
+            Some(1) => {
+                let initialized =
+                    serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}});
+                let request = serde_json::json!({
+                    "jsonrpc":"2.0",
+                    "id":2,
+                    "method":"account/rateLimits/read",
+                    "params":{}
+                });
+                if writeln!(stdin, "{initialized}")
+                    .and_then(|_| writeln!(stdin, "{request}"))
+                    .and_then(|_| stdin.flush())
+                    .is_err()
+                {
+                    break Err(LiveUsageError::new(
+                        UsageSnapshotStatus::Error,
+                        "codex_usage_write_failed",
+                        "Codex usage request could not be sent.",
+                    ));
+                }
+            }
+            Some(2) => {
+                if let Some(message) = message.pointer("/error/message").and_then(Value::as_str) {
+                    let unauthenticated = message.to_ascii_lowercase().contains("auth")
+                        || message.to_ascii_lowercase().contains("login")
+                        || message.to_ascii_lowercase().contains("sign in");
+                    break Err(LiveUsageError::new(
+                        if unauthenticated {
+                            UsageSnapshotStatus::Unauthenticated
+                        } else {
+                            UsageSnapshotStatus::Error
+                        },
+                        if unauthenticated {
+                            "codex_usage_unauthorized"
+                        } else {
+                            "codex_usage_rpc_error"
+                        },
+                        if unauthenticated {
+                            "Codex CLI sign-in needs to be refreshed."
+                        } else {
+                            "Codex could not load subscription limits."
+                        },
+                    ));
+                }
+                let limits = message
+                    .pointer("/result/rateLimits")
+                    .or_else(|| message.pointer("/result/rate_limits"));
+                let windows = limits
+                    .map(|limits| codex_windows_from_payload(limits, now))
+                    .unwrap_or_default();
+                if windows.is_empty() {
+                    break Err(LiveUsageError::new(
+                        UsageSnapshotStatus::Error,
+                        "codex_usage_windows_missing",
+                        "Codex did not report subscription limit windows.",
+                    ));
+                }
+                break Ok((UsageSource::ProviderCli, windows));
+            }
+            _ => {}
+        }
+    };
+    drop(stdin);
+    let _ = child.kill();
+    let _ = child.wait();
+    let _ = reader.join();
+    result
+}
+
+fn codex_windows_from_payload(payload: &Value, now: DateTime<Utc>) -> Vec<UsageWindow> {
+    let primary = payload.get("primary");
+    let secondary = payload.get("secondary");
+    let mut session = None;
+    let mut weekly = None;
+    for value in [primary, secondary].into_iter().flatten() {
+        let Some(used) = value.get("usedPercent").and_then(Value::as_f64) else {
+            continue;
+        };
+        let duration = value.get("windowDurationMins").and_then(Value::as_f64);
+        let window = (value, used);
+        if duration.is_some_and(|minutes| (minutes - 300.0).abs() <= 1.0) && session.is_none() {
+            session = Some(window);
+        } else if duration.is_some_and(|minutes| (minutes - 10_080.0).abs() <= 1.0)
+            && weekly.is_none()
+        {
+            weekly = Some(window);
+        }
+    }
+    if session.is_none() {
+        session = primary.and_then(|value| {
+            let duration = value.get("windowDurationMins").and_then(Value::as_f64);
+            let used = value.get("usedPercent").and_then(Value::as_f64)?;
+            (!duration.is_some_and(|minutes| {
+                (minutes - 300.0).abs() <= 1.0 || (minutes - 10_080.0).abs() <= 1.0
+            }))
+            .then_some((value, used))
+        });
+    }
+    if weekly.is_none() {
+        weekly = secondary.and_then(|value| {
+            let duration = value.get("windowDurationMins").and_then(Value::as_f64);
+            let used = value.get("usedPercent").and_then(Value::as_f64)?;
+            (!duration.is_some_and(|minutes| {
+                (minutes - 300.0).abs() <= 1.0 || (minutes - 10_080.0).abs() <= 1.0
+            }))
+            .then_some((value, used))
+        });
+    }
+    [
+        (UsageWindowKind::FiveHour, session),
+        (UsageWindowKind::Weekly, weekly),
+    ]
+    .into_iter()
+    .filter_map(|(kind, window)| {
+        let (value, used) = window?;
+        let resets_at = value
+            .get("resetsAt")
+            .or_else(|| value.get("resets_at"))
+            .and_then(timestamp_from_value);
+        Some(usage_window(
+            kind,
+            used,
+            resets_at,
+            UsageSource::ProviderCli,
+            now,
+        ))
+    })
+    .collect()
 }
 
 fn timestamp_from_value(value: &Value) -> Option<String> {
@@ -592,29 +975,41 @@ fn timestamp_from_value(value: &Value) -> Option<String> {
             .as_i64()
             .filter(|timestamp| *timestamp > 0)
             .and_then(|timestamp| {
-                DateTime::from_timestamp(timestamp, 0).map(|time| time.to_rfc3339())
+                if timestamp > 10_000_000_000 {
+                    DateTime::from_timestamp_millis(timestamp)
+                } else {
+                    DateTime::from_timestamp(timestamp, 0)
+                }
+                .map(|time| time.to_rfc3339())
             })
     })
 }
 
-fn parse_window(window: SafeWindow, now: DateTime<Utc>) -> Option<UsageWindow> {
-    let resets_at = window.resets_at.and_then(|value| valid_timestamp(&value));
+fn usage_window(
+    kind: UsageWindowKind,
+    used_percent: f64,
+    resets_at: Option<String>,
+    source: UsageSource,
+    now: DateTime<Utc>,
+) -> UsageWindow {
+    let used_percent = clamp_percent(used_percent);
+    let resets_at = resets_at.and_then(|value| valid_timestamp(&value));
     let reset_label = resets_at
         .as_deref()
         .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
         .map(|reset| countdown_label(reset.with_timezone(&Utc), now));
-    let remaining_percent = 100u8.saturating_sub(window.used_percent);
-    Some(UsageWindow {
-        kind: window.kind,
-        used_percent: window.used_percent,
+    let remaining_percent = 100u8.saturating_sub(used_percent);
+    UsageWindow {
+        kind,
+        used_percent,
         remaining_percent,
         resets_at,
         reset_label,
-        source: UsageSource::LocalSessionState,
+        source,
         confidence: UsageConfidence::Authoritative,
         is_warning: remaining_percent <= 30,
         is_critical: remaining_percent <= 10,
-    })
+    }
 }
 
 fn countdown_label(reset: DateTime<Utc>, now: DateTime<Utc>) -> String {
@@ -629,6 +1024,9 @@ fn countdown_label(reset: DateTime<Utc>, now: DateTime<Utc>) -> String {
 fn update_freshness(snapshot: &mut ProviderUsageSnapshot) {
     if snapshot.status == UsageSnapshotStatus::Unsupported {
         snapshot.freshness = UsageFreshness::Unavailable;
+        return;
+    }
+    if snapshot.status != UsageSnapshotStatus::Ready {
         return;
     }
     if let Ok(collected) = DateTime::parse_from_rfc3339(&snapshot.collected_at) {
@@ -671,6 +1069,61 @@ mod tests {
                 .total_tokens,
             7
         );
+    }
+    #[test]
+    fn claude_live_payload_uses_current_utilization_and_scoped_limits() {
+        let payload = serde_json::json!({
+            "five_hour": {
+                "utilization": 18.4,
+                "resets_at": "2026-07-28T14:20:00+05:30"
+            },
+            "limits": [
+                {
+                    "kind": "weekly_all",
+                    "percent": 69,
+                    "resets_at": "2026-07-29T22:30:00+05:30"
+                },
+                {
+                    "kind": "weekly_scoped",
+                    "percent": 41,
+                    "resets_at": "2026-07-30T22:30:00+05:30",
+                    "scope": { "model": { "display_name": "Fable" } }
+                }
+            ]
+        });
+        let windows = claude_windows_from_payload(&payload, Utc::now());
+        assert_eq!(windows.len(), 3);
+        assert_eq!(windows[0].kind, UsageWindowKind::FiveHour);
+        assert_eq!(windows[0].used_percent, 18);
+        assert_eq!(windows[1].kind, UsageWindowKind::Weekly);
+        assert_eq!(windows[1].used_percent, 69);
+        assert_eq!(windows[2].kind, UsageWindowKind::FableWeekly);
+        assert_eq!(windows[2].used_percent, 41);
+    }
+    #[test]
+    fn codex_live_payload_classifies_windows_by_duration_not_position() {
+        let weekly_only = serde_json::json!({
+            "primary": {
+                "usedPercent": 6,
+                "windowDurationMins": 10080,
+                "resetsAt": 1785816065
+            },
+            "secondary": null
+        });
+        let windows = codex_windows_from_payload(&weekly_only, Utc::now());
+        assert_eq!(windows.len(), 1);
+        assert_eq!(windows[0].kind, UsageWindowKind::Weekly);
+        assert_eq!(windows[0].used_percent, 6);
+
+        let reordered = serde_json::json!({
+            "primary": { "usedPercent": 80, "windowDurationMins": 10080 },
+            "secondary": { "usedPercent": 20, "windowDurationMins": 300 }
+        });
+        let windows = codex_windows_from_payload(&reordered, Utc::now());
+        assert_eq!(windows[0].kind, UsageWindowKind::FiveHour);
+        assert_eq!(windows[0].used_percent, 20);
+        assert_eq!(windows[1].kind, UsageWindowKind::Weekly);
+        assert_eq!(windows[1].used_percent, 80);
     }
     #[test]
     fn countdown_uses_zero_for_elapsed_resets() {
