@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { ParalithHeroVisual } from '@/components/ParalithHeroVisual';
+import { ParalithLaunchFilm } from '@/components/ParalithLaunchFilm';
 import { CapabilitiesGrid } from '@/components/CapabilitiesGrid';
 import { PrinciplesGrid } from '@/components/PrinciplesGrid';
 import { Band, ClosingBand, MetaStrip, SectionMark, Ticker } from '@/components/Editorial';
@@ -88,7 +88,7 @@ export default function HomePage() {
           />
 
           <div className="col-span-12 mt-2">
-            <ParalithHeroVisual />
+            <ParalithLaunchFilm />
           </div>
         </div>
       </Band>
