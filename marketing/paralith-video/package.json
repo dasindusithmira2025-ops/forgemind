@@ -1,0 +1,32 @@
+{
+  "name": "paralith-marketing-video",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Remotion source for the PARALITH product launch film.",
+  "scripts": {
+    "assets": "node scripts/generate-audio.mjs && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/generate-voiceover.ps1",
+    "dev": "remotion studio --port=4100",
+    "render": "node scripts/render-all.mjs",
+    "render:4k": "remotion render ParalithHero4K ../../media/exports/paralith-hero-film-4k.mp4 --codec=h264 --crf=14 --image-format=png --pixel-format=yuv420p --color-space=bt709 --audio-codec=aac --audio-bitrate=320k --x264-preset=medium --timeout=180000 --concurrency=2 --overwrite && node scripts/normalize-audio.mjs paralith-hero-film-4k.mp4",
+    "render:1080": "remotion render ParalithHero1080p ../../media/exports/paralith-hero-film-1080p.mp4 --codec=h264 --crf=16 --image-format=png --pixel-format=yuv420p --color-space=bt709 --audio-codec=aac --audio-bitrate=320k --x264-preset=medium --timeout=180000 --concurrency=4 --overwrite && node scripts/normalize-audio.mjs paralith-hero-film-1080p.mp4",
+    "normalize": "node scripts/normalize-audio.mjs",
+    "probe": "node scripts/probe.mjs",
+    "probe:formats": "node scripts/probe-formats.mjs",
+    "still": "remotion still ParalithPoster ../../media/exports/paralith-poster.png --overwrite",
+    "typecheck": "tsc --noEmit",
+    "validate": "node scripts/validate-source.mjs && remotion compositions",
+    "verify": "node scripts/verify-exports.mjs"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.500",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "remotion": "4.0.500"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.2",
+    "@types/react-dom": "19.2.2",
+    "typescript": "5.9.3"
+  }
+}

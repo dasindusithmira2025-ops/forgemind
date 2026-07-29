@@ -1,0 +1,56 @@
+name: Validate product film
+
+on:
+  pull_request:
+    paths:
+      - 'marketing/paralith-video/**'
+      - '.github/workflows/video-ci.yml'
+  push:
+    branches: [main, integration]
+    paths:
+      - 'marketing/paralith-video/**'
+      - '.github/workflows/video-ci.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validate-video-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-video:
+    name: Validate Remotion source
+    runs-on: [self-hosted, Windows, X64, paralith]
+    timeout-minutes: 20
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: marketing/paralith-video
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          clean: false
+
+      - name: Prepare workspace
+        working-directory: .
+        run: pwsh -NoProfile -File scripts/ci/prepare-workspace.ps1 -ExpectedSha "$env:GITHUB_SHA"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Validate composition registry
+        run: npm run validate
+
+      - name: Render poster smoke
+        run: npm run still

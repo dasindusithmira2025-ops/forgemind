@@ -50,6 +50,7 @@ Paralith-tauri/release/test-keys/
 graphify-out
 .claude/settings.local.json
 tmp/
+media/exports/
 
 # Editor directories and files
 .vscode/*
