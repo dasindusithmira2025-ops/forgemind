@@ -22,23 +22,26 @@ Stable performs a one-time, validated migration from the legacy `com.forgemind.w
 
 ## Administrator setup
 
-Generate the production updater key once on a protected offline administrator machine:
+Generate one updater key per edition on a protected offline administrator machine:
 
 ```powershell
-npm run tauri signer generate -- -w D:\OfflineBackup\paralith-updater.key
+npm run tauri signer generate -- -w D:\OfflineBackup\paralith-preview-updater.key
+npm run tauri signer generate -- -w D:\OfflineBackup\paralith-stable-updater.key
 ```
 
-Keep the password-protected private key and its password in the protected offline backup. Commit only the generated public key content to `release/updater.pubkey`. Set the private key in GitHub without printing it:
+Keep each password-protected private key and password in the protected offline backup. Commit only the Preview public key to `release/updater.pubkey` and the Stable public key to `release/updater.stable.pubkey`. The build selects the key from the edition, so rotating one channel cannot invalidate the other. Set each private key in its matching protected environment without printing it:
 
 ```powershell
-gh secret set TAURI_SIGNING_PRIVATE_KEY --repo OWNER/PRIVATE_REPOSITORY < D:\OfflineBackup\paralith-updater.key
-gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD --repo OWNER/PRIVATE_REPOSITORY
+gh secret set TAURI_SIGNING_PRIVATE_KEY --repo OWNER/PRIVATE_REPOSITORY --env preview-release < D:\OfflineBackup\paralith-preview-updater.key
+gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD --repo OWNER/PRIVATE_REPOSITORY --env preview-release
+gh secret set TAURI_SIGNING_PRIVATE_KEY --repo OWNER/PRIVATE_REPOSITORY --env stable-release < D:\OfflineBackup\paralith-stable-updater.key
+gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD --repo OWNER/PRIVATE_REPOSITORY --env stable-release
 ```
 
 Required GitHub Actions configuration:
 
-- Secret `TAURI_SIGNING_PRIVATE_KEY`: complete Tauri updater private key or protected runner path.
-- Secret `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`: updater key password; configure an empty value only if the offline key intentionally has no password.
+- Environment secret `TAURI_SIGNING_PRIVATE_KEY`: the edition's complete Tauri updater private key or protected runner path.
+- Environment secret `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`: the edition's updater key password; configure an empty value only if the offline key intentionally has no password.
 - Variable `PARALITH_STABLE_UPDATE_ENDPOINT`: Stable HTTPS `latest.json` URL.
 - Variable `PARALITH_PREVIEW_UPDATE_ENDPOINT`: Preview HTTPS `latest.json` URL.
 - Variable `PARALITH_UPDATES_REPOSITORY`: `dasindusithmira2025-ops/paralith-updates`.
