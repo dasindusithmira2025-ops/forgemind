@@ -75,11 +75,12 @@ if ($ExpectedSha) {
 # --------------------------------------------------------------------- targeted clean
 # Preserve only the caches that are expensive and safe to reuse. Cargo and npm both key on
 # content, so reusing them cannot mask a source change; leftover *output* can, and is removed.
-# Move the pre-monorepo cache locations once so the structural migration does not discard the
-# persistent runner's dependency cache.
+# Move the pre-monorepo npm cache once so the structural migration does not discard downloaded
+# dependencies. Cargo build output is deliberately not moved: Tauri's generated permissions and
+# Cargo fingerprints contain absolute target paths, so relocating that output can make a valid
+# checkout compile against paths that no longer exist.
 $cacheMoves = @(
-    @{ From = 'node_modules'; To = 'Paralith-tauri/node_modules' },
-    @{ From = 'src-tauri/target'; To = 'Paralith-tauri/src-tauri/target' }
+    @{ From = 'node_modules'; To = 'Paralith-tauri/node_modules' }
 )
 foreach ($move in $cacheMoves) {
     $from = [System.IO.Path]::GetFullPath((Join-Path $repoRoot $move.From))
@@ -95,6 +96,16 @@ foreach ($move in $cacheMoves) {
         Move-Item -LiteralPath $from -Destination $to
         Write-Host "Migrated persistent cache $($move.From) -> $($move.To)"
     }
+}
+
+$legacyCargoTarget = [System.IO.Path]::GetFullPath((Join-Path $repoRoot 'src-tauri/target'))
+$repoBoundary = $repoRoot.TrimEnd('\') + '\'
+if (-not $legacyCargoTarget.StartsWith($repoBoundary, [StringComparison]::OrdinalIgnoreCase)) {
+    throw "Refusing to clear a legacy Cargo target outside the repository: $legacyCargoTarget"
+}
+if (Test-Path -LiteralPath $legacyCargoTarget) {
+    Remove-Item -LiteralPath $legacyCargoTarget -Recurse -Force -ErrorAction Stop
+    Write-Host 'Cleared the pre-monorepo Cargo target; absolute build metadata cannot be relocated safely.'
 }
 
 $preserve = @(
