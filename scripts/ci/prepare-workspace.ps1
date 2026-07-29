@@ -14,7 +14,7 @@
     delete node_modules and the ~75 GB Rust target directory, discarding the only real
     advantage of a persistent runner). This script does the precise cleaning instead:
 
-      * removes every untracked/ignored file EXCEPT the two expensive dependency caches,
+      * removes every untracked/ignored file EXCEPT the package dependency/build caches,
       * removes assembled release output and bundle directories outright, so nothing from a
         prior run can ever be republished,
       * confirms the tree really is the commit the workflow was triggered for.
@@ -25,7 +25,8 @@
     The commit the workflow intends to build. The script fails if HEAD is anything else.
 
 .PARAMETER ReleaseBuild
-    Also clear src-tauri/target/release/bundle, forcing installers to be produced fresh.
+    Also clear Paralith-tauri/src-tauri/target/release/bundle, forcing installers to be
+    produced fresh.
 
 .PARAMETER Force
     Required to run outside GitHub Actions. This script deletes untracked files, which in a
@@ -54,8 +55,8 @@ Write-Host "Workspace: $repoRoot"
 if ($env:GITHUB_ACTIONS -ne 'true' -and -not $Force) {
     Write-Host ''
     Write-Host 'Refusing to run outside GitHub Actions without -Force.' -ForegroundColor Yellow
-    Write-Host 'This deletes every untracked and ignored file except node_modules and' -ForegroundColor Yellow
-    Write-Host 'src-tauri/target, which in a development clone means uncommitted new work.' -ForegroundColor Yellow
+    Write-Host 'This deletes every untracked and ignored file except package node_modules and' -ForegroundColor Yellow
+    Write-Host 'Paralith-tauri/src-tauri/target, which in a development clone can contain local work.' -ForegroundColor Yellow
     Write-Host "Target that would be cleaned: $repoRoot" -ForegroundColor Yellow
     exit 2
 }
@@ -74,7 +75,61 @@ if ($ExpectedSha) {
 # --------------------------------------------------------------------- targeted clean
 # Preserve only the caches that are expensive and safe to reuse. Cargo and npm both key on
 # content, so reusing them cannot mask a source change; leftover *output* can, and is removed.
-$preserve = @('node_modules', 'src-tauri/target')
+# Move the pre-monorepo npm cache once so the structural migration does not discard downloaded
+# dependencies. Cargo build output is deliberately not moved: Tauri's generated permissions and
+# Cargo fingerprints contain absolute target paths, so relocating that output can make a valid
+# checkout compile against paths that no longer exist.
+$cacheMoves = @(
+    @{ From = 'node_modules'; To = 'Paralith-tauri/node_modules' }
+)
+foreach ($move in $cacheMoves) {
+    $from = [System.IO.Path]::GetFullPath((Join-Path $repoRoot $move.From))
+    $to = [System.IO.Path]::GetFullPath((Join-Path $repoRoot $move.To))
+    $repoBoundary = $repoRoot.TrimEnd('\') + '\'
+    if (-not $from.StartsWith($repoBoundary, [StringComparison]::OrdinalIgnoreCase) -or
+        -not $to.StartsWith($repoBoundary, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to migrate a cache outside the repository: $from -> $to"
+    }
+    if ((Test-Path -LiteralPath $from) -and -not (Test-Path -LiteralPath $to)) {
+        $parent = Split-Path -Parent $to
+        New-Item -ItemType Directory -Path $parent -Force | Out-Null
+        Move-Item -LiteralPath $from -Destination $to
+        Write-Host "Migrated persistent cache $($move.From) -> $($move.To)"
+    }
+}
+
+$legacyCargoTarget = [System.IO.Path]::GetFullPath((Join-Path $repoRoot 'src-tauri/target'))
+$repoBoundary = $repoRoot.TrimEnd('\') + '\'
+if (-not $legacyCargoTarget.StartsWith($repoBoundary, [StringComparison]::OrdinalIgnoreCase)) {
+    throw "Refusing to clear a legacy Cargo target outside the repository: $legacyCargoTarget"
+}
+if (Test-Path -LiteralPath $legacyCargoTarget) {
+    Remove-Item -LiteralPath $legacyCargoTarget -Recurse -Force -ErrorAction Stop
+    Write-Host 'Cleared the pre-monorepo Cargo target; absolute build metadata cannot be relocated safely.'
+}
+
+$paralithCargoTarget = [System.IO.Path]::GetFullPath(
+    (Join-Path $repoRoot 'Paralith-tauri/src-tauri/target')
+)
+$cargoLayoutMarker = Join-Path $paralithCargoTarget '.paralith-package-layout-v1'
+if (-not $paralithCargoTarget.StartsWith($repoBoundary, [StringComparison]::OrdinalIgnoreCase)) {
+    throw "Refusing to validate a Cargo target outside the repository: $paralithCargoTarget"
+}
+if ((Test-Path -LiteralPath $paralithCargoTarget) -and
+    -not (Test-Path -LiteralPath $cargoLayoutMarker)) {
+    Remove-Item -LiteralPath $paralithCargoTarget -Recurse -Force -ErrorAction Stop
+    Write-Host 'Cleared an unmarked Cargo target that may contain pre-monorepo absolute paths.'
+}
+if (-not (Test-Path -LiteralPath $paralithCargoTarget)) {
+    New-Item -ItemType Directory -Path $paralithCargoTarget -Force | Out-Null
+}
+New-Item -ItemType File -Path $cargoLayoutMarker -Force | Out-Null
+
+$preserve = @(
+    'Paralith-tauri/node_modules',
+    'Paralith-tauri/src-tauri/target',
+    'corelith-web/node_modules'
+)
 $cleanArgs = @('clean', '-ffdx') + ($preserve | ForEach-Object { "--exclude=$_" })
 
 Write-Host ''
@@ -88,9 +143,9 @@ Write-Host "Removed $removedCount untracked path(s); kept $($preserve -join ', '
 # These directories must never survive between runs: publishing globs them, so a leftover
 # installer from an older version could be attached to a new release.
 $mustBeEmpty = [System.Collections.Generic.List[string]]::new()
-$mustBeEmpty.Add((Join-Path $repoRoot '.artifacts'))
+$mustBeEmpty.Add((Join-Path $repoRoot 'Paralith-tauri/.artifacts'))
 if ($ReleaseBuild) {
-    $mustBeEmpty.Add((Join-Path $repoRoot 'src-tauri/target/release/bundle'))
+    $mustBeEmpty.Add((Join-Path $repoRoot 'Paralith-tauri/src-tauri/target/release/bundle'))
 }
 
 foreach ($path in $mustBeEmpty) {

@@ -9,29 +9,27 @@ name: Validate
 # split (frontend -> rust -> windows) existed to keep 2x Windows minutes off the critical
 # path; on a self-hosted machine it only added two extra checkouts, two extra `npm ci`
 # installs, and a dist upload/download round-trip. The checks themselves are unchanged and
-# live in scripts/ci/run-checks.ps1, shared with the release workflows.
+# live in Paralith-tauri/scripts/ci/run-checks.ps1, shared with the release workflows.
 
 on:
   pull_request:
-    paths-ignore:
-      - '**/*.md'
-      - 'docs/**'
-      - 'LICENSE'
+    paths:
+      - 'Paralith-tauri/**'
+      - '!Paralith-tauri/**/*.md'
+      - 'scripts/ci/**'
+      - '.gitattributes'
       - '.gitignore'
-      - '.github/ISSUE_TEMPLATE/**'
-      # The company website is an independent package with its own lockfile and its own
-      # workflow (web-ci.yml); nothing it contains reaches the desktop build.
-      - 'corelith-web/**'
+      - '.github/workflows/ci.yml'
   push:
     # `integration` is preserved from the previous configuration alongside `main`.
     branches: [main, integration]
-    paths-ignore:
-      - '**/*.md'
-      - 'docs/**'
-      - 'LICENSE'
+    paths:
+      - 'Paralith-tauri/**'
+      - '!Paralith-tauri/**/*.md'
+      - 'scripts/ci/**'
+      - '.gitattributes'
       - '.gitignore'
-      - '.github/ISSUE_TEMPLATE/**'
-      - 'corelith-web/**'
+      - '.github/workflows/ci.yml'
 
 # No `workflow_call` entry point. The release workflows used to call this one and then compile
 # the same commit a second time for real; they now run the shared check script inline instead,
@@ -64,6 +62,7 @@ jobs:
     defaults:
       run:
         shell: pwsh
+        working-directory: Paralith-tauri
 
     steps:
       # clean: false preserves node_modules and the ~75 GB Rust target directory -- the whole
@@ -77,6 +76,7 @@ jobs:
       # Removes stray untracked files and all previous release output, keeps the dependency
       # caches, and hard-fails if HEAD is not the commit this event was raised for.
       - name: Prepare workspace
+        working-directory: .
         run: pwsh -NoProfile -File scripts/ci/prepare-workspace.ps1 -ExpectedSha "$env:GITHUB_SHA"
 
       # Cheap gate: fail before npm ci if the machine cannot build at all.
@@ -101,4 +101,5 @@ jobs:
       # Persistent runner: reclaim file locks even when the job failed or was cancelled.
       - name: Clean up abandoned build processes
         if: always()
+        working-directory: .
         run: pwsh -NoProfile -File scripts/ci/cleanup-runner-processes.ps1

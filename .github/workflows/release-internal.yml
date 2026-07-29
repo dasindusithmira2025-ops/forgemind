@@ -9,17 +9,22 @@ name: Release Internal
 # `workflow_call` into ci.yml with `full: true`) has been removed: it performed a second
 # checkout, a second `npm ci`, and a full throwaway Tauri compile of the very same commit that
 # this job then compiles for real. The checks themselves were not dropped -- they run inline
-# below via the shared scripts/ci/run-checks.ps1, before anything expensive or publishable
+# below via Paralith-tauri/scripts/ci/run-checks.ps1, before anything expensive or publishable
 # happens. A successful signed bundle build is a strictly stronger compile proof than the
 # discarded --no-bundle compile it replaces.
 
 on:
   push:
     branches: [main]
-    paths-ignore:
-      - '**/*.md'
-      - 'docs/**'
-      - 'LICENSE'
+    paths:
+      - 'Paralith-tauri/**'
+      - '!Paralith-tauri/**/*.md'
+      - 'scripts/ci/**'
+      - '.gitattributes'
+      - '.gitignore'
+      - '.github/workflows/ci.yml'
+      - '.github/workflows/release-internal.yml'
+      - '.github/workflows/release-windows.yml'
   workflow_dispatch:
 
 permissions:
@@ -49,6 +54,7 @@ jobs:
     defaults:
       run:
         shell: pwsh
+        working-directory: Paralith-tauri
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -71,6 +77,7 @@ jobs:
       # Clears .artifacts and target/release/bundle so no installer from an earlier run can be
       # globbed into this release, and asserts HEAD is exactly the dispatched commit.
       - name: Prepare workspace
+        working-directory: .
         run: pwsh -NoProfile -File scripts/ci/prepare-workspace.ps1 -ExpectedSha "$env:GITHUB_SHA" -ReleaseBuild
 
       # Release-grade preflight: a much higher disk floor (a full bundle needs far more room
@@ -179,7 +186,7 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: paralith-internal-${{ steps.version.outputs.version }}
-          path: .artifacts/release/preview/**
+          path: Paralith-tauri/.artifacts/release/preview/**
           if-no-files-found: error
           retention-days: 30
 
@@ -272,4 +279,5 @@ jobs:
 
       - name: Clean up abandoned build processes
         if: always()
+        working-directory: .
         run: pwsh -NoProfile -File scripts/ci/cleanup-runner-processes.ps1

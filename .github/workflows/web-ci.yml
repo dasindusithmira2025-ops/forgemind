@@ -7,7 +7,7 @@ name: Validate website
 #
 # Like every other workflow here, it runs on the repository-scoped self-hosted Windows runner:
 # this account's GitHub-hosted Actions allowance is exhausted, so hosted jobs are refused before
-# a runner is ever assigned. See docs/CI_SELF_HOSTED_RUNNER.md.
+# a runner is ever assigned. See Paralith-tauri/docs/CI_SELF_HOSTED_RUNNER.md.
 
 on:
   pull_request:
@@ -58,8 +58,8 @@ jobs:
         working-directory: .
         run: pwsh -NoProfile -File scripts/ci/prepare-workspace.ps1 -ExpectedSha "$env:GITHUB_SHA"
 
-      # Deterministic install from corelith-web/package-lock.json. The root lockfile belongs to
-      # the desktop app and is deliberately not touched here.
+      # Deterministic install from corelith-web/package-lock.json. The desktop package has its
+      # own lockfile under Paralith-tauri and is deliberately not touched here.
       - name: Install dependencies
         run: npm ci
 

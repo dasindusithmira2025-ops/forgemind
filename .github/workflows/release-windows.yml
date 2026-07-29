@@ -8,7 +8,7 @@ name: Release Windows (reusable)
 # job compiles for real, and in `workflow_dispatch` mode it validated the WRONG commit:
 # ci.yml resolves `github.sha` to the dispatched branch, not to the `inputs.tag` this job
 # actually builds. The checks now run inline, against the tagged checkout, via the shared
-# scripts/ci/run-checks.ps1.
+# Paralith-tauri/scripts/ci/run-checks.ps1.
 
 on:
   workflow_call:
@@ -41,6 +41,7 @@ jobs:
     defaults:
       run:
         shell: pwsh
+        working-directory: Paralith-tauri
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -51,6 +52,7 @@ jobs:
       # Clears .artifacts and target/release/bundle so nothing from a previous run can be
       # published, and confirms the tagged tree is clean.
       - name: Prepare workspace
+        working-directory: .
         run: pwsh -NoProfile -File scripts/ci/prepare-workspace.ps1 -ReleaseBuild
 
       - name: Runner preflight (release)
@@ -131,7 +133,7 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: paralith-${{ inputs.edition }}-${{ inputs.tag }}
-          path: .artifacts/release/${{ inputs.edition }}/**
+          path: Paralith-tauri/.artifacts/release/${{ inputs.edition }}/**
           if-no-files-found: error
           retention-days: 90
 
@@ -161,4 +163,5 @@ jobs:
 
       - name: Clean up abandoned build processes
         if: always()
+        working-directory: .
         run: pwsh -NoProfile -File scripts/ci/cleanup-runner-processes.ps1
