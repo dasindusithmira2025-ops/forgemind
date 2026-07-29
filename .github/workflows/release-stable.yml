@@ -9,6 +9,9 @@ on:
         description: Existing protected stable-vX.Y.Z tag
         required: true
 
+permissions:
+  contents: write
+
 jobs:
   release:
     uses: ./.github/workflows/release-windows.yml
