@@ -10,7 +10,7 @@ lerna-debug.log*
 node_modules
 dist
 dist-ssr
-src-tauri/target
+Paralith-tauri/src-tauri/target
 .artifacts
 update-site-dist/
 gha-creds-*.json
@@ -42,9 +42,9 @@ terminal-output/
 .env
 .env.*
 !.env.example
-release/private/
-release/local/
-release/test-keys/
+Paralith-tauri/release/private/
+Paralith-tauri/release/local/
+Paralith-tauri/release/test-keys/
 
 # Local tooling output (not part of the app source)
 graphify-out

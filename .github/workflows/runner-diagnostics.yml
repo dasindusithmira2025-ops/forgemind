@@ -24,6 +24,7 @@ jobs:
     defaults:
       run:
         shell: pwsh
+        working-directory: Paralith-tauri
     steps:
       # `clean: false` protects node_modules and the ~75 GB Rust target directory. The
       # diagnostic does not build, so it does not even need a prepared workspace.
@@ -33,6 +34,7 @@ jobs:
           clean: false
 
       - name: Report runner identity and labels
+        working-directory: .
         run: |
           # Quote every expansion: none of these values are trusted as code.
           Write-Host "runner name   : $env:RUNNER_NAME"
@@ -46,6 +48,7 @@ jobs:
           Write-Host 'Correct runner.' -ForegroundColor Green
 
       - name: Verify checkout matches the triggering commit
+        working-directory: .
         run: |
           $head = (git rev-parse HEAD).Trim()
           if ($head -ne $env:GITHUB_SHA) {
@@ -54,6 +57,7 @@ jobs:
           Write-Host "Checkout verified at $head"
 
       - name: Verify write access inside the workspace
+        working-directory: .
         run: |
           # Confirms the runner account can actually create and delete files in the
           # workspace -- a permissions problem here breaks every later build.
@@ -71,6 +75,7 @@ jobs:
 
       - name: Diagnostic summary
         if: always()
+        working-directory: .
         run: |
           # Names only -- no secret values are read, printed, or written here.
           $rows = @(
@@ -86,4 +91,5 @@ jobs:
       # Persistent runner: always tidy up, including after cancellation.
       - name: Clean up abandoned build processes
         if: always()
+        working-directory: .
         run: pwsh -NoProfile -File scripts/ci/cleanup-runner-processes.ps1
