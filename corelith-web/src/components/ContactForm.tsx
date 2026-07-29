@@ -1,18 +1,28 @@
 'use client';
 
 import { useState } from 'react';
-import { Send, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
+
+const CATEGORIES = [
+  { value: 'business', label: 'Business & enterprise' },
+  { value: 'product-support', label: 'Product & early access' },
+  { value: 'partnership', label: 'Partnership & distribution' },
+  { value: 'security', label: 'Security vulnerability' },
+  { value: 'careers', label: 'Careers & engineering' },
+  { value: 'press', label: 'Press & media' },
+  { value: 'general', label: 'General information' },
+];
+
+const EMPTY = {
+  name: '',
+  email: '',
+  category: 'business',
+  company: '',
+  message: '',
+  websiteHoneypot: '',
+};
 
 export function ContactForm() {
-  const [formData, setFormData] = useState({
-    name: '',
-    email: '',
-    category: 'business',
-    company: '',
-    message: '',
-    websiteHoneypot: '',
-  });
-
+  const [formData, setFormData] = useState(EMPTY);
   const [status, setStatus] = useState<'idle' | 'submitting' | 'success' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState('');
   const [inquiryId, setInquiryId] = useState('');
@@ -40,185 +50,172 @@ export function ContactForm() {
       if (res.ok && data.success) {
         setStatus('success');
         setInquiryId(data.inquiryId || '');
-        setFormData({
-          name: '',
-          email: '',
-          category: 'business',
-          company: '',
-          message: '',
-          websiteHoneypot: '',
-        });
+        setFormData(EMPTY);
       } else {
         setStatus('error');
-        setErrorMessage(data.error || 'Failed to submit form.');
+        setErrorMessage(data.error || 'Submission failed. Please try again.');
       }
-    } catch (err) {
+    } catch {
       setStatus('error');
-      setErrorMessage('Network error. Please verify your connection.');
+      setErrorMessage('Network error. Please check your connection and retry.');
     }
   };
 
-  return (
-    <div className="w-full max-w-2xl mx-auto corelith-card p-6 sm:p-10 shadow-2xl space-y-6">
-      <div>
-        <h3 className="text-xl font-bold text-white font-heading">
-          Send an Inquiry to Corelith
-        </h3>
-        <p className="text-xs text-gray-400 mt-1">
-          Select your inquiry type. Submissions are routed directly to our engineering and business teams.
+  if (status === 'success') {
+    return (
+      <div className="panel p-6 sm:p-10">
+        <p className="stamp text-success flex items-center gap-2.5">
+          <span aria-hidden="true" className="bg-success inline-block h-1.5 w-1.5 rounded-full" />
+          Inquiry received
         </p>
+
+        <h2 className="mt-5 text-xl">Thank you — it is in the queue.</h2>
+
+        <dl className="mt-6 border-t border-[var(--hair)]">
+          <div className="flex items-baseline justify-between gap-6 border-b border-[var(--hair)] py-3">
+            <dt className="stamp text-ink-faint">Reference</dt>
+            <dd className="text-ink font-mono text-sm">{inquiryId || '—'}</dd>
+          </div>
+          <div className="flex items-baseline justify-between gap-6 border-b border-[var(--hair)] py-3">
+            <dt className="stamp text-ink-faint">Typical response</dt>
+            <dd className="text-ink font-mono text-sm">Within 24 hours</dd>
+          </div>
+        </dl>
+
+        <button
+          type="button"
+          onClick={() => setStatus('idle')}
+          className="btn btn-secondary mt-8"
+        >
+          Send another
+          <span aria-hidden="true">→</span>
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="panel p-6 sm:p-10">
+      <h2 className="text-xl">Send an inquiry</h2>
+      <p className="stamp text-ink-faint mt-2.5">
+        Routed to engineering, business, or security by category
+      </p>
+
+      {/* Honeypot field (hidden from legitimate users) */}
+      <div className="hidden" aria-hidden="true">
+        <input
+          type="text"
+          name="websiteHoneypot"
+          tabIndex={-1}
+          value={formData.websiteHoneypot}
+          onChange={handleChange}
+          autoComplete="off"
+        />
       </div>
 
-      {status === 'success' ? (
-        <div className="bg-emerald-500/10 border border-emerald-500/30 p-6 rounded-xl space-y-3 animate-in fade-in duration-200 text-left">
-          <div className="flex items-center gap-2 text-emerald-400 font-bold">
-            <CheckCircle2 className="w-5 h-5" />
-            <span>Inquiry Received</span>
-          </div>
-          <p className="text-sm text-gray-300">
-            Thank you for reaching out to Corelith Technologies. Your inquiry reference ID is{' '}
-            <strong className="text-white font-mono">{inquiryId}</strong>.
-          </p>
-          <p className="text-xs text-gray-400">
-            Our team typically reviews and responds within 24 hours.
-          </p>
-          <button
-            onClick={() => setStatus('idle')}
-            className="pt-2 text-xs font-semibold text-indigo-400 hover:text-indigo-300"
-          >
-            Send another message &rarr;
-          </button>
-        </div>
-      ) : (
-        <form onSubmit={handleSubmit} className="space-y-4 text-left">
-          {/* Honeypot field (hidden from legitimate users) */}
-          <div className="hidden" aria-hidden="true">
-            <input
-              type="text"
-              name="websiteHoneypot"
-              tabIndex={-1}
-              value={formData.websiteHoneypot}
-              onChange={handleChange}
-              autoComplete="off"
-            />
-          </div>
-
-          {status === 'error' && (
-            <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-xs flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 shrink-0" />
-              <span>{errorMessage}</span>
-            </div>
-          )}
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label htmlFor="name" className="block text-xs font-mono font-medium text-gray-300 mb-1">
-                Full Name <span className="text-indigo-400">*</span>
-              </label>
-              <input
-                id="name"
-                type="text"
-                name="name"
-                required
-                value={formData.name}
-                onChange={handleChange}
-                placeholder="Jane Doe"
-                className="w-full px-3.5 py-2.5 rounded-lg bg-[#08090c] border border-white/10 text-white text-sm focus:border-indigo-500 focus:outline-none"
-              />
-            </div>
-
-            <div>
-              <label htmlFor="email" className="block text-xs font-mono font-medium text-gray-300 mb-1">
-                Work Email <span className="text-indigo-400">*</span>
-              </label>
-              <input
-                id="email"
-                type="email"
-                name="email"
-                required
-                value={formData.email}
-                onChange={handleChange}
-                placeholder="jane@company.com"
-                className="w-full px-3.5 py-2.5 rounded-lg bg-[#08090c] border border-white/10 text-white text-sm focus:border-indigo-500 focus:outline-none"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label htmlFor="category" className="block text-xs font-mono font-medium text-gray-300 mb-1">
-                Inquiry Category <span className="text-indigo-400">*</span>
-              </label>
-              <select
-                id="category"
-                name="category"
-                value={formData.category}
-                onChange={handleChange}
-                className="w-full px-3.5 py-2.5 rounded-lg bg-[#08090c] border border-white/10 text-white text-sm focus:border-indigo-500 focus:outline-none font-mono"
-              >
-                <option value="business">Business & Enterprise Inquiry</option>
-                <option value="product-support">Product & Early Access Support</option>
-                <option value="partnership">Partnership & Distribution</option>
-                <option value="security">Security Vulnerability Report</option>
-                <option value="careers">Careers & Engineering Inquiry</option>
-                <option value="press">Press & Media</option>
-                <option value="general">General Information</option>
-              </select>
-            </div>
-
-            <div>
-              <label htmlFor="company" className="block text-xs font-mono font-medium text-gray-300 mb-1">
-                Company / Organization
-              </label>
-              <input
-                id="company"
-                type="text"
-                name="company"
-                value={formData.company}
-                onChange={handleChange}
-                placeholder="Acme Corp (Optional)"
-                className="w-full px-3.5 py-2.5 rounded-lg bg-[#08090c] border border-white/10 text-white text-sm focus:border-indigo-500 focus:outline-none"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label htmlFor="message" className="block text-xs font-mono font-medium text-gray-300 mb-1">
-              Message Details <span className="text-indigo-400">*</span>
-            </label>
-            <textarea
-              id="message"
-              name="message"
-              required
-              rows={4}
-              value={formData.message}
-              onChange={handleChange}
-              placeholder="Describe your request, project scale, or inquiry details..."
-              className="w-full px-3.5 py-2.5 rounded-lg bg-[#08090c] border border-white/10 text-white text-sm focus:border-indigo-500 focus:outline-none"
-            />
-          </div>
-
-          <div className="pt-2">
-            <button
-              type="submit"
-              disabled={status === 'submitting'}
-              className="w-full flex items-center justify-center gap-2 py-3 px-6 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-semibold text-sm shadow-lg shadow-indigo-600/30 transition-all"
-            >
-              {status === 'submitting' ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Processing Submission...</span>
-                </>
-              ) : (
-                <>
-                  <Send className="w-4 h-4" />
-                  <span>Submit Inquiry</span>
-                </>
-              )}
-            </button>
-          </div>
-        </form>
+      {status === 'error' && (
+        <p
+          role="alert"
+          className="border-danger text-danger mt-6 flex items-start gap-3 border-l-4 py-2 pl-4 text-sm"
+        >
+          {errorMessage}
+        </p>
       )}
-    </div>
+
+      <div className="mt-8 grid grid-cols-1 gap-6 border-t border-[var(--hair)] pt-8 sm:grid-cols-2">
+        <div>
+          <label htmlFor="name" className="stamp text-ink-faint mb-2.5 block">
+            Full name <span className="text-ember-ink">·required</span>
+          </label>
+          <input
+            id="name"
+            type="text"
+            name="name"
+            required
+            autoComplete="name"
+            value={formData.name}
+            onChange={handleChange}
+            placeholder="Jane Doe"
+            className="field"
+          />
+        </div>
+
+        <div>
+          <label htmlFor="email" className="stamp text-ink-faint mb-2.5 block">
+            Work email <span className="text-ember-ink">·required</span>
+          </label>
+          <input
+            id="email"
+            type="email"
+            name="email"
+            required
+            autoComplete="email"
+            value={formData.email}
+            onChange={handleChange}
+            placeholder="jane@company.com"
+            className="field"
+          />
+        </div>
+
+        <div>
+          <label htmlFor="category" className="stamp text-ink-faint mb-2.5 block">
+            Category <span className="text-ember-ink">·required</span>
+          </label>
+          <select
+            id="category"
+            name="category"
+            value={formData.category}
+            onChange={handleChange}
+            className="field"
+          >
+            {CATEGORIES.map((c) => (
+              <option key={c.value} value={c.value}>
+                {c.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label htmlFor="company" className="stamp text-ink-faint mb-2.5 block">
+            Company <span className="text-ink-faint">·optional</span>
+          </label>
+          <input
+            id="company"
+            type="text"
+            name="company"
+            autoComplete="organization"
+            value={formData.company}
+            onChange={handleChange}
+            placeholder="Acme Corp"
+            className="field"
+          />
+        </div>
+
+        <div className="sm:col-span-2">
+          <label htmlFor="message" className="stamp text-ink-faint mb-2.5 block">
+            Message <span className="text-ember-ink">·required</span>
+          </label>
+          <textarea
+            id="message"
+            name="message"
+            required
+            rows={5}
+            value={formData.message}
+            onChange={handleChange}
+            placeholder="Describe your request, project scale, or inquiry details…"
+            className="field resize-y"
+          />
+        </div>
+      </div>
+
+      <div className="mt-8 flex flex-wrap items-center gap-6">
+        <button type="submit" disabled={status === 'submitting'} className="btn btn-primary">
+          {status === 'submitting' ? 'Sending…' : 'Submit inquiry'}
+          {status !== 'submitting' && <span aria-hidden="true">→</span>}
+        </button>
+        <p className="stamp text-ink-faint">Reviewed within 24 hours</p>
+      </div>
+    </form>
   );
 }

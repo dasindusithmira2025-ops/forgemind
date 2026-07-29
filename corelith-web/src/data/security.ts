@@ -3,37 +3,37 @@ import { SecurityPrinciple } from '@/types';
 export const securityData = {
   title: 'Security & Trust Center',
   description:
-    'Corelith Technologies designs software around strict data isolation, minimal privilege, signed distribution pipelines, and transparent system behavior.',
+    'Corelith Technologies builds software that keeps your work on your machine, asks before it does anything irreversible, and ships releases you can verify for yourself.',
   principles: [
     {
-      title: 'Secure-by-Default Architecture',
+      title: 'Private by default',
       description:
-        'All client telemetry is opt-in or disabled by default. Network communication requires TLS 1.3 encryption, and data storage is isolated per local project workspace.',
+        'Telemetry is off or opt-in, never on quietly. Your work is kept separate per project, and anything that does leave your machine goes over an encrypted connection.',
       iconName: 'ShieldCheck',
     },
     {
-      title: 'Least-Privilege Execution',
+      title: 'Asks before it acts',
       description:
-        'Agents, background tasks, and embedded processes operate within explicit permission boundaries. Command execution requires explicit approval configurations.',
+        'Agents and background tasks work inside limits you set. Anything that could destroy work stops and waits for you rather than deciding on your behalf.',
       iconName: 'Lock',
     },
     {
-      title: 'Signed Binary & Release Integrity',
+      title: 'Releases you can verify',
       description:
-        'Production releases for Windows, macOS, and Linux are digitally signed with cryptographic SHA-256 checksums provided for independent offline verification.',
+        'Builds for Windows, macOS, and Linux are digitally signed and published with checksums, so you can confirm a download is genuine before you install it.',
       iconName: 'FileCheck',
     },
     {
-      title: 'Responsible Vulnerability Disclosure',
+      title: 'Responsible disclosure',
       description:
-        'We welcome security researchers and developers to report potential vulnerabilities under our coordinated disclosure framework.',
+        'We welcome security researchers and developers to report potential vulnerabilities under our coordinated disclosure process.',
       iconName: 'AlertTriangle',
     },
   ] as SecurityPrinciple[],
   reportingProcess: [
     'Send encrypted details to security@corelithtechnologies.com.',
-    'Include clear steps to reproduce, affected software versions, and proof-of-concept logs.',
-    'We acknowledge receipt within 24 hours and provide regular progress updates.',
-    'We coordinate public advisory release after fixes are deployed and verified.',
+    'Include clear steps to reproduce, the affected version, and anything that helps us see it happen.',
+    'We acknowledge receipt within 24 hours and keep you updated as we work on it.',
+    'We agree the public advisory with you once a fix is out.',
   ],
 };
