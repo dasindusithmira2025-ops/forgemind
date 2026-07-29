@@ -108,6 +108,23 @@ if (Test-Path -LiteralPath $legacyCargoTarget) {
     Write-Host 'Cleared the pre-monorepo Cargo target; absolute build metadata cannot be relocated safely.'
 }
 
+$paralithCargoTarget = [System.IO.Path]::GetFullPath(
+    (Join-Path $repoRoot 'Paralith-tauri/src-tauri/target')
+)
+$cargoLayoutMarker = Join-Path $paralithCargoTarget '.paralith-package-layout-v1'
+if (-not $paralithCargoTarget.StartsWith($repoBoundary, [StringComparison]::OrdinalIgnoreCase)) {
+    throw "Refusing to validate a Cargo target outside the repository: $paralithCargoTarget"
+}
+if ((Test-Path -LiteralPath $paralithCargoTarget) -and
+    -not (Test-Path -LiteralPath $cargoLayoutMarker)) {
+    Remove-Item -LiteralPath $paralithCargoTarget -Recurse -Force -ErrorAction Stop
+    Write-Host 'Cleared an unmarked Cargo target that may contain pre-monorepo absolute paths.'
+}
+if (-not (Test-Path -LiteralPath $paralithCargoTarget)) {
+    New-Item -ItemType Directory -Path $paralithCargoTarget -Force | Out-Null
+}
+New-Item -ItemType File -Path $cargoLayoutMarker -Force | Out-Null
+
 $preserve = @(
     'Paralith-tauri/node_modules',
     'Paralith-tauri/src-tauri/target',
