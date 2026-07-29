@@ -36,19 +36,19 @@ export default function CompanyPage() {
       />
 
       {/* ── Directive ────────────────────────────────────────────────────── */}
-      <Band tone="iris" lit divider>
+      <Band tone="ember" lit divider>
         <div className="grid grid-cols-12 gap-x-8 gap-y-10">
-          <p className="stamp text-iris-lift col-span-12 lg:col-span-2">Operating mission</p>
+          <p className="stamp text-ember-ink col-span-12 lg:col-span-2">Operating mission</p>
 
           <blockquote className="col-span-12 lg:col-span-9">
             <p className="font-display text-xl leading-[1.2] font-semibold tracking-tight text-balance sm:text-2xl lg:text-3xl">
               {companyData.tagline}
             </p>
 
-            <dl className="mt-12 grid grid-cols-1 overflow-hidden rounded-lg border border-[var(--hair-strong)] bg-white/[0.02] sm:grid-cols-3">
+            <dl className="mt-12 grid grid-cols-1 overflow-hidden rounded-lg border border-[var(--hair-strong)] bg-surface sm:grid-cols-3">
               {STANCES.map((stance) => (
                 <div key={stance.k} className="border-r border-[var(--hair)] px-5 py-4 last:border-r-0">
-                  <dt className="stamp text-faint">{stance.k}</dt>
+                  <dt className="stamp text-ink-faint">{stance.k}</dt>
                   <dd className="mt-2.5 font-mono text-sm">{stance.v}</dd>
                 </div>
               ))}
@@ -58,7 +58,7 @@ export default function CompanyPage() {
       </Band>
 
       {/* ── Principles ───────────────────────────────────────────────────── */}
-      <Band tone="void" id="philosophy" className="scroll-mt-24" divider>
+      <Band tone="paper" id="philosophy" className="scroll-mt-24" divider>
         <SectionMark
           index="02"
           kicker="Foundational standards"

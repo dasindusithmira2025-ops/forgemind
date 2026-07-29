@@ -55,13 +55,13 @@ export function DownloadSelector({ productName, downloads }: DownloadSelectorPro
       <div className="flex flex-col gap-4 border-b border-[var(--hair)] p-6 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-xl">Download {productName}</h2>
-          <p className="stamp text-faint mt-2.5">Signed installers ◆ Checksums published</p>
+          <p className="stamp text-ink-faint mt-2.5">Signed installers ◆ Checksums published</p>
         </div>
 
         <div
           role="tablist"
           aria-label="Platform"
-          className="flex gap-1 self-start rounded-md border border-[var(--hair-strong)] bg-white/[0.03] p-1 sm:self-auto"
+          className="flex gap-1 self-start rounded-md border border-[var(--hair-strong)] bg-paper-2 p-1 sm:self-auto"
         >
           {downloads.map((d) => {
             const active = d.platform === current.platform;
@@ -73,7 +73,7 @@ export function DownloadSelector({ productName, downloads }: DownloadSelectorPro
                 aria-selected={active}
                 onClick={() => setSelectedPlatform(d.platform)}
                 className={`stamp rounded px-3.5 py-2.5 transition-colors ${
-                  active ? 'text-lume bg-white/[0.09]' : 'text-faint hover:text-mute'
+                  active ? 'text-ink bg-[rgba(17,24,39,0.08)]' : 'text-ink-faint hover:text-ink-soft'
                 }`}
               >
                 {d.platform}
@@ -95,24 +95,24 @@ export function DownloadSelector({ productName, downloads }: DownloadSelectorPro
               { k: 'Requires', v: current.minOsVersion },
             ].map((row) => (
               <div key={row.k} className="border-b border-[var(--hair)] py-3 sm:pr-6">
-                <dt className="stamp text-faint">{row.k}</dt>
-                <dd className="text-lume mt-2 font-mono text-sm">{row.v}</dd>
+                <dt className="stamp text-ink-faint">{row.k}</dt>
+                <dd className="text-ink mt-2 font-mono text-sm">{row.v}</dd>
               </div>
             ))}
           </dl>
 
           <div className="mt-6">
             <div className="flex items-baseline justify-between gap-4">
-              <p className="stamp text-faint">SHA-256</p>
+              <p className="stamp text-ink-faint">SHA-256</p>
               <button
                 type="button"
                 onClick={() => copyChecksum(current.checksumSha256)}
-                className="stamp text-iris-lift hover:text-lume transition-colors"
+                className="stamp text-ember-ink hover:text-ink transition-colors"
               >
                 {copied ? 'Copied ✓' : 'Copy'}
               </button>
             </div>
-            <p className="well text-mute mt-2.5 overflow-x-auto p-3 font-mono text-xs break-all">
+            <p className="well text-ink-soft mt-2.5 overflow-x-auto p-3 font-mono text-xs break-all">
               {current.checksumSha256}
             </p>
             <span aria-live="polite" className="sr-only">
@@ -136,7 +136,7 @@ export function DownloadSelector({ productName, downloads }: DownloadSelectorPro
               <button type="button" className="btn btn-primary btn-lg w-full" disabled>
                 {current.platform} build — not yet public
               </button>
-              <p className="text-mute text-sm">
+              <p className="text-ink-soft text-sm">
                 Preview binaries are issued individually while Paralith is in early access. Request
                 access and we will send the signed {current.platform} installer and its checksum.
               </p>
@@ -153,7 +153,7 @@ export function DownloadSelector({ productName, downloads }: DownloadSelectorPro
           {current.releaseNotesUrl && (
             <a
               href={current.releaseNotesUrl}
-              className="stamp text-iris-lift hover:text-lume self-start transition-colors"
+              className="stamp text-ember-ink hover:text-ink self-start transition-colors"
             >
               Read release notes →
             </a>

@@ -7,27 +7,27 @@ import { Band, PageMasthead, SectionMark } from '@/components/Editorial';
 export const metadata: Metadata = {
   title: 'Security & Trust Center',
   description:
-    'Corelith Technologies security architecture, secure-by-default design, least privilege, data handling transparency, and responsible vulnerability disclosure policy.',
+    'How Corelith Technologies handles your data: your code stays on your machine, telemetry is off by default, releases are signed, and vulnerabilities are disclosed responsibly.',
 };
 
 const DATA_MATRIX = [
   {
-    subject: 'Source code & AST',
-    posture: 'Local only',
+    subject: 'Your code',
+    posture: 'Stays on your machine',
     detail:
-      'Source files and AST indices stay on your machine. They are never uploaded to a public training corpus.',
+      'Your files and everything Paralith learns about your project stay on your device. None of it is uploaded, and none of it is used to train anything.',
   },
   {
-    subject: 'Telemetry & crash logs',
-    posture: 'Opt-in, anonymised',
+    subject: 'Crash reports',
+    posture: 'Off unless you allow it',
     detail:
-      'Crash reports require explicit consent and strip local paths, secrets, and environment tokens before leaving the device.',
+      'Nothing is sent without your say-so, and what does go strips out file paths, secrets, and anything else tied to your machine.',
   },
   {
-    subject: 'Release artifacts',
-    posture: 'Signed & checksummed',
+    subject: 'Downloads',
+    posture: 'Signed and checksummed',
     detail:
-      'Binaries are signed and published with SHA-256 hashes so the artifact can be verified offline before it runs.',
+      'Every release is signed and published with its checksum, so you can confirm the file is genuine before you install it.',
   },
 ];
 
@@ -43,15 +43,15 @@ export default function SecurityPage() {
         }
         deck={securityData.description}
         meta={[
-          { key: 'Code', value: 'Local only', accent: true },
-          { key: 'Transport', value: 'TLS 1.3' },
-          { key: 'Storage', value: 'AES-256-GCM' },
+          { key: 'Your code', value: 'Never leaves', accent: true },
+          { key: 'Telemetry', value: 'Off by default' },
+          { key: 'Downloads', value: 'Signed' },
           { key: 'Disclosure', value: 'Coordinated' },
         ]}
       />
 
       {/* ── Principles ───────────────────────────────────────────────────── */}
-      <Band tone="panel" divider>
+      <Band tone="paper-2" divider>
         <SectionMark
           index="01"
           kicker="Posture"
@@ -63,7 +63,7 @@ export default function SecurityPage() {
           {securityData.principles.map((p, i) => (
             <article
               key={p.title}
-              className="flex flex-col gap-4 border-r border-b border-[var(--hair)] p-7 transition-colors hover:bg-white/[0.025]"
+              className="flex flex-col gap-4 border-r border-b border-[var(--hair)] p-7 transition-colors hover:bg-[rgba(17,24,39,0.04)]"
             >
               <div className="flex items-start justify-between gap-4">
                 <h3 className="max-w-[20ch] text-lg text-[var(--fg)]">{p.title}</h3>
@@ -80,12 +80,12 @@ export default function SecurityPage() {
       </Band>
 
       {/* ── Data handling ────────────────────────────────────────────────── */}
-      <Band tone="void">
+      <Band tone="paper">
         <SectionMark
           index="02"
           kicker="Data handling"
           title="Where everything actually goes."
-          deck="Three categories of data, stated plainly, with the posture that applies to each."
+          deck="Three things people ask about, answered plainly."
         />
 
         <div className="mt-14 border-t border-[var(--hair-strong)]">
@@ -107,7 +107,7 @@ export default function SecurityPage() {
       </Band>
 
       {/* ── Disclosure ───────────────────────────────────────────────────── */}
-      <Band tone="panel" id="disclosure" className="scroll-mt-24" divider>
+      <Band tone="paper-2" id="disclosure" className="scroll-mt-24" divider>
         <SectionMark
           index="03"
           kicker="Coordinated disclosure"
@@ -122,7 +122,7 @@ export default function SecurityPage() {
                 key={step}
                 className="flex gap-6 border-b border-[var(--hair)] py-5 first:border-t"
               >
-                <span aria-hidden="true" className="numeral text-lume shrink-0 text-xl">
+                <span aria-hidden="true" className="numeral text-ink shrink-0 text-xl">
                   {String(i + 1).padStart(2, '0')}
                 </span>
                 <span className="text-base">{step}</span>
@@ -132,14 +132,14 @@ export default function SecurityPage() {
 
           <div className="col-span-12 lg:col-span-4 lg:col-start-9">
             <div className="panel p-7">
-              <p className="stamp text-iris-lift">Security contact</p>
+              <p className="stamp text-ember-ink">Security contact</p>
               <a
                 href={`mailto:${siteConfig.securityEmail}`}
-                className="text-lume hover:text-iris-lift mt-4 block font-mono text-sm break-all underline decoration-1 underline-offset-4 transition-colors"
+                className="text-ink hover:text-ember-ink mt-4 block font-mono text-sm break-all underline decoration-1 underline-offset-4 transition-colors"
               >
                 {siteConfig.securityEmail}
               </a>
-              <p className="text-mute mt-6 border-t border-[var(--hair)] pt-4 text-sm">
+              <p className="text-ink-soft mt-6 border-t border-[var(--hair)] pt-4 text-sm">
                 Include reproduction steps, affected versions, and proof-of-concept logs. Encrypted
                 mail is welcome.
               </p>

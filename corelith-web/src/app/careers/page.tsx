@@ -31,7 +31,7 @@ export default function CareersPage() {
       />
 
       {/* ── Values ───────────────────────────────────────────────────────── */}
-      <Band tone="panel" divider>
+      <Band tone="paper-2" divider>
         <SectionMark
           index="01"
           kicker="How we work"
@@ -55,7 +55,7 @@ export default function CareersPage() {
       </Band>
 
       {/* ── Openings ─────────────────────────────────────────────────────── */}
-      <Band tone="void">
+      <Band tone="paper">
         <SectionMark
           index="02"
           kicker="Current openings"

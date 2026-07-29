@@ -1,25 +1,22 @@
 import type { Metadata, Viewport } from 'next';
-import { Space_Grotesk, Inter, JetBrains_Mono } from 'next/font/google';
+import { Chakra_Petch, JetBrains_Mono } from 'next/font/google';
 import './globals.css';
 import { Header } from '@/components/Header';
 import { Footer } from '@/components/Footer';
 import { siteConfig } from '@/config/site';
 
-// Display face: tight, slightly mechanical grotesk for headlines and product names.
-const grotesk = Space_Grotesk({
+// The voice of the system: squared terminals and a slight condensation that
+// give headlines their printed, graphic character and still set clean copy at
+// 16px. One family covers display and reading, which is what keeps the pages
+// looking like a poster series rather than a website.
+const chakra = Chakra_Petch({
   subsets: ['latin'],
-  variable: '--font-grotesk',
+  weight: ['300', '400', '500', '600', '700'],
+  variable: '--font-chakra',
   display: 'swap',
 });
 
-// Reading face: everything that is a sentence.
-const inter = Inter({
-  subsets: ['latin'],
-  variable: '--font-inter',
-  display: 'swap',
-});
-
-// Machine face: stamps, metrics, paths, checksums, terminal output.
+// Machine face: stamps, versions, checksums.
 const jetbrainsMono = JetBrains_Mono({
   subsets: ['latin'],
   variable: '--font-jetbrains',
@@ -71,11 +68,11 @@ export const metadata: Metadata = {
   },
 };
 
-// The site is dark-only, so the UA chrome is told as much up front: without
-// this the browser paints a white background behind the page during navigation.
+// The site is light-only, and the theme colour is the paper rather than white
+// so the mobile UA chrome matches the top band instead of banding against it.
 export const viewport: Viewport = {
-  colorScheme: 'dark',
-  themeColor: '#06070a',
+  colorScheme: 'light',
+  themeColor: '#fdfbf7',
 };
 
 export default function RootLayout({
@@ -94,17 +91,14 @@ export default function RootLayout({
   };
 
   return (
-    <html
-      lang="en"
-      className={`${grotesk.variable} ${inter.variable} ${jetbrainsMono.variable}`}
-    >
+    <html lang="en" className={`${chakra.variable} ${jetbrainsMono.variable}`}>
       <head>
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
         />
       </head>
-      <body className="bg-void text-lume flex min-h-screen flex-col antialiased">
+      <body className="bg-paper text-ink flex min-h-screen flex-col antialiased">
         <a
           href="#main"
           className="btn btn-secondary sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-[60]"

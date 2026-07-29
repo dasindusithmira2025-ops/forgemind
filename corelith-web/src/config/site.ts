@@ -6,7 +6,7 @@ export const siteConfig = {
   ogImage: 'https://www.corelithtechnologies.com/og-image.jpg',
   tagline: 'Software for people building what comes next.',
   description:
-    'Corelith Technologies builds Paralith, an agentic development environment that coordinates workspaces, terminals, intelligent agents, project memory, and verification in one focused canvas.',
+    'Corelith Technologies builds Paralith, a development environment where several AI agents work on your project at once — and nothing they write lands until you approve it.',
   contactEmail: 'contact@corelithtechnologies.com',
   securityEmail: 'security@corelithtechnologies.com',
   careersEmail: 'careers@corelithtechnologies.com',

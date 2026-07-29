@@ -11,7 +11,7 @@ export function PrinciplesGrid() {
       {companyData.principles.map((item, idx) => (
         <article
           key={item.title}
-          className="flex flex-col gap-4 border-r border-b border-[var(--hair)] p-7 transition-colors hover:bg-white/[0.025]"
+          className="flex flex-col gap-4 border-r border-b border-[var(--hair)] p-7 transition-colors hover:bg-[rgba(17,24,39,0.04)]"
         >
           <div className="flex items-start justify-between gap-4">
             <p className="stamp max-w-[14ch] text-[var(--kicker)]">{item.subtitle}</p>

@@ -64,8 +64,8 @@ export function ContactForm() {
   if (status === 'success') {
     return (
       <div className="panel p-6 sm:p-10">
-        <p className="stamp text-signal flex items-center gap-2.5">
-          <span aria-hidden="true" className="bg-signal inline-block h-1.5 w-1.5 rounded-full" />
+        <p className="stamp text-success flex items-center gap-2.5">
+          <span aria-hidden="true" className="bg-success inline-block h-1.5 w-1.5 rounded-full" />
           Inquiry received
         </p>
 
@@ -73,12 +73,12 @@ export function ContactForm() {
 
         <dl className="mt-6 border-t border-[var(--hair)]">
           <div className="flex items-baseline justify-between gap-6 border-b border-[var(--hair)] py-3">
-            <dt className="stamp text-faint">Reference</dt>
-            <dd className="text-lume font-mono text-sm">{inquiryId || '—'}</dd>
+            <dt className="stamp text-ink-faint">Reference</dt>
+            <dd className="text-ink font-mono text-sm">{inquiryId || '—'}</dd>
           </div>
           <div className="flex items-baseline justify-between gap-6 border-b border-[var(--hair)] py-3">
-            <dt className="stamp text-faint">Typical response</dt>
-            <dd className="text-lume font-mono text-sm">Within 24 hours</dd>
+            <dt className="stamp text-ink-faint">Typical response</dt>
+            <dd className="text-ink font-mono text-sm">Within 24 hours</dd>
           </div>
         </dl>
 
@@ -97,7 +97,7 @@ export function ContactForm() {
   return (
     <form onSubmit={handleSubmit} className="panel p-6 sm:p-10">
       <h2 className="text-xl">Send an inquiry</h2>
-      <p className="stamp text-faint mt-2.5">
+      <p className="stamp text-ink-faint mt-2.5">
         Routed to engineering, business, or security by category
       </p>
 
@@ -124,8 +124,8 @@ export function ContactForm() {
 
       <div className="mt-8 grid grid-cols-1 gap-6 border-t border-[var(--hair)] pt-8 sm:grid-cols-2">
         <div>
-          <label htmlFor="name" className="stamp text-faint mb-2.5 block">
-            Full name <span className="text-iris-lift">·required</span>
+          <label htmlFor="name" className="stamp text-ink-faint mb-2.5 block">
+            Full name <span className="text-ember-ink">·required</span>
           </label>
           <input
             id="name"
@@ -141,8 +141,8 @@ export function ContactForm() {
         </div>
 
         <div>
-          <label htmlFor="email" className="stamp text-faint mb-2.5 block">
-            Work email <span className="text-iris-lift">·required</span>
+          <label htmlFor="email" className="stamp text-ink-faint mb-2.5 block">
+            Work email <span className="text-ember-ink">·required</span>
           </label>
           <input
             id="email"
@@ -158,8 +158,8 @@ export function ContactForm() {
         </div>
 
         <div>
-          <label htmlFor="category" className="stamp text-faint mb-2.5 block">
-            Category <span className="text-iris-lift">·required</span>
+          <label htmlFor="category" className="stamp text-ink-faint mb-2.5 block">
+            Category <span className="text-ember-ink">·required</span>
           </label>
           <select
             id="category"
@@ -177,8 +177,8 @@ export function ContactForm() {
         </div>
 
         <div>
-          <label htmlFor="company" className="stamp text-faint mb-2.5 block">
-            Company <span className="text-faint">·optional</span>
+          <label htmlFor="company" className="stamp text-ink-faint mb-2.5 block">
+            Company <span className="text-ink-faint">·optional</span>
           </label>
           <input
             id="company"
@@ -193,8 +193,8 @@ export function ContactForm() {
         </div>
 
         <div className="sm:col-span-2">
-          <label htmlFor="message" className="stamp text-faint mb-2.5 block">
-            Message <span className="text-iris-lift">·required</span>
+          <label htmlFor="message" className="stamp text-ink-faint mb-2.5 block">
+            Message <span className="text-ember-ink">·required</span>
           </label>
           <textarea
             id="message"
@@ -214,7 +214,7 @@ export function ContactForm() {
           {status === 'submitting' ? 'Sending…' : 'Submit inquiry'}
           {status !== 'submitting' && <span aria-hidden="true">→</span>}
         </button>
-        <p className="stamp text-faint">Reviewed within 24 hours</p>
+        <p className="stamp text-ink-faint">Reviewed within 24 hours</p>
       </div>
     </form>
   );

@@ -9,29 +9,29 @@ import { products } from '@/data/products';
 const paralith = products.find((p) => p.id === 'paralith')!;
 
 const TICKER = [
-  'Multi-agent orchestration',
-  'Persistent project memory',
-  'Native PTY terminals',
-  'Empirical verification',
-  'Multi-display canvas',
-  'Local-first by default',
+  'Several agents at once',
+  'Remembers your project',
+  'Terminals built in',
+  'Checked before it lands',
+  'Works across your monitors',
+  'Stays on your machine',
 ];
 
 const PILLARS = [
   {
-    title: 'Agents run in parallel',
-    body: 'Spawn specialised agents that research the codebase, propose structural edits, and drive test suites at the same time — none of them blocking the workspace you are working in.',
-    metric: 'Up to 8 concurrent',
+    title: 'Agents work in parallel',
+    body: 'Hand over several jobs at once and they are taken on at the same time — none of them freezing the window you are actually working in.',
+    metric: 'Several at once',
   },
   {
-    title: 'Memory that survives the commit',
-    body: 'A local AST and Git-lineage graph keeps every symbol, import edge, and past decision addressable, so an agent opening a file already knows what it is looking at.',
-    metric: '1,420 nodes indexed',
+    title: 'It remembers your project',
+    body: 'Paralith carries what it knows about your project from one session to the next, so an agent picking up a task already has the background you would otherwise repeat.',
+    metric: 'No re-explaining',
   },
   {
-    title: 'Nothing lands unverified',
-    body: 'Every agent edit is held behind a mandatory lint, build, and test pass. If the suite is red, the patch stays in review — there is no override switch.',
-    metric: '142/142 green',
+    title: 'Nothing lands unchecked',
+    body: 'Every change is checked before it can reach your project. If a check fails, the change waits for you to look at it — there is no override switch.',
+    metric: 'Checked every time',
   },
 ];
 
@@ -39,16 +39,16 @@ export default function HomePage() {
   return (
     <>
       {/* ── 01 · Hero ────────────────────────────────────────────────────── */}
-      <Band tone="void" lit>
+      <Band tone="paper" lit>
         <div className="grid grid-cols-12 gap-x-8 gap-y-10">
           <div className="col-span-12">
-            <span className="chip stamp text-mute">
+            <span className="chip stamp text-ink-soft">
               <span aria-hidden="true" className="node" />
               Corelith Technologies
-              <span aria-hidden="true" className="text-faint">
+              <span aria-hidden="true" className="text-ink-faint">
                 /
               </span>
-              <span className="text-iris-lift">Paralith v0.9.4 preview</span>
+              <span className="text-ember-ink">Paralith v0.9.4 preview</span>
             </span>
           </div>
 
@@ -61,9 +61,9 @@ export default function HomePage() {
           </h1>
 
           <div className="col-span-12 self-start lg:col-span-5">
-            <p className="text-mute border-l border-[var(--hair-strong)] pl-5 text-base">
-              Paralith coordinates workspaces, terminals, project memory, and parallel agents in one
-              canvas — and keeps every line of your code on your own machine while it does it.
+            <p className="text-ink-soft border-l border-[var(--hair-strong)] pl-5 text-base">
+              Paralith puts your projects, your terminals, and a team of AI agents in one workspace
+              — and keeps every line of your code on your own machine while they work.
             </p>
           </div>
 
@@ -82,8 +82,8 @@ export default function HomePage() {
             rows={[
               { key: 'Product', value: 'Paralith' },
               { key: 'Release', value: 'v0.9.4 preview', accent: true },
-              { key: 'Targets', value: 'Windows · macOS · Linux' },
-              { key: 'Data', value: 'Local-first' },
+              { key: 'Runs on', value: 'Windows · macOS · Linux' },
+              { key: 'Your code', value: 'Stays local' },
             ]}
           />
 
@@ -96,7 +96,7 @@ export default function HomePage() {
       <Ticker items={TICKER} />
 
       {/* ── 02 · The flagship ────────────────────────────────────────────── */}
-      <Band tone="void">
+      <Band tone="paper">
         <SectionMark
           index="02"
           kicker="The flagship"
@@ -108,13 +108,13 @@ export default function HomePage() {
           {PILLARS.map((pillar, i) => (
             <article key={pillar.title} className="panel panel-hover flex flex-col gap-5 p-7">
               <div className="flex items-start justify-between gap-4">
-                <h3 className="max-w-[16ch] text-lg text-lume lg:text-xl">{pillar.title}</h3>
-                <span aria-hidden="true" className="numeral text-lume text-2xl">
+                <h3 className="max-w-[16ch] text-lg text-ink lg:text-xl">{pillar.title}</h3>
+                <span aria-hidden="true" className="numeral text-ink text-2xl">
                   {String(i + 1).padStart(2, '0')}
                 </span>
               </div>
-              <p className="text-mute text-base">{pillar.body}</p>
-              <p className="stamp text-iris-lift mt-auto border-t border-[var(--hair)] pt-5">
+              <p className="text-ink-soft text-base">{pillar.body}</p>
+              <p className="stamp text-ember-ink mt-auto border-t border-[var(--hair)] pt-5">
                 {pillar.metric}
               </p>
             </article>
@@ -126,14 +126,14 @@ export default function HomePage() {
             Explore Paralith
             <span aria-hidden="true">→</span>
           </Link>
-          <p className="stamp text-faint">
+          <p className="stamp text-ink-faint">
             Signed installers ◆ SHA-256 published ◆ No telemetry by default
           </p>
         </div>
       </Band>
 
       {/* ── 03 · Scope ───────────────────────────────────────────────────── */}
-      <Band tone="panel" divider>
+      <Band tone="paper-2" divider>
         <SectionMark
           index="03"
           kicker="Engineering scope"
@@ -147,19 +147,19 @@ export default function HomePage() {
       </Band>
 
       {/* ── 04 · Directive ───────────────────────────────────────────────── */}
-      <Band tone="iris" lit divider>
+      <Band tone="ember" lit divider>
         <div className="grid grid-cols-12 gap-x-8 gap-y-8">
-          <p className="stamp text-iris-lift col-span-12 lg:col-span-2">Directive</p>
+          <p className="stamp text-ember-ink col-span-12 lg:col-span-2">Directive</p>
 
           <blockquote className="col-span-12 lg:col-span-9">
             <p className="font-display text-xl leading-[1.2] font-semibold tracking-tight text-balance sm:text-2xl lg:text-3xl">
               Corelith exists to turn ambitious software ideas into products people can depend on.
             </p>
-            <p className="text-mute mt-8 max-w-2xl text-base">
+            <p className="text-ink-soft mt-8 max-w-2xl text-base">
               We combine engineering discipline, intelligent automation, and careful product design
               to build systems that remain useful after the novelty disappears.
             </p>
-            <footer className="stamp text-faint mt-10 border-t border-[var(--hair)] pt-5">
+            <footer className="stamp text-ink-faint mt-10 border-t border-[var(--hair)] pt-5">
               {companyData.mission}
             </footer>
           </blockquote>
@@ -167,7 +167,7 @@ export default function HomePage() {
       </Band>
 
       {/* ── 05 · Standards ───────────────────────────────────────────────── */}
-      <Band tone="void" divider>
+      <Band tone="paper" divider>
         <SectionMark
           index="05"
           kicker="Product philosophy"

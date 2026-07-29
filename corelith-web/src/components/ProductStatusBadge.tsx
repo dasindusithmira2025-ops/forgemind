@@ -13,20 +13,20 @@ interface ProductStatusBadgeProps {
 export function ProductStatusBadge({ status }: ProductStatusBadgeProps) {
   const styles: Record<ProductStatus, { tone: string; marker: string }> = {
     Available: {
-      tone: 'border-signal/40 bg-signal/10 text-signal',
-      marker: 'bg-signal',
+      tone: 'border-success/40 bg-success/10 text-success',
+      marker: 'bg-success',
     },
     'Early Access': {
-      tone: 'border-iris/45 bg-iris/10 text-iris-lift',
-      marker: 'bg-iris',
+      tone: 'border-ember/45 bg-ember/10 text-ember-ink',
+      marker: 'bg-ember',
     },
     'Private Beta': {
-      tone: 'border-warn/40 bg-warn/10 text-warn',
-      marker: 'bg-warn',
+      tone: 'border-warning/40 bg-warning/10 text-warning',
+      marker: 'bg-warning',
     },
     'In Development': {
-      tone: 'border-[var(--hair-strong)] text-mute',
-      marker: 'border border-mute bg-transparent',
+      tone: 'border-[var(--hair-strong)] text-ink-soft',
+      marker: 'border border-ink-soft bg-transparent',
     },
   };
 

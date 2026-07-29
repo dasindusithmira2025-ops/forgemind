@@ -6,9 +6,10 @@ interface BrandLogoProps {
 }
 
 /**
- * The Corelith mark: a dark slab cut by a pale obelisk with a lit iris core —
+ * The Corelith mark: an ink slab cut by a cream obelisk with an amber core —
  * core + lith. Drawn rather than borrowed, so it carries no icon-set
- * fingerprint, and the core is the only element in the header allowed to glow.
+ * fingerprint, and printed flat: on paper the core reads as a struck block of
+ * brand colour, which is the graphic equivalent of the glow it replaces.
  */
 export function BrandLogo({ size = 'md', showTagline = false }: BrandLogoProps) {
   const mark = {
@@ -34,29 +35,16 @@ export function BrandLogo({ size = 'md', showTagline = false }: BrandLogoProps) 
         aria-hidden="true"
         className={`${mark} shrink-0 transition-transform duration-200 group-hover:-translate-y-0.5`}
       >
-        <rect
-          x="0.5"
-          y="0.5"
-          width="31"
-          height="31"
-          rx="7.5"
-          className="fill-panel-2 stroke-edge"
-        />
-        <path d="M13 6h6l3.5 20h-13Z" className="fill-lume" />
-        <rect
-          x="13"
-          y="17"
-          width="6"
-          height="6"
-          className="fill-iris drop-shadow-[0_0_6px_var(--color-iris)]"
-        />
+        <rect x="0" y="0" width="32" height="32" rx="5" className="fill-ink" />
+        <path d="M13 6h6l3.5 20h-13Z" className="fill-paper" />
+        <rect x="13" y="17" width="6" height="6" className="fill-amber" />
       </svg>
 
       <span className="flex flex-col leading-none">
-        <span className={`${word} text-lume font-display font-semibold tracking-[-0.03em]`}>
+        <span className={`${word} text-ink font-display font-semibold tracking-[-0.03em]`}>
           Corelith
         </span>
-        {showTagline && <span className="stamp text-faint mt-1.5">Technologies</span>}
+        {showTagline && <span className="stamp text-ink-faint mt-1.5">Technologies</span>}
       </span>
     </Link>
   );

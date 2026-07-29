@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 
-type Tone = 'void' | 'panel' | 'iris';
+type Tone = 'paper' | 'paper-2' | 'ember';
 
 interface BandProps {
   tone?: Tone;
@@ -16,13 +16,13 @@ interface BandProps {
 }
 
 /**
- * A full-bleed horizontal band. The page is a stack of these on one continuous
- * dark canvas — bands separate by elevation and light, not by flipping to a
- * pale background, which is what makes a dark page feel stitched together from
- * unrelated screenshots.
+ * A full-bleed horizontal band. The page is a stack of these, alternating
+ * between the two cream papers and — at most once per page — the burnt-orange
+ * block. Bands separate by paper tone rather than by a rule, which is what
+ * gives the page its printed, sectioned rhythm.
  */
 export function Band({
-  tone = 'void',
+  tone = 'paper',
   children,
   className = '',
   id,
@@ -78,8 +78,8 @@ export function SectionMark({ index, kicker, title, deck }: SectionMarkProps) {
       <div className="flex items-center gap-4">
         <span aria-hidden="true" className="node shrink-0" />
         <p className="stamp text-[var(--kicker)] shrink-0">
-          <span className="text-faint">{index}</span>
-          <span aria-hidden="true" className="text-faint px-2">
+          <span className="text-ink-faint">{index}</span>
+          <span aria-hidden="true" className="text-ink-faint px-2">
             /
           </span>
           {kicker}
@@ -118,7 +118,7 @@ interface PageMastheadProps {
  */
 export function PageMasthead({ kicker, title, deck, marker, meta, children }: PageMastheadProps) {
   return (
-    <Band tone="void" lit>
+    <Band tone="paper" lit>
       <div className="grid grid-cols-12 gap-x-8 gap-y-10 pt-6">
         <div className="col-span-12 flex flex-wrap items-center gap-4">
           <p className="stamp text-[var(--kicker)]">{kicker}</p>
@@ -154,17 +154,17 @@ export function MetaStrip({
 }) {
   return (
     <dl
-      className={`grid grid-cols-2 overflow-hidden rounded-lg border border-[var(--hair-strong)] bg-white/[0.02] sm:grid-cols-4 ${className}`}
+      className={`bg-surface grid grid-cols-2 overflow-hidden rounded-lg border border-[var(--hair-strong)] sm:grid-cols-4 ${className}`}
     >
       {rows.map((row) => (
         <div
           key={row.key}
           className="border-r border-b border-[var(--hair)] px-5 py-4 last:border-r-0 sm:border-b-0"
         >
-          <dt className="stamp text-faint">{row.key}</dt>
+          <dt className="stamp text-ink-faint">{row.key}</dt>
           <dd
             className={`mt-2.5 font-mono text-sm ${
-              row.accent ? 'text-iris-lift' : 'text-[var(--fg)]'
+              row.accent ? 'text-ember-ink' : 'text-[var(--fg)]'
             }`}
           >
             {row.value}
@@ -194,10 +194,10 @@ export function Colophon({ rows, className = '' }: { rows: MetaRow[]; className?
           key={row.key}
           className="flex items-baseline justify-between gap-6 border-b border-[var(--hair)] py-3"
         >
-          <dt className="stamp text-faint">{row.key}</dt>
+          <dt className="stamp text-ink-faint">{row.key}</dt>
           <dd
             className={`text-right font-mono text-sm ${
-              row.accent ? 'text-iris-lift' : 'text-[var(--fg)]'
+              row.accent ? 'text-ember-ink' : 'text-[var(--fg)]'
             }`}
           >
             {row.value}
@@ -214,15 +214,15 @@ export function Colophon({ rows, className = '' }: { rows: MetaRow[]; className?
  */
 export function Ticker({ items }: { items: string[] }) {
   return (
-    <div className="tone-panel border-y border-[var(--hair)]">
+    <div className="tone-paper-2 border-y border-[var(--hair)]">
       <div className="marquee overflow-hidden whitespace-nowrap">
         <span className="marquee-track">
           {[0, 1].map((copy) => (
             <span key={copy} className="flex shrink-0 items-center" aria-hidden={copy === 1}>
               {items.map((item) => (
-                <span key={item} className="stamp text-mute flex items-center py-3.5">
+                <span key={item} className="stamp text-ink-soft flex items-center py-3.5">
                   <span className="px-7">{item}</span>
-                  <span aria-hidden="true" className="text-iris/70">
+                  <span aria-hidden="true" className="text-ember/70">
                     ◆
                   </span>
                 </span>
@@ -244,9 +244,9 @@ export function Tag({
   variant?: 'default' | 'accent' | 'success';
 }) {
   const variants = {
-    default: 'border-[var(--hair-strong)] text-mute',
-    accent: 'border-iris/45 bg-iris/10 text-iris-lift',
-    success: 'border-signal/40 bg-signal/10 text-signal',
+    default: 'border-[var(--hair-strong)] text-ink-soft',
+    accent: 'border-ember/50 bg-ember/10 text-ember-ink',
+    success: 'border-success/45 bg-success/10 text-success',
   };
 
   return <span className={`stamp chip ${variants[variant]}`}>{children}</span>;
@@ -266,11 +266,11 @@ export function ClosingBand({
   children: ReactNode;
 }) {
   return (
-    <Band tone="iris" lit compact divider>
+    <Band tone="ember" lit compact divider>
       <div className="grid grid-cols-12 items-end gap-x-8 gap-y-10">
         <div className="col-span-12 lg:col-span-7">
           <h2 className="text-2xl sm:text-3xl">{title}</h2>
-          <p className="text-mute mt-6 max-w-xl text-base">{body}</p>
+          <p className="text-ink-soft mt-6 max-w-xl text-base">{body}</p>
         </div>
 
         <div className="col-span-12 flex flex-wrap gap-4 lg:col-span-5 lg:justify-end">{children}</div>

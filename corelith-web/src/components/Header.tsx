@@ -41,14 +41,14 @@ export function Header() {
   return (
     <>
       {/* Release strip. Scrolls away with the page — it is news, not chrome. */}
-      <div className="border-b border-[var(--hair)] bg-void-2">
+      <div className="border-b border-[var(--hair)] bg-paper-2">
         <div className="mx-auto flex max-w-[var(--measure)] items-center justify-center gap-3 px-6 py-2.5 lg:px-10">
           <span aria-hidden="true" className="node pulse shrink-0" />
-          <p className="stamp text-mute truncate">
+          <p className="stamp text-ink-soft truncate">
             Paralith v0.9.4 preview is available
             <Link
               href="/products/paralith#release-notes"
-              className="text-iris-lift hover:text-lume ml-3 underline decoration-1 underline-offset-4 transition-colors"
+              className="text-ember-ink hover:text-ink ml-3 underline decoration-1 underline-offset-4 transition-colors"
             >
               Read the changelog →
             </Link>
@@ -59,8 +59,8 @@ export function Header() {
       <header
         className={`sticky top-0 z-50 transition-colors duration-200 ${
           scrolled
-            ? 'border-b border-[var(--hair)] bg-void/80 backdrop-blur-xl'
-            : 'border-b border-transparent bg-void/40 backdrop-blur-md'
+            ? 'border-b border-[var(--hair)] bg-paper/80 backdrop-blur-xl'
+            : 'border-b border-transparent bg-paper/40 backdrop-blur-md'
         }`}
       >
         <div className="mx-auto flex max-w-[var(--measure)] items-center justify-between gap-8 px-6 py-3.5 lg:px-10">
@@ -77,8 +77,8 @@ export function Header() {
                   aria-current={active ? 'page' : undefined}
                   className={`rounded-md px-3.5 py-2 text-sm transition-colors ${
                     active
-                      ? 'text-lume bg-white/[0.06]'
-                      : 'text-mute hover:text-lume hover:bg-white/[0.04]'
+                      ? 'text-ink bg-[rgba(17,24,39,0.07)]'
+                      : 'text-ink-soft hover:text-ink hover:bg-[rgba(17,24,39,0.04)]'
                   }`}
                 >
                   {link.label}
@@ -101,23 +101,23 @@ export function Header() {
           <button
             type="button"
             onClick={() => setMobileMenuOpen((open) => !open)}
-            className="flex h-10 w-10 items-center justify-center rounded-md border border-[var(--hair-strong)] bg-white/[0.04] md:hidden"
+            className="flex h-10 w-10 items-center justify-center rounded-md border border-[var(--hair-strong)] bg-surface md:hidden"
             aria-label={mobileMenuOpen ? 'Close navigation' : 'Open navigation'}
             aria-expanded={mobileMenuOpen}
           >
             <span className="relative block h-3 w-4.5" aria-hidden="true">
               <span
-                className={`bg-lume absolute left-0 h-px w-full transition-all duration-200 ${
+                className={`bg-ink absolute left-0 h-px w-full transition-all duration-200 ${
                   mobileMenuOpen ? 'top-1.5 rotate-45' : 'top-0'
                 }`}
               />
               <span
-                className={`bg-lume absolute top-1.5 left-0 h-px w-full transition-opacity duration-200 ${
+                className={`bg-ink absolute top-1.5 left-0 h-px w-full transition-opacity duration-200 ${
                   mobileMenuOpen ? 'opacity-0' : 'opacity-100'
                 }`}
               />
               <span
-                className={`bg-lume absolute left-0 h-px w-full transition-all duration-200 ${
+                className={`bg-ink absolute left-0 h-px w-full transition-all duration-200 ${
                   mobileMenuOpen ? 'top-1.5 -rotate-45' : 'top-3'
                 }`}
               />
@@ -128,7 +128,7 @@ export function Header() {
         {/* Mobile drawer — a numbered contents page, anchored to the header so it
             never drifts out of alignment when the header resizes. */}
         {mobileMenuOpen && (
-          <div className="bg-void absolute inset-x-0 top-full flex max-h-[calc(100dvh-4.25rem)] flex-col overflow-y-auto border-b border-[var(--hair)] md:hidden">
+          <div className="bg-paper absolute inset-x-0 top-full flex max-h-[calc(100dvh-4.25rem)] flex-col overflow-y-auto border-b border-[var(--hair)] md:hidden">
             <nav aria-label="Mobile" className="flex flex-col p-3">
               {mainNavLinks.map((link, i) => {
                 const active = isCurrent(link.href);
@@ -138,17 +138,17 @@ export function Header() {
                     href={link.href}
                     aria-current={active ? 'page' : undefined}
                     className={`flex items-baseline gap-4 rounded-lg px-4 py-4 ${
-                      active ? 'bg-white/[0.06]' : ''
+                      active ? 'bg-[rgba(17,24,39,0.07)]' : ''
                     }`}
                   >
-                    <span className="stamp text-iris-lift w-6 shrink-0">
+                    <span className="stamp text-ember-ink w-6 shrink-0">
                       {String(i + 1).padStart(2, '0')}
                     </span>
                     <span>
                       <span className="font-display block text-lg font-semibold tracking-tight">
                         {link.label}
                       </span>
-                      <span className="text-mute mt-1 block text-sm">{link.description}</span>
+                      <span className="text-ink-soft mt-1 block text-sm">{link.description}</span>
                     </span>
                   </Link>
                 );

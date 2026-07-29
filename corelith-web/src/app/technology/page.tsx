@@ -4,41 +4,29 @@ import { TechDiagram } from '@/components/TechDiagram';
 import { Band, ClosingBand, PageMasthead, SectionMark } from '@/components/Editorial';
 
 export const metadata: Metadata = {
-  title: 'Technology & Architecture',
+  title: 'How Paralith works',
   description:
-    'Deep-dive into Corelith Technologies engineering architecture: agentic execution engines, persistent AST memory graphs, sandboxed PTY runtime, and zero-telemetry security.',
+    'How Paralith handles a task: several agents working in parallel on your own machine, a plain summary of every change, and checks that have to pass before anything lands.',
 };
 
 const PILLARS = [
   {
-    kicker: 'Memory',
-    title: 'Persistent AST graph',
-    body: 'An incremental syntax-tree graph is built on local disk. Agents resolve symbol relationships, import edges, and Git diffs by lookup instead of re-reading the tree on every request.',
-    facts: [
-      { k: 'Languages', v: 'Rust · TS · Python · Go' },
-      { k: 'Storage', v: 'Encrypted SQLite' },
-      { k: 'Refresh', v: 'Incremental' },
-    ],
+    kicker: 'Speed',
+    title: 'More than one thing at a time',
+    body: 'Work is split across agents that run together rather than queueing behind each other, so a morning of separate small jobs happens in one pass while you carry on with your own.',
+    assurance: 'Your window stays yours.',
   },
   {
-    kicker: 'Execution',
-    title: 'Native PTY sandbox',
-    body: 'Terminal sessions run inside asynchronous pseudo-terminal boundaries. Output is audited, and file-destructive operations stop for an explicit decision rather than proceeding on a heuristic.',
-    facts: [
-      { k: 'Shells', v: 'pwsh · bash · zsh' },
-      { k: 'Isolation', v: 'Per session' },
-      { k: 'Approval', v: 'Explicit' },
-    ],
+    kicker: 'Context',
+    title: 'It already knows your project',
+    body: 'Paralith carries what it has learned about your project between sessions. You spend your time describing the task instead of re-establishing the same background every time.',
+    assurance: 'No setup ritual.',
   },
   {
-    kicker: 'Integrity',
-    title: 'Empirical verification',
-    body: 'Static analysis, lint, build, and unit suites gate every agent-authored change. The gate is fail-closed: a suite that cannot run counts as a suite that did not pass.',
-    facts: [
-      { k: 'Gate', v: 'Fail-closed' },
-      { k: 'Evidence', v: 'Logs retained' },
-      { k: 'Rollback', v: 'Deterministic' },
-    ],
+    kicker: 'Control',
+    title: 'You are the one who approves',
+    body: 'Every change comes back as something you can read and judge in a minute — what changed, and what was deliberately left alone. None of it reaches your project until you say so.',
+    assurance: 'Nothing lands behind your back.',
   },
 ];
 
@@ -46,28 +34,28 @@ export default function TechnologyPage() {
   return (
     <>
       <PageMasthead
-        kicker="Technology foundation"
+        kicker="How it works"
         title={
           <>
-            Intelligent systems on <span className="flare">rigorous</span> architecture.
+            Serious machinery. <span className="flare">Plain</span> to use.
           </>
         }
-        deck="Local-first AST indexing, parallel agent orchestration, native terminal integration, and continuous verification — four engines, one boundary."
+        deck="You describe the work, several agents take it on at once, and you approve what comes back. The complicated part is our problem, not yours."
         meta={[
-          { key: 'Index', value: 'Local, encrypted', accent: true },
-          { key: 'Runtime', value: 'Native PTY' },
-          { key: 'Egress', value: 'Strict proxy' },
-          { key: 'Telemetry', value: 'Opt-in only' },
+          { key: 'Your code', value: 'Stays on your machine', accent: true },
+          { key: 'Agents', value: 'Run in parallel' },
+          { key: 'Changes', value: 'Reviewed by you' },
+          { key: 'Telemetry', value: 'Off by default' },
         ]}
       />
 
       {/* ── Pipeline ─────────────────────────────────────────────────────── */}
-      <Band tone="panel" divider>
+      <Band tone="paper-2" divider>
         <SectionMark
           index="01"
-          kicker="Execution pipeline"
-          title="Four stages, one boundary."
-          deck="Select a stage to inspect its isolation guarantees. Nothing crosses the local boundary to make any of it work."
+          kicker="From ask to done"
+          title="Four steps, start to finish."
+          deck="Select a step to see what it means for you. The whole path runs on your own machine."
         />
 
         <div className="mt-14">
@@ -76,12 +64,12 @@ export default function TechnologyPage() {
       </Band>
 
       {/* ── Pillars ──────────────────────────────────────────────────────── */}
-      <Band tone="void">
+      <Band tone="paper">
         <SectionMark
           index="02"
-          kicker="Engine detail"
-          title="What each engine actually does."
-          deck="Three subsystems carry the weight. Everything else in Paralith is coordination around them."
+          kicker="What you get out of it"
+          title="Three things that change day to day."
+          deck="Not a feature list — the three differences you would actually notice in a week of using it."
         />
 
         <div className="mt-14 border-t border-[var(--hair-strong)]">
@@ -91,28 +79,20 @@ export default function TechnologyPage() {
               className="grid grid-cols-12 gap-x-8 gap-y-6 border-b border-[var(--hair)] py-10"
             >
               <div className="col-span-12 flex items-baseline gap-4 lg:col-span-3 lg:flex-col lg:gap-3">
-                <span aria-hidden="true" className="numeral text-lume text-xl lg:text-2xl">
+                <span aria-hidden="true" className="numeral text-ink text-xl lg:text-2xl">
                   {String(i + 1).padStart(2, '0')}
                 </span>
-                <p className="stamp text-iris-lift">{pillar.kicker}</p>
+                <p className="stamp text-ember-ink">{pillar.kicker}</p>
               </div>
 
               <div className="col-span-12 lg:col-span-5">
                 <h3 className="text-lg lg:text-xl">{pillar.title}</h3>
-                <p className="text-mute mt-4 text-base">{pillar.body}</p>
+                <p className="text-ink-soft mt-4 text-base">{pillar.body}</p>
               </div>
 
-              <dl className="col-span-12 lg:col-span-3 lg:col-start-10">
-                {pillar.facts.map((fact) => (
-                  <div
-                    key={fact.k}
-                    className="flex items-baseline justify-between gap-4 border-b border-[var(--hair)] py-2.5 first:border-t"
-                  >
-                    <dt className="stamp text-faint">{fact.k}</dt>
-                    <dd className="text-lume font-mono text-xs">{fact.v}</dd>
-                  </div>
-                ))}
-              </dl>
+              <p className="stamp text-ember-ink col-span-12 self-center border-t border-[var(--hair)] pt-5 lg:col-span-3 lg:col-start-10 lg:border-t-0 lg:pt-0">
+                {pillar.assurance}
+              </p>
             </article>
           ))}
         </div>
@@ -121,13 +101,13 @@ export default function TechnologyPage() {
       <ClosingBand
         title={
           <>
-            The boundary is the <span className="flare">product</span>.
+            Your work stays <span className="flare">yours</span>.
           </>
         }
-        body="Read how the same guarantees are enforced in distribution, disclosure, and day-to-day data handling."
+        body="The same commitments hold for how we handle your data, how we ship releases, and how we deal with anything that goes wrong."
       >
         <Link href="/security" className="btn btn-primary btn-lg">
-          Security posture
+          Security &amp; trust
           <span aria-hidden="true">→</span>
         </Link>
         <Link href="/products/paralith" className="btn btn-secondary btn-lg">

@@ -47,7 +47,7 @@ export default function ContactPage() {
       />
 
       {/* ── Direct routes ────────────────────────────────────────────────── */}
-      <Band tone="panel" divider>
+      <Band tone="paper-2" divider>
         <SectionMark
           index="01"
           kicker="Direct routes"
@@ -67,7 +67,7 @@ export default function ContactPage() {
 
               <a
                 href={`mailto:${route.email}`}
-                className="text-lume hover:text-iris-lift font-mono text-sm break-all underline decoration-1 underline-offset-4 transition-colors"
+                className="text-ink hover:text-ember-ink font-mono text-sm break-all underline decoration-1 underline-offset-4 transition-colors"
               >
                 {route.email}
               </a>
@@ -81,7 +81,7 @@ export default function ContactPage() {
       </Band>
 
       {/* ── Form ─────────────────────────────────────────────────────────── */}
-      <Band tone="void">
+      <Band tone="paper">
         <SectionMark
           index="02"
           kicker="General inquiry"

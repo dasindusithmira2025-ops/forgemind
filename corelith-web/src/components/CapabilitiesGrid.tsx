@@ -11,12 +11,12 @@ export function CapabilitiesGrid() {
       {companyData.capabilities.map((cap, idx) => (
         <li
           key={cap.category}
-          className="group grid grid-cols-12 items-baseline gap-x-8 gap-y-3 border-b border-[var(--hair)] py-8 transition-colors hover:bg-white/[0.02]"
+          className="group grid grid-cols-12 items-baseline gap-x-8 gap-y-3 border-b border-[var(--hair)] py-8 transition-colors hover:bg-[rgba(17,24,39,0.04)]"
         >
           <div className="col-span-2 lg:col-span-1">
             <span
               aria-hidden="true"
-              className="numeral text-[var(--fg)] text-xl transition-colors group-hover:text-iris-lift lg:text-2xl"
+              className="numeral text-[var(--fg)] text-xl transition-colors group-hover:text-ember-ink lg:text-2xl"
             >
               {String(idx + 1).padStart(2, '0')}
             </span>

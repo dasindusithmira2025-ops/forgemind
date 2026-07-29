@@ -5,58 +5,46 @@ import { useState } from 'react';
 const STAGES = [
   {
     id: 1,
-    title: 'Local index',
-    tag: 'On disk',
+    title: 'You describe it',
+    tag: 'In your words',
     description:
-      'Syntax trees and Git lineage are indexed into encrypted local storage. Nothing about the shape of your codebase leaves the machine to make this work.',
-    specs: [
-      { k: 'Storage', v: 'AES-256-GCM, local' },
-      { k: 'Scope', v: 'Per workspace' },
-      { k: 'Egress', v: 'None' },
-    ],
+      'Say what you want changed the way you would say it to a colleague. There is no prompt syntax to learn and no configuration to fill in first.',
+    assurance: 'You stay in plain language.',
   },
   {
     id: 2,
-    title: 'Agent controller',
-    tag: 'Parallel',
+    title: 'Agents get to work',
+    tag: 'Several at once',
     description:
-      'Agents resolve intent against the local index and compose atomic diff patches. Work is scheduled across a bounded pool so one long task cannot starve the rest.',
-    specs: [
-      { k: 'Concurrency', v: 'Bounded pool' },
-      { k: 'Output', v: 'Atomic patches' },
-      { k: 'Context', v: 'Indexed symbols' },
-    ],
+      'The work is split across several agents that run at the same time, on your machine. You keep using the window you were already working in while they go.',
+    assurance: 'Nothing blocks what you are doing.',
   },
   {
     id: 3,
-    title: 'PTY sandbox',
-    tag: 'Isolated',
+    title: 'You see what changed',
+    tag: 'In summary',
     description:
-      'Commands execute inside native pseudo-terminals under explicit permission boundaries. Destructive calls stop and wait for a human decision.',
-    specs: [
-      { k: 'Boundary', v: 'Native PTY' },
-      { k: 'Approval', v: 'Explicit' },
-      { k: 'Audit', v: 'Full transcript' },
-    ],
+      'Each finished piece of work comes back as a short written summary of what changed and what deliberately did not, so you can judge it without reading every line.',
+    assurance: 'You decide what lands.',
   },
   {
     id: 4,
-    title: 'Verification',
-    tag: 'Gate',
+    title: 'It has to pass first',
+    tag: 'Every time',
     description:
-      'Lint, build, and unit suites run before anything reaches a branch. A red suite holds the patch in review; there is no path around this stage.',
-    specs: [
-      { k: 'Gate', v: 'Fail-closed' },
-      { k: 'Rollback', v: 'Deterministic' },
-      { k: 'Evidence', v: 'Logs retained' },
-    ],
+      'Changes are checked before they reach your project. If a check fails, the change is held for you to look at instead of going in anyway.',
+    assurance: 'There is no override switch.',
   },
 ];
 
 /**
- * The execution pipeline as a signal-flow diagram: four ruled stages on a
- * connector rail, one open at a time. Tone-agnostic — it reads its foreground
- * roles from the band it sits in.
+ * How a task moves through Paralith, as a signal-flow strip: four ruled stages
+ * on a connector rail, one open at a time.
+ *
+ * This is deliberately the *user's* path through the product rather than the
+ * system's — what you do, what you get back, and what you are guaranteed at
+ * each point. Tone-agnostic: it reads its foreground roles from the band it
+ * sits in.
  */
 export function TechDiagram() {
   const [activeId, setActiveId] = useState(1);
@@ -64,16 +52,16 @@ export function TechDiagram() {
 
   return (
     <div>
-      {/* Connector rail — the stages are a signal path, so the diagram says so
-          before the tabs do. */}
+      {/* Connector rail — the stages are a path, so the diagram says so before
+          the tabs do. */}
       <div aria-hidden="true" className="relative h-6">
         <span className="rule absolute top-1/2 right-0 left-0" />
         <span className="absolute inset-x-0 top-1/2 flex justify-between">
           {STAGES.map((stage) => (
             <span
               key={stage.id}
-              className={`h-1.5 w-1.5 -translate-y-1/2 rounded-full transition-colors ${
-                stage.id === activeId ? 'bg-iris shadow-[0_0_12px_var(--color-iris)]' : 'bg-edge'
+              className={`h-2 w-2 -translate-y-1/2 rounded-full transition-colors ${
+                stage.id === activeId ? 'bg-ember' : 'bg-[var(--hair-strong)]'
               }`}
             />
           ))}
@@ -82,7 +70,7 @@ export function TechDiagram() {
 
       <div
         role="tablist"
-        aria-label="Execution pipeline stage"
+        aria-label="How a task moves through Paralith"
         className="grid grid-cols-1 overflow-hidden rounded-t-lg border-t border-l border-[var(--hair-strong)] sm:grid-cols-2 lg:grid-cols-4"
       >
         {STAGES.map((stage) => {
@@ -98,27 +86,27 @@ export function TechDiagram() {
               onClick={() => setActiveId(stage.id)}
               className={`relative flex flex-col gap-3 border-r border-b border-[var(--hair-strong)] p-5 text-left transition-colors ${
                 isActive
-                  ? 'bg-iris/[0.12] text-iris-lift'
-                  : 'text-[var(--fg-soft)] hover:bg-white/[0.03] hover:text-[var(--fg)]'
+                  ? 'bg-ember/[0.09] text-ember-ink'
+                  : 'text-[var(--fg-soft)] hover:bg-[rgba(17,24,39,0.035)] hover:text-[var(--fg)]'
               }`}
             >
               {/* Active marker rides the top edge so the panel below reads as
                   hanging off this stage rather than floating beside it. */}
               <span
                 aria-hidden="true"
-                className={`bg-iris absolute inset-x-0 top-0 h-px transition-opacity ${
+                className={`bg-ember absolute inset-x-0 top-0 h-0.5 transition-opacity ${
                   isActive ? 'opacity-100' : 'opacity-0'
                 }`}
               />
               <span className="flex items-baseline justify-between gap-3">
-                <span className="stamp">Stage {String(stage.id).padStart(2, '0')}</span>
+                <span className="stamp">Step {String(stage.id).padStart(2, '0')}</span>
                 <span aria-hidden="true" className="stamp">
                   {stage.id < STAGES.length ? '→' : '■'}
                 </span>
               </span>
               <span
                 className={`font-display text-lg font-semibold tracking-tight ${
-                  isActive ? 'text-lume' : 'text-[var(--fg)]'
+                  isActive ? 'text-ember-ink' : 'text-[var(--fg)]'
                 }`}
               >
                 {stage.title}
@@ -133,23 +121,13 @@ export function TechDiagram() {
         id="stage-panel"
         role="tabpanel"
         aria-labelledby={`stage-tab-${activeId}`}
-        className="grid grid-cols-12 gap-x-8 gap-y-6 rounded-b-lg border-r border-b border-l border-[var(--hair-strong)] bg-white/[0.02] p-5 lg:p-8"
+        className="bg-surface grid grid-cols-12 items-start gap-x-8 gap-y-6 rounded-b-lg border-r border-b border-l border-[var(--hair-strong)] p-5 lg:p-8"
       >
-        <p className="col-span-12 text-base text-[var(--fg)] lg:col-span-7">
-          {active.description}
-        </p>
+        <p className="col-span-12 text-base text-[var(--fg)] lg:col-span-7">{active.description}</p>
 
-        <dl className="col-span-12 lg:col-span-4 lg:col-start-9">
-          {active.specs.map((spec) => (
-            <div
-              key={spec.k}
-              className="flex items-baseline justify-between gap-4 border-b border-[var(--hair)] py-2.5 first:border-t"
-            >
-              <dt className="stamp text-[var(--fg-soft)]">{spec.k}</dt>
-              <dd className="font-mono text-xs text-[var(--fg)]">{spec.v}</dd>
-            </div>
-          ))}
-        </dl>
+        <p className="stamp col-span-12 self-center border-t border-[var(--hair)] pt-5 text-[var(--kicker)] lg:col-span-4 lg:col-start-9 lg:border-t-0 lg:pt-0">
+          {active.assurance}
+        </p>
       </div>
     </div>
   );
