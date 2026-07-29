@@ -7,9 +7,9 @@ export const mainNavLinks: NavLink[] = [
     description: 'Our agentic development environment',
   },
   {
-    label: 'Technology',
+    label: 'How it works',
     href: '/technology',
-    description: 'Agentic engines & system architecture',
+    description: 'What working with Paralith is actually like',
   },
   {
     label: 'Company',
@@ -33,12 +33,12 @@ export const footerLinks = {
     { label: 'Paralith Overview', href: '/products/paralith', badge: 'Preview' },
     { label: 'Downloads', href: '/products/paralith#download' },
     { label: 'Release Notes', href: '/products/paralith#release-notes' },
-    { label: 'Technology', href: '/technology' },
+    { label: 'How it works', href: '/technology' },
   ],
   company: [
     { label: 'About Corelith', href: '/company' },
     { label: 'Engineering Standards', href: '/company#philosophy' },
-    { label: 'Technology Deep-Dive', href: '/technology' },
+    { label: 'How Paralith works', href: '/technology' },
     { label: 'Careers', href: '/careers' },
     { label: 'Contact', href: '/contact' },
   ],

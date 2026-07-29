@@ -1,25 +1,25 @@
-import type { Metadata } from 'next';
-import { Inter, Outfit, JetBrains_Mono } from 'next/font/google';
+import type { Metadata, Viewport } from 'next';
+import { Chakra_Petch, JetBrains_Mono } from 'next/font/google';
 import './globals.css';
 import { Header } from '@/components/Header';
 import { Footer } from '@/components/Footer';
 import { siteConfig } from '@/config/site';
 
-const inter = Inter({
+// The voice of the system: squared terminals and a slight condensation that
+// give headlines their printed, graphic character and still set clean copy at
+// 16px. One family covers display and reading, which is what keeps the pages
+// looking like a poster series rather than a website.
+const chakra = Chakra_Petch({
   subsets: ['latin'],
-  variable: '--font-body',
+  weight: ['300', '400', '500', '600', '700'],
+  variable: '--font-chakra',
   display: 'swap',
 });
 
-const outfit = Outfit({
-  subsets: ['latin'],
-  variable: '--font-heading',
-  display: 'swap',
-});
-
+// Machine face: stamps, versions, checksums.
 const jetbrainsMono = JetBrains_Mono({
   subsets: ['latin'],
-  variable: '--font-mono',
+  variable: '--font-jetbrains',
   display: 'swap',
 });
 
@@ -68,6 +68,15 @@ export const metadata: Metadata = {
   },
 };
 
+// The site is dark-only, so the UA chrome is told as much up front: without
+// this the browser paints a white background behind the page during navigation.
+// The theme colour is the stock itself, so the mobile chrome matches the top
+// band rather than banding against it.
+export const viewport: Viewport = {
+  colorScheme: 'dark',
+  themeColor: '#171310',
+};
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -84,16 +93,24 @@ export default function RootLayout({
   };
 
   return (
-    <html lang="en" className={`${inter.variable} ${outfit.variable} ${jetbrainsMono.variable}`}>
+    <html lang="en" className={`${chakra.variable} ${jetbrainsMono.variable}`}>
       <head>
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
         />
       </head>
-      <body className="bg-[#08090c] text-[#f3f4f6] antialiased flex flex-col min-h-screen">
+      <body className="bg-paper text-ink flex min-h-screen flex-col antialiased">
+        <a
+          href="#main"
+          className="btn btn-secondary sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-[60]"
+        >
+          Skip to content
+        </a>
         <Header />
-        <main className="flex-grow pt-24">{children}</main>
+        <main id="main" className="flex-grow">
+          {children}
+        </main>
         <Footer />
       </body>
     </html>

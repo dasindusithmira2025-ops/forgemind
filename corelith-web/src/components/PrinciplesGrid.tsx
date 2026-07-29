@@ -1,39 +1,30 @@
 import { companyData } from '@/data/company';
-import { ShieldCheck, Cpu, Activity, Lock, Layers, Eye } from 'lucide-react';
 
+/**
+ * Principles as a ruled matrix. Cells share hairlines instead of floating on
+ * gaps, so the grid reads as one printed sheet — the gapped-card layout is what
+ * makes most of these sections interchangeable between companies.
+ *
+ * Unnumbered by design: these are six standards held at once, not six steps
+ * taken in order.
+ */
 export function PrinciplesGrid() {
-  const icons = [Activity, Eye, Lock, Cpu, Layers, ShieldCheck];
-
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-      {companyData.principles.map((item, idx) => {
-        const IconComponent = icons[idx % icons.length];
-        return (
-          <div
-            key={item.title}
-            className="corelith-card p-6 space-y-4 hover:border-indigo-500/40 relative overflow-hidden group"
-          >
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] uppercase tracking-wider font-mono font-bold text-indigo-400 bg-indigo-500/10 px-2 py-0.5 rounded border border-indigo-500/20">
-                {item.subtitle}
-              </span>
-              <span className="text-xs font-mono text-gray-400">0{idx + 1}</span>
-            </div>
+    <div className="grid grid-cols-1 overflow-hidden rounded-lg border border-[var(--hair-strong)] sm:grid-cols-2 lg:grid-cols-3">
+      {companyData.principles.map((item) => (
+        <article
+          key={item.title}
+          className="flex flex-col gap-4 border-r border-b border-[var(--hair)] p-7 transition-colors hover:bg-[rgba(245,237,224,0.03)]"
+        >
+          <p className="stamp text-[var(--kicker)]">{item.subtitle}</p>
 
-            <div className="space-y-2">
-              <div className="flex items-center gap-2">
-                <IconComponent className="w-5 h-5 text-indigo-400 group-hover:scale-110 transition-transform" />
-                <h3 className="text-lg font-bold text-white font-heading">
-                  {item.title}
-                </h3>
-              </div>
-              <p className="text-sm text-gray-400 leading-relaxed">
-                {item.description}
-              </p>
-            </div>
-          </div>
-        );
-      })}
+          <h3 className="text-lg text-[var(--fg)]">{item.title}</h3>
+
+          <p className="mt-auto border-t border-[var(--hair)] pt-4 text-sm text-[var(--fg-soft)]">
+            {item.description}
+          </p>
+        </article>
+      ))}
     </div>
   );
 }

@@ -12,37 +12,37 @@ export const companyData = {
       title: 'Evidence over assumptions',
       subtitle: 'VERIFIABLE OUTCOMES',
       description:
-        'Every optimization, recommendation, or code modification produced by our software must be empirically backed by benchmarks, test runs, and clear logs. We do not ship unverified claims.',
+        'Anything our software recommends or changes has to be backed by something we can point at. We do not ship claims we have not checked.',
     },
     {
       title: 'Human control where decisions matter',
       subtitle: 'HIGH-LEVERAGE AGENCY',
       description:
-        'Automate tedious execution, repetitive boilerplate, and workspace coordination—while giving developers explicit approval authority, transparent boundary controls, and instantaneous rollbacks.',
+        'Automate the tedious parts and leave the judgement to people. You keep approval over what changes, and a way back if you change your mind.',
     },
     {
       title: 'Security by design',
       subtitle: 'LOCAL-FIRST TRUST',
       description:
-        'Treat user privacy and code isolation as non-negotiable foundations. Local storage, air-gapped support, data minimization, and encrypted pipelines come standard in Paralith.',
+        'Your work stays yours. Keeping data on your machine, collecting as little as possible, and defaulting to private are starting conditions, not settings.',
     },
     {
       title: 'Performance as a primary feature',
       subtitle: 'ZERO WASTED CYCLES',
       description:
-        'Software should feel immediate. We measure millisecond latency, memory footprint, binary sizes, and rendering frames with uncompromising rigor.',
+        'Software should feel immediate. We treat speed as something to be measured and defended in every release, not tuned once and forgotten.',
     },
     {
       title: 'Interfaces built for mental clarity',
       subtitle: 'RESTRAINED CRAFTSMANSHIP',
       description:
-        'We eliminate visual noise, flashy gimmicks, and superfluous decoration. Our interfaces prioritize information density, typographic rhythm, and deep focused work.',
+        'We cut visual noise, gimmicks, and decoration that carries no meaning. Our interfaces are built for long, focused stretches of work.',
     },
     {
       title: 'Systems designed to scale',
       subtitle: 'LONG-TERM DURABILITY',
       description:
-        'We build software platforms using robust typed architectures, modular boundaries, and clean maintenance paths engineered for years of reliable operation.',
+        'We build products meant to be maintained for years, not demoed once. That shapes what we take on and what we deliberately leave out.',
     },
   ] as CompanyPrinciple[],
 
@@ -50,22 +50,22 @@ export const companyData = {
     {
       category: 'Agentic Software Systems',
       description:
-        'Multi-agent coordination, persistent codebase indexing, workspace context retrieval, and continuous automated verification pipelines.',
+        'Products where several AI agents work on real tasks together, with a person deciding what actually lands.',
     },
     {
       category: 'Developer Infrastructure',
       description:
-        'Native desktop tools, low-latency terminal integration, multi-window layout engines, and cross-platform native binaries.',
+        'Fast native desktop software that behaves like a tool you own rather than a page you visit.',
     },
     {
       category: 'Verification & Code Integrity',
       description:
-        'Automated static analysis, test suite orchestration, reproducible build checks, and auditable change history for every agent edit.',
+        'Automatic checking, so that what our software produces can be trusted before anyone depends on it.',
     },
     {
       category: 'Local-First Security Engineering',
       description:
-        'On-device project memory, sandboxed command execution, strict outbound network controls, and cryptographically signed releases.',
+        'Products that keep your work on your machine by default, and releases you can verify before you install them.',
     },
   ],
 };

@@ -1,72 +1,119 @@
 import { Metadata } from 'next';
+import Link from 'next/link';
 import { TechDiagram } from '@/components/TechDiagram';
-import { Cpu, Terminal, ShieldCheck, Database, Lock, Server } from 'lucide-react';
+import { Band, ClosingBand, PageMasthead, SectionMark } from '@/components/Editorial';
 
 export const metadata: Metadata = {
-  title: 'Technology & Architecture',
+  title: 'How Paralith works',
   description:
-    'Deep-dive into Corelith Technologies engineering architecture: Agentic execution engines, persistent AST memory graphs, sandboxed PTY runtime, and zero-telemetry security.',
+    'How Paralith handles a task: several agents working in parallel on your own machine, a plain summary of every change, and checks that have to pass before anything lands.',
 };
+
+const PILLARS = [
+  {
+    kicker: 'Speed',
+    title: 'More than one thing at a time',
+    body: 'Work is split across agents that run together rather than queueing behind each other, so a morning of separate small jobs happens in one pass while you carry on with your own.',
+    assurance: 'Your window stays yours.',
+  },
+  {
+    kicker: 'Context',
+    title: 'It already knows your project',
+    body: 'Paralith carries what it has learned about your project between sessions. You spend your time describing the task instead of re-establishing the same background every time.',
+    assurance: 'No setup ritual.',
+  },
+  {
+    kicker: 'Control',
+    title: 'You are the one who approves',
+    body: 'Every change comes back as something you can read and judge in a minute — what changed, and what was deliberately left alone. None of it reaches your project until you say so.',
+    assurance: 'Nothing lands behind your back.',
+  },
+];
 
 export default function TechnologyPage() {
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-20 pb-20">
-      {/* HERO */}
-      <div className="text-center max-w-4xl mx-auto space-y-4 pt-6">
-        <div className="text-xs uppercase tracking-wider text-indigo-400 font-mono font-bold">
-          Technology Foundation
-        </div>
-        <h1 className="text-4xl sm:text-6xl font-extrabold text-white font-heading tracking-tight">
-          Intelligent systems built on rigorous software architecture.
-        </h1>
-        <p className="text-lg text-gray-300 max-w-3xl mx-auto leading-relaxed">
-          Corelith combines local-first AST indexing, parallel multi-agent orchestrators, native PTY terminal integration, and continuous empirical verification engines.
-        </p>
-      </div>
+    <>
+      <PageMasthead
+        kicker="How it works"
+        title={
+          <>
+            Serious machinery. <span className="flare">Plain</span> to use.
+          </>
+        }
+        deck="You describe the work, several agents take it on at once, and you approve what comes back. The complicated part is our problem, not yours."
+        meta={[
+          { key: 'Your code', value: 'Stays on your machine', accent: true },
+          { key: 'Agents', value: 'Run in parallel' },
+          { key: 'Changes', value: 'Reviewed by you' },
+          { key: 'Telemetry', value: 'Off by default' },
+        ]}
+      />
 
-      {/* INTERACTIVE DIAGRAM */}
-      <section className="space-y-4 text-center">
-        <TechDiagram />
-      </section>
+      {/* ── Pipeline ─────────────────────────────────────────────────────── */}
+      <Band tone="paper-2" divider>
+        <SectionMark
+          index="01"
+          kicker="From ask to done"
+          title="Four steps, start to finish."
+          deck="Select a step to see what it means for you. The whole path runs on your own machine."
+        />
 
-      {/* DETAILED PILLARS */}
-      <section className="grid grid-cols-1 md:grid-cols-3 gap-8">
-        <div className="corelith-card p-6 text-left space-y-3">
-          <div className="w-10 h-10 rounded-xl bg-indigo-600/10 border border-indigo-500/30 flex items-center justify-center text-indigo-400">
-            <Database className="w-5 h-5" />
-          </div>
-          <h3 className="text-lg font-bold text-white font-heading">
-            Persistent AST Memory Graph
-          </h3>
-          <p className="text-xs text-gray-400 leading-relaxed">
-            Our engines build an incremental abstract syntax tree (AST) graph locally on disk. Agents reference symbol relationships, import dependencies, and Git diffs without re-scanning files.
-          </p>
+        <div className="mt-14">
+          <TechDiagram />
         </div>
+      </Band>
 
-        <div className="corelith-card p-6 text-left space-y-3">
-          <div className="w-10 h-10 rounded-xl bg-cyan-600/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400">
-            <Terminal className="w-5 h-5" />
-          </div>
-          <h3 className="text-lg font-bold text-white font-heading">
-            Native PTY Shell Sandbox
-          </h3>
-          <p className="text-xs text-gray-400 leading-relaxed">
-            Embedded terminal sessions run inside asynchronous pseudo-terminal (PTY) boundaries. Command outputs are audited and filtered to prevent destructive file operations.
-          </p>
-        </div>
+      {/* ── Pillars ──────────────────────────────────────────────────────── */}
+      <Band tone="paper">
+        <SectionMark
+          index="02"
+          kicker="What you get out of it"
+          title="Three things that change day to day."
+          deck="Not a feature list — the three differences you would actually notice in a week of using it."
+        />
 
-        <div className="corelith-card p-6 text-left space-y-3">
-          <div className="w-10 h-10 rounded-xl bg-emerald-600/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
-            <ShieldCheck className="w-5 h-5" />
-          </div>
-          <h3 className="text-lg font-bold text-white font-heading">
-            Empirical Verification
-          </h3>
-          <p className="text-xs text-gray-400 leading-relaxed">
-            Code changes must pass strict automated static analysis, linter checks, and unit test suites before landing in active workspaces.
-          </p>
+        <div className="mt-14 border-t border-[var(--hair-strong)]">
+          {PILLARS.map((pillar, i) => (
+            <article
+              key={pillar.title}
+              className="grid grid-cols-12 gap-x-8 gap-y-6 border-b border-[var(--hair)] py-10"
+            >
+              <div className="col-span-12 flex items-baseline gap-4 lg:col-span-3 lg:flex-col lg:gap-3">
+                <span aria-hidden="true" className="numeral text-ink text-xl lg:text-2xl">
+                  {String(i + 1).padStart(2, '0')}
+                </span>
+                <p className="stamp text-ember-ink">{pillar.kicker}</p>
+              </div>
+
+              <div className="col-span-12 lg:col-span-5">
+                <h3 className="text-lg lg:text-xl">{pillar.title}</h3>
+                <p className="text-ink-soft mt-4 text-base">{pillar.body}</p>
+              </div>
+
+              <p className="stamp text-ember-ink col-span-12 self-center border-t border-[var(--hair)] pt-5 lg:col-span-3 lg:col-start-10 lg:border-t-0 lg:pt-0">
+                {pillar.assurance}
+              </p>
+            </article>
+          ))}
         </div>
-      </section>
-    </div>
+      </Band>
+
+      <ClosingBand
+        title={
+          <>
+            Your work stays <span className="flare">yours</span>.
+          </>
+        }
+        body="The same commitments hold for how we handle your data, how we ship releases, and how we deal with anything that goes wrong."
+      >
+        <Link href="/security" className="btn btn-primary btn-lg">
+          Security &amp; trust
+          <span aria-hidden="true">→</span>
+        </Link>
+        <Link href="/products/paralith" className="btn btn-secondary btn-lg">
+          See it in Paralith
+        </Link>
+      </ClosingBand>
+    </>
   );
 }
