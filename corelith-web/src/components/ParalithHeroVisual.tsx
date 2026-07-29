@@ -55,12 +55,19 @@ const STATE_STYLES: Record<'running' | 'queued' | 'done', string> = {
  * progress, a change waiting for approval, checks that passed — rather than the
  * machinery underneath. Three views share one frame, and the tab strip is what
  * makes the point that these are panels of one workspace, not three tools.
+ *
+ * The plate is trimmed with crop marks. That is the one decorative liberty on
+ * the page and it is earned: Paralith holds work in proof until it has been
+ * checked and signed off, so the thing the page is proudest of is framed the
+ * way a press proof is. The marks sit on a wrapper because the frame itself
+ * clips its own overflow.
  */
 export function ParalithHeroVisual() {
   const [view, setView] = useState<View>('work');
 
   return (
-    <div className="panel overflow-hidden rounded-xl">
+    <div className="crop">
+      <div className="panel overflow-hidden rounded-xl">
       {/* Window chrome */}
       <div className="bg-paper-2 flex flex-col gap-3 border-b border-[var(--hair)] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3">
@@ -89,8 +96,8 @@ export function ParalithHeroVisual() {
                 onClick={() => setView(v.id)}
                 className={`stamp rounded-md px-3 py-2 transition-colors ${
                   active
-                    ? 'text-ink bg-[rgba(17,24,39,0.08)]'
-                    : 'text-ink-faint hover:text-ink-soft hover:bg-[rgba(17,24,39,0.04)]'
+                    ? 'text-ink bg-[rgba(245,237,224,0.09)]'
+                    : 'text-ink-faint hover:text-ink-soft hover:bg-[rgba(245,237,224,0.06)]'
                 }`}
               >
                 {v.label}
@@ -129,7 +136,7 @@ export function ParalithHeroVisual() {
                     </div>
                     <div
                       aria-hidden="true"
-                      className="mt-2 h-0.5 w-full overflow-hidden rounded-full bg-[rgba(17,24,39,0.12)]"
+                      className="mt-2 h-0.5 w-full overflow-hidden rounded-full bg-[rgba(245,237,224,0.14)]"
                     >
                       <span
                         className={`block h-full rounded-full ${running ? 'bg-ember' : 'bg-success'}`}
@@ -252,7 +259,8 @@ export function ParalithHeroVisual() {
             <dd className="text-ink-soft mt-1.5 font-mono text-xs">{cell.v}</dd>
           </div>
         ))}
-      </dl>
+        </dl>
+      </div>
     </div>
   );
 }

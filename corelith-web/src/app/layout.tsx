@@ -68,11 +68,13 @@ export const metadata: Metadata = {
   },
 };
 
-// The site is light-only, and the theme colour is the paper rather than white
-// so the mobile UA chrome matches the top band instead of banding against it.
+// The site is dark-only, so the UA chrome is told as much up front: without
+// this the browser paints a white background behind the page during navigation.
+// The theme colour is the stock itself, so the mobile chrome matches the top
+// band rather than banding against it.
 export const viewport: Viewport = {
-  colorScheme: 'light',
-  themeColor: '#fdfbf7',
+  colorScheme: 'dark',
+  themeColor: '#171310',
 };
 
 export default function RootLayout({

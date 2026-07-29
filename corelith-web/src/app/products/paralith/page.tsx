@@ -100,14 +100,9 @@ export default function ParalithPage() {
         />
 
         <div className="mt-14 grid grid-cols-1 gap-5 md:grid-cols-2 lg:grid-cols-3">
-          {product.capabilities.map((cap, i) => (
+          {product.capabilities.map((cap) => (
             <article key={cap.title} className="panel panel-hover flex flex-col gap-4 p-7">
-              <div className="flex items-start justify-between gap-4">
-                <p className="stamp text-ember-ink max-w-[16ch]">{cap.highlight ?? 'Core system'}</p>
-                <span aria-hidden="true" className="numeral text-ink text-xl">
-                  {String(i + 1).padStart(2, '0')}
-                </span>
-              </div>
+              <p className="stamp text-[var(--kicker)]">{cap.highlight ?? 'Core system'}</p>
               <h3 className="text-lg text-ink">{cap.title}</h3>
               <p className="text-ink-soft mt-auto border-t border-[var(--hair)] pt-4 text-sm">
                 {cap.description}

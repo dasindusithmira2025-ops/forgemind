@@ -87,7 +87,7 @@ export function TechDiagram() {
               className={`relative flex flex-col gap-3 border-r border-b border-[var(--hair-strong)] p-5 text-left transition-colors ${
                 isActive
                   ? 'bg-ember/[0.09] text-ember-ink'
-                  : 'text-[var(--fg-soft)] hover:bg-[rgba(17,24,39,0.035)] hover:text-[var(--fg)]'
+                  : 'text-[var(--fg-soft)] hover:bg-[rgba(245,237,224,0.05)] hover:text-[var(--fg)]'
               }`}
             >
               {/* Active marker rides the top edge so the panel below reads as

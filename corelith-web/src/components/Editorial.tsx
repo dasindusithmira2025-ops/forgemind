@@ -7,8 +7,6 @@ interface BandProps {
   children: ReactNode;
   className?: string;
   id?: string;
-  /** Adds the aurora + mesh light layers. Reserve for openers and statements. */
-  lit?: boolean;
   /** Hairline rule along the top edge, for two adjacent bands of the same tone. */
   divider?: boolean;
   /** Tighter vertical rhythm, for CTA strips and short matrices. */
@@ -17,16 +15,15 @@ interface BandProps {
 
 /**
  * A full-bleed horizontal band. The page is a stack of these, alternating
- * between the two cream papers and — at most once per page — the burnt-orange
- * block. Bands separate by paper tone rather than by a rule, which is what
- * gives the page its printed, sectioned rhythm.
+ * between the two weights of stock and — sparingly — the ember block. Bands
+ * separate by stock weight and by the halftone screen they all carry, not by a
+ * rule, which is what gives the page its printed, sectioned rhythm.
  */
 export function Band({
   tone = 'paper',
   children,
   className = '',
   id,
-  lit = false,
   divider = false,
   compact = false,
 }: BandProps) {
@@ -37,16 +34,6 @@ export function Band({
         divider ? 'border-t border-[var(--hair)]' : ''
       } ${className}`}
     >
-      {lit && (
-        <>
-          <div aria-hidden="true" className="mesh pointer-events-none absolute inset-0 -z-10" />
-          <div
-            aria-hidden="true"
-            className="aurora pointer-events-none absolute inset-x-0 top-0 -z-10 h-[70%]"
-          />
-        </>
-      )}
-
       <div
         className={`mx-auto max-w-[var(--measure)] px-6 lg:px-10 ${
           compact ? 'py-14 lg:py-20' : 'py-[var(--band)]'
@@ -59,7 +46,7 @@ export function Band({
 }
 
 interface SectionMarkProps {
-  /** Two-digit section index, printed beside the lit node. */
+  /** Two-digit section index, printed beside the node. */
   index: string;
   kicker: string;
   title: ReactNode;
@@ -67,7 +54,7 @@ interface SectionMarkProps {
 }
 
 /**
- * The standard section opener: a lit node and mono index on a full-width rule,
+ * The standard section opener: a node and mono index on a full-width rule,
  * the display title on the left seven columns, the deck pushed to the far right
  * four. The asymmetry is the point — centred stacks are what make a page look
  * generated.
@@ -118,7 +105,7 @@ interface PageMastheadProps {
  */
 export function PageMasthead({ kicker, title, deck, marker, meta, children }: PageMastheadProps) {
   return (
-    <Band tone="paper" lit>
+    <Band tone="paper">
       <div className="grid grid-cols-12 gap-x-8 gap-y-10 pt-6">
         <div className="col-span-12 flex flex-wrap items-center gap-4">
           <p className="stamp text-[var(--kicker)]">{kicker}</p>
@@ -266,7 +253,7 @@ export function ClosingBand({
   children: ReactNode;
 }) {
   return (
-    <Band tone="ember" lit compact divider>
+    <Band tone="ember" compact divider>
       <div className="grid grid-cols-12 items-end gap-x-8 gap-y-10">
         <div className="col-span-12 lg:col-span-7">
           <h2 className="text-2xl sm:text-3xl">{title}</h2>

@@ -60,17 +60,12 @@ export default function SecurityPage() {
         />
 
         <div className="mt-14 grid grid-cols-1 overflow-hidden rounded-lg border border-[var(--hair-strong)] md:grid-cols-2">
-          {securityData.principles.map((p, i) => (
+          {securityData.principles.map((p) => (
             <article
               key={p.title}
-              className="flex flex-col gap-4 border-r border-b border-[var(--hair)] p-7 transition-colors hover:bg-[rgba(17,24,39,0.04)]"
+              className="flex flex-col gap-4 border-r border-b border-[var(--hair)] p-7 transition-colors hover:bg-[rgba(245,237,224,0.03)]"
             >
-              <div className="flex items-start justify-between gap-4">
-                <h3 className="max-w-[20ch] text-lg text-[var(--fg)]">{p.title}</h3>
-                <span aria-hidden="true" className="numeral text-[var(--fg)] text-xl">
-                  {String(i + 1).padStart(2, '0')}
-                </span>
-              </div>
+              <h3 className="max-w-[20ch] text-lg text-[var(--fg)]">{p.title}</h3>
               <p className="border-t border-[var(--hair)] pt-4 text-base text-[var(--fg-soft)]">
                 {p.description}
               </p>

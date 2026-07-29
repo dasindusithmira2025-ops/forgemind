@@ -73,7 +73,7 @@ export function DownloadSelector({ productName, downloads }: DownloadSelectorPro
                 aria-selected={active}
                 onClick={() => setSelectedPlatform(d.platform)}
                 className={`stamp rounded px-3.5 py-2.5 transition-colors ${
-                  active ? 'text-ink bg-[rgba(17,24,39,0.08)]' : 'text-ink-faint hover:text-ink-soft'
+                  active ? 'text-ink bg-[rgba(245,237,224,0.09)]' : 'text-ink-faint hover:text-ink-soft'
                 }`}
               >
                 {d.platform}

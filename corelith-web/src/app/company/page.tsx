@@ -36,7 +36,7 @@ export default function CompanyPage() {
       />
 
       {/* ── Directive ────────────────────────────────────────────────────── */}
-      <Band tone="ember" lit divider>
+      <Band tone="ember" divider>
         <div className="grid grid-cols-12 gap-x-8 gap-y-10">
           <p className="stamp text-ember-ink col-span-12 lg:col-span-2">Operating mission</p>
 

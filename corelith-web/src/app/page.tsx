@@ -39,7 +39,7 @@ export default function HomePage() {
   return (
     <>
       {/* ── 01 · Hero ────────────────────────────────────────────────────── */}
-      <Band tone="paper" lit>
+      <Band tone="paper">
         <div className="grid grid-cols-12 gap-x-8 gap-y-10">
           <div className="col-span-12">
             <span className="chip stamp text-ink-soft">
@@ -105,16 +105,11 @@ export default function HomePage() {
         />
 
         <div className="mt-14 grid grid-cols-1 gap-5 lg:grid-cols-3">
-          {PILLARS.map((pillar, i) => (
+          {PILLARS.map((pillar) => (
             <article key={pillar.title} className="panel panel-hover flex flex-col gap-5 p-7">
-              <div className="flex items-start justify-between gap-4">
-                <h3 className="max-w-[16ch] text-lg text-ink lg:text-xl">{pillar.title}</h3>
-                <span aria-hidden="true" className="numeral text-ink text-2xl">
-                  {String(i + 1).padStart(2, '0')}
-                </span>
-              </div>
+              <h3 className="max-w-[16ch] text-lg text-ink lg:text-xl">{pillar.title}</h3>
               <p className="text-ink-soft text-base">{pillar.body}</p>
-              <p className="stamp text-ember-ink mt-auto border-t border-[var(--hair)] pt-5">
+              <p className="stamp text-[var(--kicker)] mt-auto border-t border-[var(--hair)] pt-5">
                 {pillar.metric}
               </p>
             </article>
@@ -147,7 +142,7 @@ export default function HomePage() {
       </Band>
 
       {/* ── 04 · Directive ───────────────────────────────────────────────── */}
-      <Band tone="ember" lit divider>
+      <Band tone="ember" divider>
         <div className="grid grid-cols-12 gap-x-8 gap-y-8">
           <p className="stamp text-ember-ink col-span-12 lg:col-span-2">Directive</p>
 

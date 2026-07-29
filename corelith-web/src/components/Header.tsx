@@ -77,8 +77,8 @@ export function Header() {
                   aria-current={active ? 'page' : undefined}
                   className={`rounded-md px-3.5 py-2 text-sm transition-colors ${
                     active
-                      ? 'text-ink bg-[rgba(17,24,39,0.07)]'
-                      : 'text-ink-soft hover:text-ink hover:bg-[rgba(17,24,39,0.04)]'
+                      ? 'text-ink bg-[rgba(245,237,224,0.09)]'
+                      : 'text-ink-soft hover:text-ink hover:bg-[rgba(245,237,224,0.06)]'
                   }`}
                 >
                   {link.label}
@@ -138,7 +138,7 @@ export function Header() {
                     href={link.href}
                     aria-current={active ? 'page' : undefined}
                     className={`flex items-baseline gap-4 rounded-lg px-4 py-4 ${
-                      active ? 'bg-[rgba(17,24,39,0.07)]' : ''
+                      active ? 'bg-[rgba(245,237,224,0.09)]' : ''
                     }`}
                   >
                     <span className="stamp text-ember-ink w-6 shrink-0">
