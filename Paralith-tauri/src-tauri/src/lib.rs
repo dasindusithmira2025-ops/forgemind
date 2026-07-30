@@ -9,8 +9,9 @@ mod services;
 
 use database::DatabaseService;
 use services::{
-    AgentDetector, FileSystemService, FileWatchService, RepositoryService, RestorationScheduler,
-    SelfWriteLedger, TerminalManager, UpdateService, UsageService, WindowRegistry,
+    AgentDetector, AgentResumeService, FileSystemService, FileWatchService, RepositoryService,
+    RestorationScheduler, SelfWriteLedger, TerminalManager, UpdateService, UsageService,
+    WindowRegistry,
 };
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -22,6 +23,7 @@ pub struct AppState {
     database: Arc<DatabaseService>,
     detector: Arc<AgentDetector>,
     terminals: TerminalManager,
+    agent_resume: AgentResumeService,
     restoration: RestorationScheduler,
     repository: Arc<RepositoryService>,
     /// Project-scoped, path-guarded filesystem access for the Code surface.
@@ -335,6 +337,7 @@ pub fn run() {
             }
             let detector = Arc::new(AgentDetector::default());
             let terminals = TerminalManager::new(database.clone(), app.handle().clone());
+            let agent_resume = AgentResumeService::new(database.clone(), terminals.clone());
             let restoration = RestorationScheduler::new(
                 database.clone(),
                 terminals.clone(),
@@ -401,6 +404,7 @@ pub fn run() {
                 database,
                 detector,
                 terminals,
+                agent_resume,
                 restoration,
                 repository,
                 filesystem,
@@ -497,6 +501,13 @@ pub fn run() {
             commands::detect_shells,
             commands::list_agent_profiles,
             commands::list_agent_sessions,
+            commands::reconcile_agent_resume_sessions,
+            commands::list_agent_resume_sessions,
+            commands::resume_agent_session,
+            commands::dismiss_agent_resume_session,
+            commands::dismiss_all_agent_resume_sessions,
+            commands::remove_agent_resume_session,
+            commands::relocate_agent_resume_worktree,
             commands::save_custom_shell,
             commands::validate_custom_executable,
             commands::get_layout_preset,

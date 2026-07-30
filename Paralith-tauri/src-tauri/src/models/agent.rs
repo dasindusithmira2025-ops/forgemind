@@ -96,6 +96,56 @@ pub struct AgentSession {
     pub updated_at: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentResumeRecord {
+    pub terminal_session_id: String,
+    pub project_id: String,
+    pub project_name: String,
+    pub workspace_id: String,
+    pub workspace_name: String,
+    pub pane_id: String,
+    pub provider: AgentProvider,
+    pub provider_session_id: Option<String>,
+    pub session_title: String,
+    pub repository_root: String,
+    pub repository_identity: String,
+    pub worktree_path: String,
+    pub branch: Option<String>,
+    pub working_directory: String,
+    pub launch_executable: String,
+    pub launch_arguments: Vec<String>,
+    pub original_launch_arguments: Vec<String>,
+    pub last_activity_at: String,
+    pub status: String,
+    pub shutdown_reason: String,
+    pub recovery_status: String,
+    pub dismissed_at: Option<String>,
+    pub error_code: Option<String>,
+    pub error_message: Option<String>,
+    pub running_terminal_session_id: Option<String>,
+    pub command_preview: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResumeAgentSessionRequest {
+    pub terminal_session_id: String,
+    #[serde(default)]
+    pub in_new_terminal: bool,
+    pub cols: u16,
+    pub rows: u16,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResumeAgentSessionResult {
+    pub source_terminal_session_id: String,
+    pub terminal: crate::models::TerminalSession,
+    pub workspace_id: String,
+    pub pane_id: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentActivityState {

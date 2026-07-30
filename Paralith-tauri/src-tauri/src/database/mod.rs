@@ -12,10 +12,10 @@ pub(crate) use repository::NewRepositoryOperation;
 
 use crate::errors::{AppError, AppResult};
 use crate::models::{
-    AgentActivityState, AgentDetectionResult, AgentProfile, AgentProvider, AgentSession,
-    AgentStateEvent, AgentStateSource, AppSettings, CreateTerminalRequest, LayoutNode,
-    PaneAssignment, Project, ProjectOverview, RecentWorkspace, ShellProfile, StartTerminalRequest,
-    Workspace, WorkspaceSaveRequest,
+    AgentActivityState, AgentDetectionResult, AgentProfile, AgentProvider, AgentResumeRecord,
+    AgentSession, AgentStateEvent, AgentStateSource, AppSettings, CreateTerminalRequest,
+    LayoutNode, PaneAssignment, Project, ProjectOverview, RecentWorkspace, ShellProfile,
+    SplitDirection, StartTerminalRequest, Workspace, WorkspaceSaveRequest,
 };
 use chrono::Utc;
 use parking_lot::Mutex;
@@ -367,6 +367,41 @@ impl DatabaseService {
                     params![pane_id, repaired, now],
                 )?;
             }
+        }
+        let resume_repairs: Vec<(String, String, String, String)> = {
+            let mut statement = transaction.prepare(
+                "SELECT terminal_session_id,repository_root,worktree_path,working_directory FROM agent_sessions WHERE project_id=?1",
+            )?;
+            let rows = statement
+                .query_map([project_id], |row| {
+                    Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            rows
+        };
+        let repository_identity = git_common_directory(&new_project.canonical_root_path)
+            .unwrap_or_else(|| new_project.canonical_root_path.clone());
+        for (session_id, repository_root, worktree_path, working_directory) in resume_repairs {
+            let repaired_repository = relative_within(&repository_root, &old)
+                .map(|rest| join_root(&new_project.root_path, &rest))
+                .unwrap_or(repository_root);
+            let repaired_worktree = relative_within(&worktree_path, &old)
+                .map(|rest| join_root(&new_project.root_path, &rest))
+                .unwrap_or(worktree_path);
+            let repaired_working_directory = relative_within(&working_directory, &old)
+                .map(|rest| join_root(&new_project.root_path, &rest))
+                .unwrap_or(working_directory);
+            transaction.execute(
+                "UPDATE agent_sessions SET repository_root=?2,repository_identity=?3,worktree_path=?4,working_directory=?5,recovery_status=CASE WHEN recovery_status='unavailable' THEN 'reconciling' ELSE recovery_status END,last_error_code=NULL,last_error_message=NULL,updated_at=?6 WHERE terminal_session_id=?1",
+                params![
+                    session_id,
+                    repaired_repository,
+                    repository_identity,
+                    repaired_worktree,
+                    repaired_working_directory,
+                    now
+                ],
+            )?;
         }
         transaction.commit()?;
         drop(connection);
@@ -1031,6 +1066,445 @@ impl DatabaseService {
         Ok(sessions)
     }
 
+    pub fn list_agent_resume_records(
+        &self,
+        include_dismissed: bool,
+    ) -> AppResult<Vec<AgentResumeRecord>> {
+        let connection = self.connection.lock();
+        let mut statement = connection.prepare(
+            "SELECT a.terminal_session_id,a.project_id,coalesce(p.name,'Missing project'),a.workspace_id,coalesce(w.name,'Missing workspace'),a.pane_id,a.provider_type,a.provider_session_id,a.session_title,a.repository_root,a.repository_identity,a.worktree_path,a.branch_name,a.working_directory,a.launch_executable,a.launch_args_json,a.original_launch_args_json,a.last_activity_at,a.status,a.shutdown_reason,a.recovery_status,a.dismissed_at,a.last_error_code,a.last_error_message,a.running_terminal_session_id FROM agent_sessions a LEFT JOIN projects p ON p.id=a.project_id LEFT JOIN workspaces w ON w.id=a.workspace_id WHERE a.provider_type IN ('claude','codex') AND (?1=1 OR a.dismissed_at IS NULL) ORDER BY a.last_activity_at DESC,a.created_at DESC",
+        )?;
+        let records = statement
+            .query_map([include_dismissed], |row| {
+                let provider_name: String = row.get(6)?;
+                let provider = AgentProvider::from_db(&provider_name)
+                    .ok_or_else(|| rusqlite::Error::InvalidQuery)?;
+                let launch_json: String = row.get(15)?;
+                let original_json: String = row.get(16)?;
+                let launch_arguments: Vec<String> =
+                    serde_json::from_str(&launch_json).unwrap_or_default();
+                let provider_session_id: Option<String> = row.get(7)?;
+                Ok(AgentResumeRecord {
+                    terminal_session_id: row.get(0)?,
+                    project_id: row.get(1)?,
+                    project_name: row.get(2)?,
+                    workspace_id: row.get(3)?,
+                    workspace_name: row.get(4)?,
+                    pane_id: row.get(5)?,
+                    provider: provider.clone(),
+                    provider_session_id: provider_session_id.clone(),
+                    session_title: row.get(8)?,
+                    repository_root: row.get(9)?,
+                    repository_identity: row.get(10)?,
+                    worktree_path: row.get(11)?,
+                    branch: row.get(12)?,
+                    working_directory: row.get(13)?,
+                    launch_executable: row.get(14)?,
+                    launch_arguments,
+                    original_launch_arguments: serde_json::from_str(&original_json)
+                        .unwrap_or_default(),
+                    last_activity_at: row.get(17)?,
+                    status: row.get(18)?,
+                    shutdown_reason: row.get(19)?,
+                    recovery_status: row.get(20)?,
+                    dismissed_at: row.get(21)?,
+                    error_code: row.get(22)?,
+                    error_message: row.get(23)?,
+                    running_terminal_session_id: row.get(24)?,
+                    command_preview: exact_resume_preview(
+                        &provider,
+                        provider_session_id.as_deref(),
+                    ),
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(records)
+    }
+
+    pub fn get_agent_resume_record(
+        &self,
+        terminal_session_id: &str,
+    ) -> AppResult<AgentResumeRecord> {
+        self.list_agent_resume_records(true)?
+            .into_iter()
+            .find(|record| record.terminal_session_id == terminal_session_id)
+            .ok_or_else(|| {
+                AppError::new(
+                    "agent_session_not_found",
+                    "The saved agent session no longer exists.",
+                    true,
+                )
+                .entity(terminal_session_id)
+                .layer("agent_resume")
+            })
+    }
+
+    pub fn capture_provider_session_id(
+        &self,
+        terminal_session_id: &str,
+        provider_session_id: &str,
+    ) -> AppResult<()> {
+        let parsed = Uuid::parse_str(provider_session_id).map_err(|_| {
+            AppError::new(
+                "invalid_provider_session",
+                "The provider reported an invalid session identifier.",
+                true,
+            )
+            .entity(terminal_session_id)
+            .layer("agent_resume")
+        })?;
+        let now = Utc::now().to_rfc3339();
+        let affected = self.connection.lock().execute(
+            "UPDATE agent_sessions SET provider_session_id=?2,last_activity_at=?3,recovery_status=CASE WHEN status='running' THEN 'running' ELSE recovery_status END,last_error_code=NULL,last_error_message=NULL,updated_at=?3 WHERE terminal_session_id=?1",
+            params![terminal_session_id, parsed.to_string(), now],
+        )?;
+        if affected == 0 {
+            return Err(AppError::new(
+                "agent_session_not_found",
+                "The provider session could not be attached to its terminal.",
+                true,
+            )
+            .entity(terminal_session_id));
+        }
+        Ok(())
+    }
+
+    pub fn set_agent_recovery_state(
+        &self,
+        terminal_session_id: &str,
+        recovery_status: &str,
+        shutdown_reason: Option<&str>,
+        error: Option<(&str, &str)>,
+        running_terminal_session_id: Option<&str>,
+    ) -> AppResult<()> {
+        let now = Utc::now().to_rfc3339();
+        self.connection.lock().execute(
+            "UPDATE agent_sessions SET recovery_status=?2,shutdown_reason=coalesce(?3,shutdown_reason),last_error_code=?4,last_error_message=?5,running_terminal_session_id=?6,updated_at=?7 WHERE terminal_session_id=?1",
+            params![
+                terminal_session_id,
+                recovery_status,
+                shutdown_reason,
+                error.map(|value| value.0),
+                error.map(|value| value.1),
+                running_terminal_session_id,
+                now,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn claim_agent_resume(&self, terminal_session_id: &str) -> AppResult<String> {
+        let attempt_id = Uuid::new_v4().to_string();
+        let now = Utc::now().to_rfc3339();
+        let mut connection = self.connection.lock();
+        let transaction = connection.transaction()?;
+        let row: (String, Option<String>, String, Option<String>) = transaction
+            .query_row(
+                "SELECT provider_type,provider_session_id,recovery_status,dismissed_at FROM agent_sessions WHERE terminal_session_id=?1",
+                [terminal_session_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .optional()?
+            .ok_or_else(|| {
+                AppError::new(
+                    "agent_session_not_found",
+                    "The saved agent session no longer exists.",
+                    true,
+                )
+            })?;
+        let provider_session_id = row.1.ok_or_else(|| {
+            AppError::new(
+                "session_identity_missing",
+                "This session has no exact provider identifier.",
+                true,
+            )
+            .action("Start a new provider session or remove this unavailable record.")
+            .layer("agent_resume")
+        })?;
+        if row.3.is_some() || !matches!(row.2.as_str(), "resumable" | "unavailable") {
+            return Err(AppError::new(
+                "agent_resume_conflict",
+                "This session is not available for recovery.",
+                true,
+            )
+            .entity(terminal_session_id)
+            .layer("agent_resume"));
+        }
+        let duplicate: bool = transaction.query_row(
+            "SELECT EXISTS(SELECT 1 FROM agent_sessions WHERE provider_type=?1 AND provider_session_id=?2 AND terminal_session_id<>?3 AND recovery_status IN ('launching','running','detached'))",
+            params![row.0, provider_session_id, terminal_session_id],
+            |row| row.get(0),
+        )?;
+        if duplicate {
+            return Err(AppError::new(
+                "agent_resume_conflict",
+                "This provider session is already running or being restored.",
+                true,
+            )
+            .entity(terminal_session_id)
+            .layer("agent_resume"));
+        }
+        transaction.execute(
+            "UPDATE agent_sessions SET recovery_status='launching',resume_attempt_id=?2,last_error_code=NULL,last_error_message=NULL,updated_at=?3 WHERE terminal_session_id=?1",
+            params![terminal_session_id, attempt_id, now],
+        )?;
+        transaction.commit()?;
+        Ok(attempt_id)
+    }
+
+    pub fn mark_agent_resume_launched(
+        &self,
+        source_terminal_session_id: &str,
+        running_terminal_session_id: &str,
+    ) -> AppResult<()> {
+        let now = Utc::now().to_rfc3339();
+        self.connection.lock().execute(
+            "UPDATE agent_sessions SET recovery_status='restored',status='resumed',shutdown_reason='resumed',running_terminal_session_id=?2,resume_attempt_id=NULL,last_activity_at=?3,updated_at=?3 WHERE terminal_session_id=?1",
+            params![source_terminal_session_id, running_terminal_session_id, now],
+        )?;
+        Ok(())
+    }
+
+    pub fn mark_agent_shutdown_reason(
+        &self,
+        terminal_session_id: &str,
+        reason: &str,
+    ) -> AppResult<()> {
+        self.connection.lock().execute(
+            "UPDATE agent_sessions SET shutdown_reason=?2,recovery_status=CASE WHEN provider_session_id IS NULL THEN 'unavailable' ELSE 'resumable' END,updated_at=?3 WHERE terminal_session_id=?1",
+            params![terminal_session_id, reason, Utc::now().to_rfc3339()],
+        )?;
+        Ok(())
+    }
+
+    pub fn dismiss_agent_resume(&self, terminal_session_id: &str) -> AppResult<()> {
+        let affected = self.connection.lock().execute(
+            "UPDATE agent_sessions SET dismissed_at=?2 WHERE terminal_session_id=?1",
+            params![terminal_session_id, Utc::now().to_rfc3339()],
+        )?;
+        if affected == 0 {
+            return Err(AppError::new(
+                "agent_session_not_found",
+                "The saved agent session no longer exists.",
+                true,
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn dismiss_all_agent_resumes(&self) -> AppResult<usize> {
+        let changed = self.connection.lock().execute(
+            "UPDATE agent_sessions SET dismissed_at=?1 WHERE provider_type IN ('claude','codex') AND dismissed_at IS NULL AND recovery_status NOT IN ('running','detached','completed')",
+            [Utc::now().to_rfc3339()],
+        )?;
+        Ok(changed)
+    }
+
+    pub fn remove_agent_resume(&self, terminal_session_id: &str) -> AppResult<()> {
+        let affected = self.connection.lock().execute(
+            "DELETE FROM agent_sessions WHERE terminal_session_id=?1 AND recovery_status NOT IN ('running','detached','launching')",
+            [terminal_session_id],
+        )?;
+        if affected == 0 {
+            return Err(AppError::new(
+                "agent_session_remove_blocked",
+                "A running or missing session cannot be removed from the Resume Center.",
+                true,
+            )
+            .entity(terminal_session_id));
+        }
+        Ok(())
+    }
+
+    pub fn relocate_agent_resume_worktree(
+        &self,
+        terminal_session_id: &str,
+        worktree_path: &str,
+        branch: Option<&str>,
+    ) -> AppResult<()> {
+        self.connection.lock().execute(
+            "UPDATE agent_sessions SET worktree_path=?2,working_directory=?2,branch_name=coalesce(?3,branch_name),recovery_status='resumable',last_error_code=NULL,last_error_message=NULL,updated_at=?4 WHERE terminal_session_id=?1",
+            params![
+                terminal_session_id,
+                worktree_path,
+                branch,
+                Utc::now().to_rfc3339()
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn create_resume_terminal_request(
+        &self,
+        record: &AgentResumeRecord,
+        in_new_terminal: bool,
+        cols: u16,
+        rows: u16,
+    ) -> AppResult<CreateTerminalRequest> {
+        let provider_session_id = record.provider_session_id.as_deref().ok_or_else(|| {
+            AppError::new(
+                "session_identity_missing",
+                "This session has no exact provider identifier.",
+                true,
+            )
+        })?;
+        Uuid::parse_str(provider_session_id).map_err(|_| {
+            AppError::new(
+                "invalid_provider_session",
+                "The saved provider session identifier is invalid.",
+                true,
+            )
+        })?;
+        let pane_id = if in_new_terminal {
+            self.clone_resume_pane(record)?
+        } else {
+            record.pane_id.clone()
+        };
+        let arguments = exact_resume_arguments(&record.provider, provider_session_id);
+        Ok(CreateTerminalRequest {
+            project_id: record.project_id.clone(),
+            workspace_id: record.workspace_id.clone(),
+            pane_id,
+            provider: record.provider.clone(),
+            title: record.session_title.clone(),
+            executable_path: record.launch_executable.clone(),
+            args: arguments,
+            working_directory: record.working_directory.clone(),
+            cols,
+            rows,
+            restoration_attempt: true,
+        })
+    }
+
+    fn clone_resume_pane(&self, record: &AgentResumeRecord) -> AppResult<String> {
+        let mut connection = self.connection.lock();
+        let transaction = connection.transaction()?;
+        let (layout_json, position): (String, i64) = transaction.query_row(
+            "SELECT layout_json,coalesce((SELECT max(position_order)+1 FROM workspace_panes WHERE workspace_id=?1),0) FROM workspaces WHERE id=?1",
+            [&record.workspace_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        let mut layout: LayoutNode = serde_json::from_str(&layout_json).map_err(|error| {
+            AppError::new(
+                "invalid_layout",
+                "The workspace layout cannot accept another terminal.",
+                true,
+            )
+            .detail(error.to_string())
+        })?;
+        let pane_id = Uuid::new_v4().to_string();
+        let pane_ids = layout.validate()?;
+        let split_target = pane_ids
+            .iter()
+            .find(|id| id.as_str() == record.pane_id)
+            .or_else(|| pane_ids.first())
+            .ok_or_else(|| {
+                AppError::new(
+                    "workspace_empty",
+                    "The workspace has no terminal pane to host this session.",
+                    true,
+                )
+            })?;
+        if !layout.split_pane(split_target, SplitDirection::Vertical, pane_id.clone()) {
+            return Err(AppError::new(
+                "invalid_layout",
+                "The workspace layout cannot accept the resumed terminal.",
+                true,
+            ));
+        }
+        let now = Utc::now().to_rfc3339();
+        let provider_session_id = record.provider_session_id.as_deref().ok_or_else(|| {
+            AppError::new(
+                "session_identity_missing",
+                "This session has no exact provider identifier.",
+                true,
+            )
+        })?;
+        let exact_arguments = serde_json::to_string(&exact_resume_arguments(
+            &record.provider,
+            provider_session_id,
+        ))
+        .map_err(AppError::database)?;
+        transaction.execute(
+            "INSERT INTO workspace_panes(id,workspace_id,title,provider_type,executable_path,args_json,shell_profile_id,profile_id,working_directory,working_directory_mode,position_order,created_at,updated_at) VALUES(?1,?2,?3,?4,?5,?6,NULL,NULL,?7,'custom',?8,?9,?9)",
+            params![
+                pane_id,
+                record.workspace_id,
+                format!("{} resumed", record.session_title),
+                record.provider.as_str(),
+                record.launch_executable,
+                exact_arguments,
+                record.working_directory,
+                position,
+                now
+            ],
+        )?;
+        transaction.execute(
+            "UPDATE workspaces SET layout_json=?2,active_pane_id=?3,updated_at=?4 WHERE id=?1",
+            params![
+                record.workspace_id,
+                serde_json::to_string(&layout).map_err(AppError::database)?,
+                pane_id,
+                now
+            ],
+        )?;
+        transaction.commit()?;
+        Ok(pane_id)
+    }
+
+    pub fn rollback_resume_pane(&self, workspace_id: &str, pane_id: &str) -> AppResult<()> {
+        let mut connection = self.connection.lock();
+        let transaction = connection.transaction()?;
+        let (layout_json, active_pane_id): (String, Option<String>) = transaction.query_row(
+            "SELECT layout_json,active_pane_id FROM workspaces WHERE id=?1",
+            [workspace_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        let layout: LayoutNode = serde_json::from_str(&layout_json).map_err(|error| {
+            AppError::new(
+                "invalid_layout",
+                "The failed resume pane could not be removed from its Workspace.",
+                true,
+            )
+            .detail(error.to_string())
+        })?;
+        if !layout
+            .validate()?
+            .iter()
+            .any(|candidate| candidate == pane_id)
+        {
+            return Ok(());
+        }
+        let layout = layout.remove_pane(pane_id)?;
+        let pane_ids = layout.validate()?;
+        let next_active = active_pane_id
+            .filter(|candidate| candidate != pane_id && pane_ids.contains(candidate))
+            .or_else(|| pane_ids.first().cloned());
+        transaction.execute(
+            "DELETE FROM agent_sessions WHERE terminal_session_id IN (SELECT id FROM terminal_sessions WHERE workspace_id=?1 AND pane_id=?2 AND restoration_state='restored' AND status='running')",
+            params![workspace_id, pane_id],
+        )?;
+        transaction.execute(
+            "DELETE FROM terminal_sessions WHERE workspace_id=?1 AND pane_id=?2 AND restoration_state='restored' AND status='running'",
+            params![workspace_id, pane_id],
+        )?;
+        transaction.execute(
+            "DELETE FROM workspace_panes WHERE workspace_id=?1 AND id=?2",
+            params![workspace_id, pane_id],
+        )?;
+        transaction.execute(
+            "UPDATE workspaces SET layout_json=?2,active_pane_id=?3,updated_at=?4 WHERE id=?1",
+            params![
+                workspace_id,
+                serde_json::to_string(&layout).map_err(AppError::database)?,
+                next_active,
+                Utc::now().to_rfc3339()
+            ],
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
     pub fn record_session(&self, session: &crate::models::TerminalSession) -> AppResult<()> {
         let mut connection = self.connection.lock();
         let transaction = connection.transaction()?;
@@ -1042,29 +1516,65 @@ impl DatabaseService {
             session.provider,
             AgentProvider::Claude | AgentProvider::Codex | AgentProvider::Opencode
         ) {
-            let profile_id: Option<String> = transaction
+            let pane: (Option<String>, String, String) = transaction
                 .query_row(
-                    "SELECT profile_id FROM workspace_panes WHERE id=?1 AND workspace_id=?2",
+                    "SELECT profile_id,args_json,executable_path FROM workspace_panes WHERE id=?1 AND workspace_id=?2",
                     params![session.pane_id, session.workspace_id],
-                    |row| row.get(0),
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
                 )
                 .optional()?
-                .flatten();
+                .unwrap_or((None, "[]".into(), session.executable.clone()));
+            let project: (String, Option<String>) = transaction.query_row(
+                "SELECT canonical_root_path,git_branch FROM projects WHERE id=?1",
+                [&session.project_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )?;
+            let worktree: Option<(String, String)> = transaction
+                .query_row(
+                    "SELECT worktree_path,branch_name FROM pane_worktrees WHERE workspace_id=?1 AND pane_id=?2 AND status='active' ORDER BY updated_at DESC LIMIT 1",
+                    params![session.workspace_id, session.pane_id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .optional()?;
+            let provider_session_id =
+                provider_session_id_from_arguments(&session.provider, &session.arguments);
+            let safe_arguments =
+                sanitize_agent_launch_arguments(&session.provider, &session.arguments);
+            let original_arguments: Vec<String> = serde_json::from_str(&pane.1).unwrap_or_default();
+            let safe_original =
+                sanitize_agent_launch_arguments(&session.provider, &original_arguments);
+            let worktree_path = worktree
+                .as_ref()
+                .map(|entry| entry.0.clone())
+                .unwrap_or_else(|| session.working_directory.clone());
+            let branch = worktree.map(|entry| entry.1).or_else(|| project.1.clone());
+            let repository_identity =
+                git_common_directory(&project.0).unwrap_or_else(|| project.0.clone());
             let now = Utc::now().to_rfc3339();
             transaction.execute(
-                "INSERT INTO agent_sessions(terminal_session_id,project_id,workspace_id,pane_id,profile_id,provider_type,provider_session_id,transcript_path,status,agent_state,agent_state_source,agent_state_reason,agent_state_updated_at,created_at,updated_at) VALUES(?1,?2,?3,?4,?5,?6,NULL,NULL,?7,?8,?9,?10,?11,?11,?11) ON CONFLICT(terminal_session_id) DO UPDATE SET status=excluded.status,updated_at=excluded.updated_at",
+                "INSERT INTO agent_sessions(terminal_session_id,project_id,workspace_id,pane_id,profile_id,provider_type,provider_session_id,transcript_path,status,agent_state,agent_state_source,agent_state_reason,agent_state_updated_at,created_at,updated_at,session_title,repository_root,repository_identity,worktree_path,branch_name,working_directory,launch_executable,launch_args_json,original_launch_args_json,last_activity_at,recovery_status,shutdown_reason,running_terminal_session_id) VALUES(?1,?2,?3,?4,?5,?6,?7,NULL,?8,?9,?10,?11,?12,?12,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?12,'running','running',?1) ON CONFLICT(terminal_session_id) DO UPDATE SET status=excluded.status,provider_session_id=coalesce(agent_sessions.provider_session_id,excluded.provider_session_id),last_activity_at=excluded.last_activity_at,recovery_status='running',shutdown_reason='running',running_terminal_session_id=excluded.running_terminal_session_id,updated_at=excluded.updated_at",
                 params![
                     session.id,
                     session.project_id,
                     session.workspace_id,
                     session.pane_id,
-                    profile_id,
+                    pane.0,
                     session.provider.as_str(),
+                    provider_session_id,
                     session.status,
                     AgentActivityState::Working.as_str(),
                     AgentStateSource::Heuristic.as_str(),
                     "session started",
                     now,
+                    session.title,
+                    project.0,
+                    repository_identity,
+                    worktree_path,
+                    branch,
+                    session.working_directory,
+                    pane.2,
+                    serde_json::to_string(&safe_arguments).unwrap_or_else(|_| "[]".into()),
+                    serde_json::to_string(&safe_original).unwrap_or_else(|_| "[]".into()),
                 ],
             )?;
         }
@@ -1082,7 +1592,7 @@ impl DatabaseService {
             None
         };
         self.connection.lock().execute(
-            "UPDATE agent_sessions SET agent_state=?2,agent_state_source=?3,agent_state_reason=?4,agent_attention_since=?5,agent_state_updated_at=?6,updated_at=?6 WHERE terminal_session_id=?1",
+            "UPDATE agent_sessions SET agent_state=?2,agent_state_source=?3,agent_state_reason=?4,agent_attention_since=?5,agent_state_updated_at=?6,last_activity_at=?6,recovery_status=CASE WHEN status='running' THEN 'running' ELSE recovery_status END,updated_at=?6 WHERE terminal_session_id=?1",
             params![
                 event.terminal_session_id,
                 event.state.as_str(),
@@ -1138,8 +1648,8 @@ impl DatabaseService {
         let now = Utc::now().to_rfc3339();
         let attention_since = now.clone();
         self.connection.lock().execute(
-            "UPDATE agent_sessions SET status=?2,agent_state=?3,agent_state_source=?4,agent_state_reason=?5,agent_attention_since=?6,agent_state_updated_at=?7,updated_at=?7 WHERE terminal_session_id=?1",
-            params![id, status, agent_state.as_str(), source.as_str(), reason, attention_since, now],
+            "UPDATE agent_sessions SET status=?2,agent_state=?3,agent_state_source=?4,agent_state_reason=?5,agent_attention_since=?6,agent_state_updated_at=?7,last_activity_at=?7,recovery_status=CASE WHEN shutdown_reason<>'running' AND provider_session_id IS NOT NULL THEN 'resumable' WHEN ?2='exited' AND coalesce(?8,0)=0 THEN 'completed' WHEN provider_session_id IS NOT NULL THEN 'resumable' ELSE 'unavailable' END,shutdown_reason=CASE WHEN shutdown_reason='running' THEN CASE WHEN ?2='exited' THEN 'process_exit' ELSE 'terminal_terminated' END ELSE shutdown_reason END,running_terminal_session_id=NULL,updated_at=?7 WHERE terminal_session_id=?1",
+            params![id, status, agent_state.as_str(), source.as_str(), reason, attention_since, now, exit_code],
         )?;
         Ok(())
     }
@@ -1298,6 +1808,141 @@ fn join_root(root: &str, rest: &str) -> String {
     )
 }
 
+fn provider_session_id_from_arguments(
+    provider: &AgentProvider,
+    arguments: &[String],
+) -> Option<String> {
+    let candidate = match provider {
+        AgentProvider::Claude => arguments.iter().enumerate().find_map(|(index, argument)| {
+            matches!(argument.as_str(), "--session-id" | "--resume" | "-r")
+                .then(|| arguments.get(index + 1))
+                .flatten()
+        }),
+        AgentProvider::Codex => arguments
+            .windows(2)
+            .find(|pair| pair[0] == "resume")
+            .map(|pair| &pair[1]),
+        _ => None,
+    }?;
+    Uuid::parse_str(candidate)
+        .ok()
+        .map(|identifier| identifier.to_string())
+}
+
+fn exact_resume_arguments(provider: &AgentProvider, provider_session_id: &str) -> Vec<String> {
+    match provider {
+        AgentProvider::Claude => vec!["--resume".into(), provider_session_id.into()],
+        AgentProvider::Codex => vec!["resume".into(), provider_session_id.into()],
+        _ => Vec::new(),
+    }
+}
+
+fn exact_resume_preview(provider: &AgentProvider, provider_session_id: Option<&str>) -> String {
+    let Some(identifier) = provider_session_id else {
+        return "Exact session ID unavailable".into();
+    };
+    match provider {
+        AgentProvider::Claude => format!("claude --resume {identifier}"),
+        AgentProvider::Codex => format!("codex resume {identifier}"),
+        _ => "Unsupported provider".into(),
+    }
+}
+
+fn git_common_directory(path: &str) -> Option<String> {
+    let output = std::process::Command::new("git")
+        .args(["-C", path, "rev-parse", "--git-common-dir"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let value = String::from_utf8(output.stdout).ok()?;
+    let common = PathBuf::from(value.trim());
+    let resolved = if common.is_absolute() {
+        common
+    } else {
+        Path::new(path).join(common)
+    };
+    std::fs::canonicalize(&resolved)
+        .ok()
+        .or(Some(resolved))
+        .map(|path| path.to_string_lossy().into_owned())
+}
+
+/// Preserve only non-sensitive provider configuration in the resume registry. Positional prompts,
+/// inline config, environment overrides, API keys, and unknown flags are intentionally excluded.
+fn sanitize_agent_launch_arguments(provider: &AgentProvider, arguments: &[String]) -> Vec<String> {
+    let allowed_with_value: &[&str] = match provider {
+        AgentProvider::Claude => &[
+            "--session-id",
+            "--resume",
+            "-r",
+            "--model",
+            "--permission-mode",
+            "--name",
+            "-n",
+            "--effort",
+        ],
+        AgentProvider::Codex => &[
+            "--model",
+            "-m",
+            "--profile",
+            "-p",
+            "--sandbox",
+            "-s",
+            "--ask-for-approval",
+            "-a",
+            "--cd",
+            "-C",
+        ],
+        _ => &[],
+    };
+    let allowed_switches: &[&str] = match provider {
+        AgentProvider::Codex => &["--oss", "--search", "--no-alt-screen"],
+        _ => &[],
+    };
+    let mut safe = Vec::new();
+    let mut index = 0;
+    if matches!(provider, AgentProvider::Codex)
+        && arguments
+            .first()
+            .is_some_and(|argument| argument == "resume")
+    {
+        safe.push("resume".into());
+        if let Some(identifier) = arguments
+            .get(1)
+            .and_then(|value| Uuid::parse_str(value).ok())
+        {
+            safe.push(identifier.to_string());
+        }
+        index = 2;
+    }
+    while index < arguments.len() {
+        let argument = arguments[index].as_str();
+        if allowed_switches.contains(&argument) {
+            safe.push(argument.into());
+            index += 1;
+            continue;
+        }
+        if allowed_with_value.contains(&argument) {
+            if let Some(value) = arguments.get(index + 1) {
+                let sensitive = argument.eq_ignore_ascii_case("--cd")
+                    || argument == "-C"
+                    || value.contains('\n')
+                    || value.len() > 256;
+                if !sensitive {
+                    safe.push(argument.into());
+                    safe.push(value.clone());
+                }
+            }
+            index += 2;
+            continue;
+        }
+        index += 1;
+    }
+    safe
+}
+
 fn load_panes(connection: &Connection, workspace_id: &str) -> AppResult<Vec<PaneAssignment>> {
     let mut statement = connection.prepare("SELECT id,title,provider_type,executable_path,args_json,shell_profile_id,profile_id,working_directory,working_directory_mode,position_order FROM workspace_panes WHERE workspace_id=?1 ORDER BY position_order")?;
     let panes = statement
@@ -1398,6 +2043,122 @@ mod tests {
             .mark_session_ended(&session.id, "exited", Some(0), b"bye")
             .unwrap();
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn resume_registry_captures_exact_ids_redacts_arguments_and_deduplicates_claims() {
+        let database = DatabaseService::in_memory().unwrap();
+        let root = std::env::temp_dir().join(format!("paralith-resume-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let saved_project = database.upsert_project(&project(&root)).unwrap();
+        let mut request = workspace_request(&saved_project.id, "Recovery", &root);
+        request.panes[0].provider = AgentProvider::Claude;
+        request.panes[0].title = "Claude recovery".into();
+        let workspace = database.save_workspace(&request).unwrap();
+        let workspace_id = workspace.id.clone();
+        let project_id = saved_project.id.clone();
+        let exact_id = Uuid::new_v4().to_string();
+        let session = crate::models::TerminalSession {
+            id: Uuid::new_v4().to_string(),
+            project_id: saved_project.id,
+            workspace_id: workspace.id,
+            pane_id: workspace.panes[0].id.clone(),
+            provider: AgentProvider::Claude,
+            executable: std::env::current_exe()
+                .unwrap()
+                .to_string_lossy()
+                .to_string(),
+            arguments: vec![
+                "--session-id".into(),
+                exact_id.clone(),
+                "--model".into(),
+                "opus".into(),
+                "--api-key".into(),
+                "secret-value".into(),
+                "prompt; Remove-Item -Recurse C:/".into(),
+            ],
+            title: "Claude recovery".into(),
+            working_directory: root.to_string_lossy().into_owned(),
+            status: "running".into(),
+            process_id: Some(42),
+            started_at: Utc::now().to_rfc3339(),
+            ended_at: None,
+            exit_code: None,
+            output_tail: Vec::new(),
+            next_sequence: 0,
+            log_path: None,
+            restoration_state: "not_requested".into(),
+            dropped_output_bytes: 0,
+        };
+        database.record_session(&session).unwrap();
+        database
+            .mark_agent_shutdown_reason(&session.id, "application_shutdown")
+            .unwrap();
+        let records = database.list_agent_resume_records(false).unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(
+            records[0].provider_session_id.as_deref(),
+            Some(exact_id.as_str())
+        );
+        assert_eq!(
+            records[0].launch_arguments,
+            vec!["--session-id", &exact_id, "--model", "opus"]
+        );
+        let serialized = serde_json::to_string(&records[0]).unwrap();
+        assert!(!serialized.contains("secret-value"));
+        assert!(!serialized.contains("Remove-Item"));
+        assert!(!records[0].command_preview.contains("--last"));
+        assert_eq!(
+            exact_resume_arguments(&AgentProvider::Claude, &exact_id),
+            vec!["--resume", exact_id.as_str()]
+        );
+        assert_eq!(
+            exact_resume_arguments(&AgentProvider::Codex, &exact_id),
+            vec!["resume", exact_id.as_str()]
+        );
+
+        let relocated_root =
+            std::env::temp_dir().join(format!("paralith-resume-moved-{}", Uuid::new_v4()));
+        fs::create_dir_all(&relocated_root).unwrap();
+        database
+            .relocate_project(&project_id, &project(&relocated_root))
+            .unwrap();
+        let relocated = database.get_agent_resume_record(&session.id).unwrap();
+        assert_eq!(Path::new(&relocated.repository_root), relocated_root);
+        assert_eq!(Path::new(&relocated.working_directory), relocated_root);
+        let recreated = database
+            .create_resume_terminal_request(&relocated, true, 120, 40)
+            .unwrap();
+        assert_ne!(recreated.pane_id, session.pane_id);
+        assert_eq!(recreated.args, vec!["--resume", exact_id.as_str()]);
+        assert!(database
+            .get_workspace(&workspace_id)
+            .unwrap()
+            .panes
+            .iter()
+            .any(|pane| pane.id == recreated.pane_id));
+        database
+            .rollback_resume_pane(&workspace_id, &recreated.pane_id)
+            .unwrap();
+        assert!(!database
+            .get_workspace(&workspace_id)
+            .unwrap()
+            .panes
+            .iter()
+            .any(|pane| pane.id == recreated.pane_id));
+
+        database.claim_agent_resume(&session.id).unwrap();
+        let duplicate = database.claim_agent_resume(&session.id).unwrap_err();
+        assert_eq!(duplicate.code, "agent_resume_conflict");
+
+        database.dismiss_agent_resume(&session.id).unwrap();
+        assert!(database
+            .list_agent_resume_records(false)
+            .unwrap()
+            .is_empty());
+        assert_eq!(database.list_agent_resume_records(true).unwrap().len(), 1);
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(relocated_root).unwrap();
     }
 
     #[test]

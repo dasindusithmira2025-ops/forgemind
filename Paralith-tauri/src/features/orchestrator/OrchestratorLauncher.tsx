@@ -3,6 +3,7 @@ import { native } from '../../native/commands'
 import { onOrchestratorEvent, onOrchestratorSession } from './api'
 import { useOrchestratorStore } from './store'
 import type { CapabilityDescriptor, OperatingMode, RiskLevel, SessionState } from './types'
+import { openAgentResumeCenter } from '../agent-resume/events'
 
 const MODE_LABELS: Record<OperatingMode, string> = {
   observe: 'Observe',
@@ -273,6 +274,9 @@ function InvocationPanel({ onClose }: { onClose: () => void }) {
               ? 'A project is in scope — file capabilities are available.'
               : 'No project in scope — open a project to enable file capabilities.'}
           </p>
+          <button type="button" className="orch-quick-command" onClick={() => { onClose(); openAgentResumeCenter() }}>
+            Resume interrupted Claude or Codex sessions
+          </button>
         </div>
       ) : (
         <div className="orch-session">

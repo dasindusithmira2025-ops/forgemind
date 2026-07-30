@@ -11,6 +11,7 @@ import { OrchestratorLauncher } from './features/orchestrator/OrchestratorLaunch
 import { initThemeRuntime } from './theme/themeStore'
 import { UpdateNotification } from './features/updates/UpdateNotification'
 import { startUpdateController, stopUpdateController } from './features/updates/updateController'
+import { AgentResumeCenter } from './features/agent-resume/AgentResumeCenter'
 
 // Periodic background update poll while the app is running (in addition to the one-shot check after
 // safe startup and the manual Settings → Updates check). The Rust coordinator owns actual check
@@ -157,6 +158,7 @@ export default function App() {
       </Routes>
       </Suspense>
       <OrchestratorLauncher />
+      <AgentResumeCenter />
       {whatsNew && <aside className="whats-new" aria-label="What's new"><span>UPDATED · {whatsNew.build.edition.toUpperCase()}</span><h2>PARALITH {whatsNew.build.version} is healthy.</h2><p>{Array.isArray(whatsNew.build.bundledRelease.highlights) ? (whatsNew.build.bundledRelease.highlights as string[]).join(' · ') : 'The signed update passed migration and startup health checks.'}</p><button onClick={() => setWhatsNew(undefined)}>Dismiss</button></aside>}
       <UpdateNotification />
     </HashRouter>

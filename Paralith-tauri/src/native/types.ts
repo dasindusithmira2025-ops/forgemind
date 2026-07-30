@@ -232,6 +232,59 @@ export interface AgentSession {
   updatedAt: string
 }
 
+export type AgentResumeStatus =
+  | 'reconciling'
+  | 'resumable'
+  | 'launching'
+  | 'running'
+  | 'detached'
+  | 'restored'
+  | 'unavailable'
+  | 'completed'
+
+export interface AgentResumeRecord {
+  terminalSessionId: string
+  projectId: string
+  projectName: string
+  workspaceId: string
+  workspaceName: string
+  paneId: string
+  provider: 'claude' | 'codex'
+  providerSessionId?: string
+  sessionTitle: string
+  repositoryRoot: string
+  repositoryIdentity: string
+  worktreePath: string
+  branch?: string
+  workingDirectory: string
+  launchExecutable: string
+  launchArguments: string[]
+  originalLaunchArguments: string[]
+  lastActivityAt: string
+  status: string
+  shutdownReason: string
+  recoveryStatus: AgentResumeStatus
+  dismissedAt?: string
+  errorCode?: string
+  errorMessage?: string
+  runningTerminalSessionId?: string
+  commandPreview: string
+}
+
+export interface ResumeAgentSessionRequest {
+  terminalSessionId: string
+  inNewTerminal: boolean
+  cols: number
+  rows: number
+}
+
+export interface ResumeAgentSessionResult {
+  sourceTerminalSessionId: string
+  terminal: TerminalSession
+  workspaceId: string
+  paneId: string
+}
+
 export interface AgentStateEvent {
   terminalSessionId: string
   projectId: string

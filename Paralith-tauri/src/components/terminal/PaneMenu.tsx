@@ -28,6 +28,7 @@ export function PaneMenu({ menu, compact = false, onClose, onAction }: { menu: {
       </>}
       <span className="menu-separator" />
       <button onClick={() => onAction('review_changes')}>Review pane changes</button>
+      <button onClick={() => onAction('resume_agents')}><RefreshCw size={14} />Agent Resume Center</button>
       <button onClick={() => onAction('search')}><Search size={14} />Search terminal</button>
       <button onClick={() => onAction('copy')}><Copy size={14} />Copy terminal output</button>
       <button onClick={() => onAction('paste')}>Paste</button>
