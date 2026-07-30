@@ -22,7 +22,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{sync_channel, RecvTimeoutError, TrySendError};
 use std::sync::Arc;
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 use tauri::{AppHandle, Emitter};
 use uuid::Uuid;
 
@@ -176,7 +176,8 @@ impl TerminalManager {
         }
     }
 
-    pub fn create_session(&self, request: CreateTerminalRequest) -> AppResult<TerminalSession> {
+    pub fn create_session(&self, mut request: CreateTerminalRequest) -> AppResult<TerminalSession> {
+        prepare_exact_provider_identity(&mut request);
         let machine_protocol = is_machine_protocol_workspace(&request.workspace_id);
         let reservation_key = (request.workspace_id.clone(), request.pane_id.clone());
         // Atomically check for a live or in-flight duplicate and claim the pane. Both checks
@@ -378,6 +379,7 @@ impl TerminalManager {
             .spawn_output_reader(handle.clone(), reader)
             .and_then(|_| self.spawn_exit_watcher(handle.clone()))
             .and_then(|_| self.spawn_agent_state_watcher(handle.clone()))
+            .and_then(|_| self.spawn_provider_identity_watcher(handle.clone()))
         {
             let _ = handle.child.lock().kill();
             self.sessions.write().remove(&session.id);
@@ -390,6 +392,57 @@ impl TerminalManager {
             .entity(&session.pane_id));
         }
         Ok(session)
+    }
+
+    fn spawn_provider_identity_watcher(&self, handle: Arc<TerminalHandle>) -> std::io::Result<()> {
+        let metadata = handle.metadata.read().clone();
+        if !matches!(
+            metadata.provider,
+            crate::models::AgentProvider::Claude | crate::models::AgentProvider::Codex
+        ) || launch_contains_exact_session(&metadata.provider, &metadata.arguments)
+        {
+            return Ok(());
+        }
+        let Some(database) = self.database.clone() else {
+            return Ok(());
+        };
+        thread::Builder::new()
+            .name(format!("forgemind-agent-identity-{}", metadata.id))
+            .spawn(move || {
+                let floor = SystemTime::now()
+                    .checked_sub(Duration::from_secs(8))
+                    .unwrap_or(SystemTime::UNIX_EPOCH);
+                for _ in 0..80 {
+                    if let Some(identifier) = discover_provider_session_identity(
+                        &metadata.provider,
+                        &metadata.working_directory,
+                        floor,
+                    ) {
+                        if let Err(error) =
+                            database.capture_provider_session_id(&metadata.id, &identifier)
+                        {
+                            log::warn!(
+                                "provider session identity persistence failed terminal_session_id={} code={}",
+                                metadata.id,
+                                error.code
+                            );
+                        }
+                        return;
+                    }
+                    thread::sleep(Duration::from_millis(500));
+                }
+                let _ = database.set_agent_recovery_state(
+                    &metadata.id,
+                    "unavailable",
+                    None,
+                    Some((
+                        "session_identity_missing",
+                        "The provider did not expose an exact resumable session identifier.",
+                    )),
+                    Some(&metadata.id),
+                );
+            })
+            .map(drop)
     }
 
     fn create_output_log(&self, session_id: &str) -> AppResult<Option<TerminalLog>> {
@@ -772,7 +825,14 @@ impl TerminalManager {
     }
 
     pub fn terminate_session(&self, session_id: &str) -> AppResult<()> {
+        self.terminate_session_with_reason(session_id, "user_terminated")
+    }
+
+    fn terminate_session_with_reason(&self, session_id: &str, reason: &str) -> AppResult<()> {
         let handle = self.owned(session_id)?;
+        if let Some(database) = &self.database {
+            database.mark_agent_shutdown_reason(session_id, reason)?;
+        }
         {
             let metadata = handle.metadata.read();
             log::info!(
@@ -841,12 +901,16 @@ impl TerminalManager {
                 (metadata.workspace_id == workspace_id).then_some(metadata.id.clone())
             })
             .collect();
-        self.terminate_many(session_ids)
+        self.terminate_many(session_ids, "workspace_stopped")
     }
 
     pub fn terminate_all_sessions(&self) -> AppResult<()> {
+        self.terminate_all_sessions_with_reason("application_shutdown")
+    }
+
+    pub fn terminate_all_sessions_with_reason(&self, reason: &str) -> AppResult<()> {
         let session_ids: Vec<String> = self.sessions.read().keys().cloned().collect();
-        self.terminate_many(session_ids)
+        self.terminate_many(session_ids, reason)
     }
 
     /// Terminate a batch of sessions concurrently with a bounded per-session wait, then join.
@@ -858,21 +922,23 @@ impl TerminalManager {
     /// stays bounded by the slowest single session regardless of how many are open. The batch is
     /// idempotent: an already-gone session simply resolves to `terminal_session_not_found`, which
     /// is ignored so a duplicate close never fails.
-    fn terminate_many(&self, session_ids: Vec<String>) -> AppResult<()> {
+    fn terminate_many(&self, session_ids: Vec<String>, reason: &str) -> AppResult<()> {
         // One or zero sessions gains nothing from a worker thread — terminate inline.
         if session_ids.len() <= 1 {
             return session_ids.into_iter().try_for_each(|session_id| {
-                ignore_already_gone(self.terminate_session(&session_id))
+                ignore_already_gone(self.terminate_session_with_reason(&session_id, reason))
             });
         }
+        let reason = reason.to_owned();
         let workers: Vec<(String, _)> = session_ids
             .into_iter()
             .map(|session_id| {
                 let manager = self.clone();
                 let worker_id = session_id.clone();
+                let reason = reason.clone();
                 let spawned = thread::Builder::new()
                     .name(format!("forgemind-terminate-{session_id}"))
-                    .spawn(move || manager.terminate_session(&worker_id));
+                    .spawn(move || manager.terminate_session_with_reason(&worker_id, &reason));
                 (session_id, spawned)
             })
             .collect();
@@ -1031,6 +1097,147 @@ fn emit_output(app: &Option<AppHandle>, handle: &TerminalHandle, sequence: u64, 
     }
 }
 
+fn prepare_exact_provider_identity(request: &mut CreateTerminalRequest) {
+    if request.provider != crate::models::AgentProvider::Claude
+        || launch_contains_exact_session(&request.provider, &request.args)
+        || request
+            .args
+            .iter()
+            .any(|argument| matches!(argument.as_str(), "--continue" | "-c"))
+    {
+        return;
+    }
+    request.args.push("--session-id".into());
+    request.args.push(Uuid::new_v4().to_string());
+}
+
+fn launch_contains_exact_session(
+    provider: &crate::models::AgentProvider,
+    arguments: &[String],
+) -> bool {
+    match provider {
+        crate::models::AgentProvider::Claude => {
+            arguments.iter().enumerate().any(|(index, argument)| {
+                matches!(argument.as_str(), "--session-id" | "--resume" | "-r")
+                    && arguments
+                        .get(index + 1)
+                        .is_some_and(|value| Uuid::parse_str(value).is_ok())
+            })
+        }
+        crate::models::AgentProvider::Codex => arguments
+            .windows(2)
+            .any(|pair| pair[0] == "resume" && Uuid::parse_str(pair[1].as_str()).is_ok()),
+        _ => false,
+    }
+}
+
+/// Provider discovery is a fallback for CLIs that cannot accept a caller-chosen session id
+/// (currently Codex interactive). Only the first JSONL metadata record is read; conversation
+/// messages are neither parsed nor retained.
+fn discover_provider_session_identity(
+    provider: &crate::models::AgentProvider,
+    working_directory: &str,
+    modified_after: SystemTime,
+) -> Option<String> {
+    let home = std::env::var_os("USERPROFILE")
+        .or_else(|| std::env::var_os("HOME"))
+        .map(PathBuf::from)?;
+    let root = match provider {
+        crate::models::AgentProvider::Claude => std::env::var_os("CLAUDE_CONFIG_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| home.join(".claude"))
+            .join("projects"),
+        crate::models::AgentProvider::Codex => std::env::var_os("CODEX_HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| home.join(".codex"))
+            .join("sessions"),
+        _ => return None,
+    };
+    let mut files = Vec::new();
+    collect_recent_jsonl(&root, modified_after, 0, &mut files);
+    files.sort_by_key(|entry| std::cmp::Reverse(entry.0));
+    let mut matches = HashSet::new();
+    for (_, path) in files.into_iter().take(64) {
+        let Ok(file) = File::open(path) else {
+            continue;
+        };
+        let mut bytes = Vec::new();
+        if file.take(32 * 1024).read_to_end(&mut bytes).is_err() {
+            continue;
+        }
+        let Some(first_line) = bytes.split(|byte| *byte == b'\n').next() else {
+            continue;
+        };
+        let Ok(value) = serde_json::from_slice::<serde_json::Value>(first_line) else {
+            continue;
+        };
+        let (identifier, cwd) = match provider {
+            crate::models::AgentProvider::Codex => (
+                value
+                    .pointer("/payload/id")
+                    .and_then(|value| value.as_str()),
+                value
+                    .pointer("/payload/cwd")
+                    .and_then(|value| value.as_str()),
+            ),
+            crate::models::AgentProvider::Claude => (
+                value.get("sessionId").and_then(|value| value.as_str()),
+                value.get("cwd").and_then(|value| value.as_str()),
+            ),
+            _ => (None, None),
+        };
+        if cwd.is_some_and(|cwd| same_path(cwd, working_directory)) {
+            if let Some(identifier) = identifier.and_then(|value| Uuid::parse_str(value).ok()) {
+                matches.insert(identifier.to_string());
+            }
+        }
+    }
+    (matches.len() == 1)
+        .then(|| matches.into_iter().next())
+        .flatten()
+}
+
+fn collect_recent_jsonl(
+    directory: &Path,
+    modified_after: SystemTime,
+    depth: usize,
+    files: &mut Vec<(SystemTime, PathBuf)>,
+) {
+    if depth > 6 {
+        return;
+    }
+    let Ok(entries) = fs::read_dir(directory) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Ok(metadata) = entry.metadata() else {
+            continue;
+        };
+        if metadata.is_dir() {
+            collect_recent_jsonl(&path, modified_after, depth + 1, files);
+        } else if path.extension().and_then(|value| value.to_str()) == Some("jsonl") {
+            if let Ok(modified) = metadata.modified() {
+                if modified >= modified_after {
+                    files.push((modified, path));
+                }
+            }
+        }
+    }
+}
+
+fn same_path(left: &str, right: &str) -> bool {
+    let normalize = |value: &str| {
+        let normalized = value.trim_end_matches(['\\', '/']).replace('\\', "/");
+        if cfg!(windows) {
+            normalized.to_ascii_lowercase()
+        } else {
+            normalized
+        }
+    };
+    normalize(left) == normalize(right)
+}
+
 fn is_coding_agent(provider: &crate::models::AgentProvider) -> bool {
     matches!(
         provider,
@@ -1161,6 +1368,39 @@ mod tests {
             rows: 24,
             restoration_attempt: false,
         }
+    }
+
+    #[test]
+    fn claude_launches_receive_an_exact_session_id_without_latest() {
+        let mut request = shell_request("workspace", "pane");
+        request.provider = AgentProvider::Claude;
+        request.args = vec!["--model".into(), "sonnet".into()];
+        prepare_exact_provider_identity(&mut request);
+        assert!(launch_contains_exact_session(
+            &AgentProvider::Claude,
+            &request.args
+        ));
+        assert!(!request
+            .args
+            .iter()
+            .any(|argument| matches!(argument.as_str(), "--continue" | "-c" | "--last")));
+    }
+
+    #[test]
+    fn exact_resume_detection_rejects_latest_and_injection_text() {
+        let id = Uuid::new_v4().to_string();
+        assert!(launch_contains_exact_session(
+            &AgentProvider::Codex,
+            &["resume".into(), id]
+        ));
+        assert!(!launch_contains_exact_session(
+            &AgentProvider::Codex,
+            &["resume".into(), "--last".into()]
+        ));
+        assert!(!launch_contains_exact_session(
+            &AgentProvider::Claude,
+            &["--resume".into(), "x; Remove-Item C:/".into()]
+        ));
     }
 
     /// A pane inherits PARALITH's environment, so a `NO_COLOR=1` exported by whatever launched

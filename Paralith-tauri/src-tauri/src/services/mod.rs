@@ -1,4 +1,5 @@
 pub mod agent_detector;
+pub mod agent_resume;
 pub mod browser_service;
 pub mod file_watch_service;
 pub mod filesystem_service;
@@ -16,6 +17,7 @@ pub mod window_chrome;
 pub mod window_registry;
 
 pub use agent_detector::AgentDetector;
+pub use agent_resume::AgentResumeService;
 pub use browser_service::BrowserService;
 pub use file_watch_service::FileWatchService;
 pub use filesystem_service::{FileSystemService, SelfWriteLedger};

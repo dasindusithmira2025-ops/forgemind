@@ -418,6 +418,54 @@ html[data-theme-swapping] *, html[data-theme-swapping] *::before, html[data-them
 .modal > header h2 { font-size: var(--text-md); font-weight: 650; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
 
+/* ---- Agent Resume Center ----------------------------------------------------- */
+.modal:has(.agent-resume-center) { width: min(920px, calc(100vw - 32px)); max-height: min(84vh, 820px); }
+.agent-resume-center { min-height: 0; display: flex; flex-direction: column; }
+.agent-resume-intro, .agent-resume-footer { padding: var(--space-3) var(--space-4); display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.agent-resume-intro { border-bottom: 1px solid var(--border-subtle); }
+.agent-resume-intro > div { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.agent-resume-intro strong, .agent-resume-empty strong { color: var(--text-strong); font-size: var(--text-sm); }
+.agent-resume-intro span, .agent-resume-empty span { color: var(--muted); font-size: var(--text-xs); }
+.agent-resume-list { min-height: 0; overflow: auto; display: flex; flex-direction: column; }
+.agent-resume-row { position: relative; padding: var(--space-3) var(--space-4); display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: var(--space-3); border-bottom: 1px solid var(--border-subtle); }
+.agent-resume-row::before { content: ''; position: absolute; inset: 0 auto 0 0; width: 2px; background: var(--status-offline); }
+.agent-resume-row.is-resumable::before { background: var(--status-working); }
+.agent-resume-row.is-unavailable::before { background: var(--status-blocked); }
+.agent-resume-row.is-launching::before { background: var(--status-waiting); }
+.agent-resume-row.is-running::before, .agent-resume-row.is-detached::before { background: var(--success); }
+.agent-resume-provider { width: 30px; height: 30px; display: grid; place-items: center; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-3); font-size: var(--text-2xs); font-weight: 700; letter-spacing: var(--tracking-label); }
+.agent-resume-provider.is-claude { color: var(--agent-claude); }
+.agent-resume-provider.is-codex { color: var(--agent-codex); }
+.agent-resume-main { min-width: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+.agent-resume-heading, .agent-resume-location, .agent-resume-actions { min-width: 0; display: flex; align-items: center; gap: var(--space-2); }
+.agent-resume-heading strong { min-width: 0; overflow: hidden; color: var(--text-strong); font-size: var(--text-sm); text-overflow: ellipsis; white-space: nowrap; }
+.agent-resume-heading time { margin-left: auto; flex: none; color: var(--faint); font-size: var(--text-xs); }
+.agent-resume-status { flex: none; padding: 1px 6px; border: 1px solid var(--border); border-radius: var(--radius-pill); color: var(--muted); font-size: var(--text-2xs); text-transform: uppercase; letter-spacing: var(--tracking-label); }
+.agent-resume-status.is-resumable { color: var(--status-working); }
+.agent-resume-status.is-unavailable { color: var(--status-blocked); }
+.agent-resume-status.is-running, .agent-resume-status.is-detached { color: var(--success); }
+.agent-resume-location { color: var(--muted); font-size: var(--text-xs); }
+.agent-resume-location span { min-width: 0; max-width: 42%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-resume-location span + span::before { content: '›'; margin-right: var(--space-2); color: var(--faint); }
+.agent-resume-command { min-width: 0; padding: 6px 8px; display: block; overflow: hidden; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg); color: var(--text); font: var(--text-xs) var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+.agent-resume-error { margin: 0; color: var(--danger-text); font-size: var(--text-xs); }
+.agent-resume-actions { flex-wrap: wrap; }
+.agent-resume-actions > button:not(.button) { min-height: var(--control-h-xs); padding: 0 7px; display: inline-flex; align-items: center; gap: 5px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--muted); font-size: var(--text-xs); cursor: pointer; }
+.agent-resume-actions > button:not(.button):hover { background: var(--surface-hover); color: var(--text); }
+.agent-resume-actions > button:disabled { opacity: .45; cursor: not-allowed; }
+.agent-resume-actions > .danger-item { color: var(--danger-text); }
+.agent-resume-empty { min-height: 220px; display: grid; place-content: center; justify-items: center; gap: var(--space-2); text-align: center; }
+.agent-resume-empty span { max-width: 360px; }
+.agent-resume-footer { border-top: 1px solid var(--border-subtle); }
+.orch-quick-command { grid-column: 1 / -1; justify-self: start; min-height: var(--control-h-sm); padding: 0 10px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-3); color: var(--text); font-size: var(--text-xs); cursor: pointer; }
+.orch-quick-command:hover { background: var(--surface-hover); }
+@media (max-width: 680px) {
+  .agent-resume-row { grid-template-columns: 1fr; }
+  .agent-resume-provider { width: auto; padding: 0 8px; }
+  .agent-resume-location { flex-wrap: wrap; }
+  .agent-resume-location span { max-width: 100%; }
+}
+
 .prompt-form { padding: 14px; display: flex; flex-direction: column; gap: 14px; }
 .prompt-form label { display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: var(--text-xs); }
 .prompt-form input { height: var(--control-h); padding: 0 9px; color: var(--text); background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius); }

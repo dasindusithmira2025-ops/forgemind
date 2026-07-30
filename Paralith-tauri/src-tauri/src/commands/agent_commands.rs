@@ -1,6 +1,7 @@
 use crate::errors::{AppError, AppResult};
 use crate::models::{
-    AgentDetectionResult, AgentProfile, AgentProvider, AgentSession, ShellProfile,
+    AgentDetectionResult, AgentProfile, AgentProvider, AgentResumeRecord, AgentSession,
+    ResumeAgentSessionRequest, ResumeAgentSessionResult, ShellProfile,
 };
 use crate::AppState;
 use serde::Deserialize;
@@ -56,6 +57,86 @@ pub fn list_agent_sessions(
 ) -> AppResult<Vec<AgentSession>> {
     crate::require_main_window(&window)?;
     state.database.list_agent_sessions(&workspace_id)
+}
+
+#[tauri::command]
+pub async fn reconcile_agent_resume_sessions(
+    window: Window,
+    state: State<'_, AppState>,
+) -> AppResult<Vec<AgentResumeRecord>> {
+    crate::require_main_window(&window)?;
+    let resume = state.agent_resume.clone();
+    tauri::async_runtime::spawn_blocking(move || resume.reconcile())
+        .await
+        .map_err(blocking_task_error)?
+}
+
+#[tauri::command]
+pub fn list_agent_resume_sessions(
+    include_dismissed: bool,
+    window: Window,
+    state: State<'_, AppState>,
+) -> AppResult<Vec<AgentResumeRecord>> {
+    crate::require_main_window(&window)?;
+    state.database.list_agent_resume_records(include_dismissed)
+}
+
+#[tauri::command]
+pub async fn resume_agent_session(
+    request: ResumeAgentSessionRequest,
+    window: Window,
+    state: State<'_, AppState>,
+) -> AppResult<ResumeAgentSessionResult> {
+    crate::require_main_window(&window)?;
+    let resume = state.agent_resume.clone();
+    tauri::async_runtime::spawn_blocking(move || resume.resume(request))
+        .await
+        .map_err(blocking_task_error)?
+}
+
+#[tauri::command]
+pub fn dismiss_agent_resume_session(
+    terminal_session_id: String,
+    window: Window,
+    state: State<'_, AppState>,
+) -> AppResult<()> {
+    crate::require_main_window(&window)?;
+    state.database.dismiss_agent_resume(&terminal_session_id)
+}
+
+#[tauri::command]
+pub fn dismiss_all_agent_resume_sessions(
+    window: Window,
+    state: State<'_, AppState>,
+) -> AppResult<usize> {
+    crate::require_main_window(&window)?;
+    state.database.dismiss_all_agent_resumes()
+}
+
+#[tauri::command]
+pub fn remove_agent_resume_session(
+    terminal_session_id: String,
+    window: Window,
+    state: State<'_, AppState>,
+) -> AppResult<()> {
+    crate::require_main_window(&window)?;
+    state.database.remove_agent_resume(&terminal_session_id)
+}
+
+#[tauri::command]
+pub async fn relocate_agent_resume_worktree(
+    terminal_session_id: String,
+    path: String,
+    window: Window,
+    state: State<'_, AppState>,
+) -> AppResult<AgentResumeRecord> {
+    crate::require_main_window(&window)?;
+    let resume = state.agent_resume.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        resume.relocate_worktree(&terminal_session_id, &path)
+    })
+    .await
+    .map_err(blocking_task_error)?
 }
 
 #[tauri::command]

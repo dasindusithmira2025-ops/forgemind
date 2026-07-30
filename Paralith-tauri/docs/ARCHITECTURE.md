@@ -50,9 +50,17 @@ Restore behavior can ask, restart assigned agents, or launch fresh native shells
 
 Inactive Workspace processes follow `keep_running`, `ask`, or `stop`. Inactive xterm canvases are always hibernated; native bounded tails preserve history for re-entry.
 
+## Exact agent-session recovery
+
+The Agent Resume Center is a recovery layer above ordinary pane restoration. It supports Claude Code and Codex only and persists provider-neutral identity in `agent_sessions`: the exact provider session ID, Project and repository identity, Workspace and Pane ownership, worktree and branch, working directory, sanitized launch metadata, activity timestamp, and shutdown/recovery state. It never persists prompts, transcripts, credentials, tokens, or environment snapshots.
+
+Claude launches receive a caller-generated session UUID before the PTY starts. Codex identity is captured from the provider session file created for that launch; the fallback reads only the bounded first metadata record and never stores provider content. Resume launches are reconstructed as executable plus argument vectors (`claude --resume <id>` or `codex resume <id>`), not shell command strings, and never use “latest” when an exact ID exists.
+
+Startup reconciliation runs after the renderer is interactive. It compares the registry with live `TerminalManager` ownership, validates the Project, Workspace, worktree, working directory, CLI, provider metadata, and native/WSL boundary, then classifies each record as running, resumable, unavailable, detached, or completed. Only resumable records trigger the automatic startup modal; unavailable records remain available through the menus for repair or removal, while pre-feature rows that never had an exact ID are initially dismissed to avoid presenting false recovery. A resume is atomically claimed before launch, opens the owning Project and Workspace, reuses or transactionally creates a Pane, starts one exact-session PTY in the saved working directory, and focuses that terminal. Batch recovery is bounded and reports each failure independently.
+
 ## Persistence
 
-SQLite is authoritative. Every connection enables foreign keys. Multi-entity writes use transactions. Forward-only migration 4 normalizes Workspace names, restores strict Session ownership foreign keys, expands Terminal Session metadata, and adds Agent Profiles, Agent Sessions, repair history, and quarantine tables. A pre-migration SQLite backup is created before schema 4. WAL is enabled only after migration and compatibility checks.
+SQLite is authoritative. Every connection enables foreign keys. Multi-entity writes use transactions. Forward-only migration 4 normalizes Workspace names, restores strict Session ownership foreign keys, expands Terminal Session metadata, and adds Agent Profiles, Agent Sessions, repair history, and quarantine tables. Migration 27 adds the sanitized exact-session recovery registry and indexes while backfilling existing Agent Sessions in place. A pre-migration SQLite backup is created before schema 4. WAL is enabled only after migration and compatibility checks.
 
 Startup repair is idempotent. It normalizes stale live Sessions, invalid active Pane references, and invalid layouts; unrecoverable metadata is quarantined and every action is recorded. Repair never reads, modifies, or deletes source Project contents.
 

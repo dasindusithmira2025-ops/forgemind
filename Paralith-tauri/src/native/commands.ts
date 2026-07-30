@@ -21,6 +21,9 @@ import type {
   StartTerminalRequest,
   AgentProfile,
   AgentSession,
+  AgentResumeRecord,
+  ResumeAgentSessionRequest,
+  ResumeAgentSessionResult,
   IsolatedWorktreeResult,
   PaneGitReview,
   Workspace,
@@ -174,6 +177,18 @@ export const native = {
     invoke<void>('apply_window_chrome', { chrome }),
   listAgentProfiles: () => invoke<AgentProfile[]>('list_agent_profiles'),
   listAgentSessions: (workspaceId: string) => invoke<AgentSession[]>('list_agent_sessions', { workspaceId }),
+  reconcileAgentResumeSessions: () => invoke<AgentResumeRecord[]>('reconcile_agent_resume_sessions'),
+  listAgentResumeSessions: (includeDismissed = false) =>
+    invoke<AgentResumeRecord[]>('list_agent_resume_sessions', { includeDismissed }),
+  resumeAgentSession: (request: ResumeAgentSessionRequest) =>
+    invoke<ResumeAgentSessionResult>('resume_agent_session', { request }),
+  dismissAgentResumeSession: (terminalSessionId: string) =>
+    invoke<void>('dismiss_agent_resume_session', { terminalSessionId }),
+  dismissAllAgentResumeSessions: () => invoke<number>('dismiss_all_agent_resume_sessions'),
+  removeAgentResumeSession: (terminalSessionId: string) =>
+    invoke<void>('remove_agent_resume_session', { terminalSessionId }),
+  relocateAgentResumeWorktree: (terminalSessionId: string, path: string) =>
+    invoke<AgentResumeRecord>('relocate_agent_resume_worktree', { terminalSessionId, path }),
   getDiagnostics: () => invoke<DiagnosticsSnapshot>('get_diagnostics'),
   runHealthCheck: () => invoke<HealthReport>('run_health_check'),
   exportRedactedSupportBundle: () => invoke<string>('export_redacted_support_bundle'),

@@ -1,7 +1,7 @@
 use crate::errors::{AppError, AppResult};
 use rusqlite::{params, Connection};
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 26;
+pub const CURRENT_SCHEMA_VERSION: i64 = 27;
 
 const MIGRATION_1: &str = r#"
 CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
@@ -901,6 +901,12 @@ pub fn apply(connection: &Connection) -> AppResult<()> {
     if current < 26 || !table_exists(connection, "repository_graph_nodes")? {
         migrate_v26(connection)?;
     }
+    if current < 27
+        || !column_exists(connection, "agent_sessions", "recovery_status")?
+        || !column_exists(connection, "agent_sessions", "worktree_path")?
+    {
+        migrate_v27(connection)?;
+    }
     Ok(())
 }
 
@@ -949,7 +955,9 @@ pub fn requires_migration(connection: &Connection) -> AppResult<bool> {
             "execution_config_snapshot_json",
         )?
         || !table_exists(connection, "swarm_execution_defaults")?
-        || !table_exists(connection, "repository_graph_nodes")?)
+        || !table_exists(connection, "repository_graph_nodes")?
+        || !column_exists(connection, "agent_sessions", "recovery_status")?
+        || !column_exists(connection, "agent_sessions", "worktree_path")?)
 }
 
 fn migrate_v24(connection: &Connection) -> AppResult<()> {
@@ -2392,6 +2400,119 @@ CREATE TABLE IF NOT EXISTS repository_graph_index_state(
     finish_migration_transaction(connection, result, 26)
 }
 
+/// Extend the canonical agent-session record into the provider-neutral resume registry. These
+/// fields are metadata snapshots only: provider transcripts, credentials, tokens, and complete
+/// environments remain provider-owned and are never copied into SQLite.
+fn migrate_v27(connection: &Connection) -> AppResult<()> {
+    connection
+        .execute_batch("BEGIN IMMEDIATE;")
+        .map_err(AppError::database)?;
+    let result = (|| {
+        for (column, definition) in [
+            ("session_title", "TEXT NOT NULL DEFAULT ''"),
+            ("repository_root", "TEXT NOT NULL DEFAULT ''"),
+            ("repository_identity", "TEXT NOT NULL DEFAULT ''"),
+            ("worktree_path", "TEXT NOT NULL DEFAULT ''"),
+            ("branch_name", "TEXT"),
+            ("working_directory", "TEXT NOT NULL DEFAULT ''"),
+            ("launch_executable", "TEXT NOT NULL DEFAULT ''"),
+            ("launch_args_json", "TEXT NOT NULL DEFAULT '[]'"),
+            ("original_launch_args_json", "TEXT NOT NULL DEFAULT '[]'"),
+            ("last_activity_at", "TEXT NOT NULL DEFAULT ''"),
+            ("recovery_status", "TEXT NOT NULL DEFAULT 'unknown'"),
+            ("shutdown_reason", "TEXT NOT NULL DEFAULT 'unknown'"),
+            ("dismissed_at", "TEXT"),
+            ("resume_attempt_id", "TEXT"),
+            ("last_error_code", "TEXT"),
+            ("last_error_message", "TEXT"),
+            ("running_terminal_session_id", "TEXT"),
+        ] {
+            add_column_if_missing(connection, "agent_sessions", column, definition)?;
+        }
+        connection.execute_batch(
+            r#"
+UPDATE agent_sessions
+SET session_title = coalesce(
+      nullif(session_title, ''),
+      (SELECT title FROM terminal_sessions t WHERE t.id=agent_sessions.terminal_session_id),
+      provider_type
+    ),
+    repository_root = coalesce(
+      nullif(repository_root, ''),
+      (SELECT canonical_root_path FROM projects p WHERE p.id=agent_sessions.project_id),
+      ''
+    ),
+    repository_identity = coalesce(
+      nullif(repository_identity, ''),
+      (SELECT canonical_root_path FROM projects p WHERE p.id=agent_sessions.project_id),
+      ''
+    ),
+    worktree_path = coalesce(
+      nullif(worktree_path, ''),
+      (SELECT pw.worktree_path FROM pane_worktrees pw
+       WHERE pw.workspace_id=agent_sessions.workspace_id
+         AND pw.pane_id=agent_sessions.pane_id
+         AND pw.status='active'
+       ORDER BY pw.updated_at DESC LIMIT 1),
+      (SELECT working_directory FROM terminal_sessions t WHERE t.id=agent_sessions.terminal_session_id),
+      ''
+    ),
+    branch_name = coalesce(
+      branch_name,
+      (SELECT pw.branch_name FROM pane_worktrees pw
+       WHERE pw.workspace_id=agent_sessions.workspace_id
+         AND pw.pane_id=agent_sessions.pane_id
+         AND pw.status='active'
+       ORDER BY pw.updated_at DESC LIMIT 1),
+      (SELECT git_branch FROM projects p WHERE p.id=agent_sessions.project_id)
+    ),
+    working_directory = coalesce(
+      nullif(working_directory, ''),
+      (SELECT working_directory FROM terminal_sessions t WHERE t.id=agent_sessions.terminal_session_id),
+      ''
+    ),
+    launch_executable = coalesce(
+      nullif(launch_executable, ''),
+      (SELECT executable_path FROM terminal_sessions t WHERE t.id=agent_sessions.terminal_session_id),
+      ''
+    ),
+    launch_args_json = coalesce(
+      nullif(launch_args_json, '[]'),
+      '[]'
+    ),
+    original_launch_args_json = coalesce(
+      nullif(original_launch_args_json, '[]'),
+      '[]'
+    ),
+    last_activity_at = coalesce(nullif(last_activity_at, ''), nullif(agent_state_updated_at, ''), updated_at),
+    recovery_status = CASE
+      WHEN recovery_status <> 'unknown' THEN recovery_status
+      WHEN status='running' THEN 'reconciling'
+      WHEN status='exited' AND agent_state='finished' THEN 'completed'
+      ELSE 'resumable'
+    END,
+    shutdown_reason = CASE
+      WHEN shutdown_reason <> 'unknown' THEN shutdown_reason
+      WHEN status='running' THEN 'unclean_shutdown'
+      WHEN status='exited' AND agent_state='finished' THEN 'completed'
+      ELSE 'legacy_stopped'
+    END,
+    dismissed_at = CASE
+      WHEN provider_session_id IS NULL THEN coalesce(dismissed_at,updated_at)
+      ELSE dismissed_at
+    END;
+CREATE INDEX IF NOT EXISTS idx_agent_resume_center
+  ON agent_sessions(dismissed_at,recovery_status,last_activity_at DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_provider_session
+  ON agent_sessions(provider_type,provider_session_id,last_activity_at DESC);
+"#,
+        )
+        .map_err(AppError::database)?;
+        record_migration(connection, 27)
+    })();
+    finish_migration_transaction(connection, result, 27)
+}
+
 /// Rewrite every stored preset's `config_json` into the role-pool allocation shape. User presets
 /// are upgraded in place (no data loss); built-in presets are refreshed to the canonical
 /// composition from [`crate::models::swarm::builtin_presets`], which is where the Feature Team and
@@ -2815,6 +2936,126 @@ mod tests {
             .unwrap();
         migrate_v24(&connection).unwrap();
         assert!(table_exists(&connection, "swarm_execution_defaults").unwrap());
+    }
+
+    #[test]
+    fn v27_backfills_resume_metadata_without_losing_agent_identity() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .execute_batch(
+                r#"
+CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
+CREATE TABLE projects(id TEXT PRIMARY KEY, canonical_root_path TEXT NOT NULL, git_branch TEXT);
+CREATE TABLE workspaces(id TEXT PRIMARY KEY);
+CREATE TABLE workspace_panes(id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, args_json TEXT NOT NULL);
+CREATE TABLE terminal_sessions(
+  id TEXT PRIMARY KEY, title TEXT NOT NULL, working_directory TEXT NOT NULL,
+  executable_path TEXT NOT NULL, args_json TEXT NOT NULL
+);
+CREATE TABLE pane_worktrees(
+  workspace_id TEXT NOT NULL, pane_id TEXT NOT NULL, worktree_path TEXT NOT NULL,
+  branch_name TEXT NOT NULL, status TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE agent_sessions(
+  terminal_session_id TEXT PRIMARY KEY, project_id TEXT NOT NULL, workspace_id TEXT NOT NULL,
+  pane_id TEXT NOT NULL, profile_id TEXT, provider_type TEXT NOT NULL,
+  provider_session_id TEXT, transcript_path TEXT, status TEXT NOT NULL,
+  agent_state TEXT NOT NULL, agent_state_source TEXT NOT NULL, agent_state_reason TEXT NOT NULL,
+  agent_attention_since TEXT, agent_state_updated_at TEXT NOT NULL,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+INSERT INTO projects VALUES('project','C:/repo','main');
+INSERT INTO workspaces VALUES('workspace');
+INSERT INTO workspace_panes VALUES('pane','workspace','[]');
+INSERT INTO terminal_sessions VALUES('terminal','Claude','C:/repo','C:/bin/claude.exe','["--model","opus"]');
+INSERT INTO terminal_sessions VALUES('terminal-running','Codex','C:/repo','C:/bin/codex.exe','[]');
+INSERT INTO terminal_sessions VALUES('terminal-unidentified','Claude','C:/repo','C:/bin/claude.exe','["prompt with secret"]');
+INSERT INTO agent_sessions VALUES(
+  'terminal','project','workspace','pane',NULL,'claude',
+  '5bb49df0-2afe-4fe2-8fd4-8aa4ba2943a9',NULL,'terminated',
+  'failed','process_exit','stopped',NULL,'2026-07-30T10:00:00Z',
+  '2026-07-30T09:00:00Z','2026-07-30T10:00:00Z'
+);
+INSERT INTO agent_sessions VALUES(
+  'terminal-unidentified','project','workspace','pane',NULL,'claude',
+  NULL,NULL,'terminated',
+  'failed','process_exit','stopped',NULL,'2026-07-30T10:00:00Z',
+  '2026-07-30T09:00:00Z','2026-07-30T10:00:00Z'
+);
+INSERT INTO agent_sessions VALUES(
+  'terminal-running','project','workspace','pane',NULL,'codex',
+  'c79b35f1-f15f-4665-a2d0-b56e992167b5',NULL,'running',
+  'working','process_running','active',NULL,'2026-07-30T10:00:00Z',
+  '2026-07-30T09:00:00Z','2026-07-30T10:00:00Z'
+);
+PRAGMA user_version=26;
+"#,
+            )
+            .unwrap();
+        migrate_v27(&connection).unwrap();
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT provider_session_id FROM agent_sessions WHERE terminal_session_id='terminal'",
+                    [],
+                    |row| row.get::<_, String>(0)
+                )
+                .unwrap(),
+            "5bb49df0-2afe-4fe2-8fd4-8aa4ba2943a9"
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT repository_root FROM agent_sessions WHERE terminal_session_id='terminal'",
+                    [],
+                    |row| row.get::<_, String>(0)
+                )
+                .unwrap(),
+            "C:/repo"
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT recovery_status||':'||shutdown_reason FROM agent_sessions WHERE terminal_session_id='terminal'",
+                    [],
+                    |row| row.get::<_, String>(0)
+                )
+                .unwrap(),
+            "resumable:legacy_stopped"
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT recovery_status||':'||shutdown_reason FROM agent_sessions WHERE terminal_session_id='terminal-running'",
+                    [],
+                    |row| row.get::<_, String>(0)
+                )
+                .unwrap(),
+            "reconciling:unclean_shutdown"
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT launch_args_json FROM agent_sessions WHERE terminal_session_id='terminal'",
+                    [],
+                    |row| row.get::<_, String>(0)
+                )
+                .unwrap(),
+            "[]"
+        );
+        assert!(connection
+            .query_row(
+                "SELECT dismissed_at IS NOT NULL FROM agent_sessions WHERE terminal_session_id='terminal-unidentified'",
+                [],
+                |row| row.get::<_, bool>(0)
+            )
+            .unwrap());
+        assert_eq!(
+            connection
+                .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            27
+        );
     }
 
     fn insert_session(connection: &Connection) -> rusqlite::Result<usize> {

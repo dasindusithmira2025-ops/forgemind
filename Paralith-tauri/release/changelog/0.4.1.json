@@ -7,6 +7,7 @@
     "Public artifact-only update distribution with isolated Preview and Stable channel manifests",
     "Project-scoped Swarm role pools with mixed Claude, Codex, and automatic runtime allocations",
     "Live Claude and Codex usage limits in the desktop workspace",
+    "Exact-session recovery for interrupted Claude Code and Codex terminals",
     "A denser project-first sidebar and workspace information architecture"
   ],
   "fixes": [
@@ -18,7 +19,7 @@
     "Reject invalid runtime allocations and block launches when an explicitly selected runtime is unavailable"
   ],
   "databaseChanges": [
-    "Apply forward-only schemas 16-26 for orchestration, evidence, recovery, repository state, runtime usage, and idempotent event processing",
+    "Apply forward-only schemas 16-27 for orchestration, evidence, exact agent-session recovery, repository state, runtime usage, and idempotent event processing",
     "Backfill existing single-runtime roles and upgrade saved preset and Swarm configurations without deleting user data",
     "Preserve existing Projects, Workspaces, terminals, Missions, Memory, settings, and edition-specific updater state"
   ],
