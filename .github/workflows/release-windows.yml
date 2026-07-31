@@ -165,6 +165,24 @@ jobs:
             node scripts/release/github-artifacts-publisher.mjs publish '${{ inputs.edition }}' '${{ inputs.tag }}' "$($dir.FullName)" "$($dir.Name)"
           }
 
+      # A push mirror only holds what we upload, so this runs after the canonical publication has
+      # already succeeded: the origin is never left behind a mirror. Skipped entirely when no mirror
+      # is configured. Ordering (installers first, manifest last, activated by atomic rename) is
+      # enforced by the generated sftp batch, not by this step.
+      - name: Publish to the partner-hosted mirror
+        if: ${{ vars.PARALITH_UPDATE_MIRROR_BASE_URL != '' }}
+        env:
+          PARALITH_UPDATE_MIRROR_MODE: ${{ vars.PARALITH_UPDATE_MIRROR_MODE }}
+          PARALITH_MIRROR_SSH_HOST: ${{ vars.PARALITH_MIRROR_SSH_HOST }}
+          PARALITH_MIRROR_SSH_PORT: ${{ vars.PARALITH_MIRROR_SSH_PORT }}
+          PARALITH_MIRROR_SSH_USER: ${{ vars.PARALITH_MIRROR_SSH_USER }}
+          PARALITH_MIRROR_REMOTE_ROOT: ${{ vars.PARALITH_MIRROR_REMOTE_ROOT }}
+          PARALITH_MIRROR_SSH_KEY: ${{ secrets.PARALITH_MIRROR_SSH_KEY }}
+          PARALITH_MIRROR_SSH_HOST_KEY: ${{ secrets.PARALITH_MIRROR_SSH_HOST_KEY }}
+        run: |
+          $dir = Get-ChildItem '.artifacts/release/${{ inputs.edition }}' -Directory | Select-Object -First 1
+          pwsh -NoProfile -File scripts/release/push-mirror-publication.ps1 -Channel '${{ inputs.edition }}' -Tag '${{ inputs.tag }}' -SourceDirectory "$($dir.FullName)"
+
       # The canonical origin is proven by the publisher itself. This proves the URL that installed
       # apps will actually poll, which is a different host whenever a mirror is configured. A mirror
       # is usually cold right after publication, so the check retries while it pulls from the origin.
