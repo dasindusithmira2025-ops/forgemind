@@ -40,9 +40,10 @@ const context = { workspaceId: 'wsb', projectId: 'p1', workspaceName: 'WS', proj
 beforeEach(() => {
   holder.handler = undefined
   browserNavigate.mockClear()
-  browserSetVisible.mockClear()
+  browserSetVisible.mockReset().mockResolvedValue(undefined)
   browserSetInspect.mockClear()
-  openBrowserView.mockClear()
+  openBrowserView.mockReset().mockResolvedValue(undefined)
+  closeBrowserView.mockReset().mockResolvedValue(undefined)
   localStorage.clear()
   // jsdom reports a 0×0 layout; give the viewport a real size so the geometry effect (which drives
   // native navigation) proceeds instead of bailing on an empty rectangle.
@@ -90,6 +91,55 @@ describe('BrowserSurface', () => {
     browserSetVisible.mockClear()
     rerender(<BrowserSurface active={false} context={context} />)
     await waitFor(() => expect(browserSetVisible).toHaveBeenCalledWith('wsb', false))
+  })
+
+  it('orders a panel-collapse hide after pending native webview creation', async () => {
+    let finishOpen!: () => void
+    const opened = new Promise<void>((resolve) => { finishOpen = resolve })
+    const lifecycle: string[] = []
+    openBrowserView.mockImplementationOnce(async () => {
+      await opened
+      lifecycle.push('open:resolved')
+    })
+    browserSetVisible.mockImplementation(async (_workspaceId: string, visible: boolean) => {
+      lifecycle.push(`visible:${visible}`)
+    })
+
+    act(() => { useBrowserSessionStore.getState().init('wsb') })
+    act(() => { useBrowserSessionStore.getState().navigate('http://localhost:3000/') })
+    const { rerender } = render(<BrowserSurface active context={context} />)
+    await waitFor(() => expect(openBrowserView).toHaveBeenCalled())
+
+    rerender(<BrowserSurface active={false} context={context} />)
+    expect(browserSetVisible).not.toHaveBeenCalled()
+    finishOpen()
+
+    await waitFor(() => expect(lifecycle.at(-1)).toBe('visible:false'))
+    expect(browserSetVisible).not.toHaveBeenCalledWith('wsb', true)
+  })
+
+  it('orders unmount cleanup after pending native webview creation', async () => {
+    let finishOpen!: () => void
+    const opened = new Promise<void>((resolve) => { finishOpen = resolve })
+    const lifecycle: string[] = []
+    openBrowserView.mockImplementationOnce(async () => {
+      await opened
+      lifecycle.push('open:resolved')
+    })
+    closeBrowserView.mockImplementation(async () => {
+      lifecycle.push('close')
+    })
+
+    act(() => { useBrowserSessionStore.getState().init('wsb') })
+    act(() => { useBrowserSessionStore.getState().navigate('http://localhost:3000/') })
+    const { unmount } = render(<BrowserSurface active context={context} />)
+    await waitFor(() => expect(openBrowserView).toHaveBeenCalled())
+
+    unmount()
+    expect(closeBrowserView).not.toHaveBeenCalled()
+    finishOpen()
+
+    await waitFor(() => expect(lifecycle.at(-1)).toBe('close'))
   })
 
   it('decodes + sanitizes an inspect selection and exits inspect mode', async () => {
