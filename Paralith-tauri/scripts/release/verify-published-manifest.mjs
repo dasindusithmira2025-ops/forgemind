@@ -95,11 +95,11 @@ async function fetchStatus(url, method = 'GET') {
   return response
 }
 
-async function main() {
-  const [edition, endpoint, expectedVersion, previousVersion] = process.argv.slice(2)
-  if (!edition || !endpoint || !expectedVersion) {
-    throw new Error('usage: verify-published-manifest <edition> <manifestUrl> <expectedVersion> [previousVersion]')
-  }
+/**
+ * One full check of a live manifest URL: reachable, structurally valid for the release, and
+ * pointing at an artifact that actually downloads. Returns human-readable problems; empty is a pass.
+ */
+export async function checkPublishedManifest(edition, endpoint, expectedVersion, previousVersion = null) {
   const response = await fetchStatus(endpoint)
   if (response.status !== 200) {
     throw new Error(`Published ${edition} manifest ${endpoint} returned HTTP ${response.status}, expected 200`)
@@ -122,6 +122,32 @@ async function main() {
     }
     if (![200, 206].includes(artifact.status)) {
       errors.push(`updater artifact ${artifactUrl} returned HTTP ${artifact.status}`)
+    }
+  }
+  return errors
+}
+
+async function main() {
+  const positional = process.argv.slice(2).filter((argument) => !argument.startsWith('--'))
+  const [edition, endpoint, expectedVersion, previousVersion] = positional
+  if (!edition || !endpoint || !expectedVersion) {
+    throw new Error('usage: verify-published-manifest <edition> <manifestUrl> <expectedVersion> [previousVersion] [--attempts=N]')
+  }
+  // A freshly published mirror is usually cold: the first request is what makes it pull from the
+  // origin. Retrying turns that expected warm-up into a wait instead of a failed release.
+  const attemptsFlag = process.argv.slice(2).find((argument) => argument.startsWith('--attempts='))
+  const attempts = Math.max(1, Number(attemptsFlag?.split('=')[1] || 1))
+  let errors = []
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      errors = await checkPublishedManifest(edition, endpoint, expectedVersion, previousVersion || null)
+    } catch (error) {
+      errors = [error.message]
+    }
+    if (errors.length === 0) break
+    if (attempt < attempts) {
+      console.log(`Attempt ${attempt}/${attempts} for ${endpoint} not ready yet; retrying in 10s.`)
+      await new Promise((resolve) => setTimeout(resolve, 10_000))
     }
   }
 

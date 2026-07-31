@@ -163,6 +163,26 @@ describe('public update repository contract', () => {
     ]))
   })
 
+  it('accepts mirror-hosted installer URLs only when the mirror is declared in full mode', () => {
+    const mirror = 'https://updates.example.com'
+    const mirrored = manifest({
+      platforms: {
+        'windows-x86_64': { url: `${mirror}/releases/${tag}/PARALITH.Preview_${version}_x64-setup.exe`, signature: 'sig' },
+        'windows-x86_64-nsis': { url: `${mirror}/releases/${tag}/PARALITH.Preview_${version}_x64-setup.exe`, signature: 'sig' },
+        'windows-x86_64-msi': { url: `${mirror}/releases/${tag}/PARALITH.Preview_${version}_x64_en-US.msi`, signature: 'sig' },
+      },
+    })
+    const full = { PARALITH_UPDATE_MIRROR_BASE_URL: mirror, PARALITH_UPDATE_MIRROR_MODE: 'full' }
+
+    expect(validateGithubManifest(mirrored, { repository, tag, channel: 'preview', version, env: full })).toEqual([])
+    // Without the opt-in the installers must stay on the canonical origin, so the same manifest fails.
+    for (const env of [{}, { PARALITH_UPDATE_MIRROR_BASE_URL: mirror }]) {
+      expect(validateGithubManifest(mirrored, { repository, tag, channel: 'preview', version, env })).toEqual(
+        expect.arrayContaining([expect.stringContaining('does not reference release')]),
+      )
+    }
+  })
+
   it('stages only a validated public release handoff', async () => {
     const root = await mkdtemp(join(tmpdir(), 'paralith-handoff-'))
     const source = join(root, 'source')

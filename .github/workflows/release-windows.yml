@@ -71,13 +71,15 @@ jobs:
           PARALITH_UPDATES_DEPLOY_KEY: ${{ secrets.PARALITH_UPDATES_DEPLOY_KEY }}
           PARALITH_STABLE_UPDATE_ENDPOINT: ${{ vars.PARALITH_STABLE_UPDATE_ENDPOINT }}
           PARALITH_PREVIEW_UPDATE_ENDPOINT: ${{ vars.PARALITH_PREVIEW_UPDATE_ENDPOINT }}
+          PARALITH_UPDATE_MIRROR_BASE_URL: ${{ vars.PARALITH_UPDATE_MIRROR_BASE_URL }}
+          PARALITH_UPDATE_MIRROR_MODE: ${{ vars.PARALITH_UPDATE_MIRROR_MODE }}
         run: |
           if ($env:PARALITH_UPDATE_PUBLISH_PROVIDER -ne 'github-artifacts') { throw 'Protected channel releases require PARALITH_UPDATE_PUBLISH_PROVIDER=github-artifacts.' }
           if (-not $env:PARALITH_UPDATES_REPOSITORY) { throw 'PARALITH_UPDATES_REPOSITORY is required.' }
           if (-not $env:PARALITH_UPDATES_TOKEN -and -not $env:PARALITH_UPDATES_DEPLOY_KEY) { throw 'PARALITH_UPDATES_TOKEN or PARALITH_UPDATES_DEPLOY_KEY is required.' }
-          $endpoint = if ('${{ inputs.edition }}' -eq 'stable') { $env:PARALITH_STABLE_UPDATE_ENDPOINT } else { $env:PARALITH_PREVIEW_UPDATE_ENDPOINT }
-          $expected = "https://raw.githubusercontent.com/$env:PARALITH_UPDATES_REPOSITORY/main/channels/${{ inputs.edition }}/latest.json"
-          if ($endpoint -ne $expected) { throw "The ${{ inputs.edition }} endpoint must be the public channel manifest URL." }
+          # Derives and validates the endpoint and installer base URL for this release, honouring an
+          # optional third-party mirror, and exports them so nothing downstream rebuilds them by hand.
+          node scripts/release/update-distribution.mjs '${{ inputs.edition }}' '${{ inputs.tag }}'
 
       - name: Validate protected release tag
         run: npm run release:check
@@ -109,10 +111,10 @@ jobs:
           $env:PARALITH_RELEASE_CHANNEL='${{ inputs.edition }}'
           $env:PARALITH_GIT_COMMIT=(git rev-parse HEAD).Trim()
           $env:PARALITH_BUILD_TIMESTAMP=(Get-Date).ToUniversalTime().ToString('o')
-          $env:PARALITH_UPDATE_ARTIFACT_BASE_URL="https://github.com/$env:PARALITH_UPDATES_REPOSITORY/releases/download/${{ inputs.tag }}"
-          $endpoint = if ('${{ inputs.edition }}' -eq 'stable') { $env:PARALITH_STABLE_UPDATE_ENDPOINT } else { $env:PARALITH_PREVIEW_UPDATE_ENDPOINT }
-          if (-not $endpoint) { throw 'Edition update endpoint repository variable is required.' }
-          $env:PARALITH_UPDATE_ENDPOINT=$endpoint
+          # PARALITH_UPDATE_ENDPOINT and PARALITH_UPDATE_ARTIFACT_BASE_URL were derived and validated
+          # by the publication preflight step and exported through $GITHUB_ENV.
+          if (-not $env:PARALITH_UPDATE_ENDPOINT) { throw 'PARALITH_UPDATE_ENDPOINT was not resolved by the publication preflight.' }
+          if (-not $env:PARALITH_UPDATE_ARTIFACT_BASE_URL) { throw 'PARALITH_UPDATE_ARTIFACT_BASE_URL was not resolved by the publication preflight.' }
           $config = node scripts/release/render-tauri-config.mjs '${{ inputs.edition }}' release | Select-Object -Last 1
           npm run tauri -- build --bundles msi,nsis --config $config
           node scripts/release/assemble-release.mjs '${{ inputs.edition }}'
@@ -153,6 +155,8 @@ jobs:
           PARALITH_UPDATES_REPOSITORY: ${{ vars.PARALITH_UPDATES_REPOSITORY }}
           PARALITH_UPDATES_TOKEN: ${{ secrets.PARALITH_UPDATES_TOKEN }}
           PARALITH_UPDATES_DEPLOY_KEY: ${{ secrets.PARALITH_UPDATES_DEPLOY_KEY }}
+          PARALITH_UPDATE_MIRROR_BASE_URL: ${{ vars.PARALITH_UPDATE_MIRROR_BASE_URL }}
+          PARALITH_UPDATE_MIRROR_MODE: ${{ vars.PARALITH_UPDATE_MIRROR_MODE }}
         run: |
           $dir = Get-ChildItem '.artifacts/release/${{ inputs.edition }}' -Directory | Select-Object -First 1
           if ($env:PARALITH_UPDATES_DEPLOY_KEY) {
@@ -160,6 +164,14 @@ jobs:
           } else {
             node scripts/release/github-artifacts-publisher.mjs publish '${{ inputs.edition }}' '${{ inputs.tag }}' "$($dir.FullName)" "$($dir.Name)"
           }
+
+      # The canonical origin is proven by the publisher itself. This proves the URL that installed
+      # apps will actually poll, which is a different host whenever a mirror is configured. A mirror
+      # is usually cold right after publication, so the check retries while it pulls from the origin.
+      - name: Verify the live update endpoint installed apps will poll
+        run: |
+          $dir = Get-ChildItem '.artifacts/release/${{ inputs.edition }}' -Directory | Select-Object -First 1
+          node scripts/release/verify-published-manifest.mjs '${{ inputs.edition }}' "$env:PARALITH_UPDATE_ENDPOINT" "$($dir.Name)" --attempts=30
 
       - name: Clean up abandoned build processes
         if: always()
