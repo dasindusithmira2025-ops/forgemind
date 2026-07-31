@@ -53,31 +53,91 @@ manifest and can never be rewritten afterwards.
 
 ### Expected layout
 
-The mirror reproduces the canonical paths verbatim, so a pull-through cache needs no URL rewriting:
+The mirror reproduces the canonical paths verbatim:
 
 ```
 <mirror>/channels/stable/latest.json   ← https://raw.githubusercontent.com/<repo>/main/channels/stable/latest.json
 <mirror>/releases/<tag>/<file>         ← https://github.com/<repo>/releases/download/<tag>/<file>   (full mode only)
 ```
 
-`node scripts/release/update-distribution.mjs stable <tag>` prints the exact origin URLs to
-configure, and the release workflow runs it on every release.
+`node scripts/release/update-distribution.mjs stable <tag>` prints the exact URLs, and the release
+workflow runs it on every release.
+
+## Push mirrors (SFTP)
+
+A mirror that pulls from GitHub needs nothing from us but a URL. A mirror we upload into is a push
+target, and the release pipeline uploads to it over SFTP after the canonical publication succeeds —
+never before, so the origin is never left behind the mirror.
+
+| Setting | Kind | Notes |
+|---|---|---|
+| `PARALITH_MIRROR_SSH_HOST` | variable | hostname or IP |
+| `PARALITH_MIRROR_SSH_PORT` | variable | defaults to 22 |
+| `PARALITH_MIRROR_SSH_USER` | variable | should own only the served directory |
+| `PARALITH_MIRROR_REMOTE_ROOT` | variable | absolute path, e.g. `/srv/paralith` |
+| `PARALITH_MIRROR_SSH_KEY` | **secret** | private key; write access to the mirror |
+| `PARALITH_MIRROR_SSH_HOST_KEY` | **secret** | pinned `known_hosts` line from `ssh-keyscan -p <port> <host>` |
+
+Push publication is only as safe as its ordering, so the generated `sftp` batch guarantees it:
+
+1. installers and signatures upload first, under `releases/<tag>/`
+2. the manifest uploads to `.latest.json.incoming`
+3. it is **renamed** into `latest.json`, which is atomic on the server
+
+A client polling mid-upload therefore sees either the old release or the new one, never a partial
+manifest and never a manifest naming files that have not arrived. `sftp -b` aborts on the first
+failed command, so a broken upload stops before the rename that would activate it.
+
+The host key is pinned rather than accepted on first use. This step decides what every installed
+client downloads; trusting whatever answers the address is not good enough for that.
 
 ## What the hosting partner needs
 
-Only this, and nothing from the application repository:
-
-1. Origin-pull (reverse proxy / CDN pull zone) from the two origins printed above.
+1. **TLS. This is not optional** — see below.
 2. `channels/**/latest.json` served as `application/json` with
    `Cache-Control: no-cache, no-store, must-revalidate`. **A cached manifest is a stuck update.**
 3. Installer files served as ordinary static binaries — direct bytes, no HTML interstitial, no
    redirect to a download page. Range requests should work; `HEAD` is preferred but a ranged `GET`
    fallback is accepted by verification.
-4. A valid TLS certificate. Plain HTTP is rejected at configuration time.
+4. For a push mirror: an SSH account restricted to the served directory, and its host key.
 
-They never receive a signing key, a token, or write access to anything. The updater verifies every
-payload against the public key compiled into the app, so a mirror that serves the wrong bytes
-produces a failed signature check, not a bad install.
+They never receive a signing key. The updater verifies every payload against the public key compiled
+into the app, so a mirror serving wrong bytes produces a failed signature check, not a bad install.
+
+### Why plain HTTP is refused
+
+`render-tauri-config.mjs` rejects a non-HTTPS endpoint for a release build, and mirror configuration
+rejects one too. That is deliberate and must not be relaxed.
+
+Signature verification alone does not make HTTP safe. It proves a payload was signed by us; it does
+not prove it is the *current* one. Anyone on the network path — an ISP, a public wifi access point,
+a compromised router — can answer with a genuinely signed **older** manifest and installer, and the
+updater will accept and install it, because every signature checks out. That is a working downgrade
+attack against a version whose bugs are already published in the release notes. HTTP also lets any
+observer see exactly which build each user is running.
+
+Because the endpoint is compiled into the binary, shipping `http://` is permanent for every install
+that receives it. It cannot be corrected by a later release.
+
+TLS is free. Caddy provisions and renews Let's Encrypt certificates automatically, and produces the
+correct cache headers in the same file:
+
+```caddyfile
+updates.example.com {
+    root * /srv/paralith
+    file_server
+
+    @manifest path /channels/*/latest.json
+    header @manifest Cache-Control "no-cache, no-store, must-revalidate"
+    header @manifest Content-Type "application/json; charset=utf-8"
+
+    @installers path /releases/*
+    header @installers Cache-Control "public, max-age=31536000, immutable"
+}
+```
+
+Requirements: a DNS name pointing at the host, and ports 80 and 443 reachable. If the container
+cannot terminate TLS itself, putting Cloudflare's free tier in front of it also works.
 
 ## Fail-closed verification
 
