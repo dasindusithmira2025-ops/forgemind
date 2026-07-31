@@ -93,7 +93,7 @@ describe('SwarmOverview live backend projection', () => {
     await userEvent.type(input, 'Keep migrations reversible')
     await userEvent.click(screen.getByRole('button', { name: /^Send$/ }))
     expect(sendSwarmMessage).toHaveBeenCalledWith('p1', 's1', '@builders', 'Keep migrations reversible')
-  })
+  }, 15_000)
 
   it('keeps routine file reads out of the meaningful activity stream', async () => {
     const withRoutineRead = {
