@@ -4,6 +4,7 @@ import { basename, join } from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 import { comparePrecedence, validateManifest } from './verify-published-manifest.mjs'
+import { githubArtifactBaseUrl, githubChannelManifestUrl, resolveDistribution } from './update-distribution.mjs'
 
 const API_VERSION = '2022-11-28'
 const PUBLIC_METADATA = new Set([
@@ -17,13 +18,10 @@ const PUBLIC_METADATA = new Set([
 
 export const PUBLICATION_CONCURRENCY_GROUP = 'paralith-update-publication'
 
-export function releaseAssetBaseUrl(repository, tag) {
-  return `https://github.com/${repository}/releases/download/${encodeURIComponent(tag)}`
-}
-
-export function channelManifestUrl(repository, channel, branch = 'main') {
-  return `https://raw.githubusercontent.com/${repository}/${encodeURIComponent(branch)}/channels/${channel}/latest.json`
-}
+// The canonical GitHub locations. A mirror may sit in front of these for installed clients, but
+// publication and anonymous verification always go through the origin. See update-distribution.mjs.
+export const releaseAssetBaseUrl = githubArtifactBaseUrl
+export const channelManifestUrl = githubChannelManifestUrl
 
 export function githubReleaseAssetName(name) {
   // GitHub replaces spaces with dots when it creates a Release asset. Canonicalize before hashing
@@ -61,16 +59,19 @@ export function validatePublicArtifactNames(names) {
   return problems
 }
 
-export function validateGithubManifest(manifest, { repository, tag, channel, version }) {
+export function validateGithubManifest(manifest, { repository, tag, channel, version, env = process.env }) {
   const problems = validateManifest(manifest, { expectedVersion: version, edition: channel })
   if (manifest?.paralith?.edition !== channel) {
     problems.push(`manifest edition "${manifest?.paralith?.edition}" is not "${channel}"`)
   }
   if (!String(manifest?.notes || '').trim()) problems.push('manifest release notes are missing')
-  const base = `${releaseAssetBaseUrl(repository, tag)}/`
+  // Installer URLs are signed into the manifest and can never be corrected afterwards, so they must
+  // match exactly one location: the canonical GitHub release, or the declared mirror in `full` mode.
+  const { artifactBaseUrl } = resolveDistribution(env, { repository, channel, tag })
+  const base = `${artifactBaseUrl}/`
   for (const [platform, entry] of Object.entries(manifest?.platforms || {})) {
     if (entry?.url && !String(entry.url).startsWith(base)) {
-      problems.push(`manifest platform "${platform}" does not reference release ${tag} in ${repository}`)
+      problems.push(`manifest platform "${platform}" does not reference release ${tag} at ${base}`)
     }
   }
   return problems
