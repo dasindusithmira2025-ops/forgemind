@@ -71,17 +71,29 @@ export function BrowserSurface({ active, context, onSendToAgent }: BrowserSurfac
   const viewportRef = useRef<HTMLDivElement>(null)
   const addressRef = useRef<HTMLInputElement>(null)
   const boundsFrame = useRef(0)
+  const browserOperations = useRef<Promise<void>>(Promise.resolve())
   const [quickOpen, setQuickOpen] = useState(false)
 
   const url = currentEntry(store.history)
   const shouldShowWebview = active && Boolean(url)
+
+  // Native child-webview creation can take long enough for the panel to close or the Workspace to
+  // change before it finishes. Keep lifecycle mutations ordered so a late creation is always
+  // followed by the hide/close that superseded it instead of painting over the terminal canvas.
+  const queueBrowserOperation = useCallback((operation: () => Promise<void>) => {
+    browserOperations.current = browserOperations.current
+      .then(operation, operation)
+      .catch(() => undefined)
+  }, [])
 
   useEffect(() => {
     store.init(workspaceId)
     // Tear down this Workspace's browser view when the surface unmounts or the Workspace changes,
     // so a browser session is never silently reused under an unrelated Workspace.
     return () => {
-      void native.closeBrowserView(workspaceId).catch(() => undefined)
+      queueBrowserOperation(async () => {
+        await native.closeBrowserView(workspaceId).catch(() => undefined)
+      })
     }
     // Only re-run when the Workspace identity changes.
     // oxlint-disable-next-line react-hooks/exhaustive-deps
@@ -109,20 +121,30 @@ export function BrowserSurface({ active, context, onSendToAgent }: BrowserSurfac
   // recreated on show/hide — its page, history and scroll survive tool switches.
   useEffect(() => {
     if (!shouldShowWebview) {
-      void native.browserSetVisible(workspaceId, false).catch(() => undefined)
+      queueBrowserOperation(async () => {
+        await native.browserSetVisible(workspaceId, false).catch(() => undefined)
+      })
       return
     }
     const bounds = measureBounds()
     if (!bounds) return
     let cancelled = false
-    void (async () => {
+    queueBrowserOperation(async () => {
+      if (cancelled) return
       try {
         // Passing the URL means the backend creates the view pointing at it (no about:blank →
         // navigate race) or navigates an existing view only when the URL actually changed — so a
         // re-show after an Editor switch never reloads the page.
         await native.openBrowserView(workspaceId, bounds, url)
-        if (cancelled) return
+        if (cancelled) {
+          await native.browserSetVisible(workspaceId, false).catch(() => undefined)
+          return
+        }
         await native.browserSetZoom(workspaceId, useBrowserSessionStore.getState().zoom)
+        if (cancelled) {
+          await native.browserSetVisible(workspaceId, false).catch(() => undefined)
+          return
+        }
         await native.browserSetVisible(workspaceId, true)
       } catch (caught) {
         if (cancelled) return
@@ -130,7 +152,7 @@ export function BrowserSurface({ active, context, onSendToAgent }: BrowserSurfac
         const message = (caught as { message?: string })?.message ?? String(caught)
         useBrowserSessionStore.setState({ loading: false, error: { kind: 'load-failed', url: url ?? '', message } })
       }
-    })()
+    })
 
     const node = viewportRef.current
     const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(() => pushBounds()) : undefined
