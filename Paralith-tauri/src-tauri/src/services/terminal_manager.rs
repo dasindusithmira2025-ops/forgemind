@@ -1445,6 +1445,7 @@ mod tests {
     /// not survive into the child, otherwise agent TUIs render greyscale inside every pane.
     #[test]
     fn a_spawned_pane_process_does_not_inherit_no_color() {
+        let previous_no_color = std::env::var_os("NO_COLOR");
         std::env::set_var("NO_COLOR", "1");
         let manager = TerminalManager::for_test();
         #[cfg(windows)]
@@ -1453,31 +1454,39 @@ mod tests {
                 std::env::var("COMSPEC")
                     .unwrap_or_else(|_| "C:\\Windows\\System32\\cmd.exe".into()),
             ),
-            vec!["/c".into(), "echo SUPPRESSION=[%NO_COLOR%]".into()],
+            vec![
+                "/d".into(),
+                "/q".into(),
+                "/c".into(),
+                "echo SUPPRESSION=[%NO_COLOR%] & set /p _=".into(),
+            ],
         );
         #[cfg(not(windows))]
         let (executable, args) = (
             PathBuf::from("/bin/sh"),
             vec![
                 "-c".into(),
-                "printf 'SUPPRESSION=[%s]\\n' \"$NO_COLOR\"".into(),
+                "printf 'SUPPRESSION=[%s]\\n' \"$NO_COLOR\"; read _".into(),
             ],
         );
-        let session = manager
-            .create_session(CreateTerminalRequest {
-                project_id: "project".into(),
-                workspace_id: "colour".into(),
-                pane_id: "pane".into(),
-                provider: AgentProvider::CommandPrompt,
-                title: "Colour test".into(),
-                executable_path: executable.to_string_lossy().to_string(),
-                args,
-                working_directory: std::env::temp_dir().to_string_lossy().to_string(),
-                cols: 80,
-                rows: 24,
-                restoration_attempt: false,
-            })
-            .unwrap();
+        let created = manager.create_session(CreateTerminalRequest {
+            project_id: "project".into(),
+            workspace_id: "colour".into(),
+            pane_id: "pane".into(),
+            provider: AgentProvider::CommandPrompt,
+            title: "Colour test".into(),
+            executable_path: executable.to_string_lossy().to_string(),
+            args,
+            working_directory: std::env::temp_dir().to_string_lossy().to_string(),
+            cols: 80,
+            rows: 24,
+            restoration_attempt: false,
+        });
+        match previous_no_color {
+            Some(value) => std::env::set_var("NO_COLOR", value),
+            None => std::env::remove_var("NO_COLOR"),
+        }
+        let session = created.unwrap();
         let deadline = Instant::now() + Duration::from_secs(10);
         let mut output = String::new();
         while Instant::now() < deadline {
@@ -1492,7 +1501,6 @@ mod tests {
             thread::sleep(Duration::from_millis(30));
         }
         let _ = manager.terminate_session(&session.id);
-        std::env::remove_var("NO_COLOR");
         // `cmd.exe` leaves `%VAR%` unexpanded when the variable does not exist; `sh` expands an
         // unset variable to the empty string. Either way the value must never arrive as `1`.
         #[cfg(windows)]
