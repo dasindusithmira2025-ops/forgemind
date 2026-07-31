@@ -8,8 +8,9 @@ vi.mock('../../native/commands', () => ({
   native: { listProjectDirectory: (projectId: string, path: string) => listProjectDirectory(projectId, path) },
   asNativeError: (error: unknown) => ({ code: 'x', message: String((error as { message?: string })?.message ?? error) }),
 }))
-vi.mock('@tauri-apps/plugin-opener', () => ({ openPath: vi.fn() }))
+vi.mock('@tauri-apps/plugin-opener', () => ({ openPath: vi.fn(), revealItemInDir: vi.fn() }))
 
+const { openPath, revealItemInDir } = await import('@tauri-apps/plugin-opener')
 const { FileExplorer } = await import('./FileExplorer')
 const { useExplorerStore } = await import('./explorerStore')
 const { useEditorStore } = await import('./editorStore')
@@ -24,6 +25,8 @@ function listing(path: string, entries: DirectoryEntry[]): DirectoryListing {
 
 beforeEach(() => {
   listProjectDirectory.mockReset()
+  vi.mocked(openPath).mockReset().mockResolvedValue(undefined)
+  vi.mocked(revealItemInDir).mockReset().mockResolvedValue(undefined)
   useExplorerStore.setState({ projectId: 'p1', listings: {}, loading: {}, errors: {}, truncated: {} })
   useEditorStore.setState({ expanded: [], tabs: [], activePath: undefined })
 })
@@ -61,5 +64,33 @@ describe('FileExplorer', () => {
     listProjectDirectory.mockRejectedValueOnce({ message: 'permission denied' })
     render(<FileExplorer projectId="p1" projectRootPath="/proj" onOpenFile={vi.fn()} onDeletedPath={vi.fn()} />)
     expect(await screen.findByText('permission denied')).toBeInTheDocument()
+  })
+
+  it('reveals the entry itself via revealItemInDir, not its parent folder', async () => {
+    listProjectDirectory.mockResolvedValueOnce(listing('', [entry({ name: 'src', relativePath: 'src', kind: 'directory' })]))
+    listProjectDirectory.mockResolvedValueOnce(listing('src', [entry({ name: 'index.ts', relativePath: 'src/index.ts', kind: 'file' })]))
+    render(<FileExplorer projectId="p1" projectRootPath="/proj" onOpenFile={vi.fn()} onDeletedPath={vi.fn()} />)
+    fireEvent.click(await screen.findByText('src'))
+    fireEvent.contextMenu(await screen.findByText('index.ts'))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Reveal in file explorer' }))
+    expect(revealItemInDir).toHaveBeenCalledWith('/proj/src/index.ts')
+    expect(openPath).not.toHaveBeenCalled()
+  })
+
+  it('reveals a directory entry at its own path', async () => {
+    listProjectDirectory.mockResolvedValueOnce(listing('', [entry({ name: 'src', relativePath: 'src', kind: 'directory' })]))
+    render(<FileExplorer projectId="p1" projectRootPath="/proj" onOpenFile={vi.fn()} onDeletedPath={vi.fn()} />)
+    fireEvent.contextMenu(await screen.findByText('src'))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Reveal in file explorer' }))
+    expect(revealItemInDir).toHaveBeenCalledWith('/proj/src')
+  })
+
+  it('surfaces a reveal failure instead of silently doing nothing', async () => {
+    vi.mocked(revealItemInDir).mockRejectedValueOnce({ message: 'path does not exist' })
+    listProjectDirectory.mockResolvedValueOnce(listing('', [entry({ name: 'a.ts', relativePath: 'a.ts', kind: 'file' })]))
+    render(<FileExplorer projectId="p1" projectRootPath="/proj" onOpenFile={vi.fn()} onDeletedPath={vi.fn()} />)
+    fireEvent.contextMenu(await screen.findByText('a.ts'))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Reveal in file explorer' }))
+    expect(await screen.findByText('path does not exist')).toBeInTheDocument()
   })
 })

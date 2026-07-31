@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { openPath } from '@tauri-apps/plugin-opener'
+import { openPath, revealItemInDir } from '@tauri-apps/plugin-opener'
 import {
   ChevronRight,
   Folder,
@@ -70,6 +70,32 @@ export function FileExplorer({ projectId, projectRootPath, activePath, onOpenFil
   )
 
   const copy = useCallback((value: string) => void navigator.clipboard?.writeText(value).catch(() => undefined), [])
+
+  // `openPath` is scope-gated by the opener ACL, so reveal goes through the unscoped
+  // `revealItemInDir`, which also selects the entry instead of just opening its parent.
+  const reveal = useCallback(
+    async (entry: DirectoryEntry) => {
+      setActionError('')
+      try {
+        await revealItemInDir(absolutePath(entry.relativePath))
+      } catch (caught) {
+        setActionError(asNativeError(caught).message)
+      }
+    },
+    [absolutePath],
+  )
+
+  const openExternally = useCallback(
+    async (entry: DirectoryEntry) => {
+      setActionError('')
+      try {
+        await openPath(absolutePath(entry.relativePath))
+      } catch (caught) {
+        setActionError(asNativeError(caught).message)
+      }
+    },
+    [absolutePath],
+  )
 
   const runMutation = useCallback(
     async (action: () => Promise<void>, parents: string[]) => {
@@ -237,8 +263,8 @@ export function FileExplorer({ projectId, projectRootPath, activePath, onOpenFil
               case 'delete': void deleteEntry(entry); break
               case 'copy-relative': copy(entry.relativePath); break
               case 'copy-absolute': copy(absolutePath(entry.relativePath)); break
-              case 'reveal': void openPath(absolutePath(parentDir(entry.relativePath))).catch(() => undefined); break
-              case 'open-external': void openPath(absolutePath(entry.relativePath)).catch(() => undefined); break
+              case 'reveal': void reveal(entry); break
+              case 'open-external': void openExternally(entry); break
             }
           }}
         />

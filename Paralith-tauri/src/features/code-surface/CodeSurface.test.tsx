@@ -27,7 +27,7 @@ vi.mock('../../native/events', () => ({
     return Promise.resolve(() => undefined)
   },
 }))
-vi.mock('@tauri-apps/plugin-opener', () => ({ openPath: vi.fn() }))
+vi.mock('@tauri-apps/plugin-opener', () => ({ openPath: vi.fn(), revealItemInDir: vi.fn() }))
 // Keep Monaco out of jsdom; the surface only needs a placeholder for the editor region.
 vi.mock('./MonacoEditorPane', () => ({ default: () => <div data-testid="monaco" />, DiffOverlay: () => <div data-testid="diff" /> }))
 
