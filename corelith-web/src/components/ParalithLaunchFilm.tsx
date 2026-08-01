@@ -23,7 +23,7 @@ export function ParalithLaunchFilm() {
         >
           <source src="/media/paralith-launch.mp4" type="video/mp4" />
           Your browser cannot play this video.{' '}
-          <a className="text-amber-ink underline" href="/media/paralith-launch.mp4">
+          <a className="text-core-ink underline" href="/media/paralith-launch.mp4">
             Open the launch film directly.
           </a>
         </video>

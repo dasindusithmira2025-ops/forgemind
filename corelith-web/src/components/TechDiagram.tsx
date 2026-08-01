@@ -61,7 +61,7 @@ export function TechDiagram() {
             <span
               key={stage.id}
               className={`h-2 w-2 -translate-y-1/2 rounded-full transition-colors ${
-                stage.id === activeId ? 'bg-ember' : 'bg-[var(--hair-strong)]'
+                stage.id === activeId ? 'bg-core' : 'bg-[var(--hair-strong)]'
               }`}
             />
           ))}
@@ -86,7 +86,7 @@ export function TechDiagram() {
               onClick={() => setActiveId(stage.id)}
               className={`relative flex flex-col gap-3 border-r border-b border-[var(--hair-strong)] p-5 text-left transition-colors ${
                 isActive
-                  ? 'bg-ember/[0.09] text-ember-ink'
+                  ? 'bg-core/[0.09] text-core-ink'
                   : 'text-[var(--fg-soft)] hover:bg-[rgba(245,237,224,0.05)] hover:text-[var(--fg)]'
               }`}
             >
@@ -94,7 +94,7 @@ export function TechDiagram() {
                   hanging off this stage rather than floating beside it. */}
               <span
                 aria-hidden="true"
-                className={`bg-ember absolute inset-x-0 top-0 h-0.5 transition-opacity ${
+                className={`bg-core absolute inset-x-0 top-0 h-0.5 transition-opacity ${
                   isActive ? 'opacity-100' : 'opacity-0'
                 }`}
               />
@@ -106,7 +106,7 @@ export function TechDiagram() {
               </span>
               <span
                 className={`font-display text-lg font-semibold tracking-tight ${
-                  isActive ? 'text-ember-ink' : 'text-[var(--fg)]'
+                  isActive ? 'text-core-ink' : 'text-[var(--fg)]'
                 }`}
               >
                 {stage.title}

@@ -125,7 +125,7 @@ export function ContactForm() {
       <div className="mt-8 grid grid-cols-1 gap-6 border-t border-[var(--hair)] pt-8 sm:grid-cols-2">
         <div>
           <label htmlFor="name" className="stamp text-ink-faint mb-2.5 block">
-            Full name <span className="text-ember-ink">·required</span>
+            Full name <span className="text-core-ink">·required</span>
           </label>
           <input
             id="name"
@@ -142,7 +142,7 @@ export function ContactForm() {
 
         <div>
           <label htmlFor="email" className="stamp text-ink-faint mb-2.5 block">
-            Work email <span className="text-ember-ink">·required</span>
+            Work email <span className="text-core-ink">·required</span>
           </label>
           <input
             id="email"
@@ -159,7 +159,7 @@ export function ContactForm() {
 
         <div>
           <label htmlFor="category" className="stamp text-ink-faint mb-2.5 block">
-            Category <span className="text-ember-ink">·required</span>
+            Category <span className="text-core-ink">·required</span>
           </label>
           <select
             id="category"
@@ -194,7 +194,7 @@ export function ContactForm() {
 
         <div className="sm:col-span-2">
           <label htmlFor="message" className="stamp text-ink-faint mb-2.5 block">
-            Message <span className="text-ember-ink">·required</span>
+            Message <span className="text-core-ink">·required</span>
           </label>
           <textarea
             id="message"
