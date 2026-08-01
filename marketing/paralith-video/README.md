@@ -1,12 +1,20 @@
-# PARALITH cinematic product film
+# PARALITH films
 
-Remotion source for the 82-second PARALITH launch film and its landscape, vertical, square,
-captioned, clean, trailer, teaser, and poster deliveries.
+Remotion source for two separate deliverables:
 
-The story, product-truth boundary, final copy, voice-over, audio plan, transition plan, capture
-list, and frame-accurate timing sheet are in
-[`docs/PRODUCTION_BIBLE.md`](docs/PRODUCTION_BIBLE.md). Asset provenance and license notes are in
-[`docs/ASSET_LICENSES.md`](docs/ASSET_LICENSES.md).
+- **The brand film** — "Many agents. One build." An 82-second, score-and-type cut whose product
+  footage is a generated digital twin of the desktop app rather than a reconstruction of it. See
+  [`docs/BRAND_FILM.md`](docs/BRAND_FILM.md).
+- **The narrated product film** — the earlier 82-second launch explainer and its landscape,
+  vertical, square, captioned, clean, trailer, teaser, and poster deliveries. See
+  [`docs/PRODUCTION_BIBLE.md`](docs/PRODUCTION_BIBLE.md).
+
+Both are registered in `src/Root.tsx` and render from the same package. Asset provenance and
+license notes for both are in [`docs/ASSET_LICENSES.md`](docs/ASSET_LICENSES.md).
+
+The brand film's interface is not drawn by hand: `scripts/sync-product-ui.mjs` generates
+`src/product/generated/` from `Paralith-tauri`'s own stylesheet and theme engine, and
+`npm run sync:product:check` fails the build if the two have drifted apart.
 
 This is an independent npm package with its own lockfile. It is deliberately not an npm
 workspace, so video dependencies cannot rewrite the website or PARALITH desktop lockfiles.

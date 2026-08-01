@@ -8,6 +8,15 @@
     "assets": "node scripts/generate-audio.mjs && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/generate-voiceover.ps1",
     "dev": "remotion studio --port=4100",
     "render": "node scripts/render-all.mjs",
+    "sync:product": "node scripts/sync-product-ui.mjs",
+    "sync:product:check": "node scripts/sync-product-ui.mjs --check",
+    "brand:assets": "node scripts/prepare-brand-assets.mjs",
+    "brand:font": "node scripts/embed-mono-font.mjs",
+    "render:brand": "remotion render ParalithBrandFilm1080p ../../media/exports/paralith-brand-film-1080p.mp4 --codec=h264 --crf=16 --image-format=png --pixel-format=yuv420p --color-space=bt709 --audio-codec=aac --audio-bitrate=320k --x264-preset=medium --timeout=180000 --concurrency=4 --overwrite && node scripts/normalize-audio.mjs paralith-brand-film-1080p.mp4",
+    "render:brand:4k": "remotion render ParalithBrandFilm4K ../../media/exports/paralith-brand-film-4k.mp4 --codec=h264 --crf=14 --image-format=png --pixel-format=yuv420p --color-space=bt709 --audio-codec=aac --audio-bitrate=320k --x264-preset=medium --timeout=180000 --concurrency=2 --overwrite && node scripts/normalize-audio.mjs paralith-brand-film-4k.mp4",
+    "still:twin": "remotion still ParalithTwinProof out/probe/twin-proof.png --frame=420 --overwrite",
+    "verify:brand": "node scripts/verify-brand.mjs",
+    "score:brand": "node scripts/generate-brand-score.mjs",
     "render:4k": "remotion render ParalithHero4K ../../media/exports/paralith-hero-film-4k.mp4 --codec=h264 --crf=14 --image-format=png --pixel-format=yuv420p --color-space=bt709 --audio-codec=aac --audio-bitrate=320k --x264-preset=medium --timeout=180000 --concurrency=2 --overwrite && node scripts/normalize-audio.mjs paralith-hero-film-4k.mp4",
     "render:1080": "remotion render ParalithHero1080p ../../media/exports/paralith-hero-film-1080p.mp4 --codec=h264 --crf=16 --image-format=png --pixel-format=yuv420p --color-space=bt709 --audio-codec=aac --audio-bitrate=320k --x264-preset=medium --timeout=180000 --concurrency=4 --overwrite && node scripts/normalize-audio.mjs paralith-hero-film-1080p.mp4",
     "normalize": "node scripts/normalize-audio.mjs",
@@ -20,6 +29,7 @@
   },
   "dependencies": {
     "@remotion/cli": "4.0.500",
+    "lucide-react": "^1.28.0",
     "react": "19.2.0",
     "react-dom": "19.2.0",
     "remotion": "4.0.500"

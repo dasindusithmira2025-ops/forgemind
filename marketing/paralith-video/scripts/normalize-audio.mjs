@@ -14,6 +14,10 @@ const expectedFilenames = [
   'paralith-teaser-15s.mp4',
   'paralith-hero-captioned.mp4',
   'paralith-hero-clean.mp4',
+  // Brand film masters; see docs/BRAND_FILM.md.
+  'paralith-brand-film-4k.mp4',
+  'paralith-brand-film-1080p.mp4',
+  'paralith-brand-film-silent.mp4',
 ];
 const requestedFilenames = process.argv.slice(2);
 const filenames =
