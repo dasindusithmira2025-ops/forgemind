@@ -22,6 +22,10 @@ pub struct RestorationScheduler {
     /// still-running earlier restore) serialize instead of both planning launches from the
     /// same "nothing is live yet" snapshot and doubling every pane's terminal.
     restores: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
+    /// The launch budget is application-wide, not per Workspace. Serialize restore planning
+    /// across Workspaces so two concurrent cold opens cannot each consume the full budget from
+    /// the same global live-session snapshot.
+    global_restore: Arc<Mutex<()>>,
     app: AppHandle,
 }
 
@@ -38,6 +42,7 @@ impl RestorationScheduler {
             detector,
             attempts: Arc::new(Mutex::new(HashMap::new())),
             restores: Arc::new(Mutex::new(HashMap::new())),
+            global_restore: Arc::new(Mutex::new(())),
             app,
         }
     }
@@ -55,9 +60,12 @@ impl RestorationScheduler {
             .or_default()
             .clone();
         let _serialized = workspace_lock.lock();
+        let _global_restore = self.global_restore.lock();
         let budget = budget.clamp(1, 8);
         let workspace = self.database.get_workspace(workspace_id)?;
         let existing = self.terminals.list_live_sessions(Some(workspace_id));
+        let global_live = self.terminals.list_live_sessions(None).len();
+        let available_slots = available_restore_slots(budget, global_live);
         let live_panes = existing
             .iter()
             .map(|session| session.pane_id.as_str())
@@ -67,7 +75,7 @@ impl RestorationScheduler {
             pane_ids,
             workspace.active_pane_id.as_deref(),
             &live_panes,
-            budget,
+            available_slots,
         );
         let mut sessions = existing;
         let mut failures = Vec::new();
@@ -115,11 +123,13 @@ impl RestorationScheduler {
                 *value
             };
             log::info!(
-                "restoration lifecycle workspace_id={} pane_id={} event=starting attempt={} budget={}",
+                "restoration lifecycle workspace_id={} pane_id={} event=starting attempt={} budget={} global_live={} available_slots={}",
                 workspace_id,
                 pane_id,
                 attempt,
-                budget
+                budget,
+                global_live,
+                available_slots
             );
             self.emit_progress(workspace_id, pane_id, "starting", completed, launch.len());
             let request = StartTerminalRequest {
@@ -245,7 +255,7 @@ fn restoration_plan(
     mut pane_ids: Vec<String>,
     active: Option<&str>,
     live: &std::collections::HashSet<&str>,
-    budget: u16,
+    available_slots: usize,
 ) -> (Vec<String>, Vec<String>) {
     if let Some(active) = active {
         if let Some(index) = pane_ids.iter().position(|id| id == active) {
@@ -254,9 +264,13 @@ fn restoration_plan(
         }
     }
     pane_ids.retain(|pane_id| !live.contains(pane_id.as_str()));
-    let split = pane_ids.len().min(budget as usize);
+    let split = pane_ids.len().min(available_slots);
     let deferred = pane_ids.split_off(split);
     (pane_ids, deferred)
+}
+
+fn available_restore_slots(budget: u16, global_live: usize) -> usize {
+    usize::from(budget).saturating_sub(global_live)
 }
 
 #[cfg(test)]
@@ -277,5 +291,26 @@ mod tests {
         );
         assert_eq!(launch, vec!["p4", "p1"]);
         assert_eq!(deferred, vec!["p3", "p5"]);
+    }
+
+    #[test]
+    fn restore_budget_is_shared_across_open_workspaces() {
+        assert_eq!(available_restore_slots(4, 0), 4);
+        assert_eq!(available_restore_slots(4, 3), 1);
+        assert_eq!(available_restore_slots(4, 4), 0);
+        assert_eq!(available_restore_slots(4, 8), 0);
+
+        let live = std::collections::HashSet::new();
+        let (launch, deferred) = restoration_plan(
+            ["next-workspace-p1", "next-workspace-p2"]
+                .into_iter()
+                .map(str::to_owned)
+                .collect(),
+            Some("next-workspace-p2"),
+            &live,
+            available_restore_slots(4, 4),
+        );
+        assert!(launch.is_empty());
+        assert_eq!(deferred, vec!["next-workspace-p2", "next-workspace-p1"]);
     }
 }
