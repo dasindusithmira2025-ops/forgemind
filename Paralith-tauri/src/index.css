@@ -648,7 +648,7 @@ html[data-theme-swapping] *, html[data-theme-swapping] *::before, html[data-them
 .sb-pop-row-close:hover { color: var(--danger); background: var(--surface); }
 .sb-pop-empty { padding: 7px 9px; color: var(--faint); font-size: var(--text-sm); }
 .sb-pop-actions, .sb-pop-footer { display: flex; flex-direction: column; gap: 1px; }
-.sb-pop-footer { flex: 0 0 auto; padding: 5px; border-top: 1px solid var(--border); background: color-mix(in srgb, var(--surface-3) 82%, #000); }
+.sb-pop-footer { flex: 0 0 auto; padding: 5px; border-top: 1px solid var(--border); background: var(--surface-2); }
 .sb-pop-actions button, .sb-pop-footer button { min-height: var(--control-h); padding: 0 8px; display: flex; align-items: center; gap: 9px; color: var(--muted); background: transparent; border: 0; border-radius: var(--radius); font-size: var(--text-sm); text-align: left; cursor: pointer; transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out); }
 .sb-pop-actions button:hover:not(:disabled), .sb-pop-footer button:hover { color: var(--text); background: var(--surface-hover); }
 .sb-pop-search { margin: 0 0 5px; padding: 0 9px; min-height: var(--control-h); display: flex; align-items: center; gap: 7px; color: var(--faint); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); transition: border-color var(--dur-fast) var(--ease-out); }
@@ -747,7 +747,7 @@ html[data-theme-swapping] *, html[data-theme-swapping] *::before, html[data-them
 
 /* Pinned utilities: one icon rail, not four labelled rows. */
 /* ---- Toolbar: identity left, the least-used controls right --------------------------------- */
-.sb-toolbar { flex: 0 0 auto; padding: 4px 6px; display: flex; align-items: center; justify-content: space-between; gap: 8px; border-top: 1px solid var(--border-subtle); background: color-mix(in srgb, var(--sidebar-bg) 88%, #000); }
+.sb-toolbar { flex: 0 0 auto; padding: 4px 6px; display: flex; align-items: center; justify-content: space-between; gap: 8px; border-top: 1px solid var(--border); background: var(--sidebar-bg); }
 .sb-toolbar-brand { min-width: 0; padding: 0 6px; min-height: var(--icon-btn); display: flex; align-items: center; }
 .sb-toolbar-brand .brand--monochrome .brand-logo { width: 92px; height: 22px; }
 .sb-toolbar-tools { flex: 0 0 auto; display: flex; align-items: center; gap: 1px; }
@@ -1163,7 +1163,7 @@ html[data-theme-swapping] *, html[data-theme-swapping] *::before, html[data-them
 .theme-card-check.on { opacity: 1; transform: none; }
 
 /* Miniature app window, painted from the card's scoped theme tokens. */
-.theme-preview { display: block; padding: 8px 8px 0; background: color-mix(in srgb, var(--bg) 92%, #000); border-bottom: 1px solid var(--border-subtle); }
+.theme-preview { display: block; padding: 8px 8px 0; background: var(--bg); border-bottom: 1px solid var(--border-subtle); }
 .tp-window { display: block; height: 96px; overflow: hidden; background: var(--bg); border: 1px solid var(--border); border-bottom: 0; border-radius: var(--radius) var(--radius) 0 0; box-shadow: var(--shadow-sm); }
 .tp-titlebar { display: flex; align-items: center; gap: 5px; height: 16px; padding: 0 8px; background: var(--surface-2); border-bottom: 1px solid var(--border); }
 .tp-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--border-strong); }
@@ -1247,7 +1247,11 @@ html[data-theme-swapping] *, html[data-theme-swapping] *::before, html[data-them
 .update-toast-progressive .update-progress { margin: 0 0 5px; }
 .update-toast-progressive .update-progress span { margin-top: 0; }
 .update-toast-progressive .update-toast-actions { grid-column: 1 / -1; flex-wrap: wrap; }
-.update-toast-progressive .update-toast-actions .button-primary { color: var(--accent-contrast); background: var(--accent); border-color: var(--accent); gap: 6px; }
+/* Genome rule 3: the highest-emphasis button stays achromatic. This rule used to repaint it in
+   `--accent` against an undefined `--accent-contrast`, so the colour was invalid at
+   computed-value time and the label fell back to inherited `--text` - near-white on violet, 2.65:1.
+   The inherited `.button-primary` pairing is `--primary`/`--on-primary` at 14.4:1. */
+.update-toast-progressive .update-toast-actions .button-primary { gap: 6px; }
 .update-toast-progressive .update-toast-actions button:disabled { cursor: default; opacity: .55; }
 
 /* ---- Detached workspace windows ---------------------------------------------------- */
@@ -1938,7 +1942,7 @@ html[data-theme-swapping] *, html[data-theme-swapping] *::before, html[data-them
 .swarm-review-grid { display: grid; grid-template-columns: 1.4fr .6fr; gap: 8px; }.swarm-review-grid article { padding: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }.swarm-review-grid article > span { display: block; margin-bottom: 8px; color: var(--faint); font-family: var(--mono); font-weight: 600; font-size: var(--text-2xs); line-height: 1; text-transform: uppercase; letter-spacing: .06em; }.swarm-review-grid article p { color: var(--muted); font-size: var(--text-sm); line-height: 1.45; }.swarm-review-roster p { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid var(--border); }.swarm-review-roster em { color: var(--faint); font-family: var(--mono); font-weight: 400; font-size: var(--text-2xs); line-height: 1.4; }.swarm-review-safeguards p { display: grid; grid-template-columns: 180px 1fr; gap: 12px; padding: 5px 0; }.swarm-launch-warning { display: flex; gap: 10px; padding: 11px; color: var(--warning); background: var(--warning-soft); border: 1px solid color-mix(in srgb, var(--warning) 35%, var(--border)); border-radius: var(--radius); }.swarm-launch-warning p { margin-top: 3px; color: var(--muted); font-size: var(--text-sm); }
 
 .swarm-main:has(.swarm-live-shell) { overflow: hidden; }.swarm-live-shell { height: 100%; min-height: 0; display: grid; grid-template-rows: auto auto auto minmax(0, 1fr) auto; background: var(--bg); }
-.swarm-live-header { min-height: 66px; display: grid; grid-template-columns: minmax(250px, 1fr) auto auto; align-items: center; gap: 18px; padding: 10px 16px; border-bottom: 1px solid var(--border); background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 6%, var(--surface)), var(--surface)); }
+.swarm-live-header { min-height: 66px; display: grid; grid-template-columns: minmax(250px, 1fr) auto auto; align-items: center; gap: 18px; padding: 10px 16px; border-bottom: 1px solid var(--border); background: var(--surface); }
 .swarm-live-identity { min-width: 0; display: flex; align-items: flex-start; gap: 10px; }.swarm-live-identity h2 { font-size: var(--text-md); font-weight: 600; letter-spacing: -.01em; }.swarm-live-identity button { max-width: 640px; display: flex; align-items: center; gap: 5px; margin-top: 4px; padding: 0; background: none; border: 0; color: var(--muted); font: inherit; font-size: var(--text-xs); line-height: 1.35; text-align: left; cursor: pointer; }
 .swarm-live-meta { display: flex; gap: 13px; color: var(--muted); font-family: var(--mono); font-weight: 400; font-size: var(--text-2xs); line-height: 1; }.swarm-live-meta span + span::before { content: "·"; margin-right: 13px; color: var(--border-strong); }.swarm-live-actions { display: flex; gap: 6px; }.swarm-icon-button { width: 30px; height: 30px; display: grid; place-items: center; background: none; border: 1px solid transparent; border-radius: var(--radius); color: var(--muted); cursor: pointer; }.swarm-icon-button:hover { background: var(--surface-2); border-color: var(--border); }
 .swarm-header-overflow { position: relative; width: 30px; height: 30px; }.swarm-header-overflow .swarm-row-menu { top: 0; right: 0; }.swarm-header-overflow .swarm-row-more { opacity: 1; width: 30px; height: 30px; }
