@@ -44,7 +44,7 @@ On Windows, PARALITH verifies executable targets, rejects WindowsApps aliases, r
 
 ## Restoration and inactive Workspaces
 
-Restoration validates the Project path, Workspace layout, persisted Pane ownership, and provider/shell launch target. The active Pane is prioritized. The configured initial budget is clamped to 1–8; remaining Panes stay visible as deferred and can be resumed individually. Three consecutive failures open a per-Workspace/per-Pane circuit breaker until the user explicitly retries.
+Restoration validates the Project path, Workspace layout, persisted Pane ownership, and provider/shell launch target. The active Pane is prioritized. The configured initial budget is clamped to 1–8 and shared across all open Workspaces; concurrent restores are serialized so each Workspace observes the current application-wide live-session count. Remaining Panes stay visible as deferred and can be resumed individually. Three consecutive failures open a per-Workspace/per-Pane circuit breaker until the user explicitly retries.
 
 Restore behavior can ask, restart assigned agents, or launch fresh native shells without changing saved assignments. Restoration status is stored on the Terminal Session and emitted as progress events.
 
