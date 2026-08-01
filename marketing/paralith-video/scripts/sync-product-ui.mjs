@@ -39,8 +39,18 @@ const THEME_ID = 'paralith-dark';
 /** The CSS container the product window establishes; see `scopeBreakpointsToWindow`. */
 const CONTAINER_NAME = 'paralith-window';
 
-const sha256 = (value) => createHash('sha256').update(value).digest('hex');
+const sha256 = (value) => createHash('sha256').update(normalize(value)).digest('hex');
 const rel = (path) => relative(VIDEO_ROOT, path).replaceAll('\\', '/');
+
+/**
+ * Line endings are not content. Git rewrites them on checkout according to each machine's
+ * config, so both the drift comparison and the recorded source hashes work on normalised text —
+ * otherwise the same source would hash differently on the Windows runner than on the machine
+ * that generated it.
+ */
+function normalize(text) {
+  return text.replace(/\r\n/g, '\n');
+}
 
 /**
  * The product bundles Geist from its own `src/assets`, which does not exist here. The film
@@ -176,7 +186,10 @@ async function main() {
     const drifted = [];
     for (const { path, content } of artifacts) {
       const current = await readFile(path, 'utf8').catch(() => null);
-      if (current !== content) drifted.push(rel(path));
+      // Compare on content, not bytes. Git normalises line endings on checkout, so on a Windows
+      // runner these files arrive with CRLF while the generator always writes LF — without this,
+      // a freshly checked-out tree would report drift on every generated file, every time.
+      if (current === null || normalize(current) !== normalize(content)) drifted.push(rel(path));
     }
     if (drifted.length > 0) {
       console.error(

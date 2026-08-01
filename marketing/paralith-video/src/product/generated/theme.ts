@@ -1,6 +1,6 @@
 /* GENERATED FILE — DO NOT EDIT.
- * Source:  ../../Paralith-tauri/src/theme/themes.ts (sha-256 5c70dbf76cf7082ee556e543269bf3f41172a7cf42b2b833b17d8bc4b3ba4ed4)
- *          ../../Paralith-tauri/src/theme/tokens.ts (sha-256 42dddcd4f181555ed22e5031cd8d4f2379f25d51b485dcee7887965e0e4e4490)
+ * Source:  ../../Paralith-tauri/src/theme/themes.ts (sha-256 9fa779c4d39dab7ef495ba448321b37f8d38aadad4e7d48eb83bd7483585d452)
+ *          ../../Paralith-tauri/src/theme/tokens.ts (sha-256 7311aa19699e46dab21aa1c1eda6d209a8f3e3d78756c8d269af8503222b887d)
  * Regenerate: npm run sync:product
  *
  * Produced by calling the product's own toCssVars() on its own 'paralith-dark' definition —
