@@ -67,6 +67,7 @@ export function WorkspaceScreen() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [paneErrors, setPaneErrors] = useState<Record<string, string>>({})
+  const launchingPaneIds = useRef(new Set<string>())
   const [collapsed, setCollapsed] = useState(!settings.sidebarOpen)
   const [sidebarWidth, setSidebarWidth] = useState(clampSidebarWidth(settings.sidebarWidth))
   const [sidebarSaving, setSidebarSaving] = useState(false)
@@ -654,24 +655,20 @@ export function WorkspaceScreen() {
 
   const restartPane = async (paneId: string) => {
     if (!workspace) return
+    if (launchingPaneIds.current.has(paneId)) return
     const assignment = workspace.panes.find((pane) => pane.id === paneId)
     if (!assignment) return
-    const session = paneSession(paneId)
-    if (session?.status === 'running') await native.terminateTerminalSession(session.id).catch(() => undefined)
-    if (session) terminalRuntime.remove(session.id)
-    setDeferredPaneIds((current) => current.filter((id) => id !== paneId))
-    await launchPane(assignment, workspace)
+    launchingPaneIds.current.add(paneId)
+    try {
+      const session = paneSession(paneId)
+      if (session?.status === 'running') await native.terminateTerminalSession(session.id).catch(() => undefined)
+      if (session) terminalRuntime.remove(session.id)
+      setDeferredPaneIds((current) => current.filter((id) => id !== paneId))
+      await launchPane(assignment, workspace)
+    } finally {
+      launchingPaneIds.current.delete(paneId)
+    }
   }
-
-  // Budget-deferred Panes stay in the layout but idle. Resume one the moment it becomes active
-  // (click/focus/keyboard nav) so it comes alive on interaction instead of stranding the user on
-  // the "Terminal paused to reduce resource usage" card. restartPane drops the id from deferredPaneIds, so
-  // this fires once per Pane and never loops.
-  useEffect(() => {
-    if (activePaneId && deferredPaneIds.includes(activePaneId)) void restartPane(activePaneId)
-    // restartPane is redefined each render; the membership guard keeps this from re-running.
-    // oxlint-disable-next-line react-hooks/exhaustive-deps
-  }, [activePaneId, deferredPaneIds])
 
   const closePane = async (paneId: string) => {
     if (!workspace || workspace.panes.length <= 1) { setPaneErrors((current) => ({ ...current, [paneId]: 'At least one terminal pane must remain.' })); return }
@@ -1112,7 +1109,13 @@ export function WorkspaceScreen() {
     const session = sessions.find((item) => item.paneId === paneId)
     return <>
       <TerminalPane assignment={assignment} session={session} deferred={deferredPaneIds.includes(paneId)} active={ctx.active} maximized={ctx.maximized} settings={settings}
-        onFocus={() => setActivePane(paneId)}
+        onFocus={() => {
+          setActivePane(paneId)
+          // Only a real pointer focus resumes a budget-deferred Pane. Hydration changes the
+          // shared active Pane several times; treating those state writes as user intent leaked
+          // extra agent processes immediately after startup and defeated the global budget.
+          if (deferredPaneIds.includes(paneId)) void restartPane(paneId)
+        }}
         onMaximize={() => useCanvasStore.getState().toggleMaximize(paneId)}
         onClose={() => void closePane(paneId)} onRestart={() => void restartPane(paneId)} onStop={() => void stopPane(paneId)}
         onMenu={(anchor) => { const rect = anchor.getBoundingClientRect(); setPaneMenu({ paneId, x: Math.min(rect.left, window.innerWidth - 230), y: rect.bottom + 4 }) }}
