@@ -18,6 +18,16 @@ const expectedFilenames = [
   'paralith-brand-film-4k.mp4',
   'paralith-brand-film-1080p.mp4',
   'paralith-brand-film-silent.mp4',
+  // Campaign cut deliveries; see docs/CAMPAIGN_FILM.md. The website hero loop is absent on
+  // purpose — it is rendered muted, and a loudness pass over a file with no audio stream would
+  // fail on the measurement rather than skip.
+  'paralith-brand-film-master-4k.mp4',
+  'paralith-brand-film-master-1080p.mp4',
+  'paralith-brand-film-captioned.mp4',
+  'paralith-brand-film-60s.mp4',
+  'paralith-brand-film-30s.mp4',
+  'paralith-brand-film-15s-teaser.mp4',
+  'paralith-brand-film-vertical-30s.mp4',
 ];
 const requestedFilenames = process.argv.slice(2);
 const filenames =

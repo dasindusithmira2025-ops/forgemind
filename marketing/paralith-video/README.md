@@ -1,20 +1,36 @@
 # PARALITH films
 
-Remotion source for two separate deliverables:
+Remotion source for three deliverables, newest first:
 
-- **The brand film** — "Many agents. One build." An 82-second, score-and-type cut whose product
-  footage is a generated digital twin of the desktop app rather than a reconstruction of it. See
+- **The campaign film** — "Build beyond the editor." A 95-second, score-and-type cut in eight
+  sequences, and the current master. Ships a 4K master, a 1080p clean version, a captioned version,
+  60/30/15-second cuts, a 9:16 social cut, a silent website hero loop, a poster, and caption
+  sidecars. See [`docs/CAMPAIGN_FILM.md`](docs/CAMPAIGN_FILM.md).
+- **The brand film** — "Many agents. One build." The earlier 82-second cut that introduced the
+  product twin. Superseded by the campaign film but still registered and reproducible. See
   [`docs/BRAND_FILM.md`](docs/BRAND_FILM.md).
-- **The narrated product film** — the earlier 82-second launch explainer and its landscape,
+- **The narrated product film** — the original 82-second launch explainer and its landscape,
   vertical, square, captioned, clean, trailer, teaser, and poster deliveries. See
   [`docs/PRODUCTION_BIBLE.md`](docs/PRODUCTION_BIBLE.md).
 
-Both are registered in `src/Root.tsx` and render from the same package. Asset provenance and
-license notes for both are in [`docs/ASSET_LICENSES.md`](docs/ASSET_LICENSES.md).
+All three are registered in `src/Root.tsx` and render from the same package. Asset provenance and
+license notes for all of them are in [`docs/ASSET_LICENSES.md`](docs/ASSET_LICENSES.md).
 
-The brand film's interface is not drawn by hand: `scripts/sync-product-ui.mjs` generates
-`src/product/generated/` from `Paralith-tauri`'s own stylesheet and theme engine, and
+The brand and campaign films' interface is not drawn by hand: `scripts/sync-product-ui.mjs`
+generates `src/product/generated/` from `Paralith-tauri`'s own stylesheet and theme engine, and
 `npm run sync:product:check` fails the build if the two have drifted apart.
+
+## The campaign film, end to end
+
+```powershell
+Set-Location marketing/paralith-video
+npm ci
+npm run typecheck
+npm run score:campaign      # four scores, one per cut length
+npm run probe:campaign      # contact sheet across all eight sequences
+npm run render:campaign     # every delivery, plus poster and captions
+npm run verify:campaign     # codec, duration, loudness, and sidecar assertions
+```
 
 This is an independent npm package with its own lockfile. It is deliberately not an npm
 workspace, so video dependencies cannot rewrite the website or PARALITH desktop lockfiles.
