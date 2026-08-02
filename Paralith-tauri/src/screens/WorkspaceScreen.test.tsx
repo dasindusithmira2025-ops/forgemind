@@ -8,6 +8,7 @@ import type { Project, TerminalSession, Workspace, WorkspaceSaveRequest } from '
 
 const runtime = vi.hoisted(() => ({ sessions: [] as TerminalSession[], hydrate: vi.fn(), upsert: vi.fn(), remove: vi.fn(), clearWorkspace: vi.fn(), agentStateForSession: vi.fn(() => undefined) }))
 const restoreWorkspace = vi.fn()
+const createTerminalSession = vi.fn()
 const saveSettings = vi.fn()
 const getWorkspace = vi.fn()
 const listRecentWorkspaces = vi.fn()
@@ -20,7 +21,7 @@ const closeProjectSession = vi.fn()
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn() }))
 vi.mock('@tauri-apps/plugin-opener', () => ({ openPath: vi.fn() }))
 vi.mock('../features/terminals/runtimeStore', () => ({ terminalRuntime: runtime, useWorkspaceSessions: () => runtime.sessions }))
-vi.mock('../components/terminal/TerminalPane', () => ({ TerminalPane: ({ assignment, maximized, onMaximize }: { assignment: { title: string }; maximized: boolean; onMaximize: () => void }) => <div data-testid="terminal-pane" data-maximized={maximized}><span>{assignment.title}</span><button onClick={onMaximize}>Toggle maximize</button></div> }))
+vi.mock('../components/terminal/TerminalPane', () => ({ TerminalPane: ({ assignment, deferred, maximized, onFocus, onMaximize, onRestart }: { assignment: { title: string }; deferred?: boolean; maximized: boolean; onFocus: () => void; onMaximize: () => void; onRestart: () => void }) => <div data-testid="terminal-pane" data-maximized={maximized} onMouseDown={onFocus}><span>{assignment.title}</span><button onClick={onMaximize}>Toggle maximize</button>{deferred && <button onMouseDown={(event) => event.stopPropagation()} onClick={onRestart}>Resume terminal</button>}</div> }))
 vi.mock('../components/terminal/terminalActions', () => ({ dispatchTerminalAction: vi.fn() }))
 vi.mock('../native/commands', () => ({
   asNativeError: (error: unknown) => ({ message: String(error) }),
@@ -35,7 +36,7 @@ vi.mock('../native/commands', () => ({
     renameWorkspace: vi.fn(), removeRecentWorkspace: vi.fn(), deleteWorkspaceConfiguration: vi.fn(), relocateProject: vi.fn(), openProject: vi.fn(),
     detectAgents: vi.fn().mockResolvedValue([]), detectShells: vi.fn().mockResolvedValue([{ id: 'shell', name: 'PowerShell', executablePath: 'C:\\pwsh.exe', args: [], available: true, source: 'detected' }]),
     listLiveSessions: vi.fn().mockResolvedValue([]), restoreWorkspaceSessions: (...args: unknown[]) => restoreWorkspace(...args),
-    createTerminalSession: vi.fn(), terminateTerminalSession: vi.fn(), terminateWorkspaceSessions: (...args: unknown[]) => terminateWorkspace(...args),
+    createTerminalSession: (...args: unknown[]) => createTerminalSession(...args), terminateTerminalSession: vi.fn(), terminateWorkspaceSessions: (...args: unknown[]) => terminateWorkspace(...args),
     getPaneGitReview: vi.fn(), stagePaneFile: vi.fn(), restorePaneFile: vi.fn(), createIsolatedPaneWorktree: vi.fn(),
     removeLayoutPane: vi.fn(), splitLayoutPane: vi.fn(), validateWorkingDirectory: vi.fn(),
     getDiagnostics: vi.fn(), runHealthCheck: vi.fn(),
@@ -58,6 +59,7 @@ describe('Workspace screen', () => {
     vi.clearAllMocks(); runtime.sessions = [session]
     useSidebarStore.setState({ projectSwitcherOpen: false, listOptionsOpen: false, diagnosticsOpen: false, menuWorkspaceId: undefined, draggingWorkspaceId: undefined, filterQuery: '', groupBy: 'project', sortMode: 'manual', collapsedGroups: {} })
     restoreWorkspace.mockResolvedValue({ workspaceId: 'workspace', sessions: [session], deferredPaneIds: [], failures: [], budget: 4 })
+    createTerminalSession.mockResolvedValue(session)
     terminateWorkspace.mockResolvedValue(undefined)
     reorderWorkspaces.mockResolvedValue(undefined)
     saveSettings.mockImplementation(async (value) => value)
@@ -243,6 +245,22 @@ describe('Workspace screen', () => {
     runtime.sessions = []
     restoreWorkspace.mockResolvedValue({ workspaceId: 'workspace', sessions: [], deferredPaneIds: ['pane'], failures: [], budget: 1 })
     renderWorkspace()
-    expect(await screen.findByTestId('terminal-pane')).toBeInTheDocument()
+    const pane = await screen.findByTestId('terminal-pane')
+    await waitFor(() => expect(restoreWorkspace).toHaveBeenCalled())
+    expect(createTerminalSession).not.toHaveBeenCalled()
+
+    fireEvent.mouseDown(pane)
+    await waitFor(() => expect(createTerminalSession).toHaveBeenCalledTimes(1))
+  })
+
+  it('launches a deferred Pane once when its Resume button is pressed', async () => {
+    runtime.sessions = []
+    restoreWorkspace.mockResolvedValue({ workspaceId: 'workspace', sessions: [], deferredPaneIds: ['pane'], failures: [], budget: 1 })
+    renderWorkspace()
+    const resume = await screen.findByRole('button', { name: 'Resume terminal' })
+
+    fireEvent.mouseDown(resume)
+    fireEvent.click(resume)
+    await waitFor(() => expect(createTerminalSession).toHaveBeenCalledTimes(1))
   })
 })
