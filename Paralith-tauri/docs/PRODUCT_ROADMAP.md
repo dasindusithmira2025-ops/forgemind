@@ -163,7 +163,7 @@ matrix, signing/notarization, platform installers.
 - [ ] **Terminal search UI** (search addon is installed but needs a proper find bar + fleet-wide search). — `planned`
 - [ ] **Cost/usage awareness**: per-run token/cost readout where providers expose it (folds into F5). — `planned`
 - [ ] **Opt-in telemetry**: we currently have zero product signal; can't steer a business blind. Privacy-respecting, off by default, documented. — `planned`
-- [ ] **Onboarding + public preview channel + website**: release infra exists (`INTERNAL_RELEASES.md`); needs a public front door. — `planned`
+- [ ] **Onboarding + public preview channel + website**: requires a separately approved channel; current release automation is Stable-only (`INTERNAL_RELEASES.md`). — `planned`
 - [ ] **Theming + reduced motion + accessibility audit** (AGENTS.md §5.2 checklist). — `planned`
 - [ ] **Broadcast input mode** (type into N panes at once, with explicit armed-state UI). — `planned`
 

@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url'
 
 // Post-publish verification. A local manifest passing checks proves nothing about what an installed
 // app can actually download — the app polls a live URL. This fetches the REAL published manifest and
-// fails the release if the preview channel is not genuinely usable: wrong/old version, missing
+// fails the release if the selected channel is not genuinely usable: wrong/old version, missing
 // signed Windows artifact, unreachable artifact, or wrong channel. Run it after publishing.
 
 const SEMVER = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/
@@ -45,9 +45,14 @@ export function comparePrecedence(a, b) {
  * Structural validation of a fetched manifest. Returns an array of human-readable problems; empty
  * means valid. Pure (no I/O) so it is unit-tested directly.
  * @param {any} manifest parsed latest.json
- * @param {{ expectedVersion: string, edition: string, previousVersion?: string|null }} opts
+ * @param {{ expectedVersion: string, edition: string, previousVersion?: string|null, expectedRolloutPercent?: number|null }} opts
  */
-export function validateManifest(manifest, { expectedVersion, edition, previousVersion = null }) {
+export function validateManifest(manifest, {
+  expectedVersion,
+  edition,
+  previousVersion = null,
+  expectedRolloutPercent = null,
+}) {
   const errors = []
   if (!manifest || typeof manifest !== 'object') {
     return ['manifest is not a JSON object']
@@ -87,6 +92,13 @@ export function validateManifest(manifest, { expectedVersion, edition, previousV
   if (channel !== edition) {
     errors.push(`manifest channel "${channel}" is not "${edition}"`)
   }
+  const rolloutPercent = manifest?.paralith?.rolloutPercent
+  if (rolloutPercent !== undefined && (!Number.isInteger(rolloutPercent) || rolloutPercent < 0 || rolloutPercent > 100)) {
+    errors.push(`manifest rolloutPercent "${rolloutPercent}" is not an integer from 0 through 100`)
+  }
+  if (expectedRolloutPercent !== null && rolloutPercent !== expectedRolloutPercent) {
+    errors.push(`manifest rolloutPercent "${rolloutPercent}" is not ${expectedRolloutPercent}`)
+  }
   return errors
 }
 
@@ -99,7 +111,13 @@ async function fetchStatus(url, method = 'GET') {
  * One full check of a live manifest URL: reachable, structurally valid for the release, and
  * pointing at an artifact that actually downloads. Returns human-readable problems; empty is a pass.
  */
-export async function checkPublishedManifest(edition, endpoint, expectedVersion, previousVersion = null) {
+export async function checkPublishedManifest(
+  edition,
+  endpoint,
+  expectedVersion,
+  previousVersion = null,
+  expectedRolloutPercent = null,
+) {
   const response = await fetchStatus(endpoint)
   if (response.status !== 200) {
     throw new Error(`Published ${edition} manifest ${endpoint} returned HTTP ${response.status}, expected 200`)
@@ -110,7 +128,12 @@ export async function checkPublishedManifest(edition, endpoint, expectedVersion,
   } catch (error) {
     throw new Error(`Published ${edition} manifest is not valid JSON: ${error.message}`)
   }
-  const errors = validateManifest(manifest, { expectedVersion, edition, previousVersion: previousVersion || null })
+  const errors = validateManifest(manifest, {
+    expectedVersion,
+    edition,
+    previousVersion: previousVersion || null,
+    expectedRolloutPercent,
+  })
 
   // The manifest can be structurally valid but point at an artifact that was never uploaded.
   const artifactUrl = manifest?.platforms?.['windows-x86_64']?.url
@@ -131,16 +154,27 @@ async function main() {
   const positional = process.argv.slice(2).filter((argument) => !argument.startsWith('--'))
   const [edition, endpoint, expectedVersion, previousVersion] = positional
   if (!edition || !endpoint || !expectedVersion) {
-    throw new Error('usage: verify-published-manifest <edition> <manifestUrl> <expectedVersion> [previousVersion] [--attempts=N]')
+    throw new Error('usage: verify-published-manifest <edition> <manifestUrl> <expectedVersion> [previousVersion] [--rollout=N] [--attempts=N]')
   }
   // A freshly published mirror is usually cold: the first request is what makes it pull from the
   // origin. Retrying turns that expected warm-up into a wait instead of a failed release.
   const attemptsFlag = process.argv.slice(2).find((argument) => argument.startsWith('--attempts='))
   const attempts = Math.max(1, Number(attemptsFlag?.split('=')[1] || 1))
+  const rolloutFlag = process.argv.slice(2).find((argument) => argument.startsWith('--rollout='))
+  const expectedRolloutPercent = rolloutFlag ? Number(rolloutFlag.split('=')[1]) : null
+  if (expectedRolloutPercent !== null && (!Number.isInteger(expectedRolloutPercent) || expectedRolloutPercent < 0 || expectedRolloutPercent > 100)) {
+    throw new Error('--rollout must be an integer from 0 through 100')
+  }
   let errors = []
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     try {
-      errors = await checkPublishedManifest(edition, endpoint, expectedVersion, previousVersion || null)
+      errors = await checkPublishedManifest(
+        edition,
+        endpoint,
+        expectedVersion,
+        previousVersion || null,
+        expectedRolloutPercent,
+      )
     } catch (error) {
       errors = [error.message]
     }

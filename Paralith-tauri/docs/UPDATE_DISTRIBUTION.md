@@ -30,7 +30,7 @@ needs to be shared with a hosting partner.
 ## Adding a mirror
 
 A mirror is an optional layer in front of the canonical origin, declared with two environment
-variables on the `stable-release` (or `preview-release`) GitHub environment:
+variables on the `stable-release` GitHub environment:
 
 | Variable | Example | Meaning |
 |---|---|---|
