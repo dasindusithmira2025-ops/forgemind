@@ -1,4 +1,4 @@
-import { CircleStop, Copy, RefreshCw, Search, SplitSquareHorizontal, SplitSquareVertical, Trash2 } from 'lucide-react'
+import { CircleStop, Copy, GitBranch, RefreshCw, Search, SplitSquareHorizontal, SplitSquareVertical, Trash2 } from 'lucide-react'
 
 export interface PaneMenuState {
   paneId: string
@@ -18,6 +18,7 @@ export function PaneMenu({ menu, compact = false, onClose, onAction }: { menu: {
     <div className="context-popover pane-popover" style={{ left: menu.x, top: menu.y }}>
       <button onClick={() => onAction('focus')}>Focus pane</button>
       <button onClick={() => onAction('rename')}>Rename pane</button>
+      <button onClick={() => onAction('change_branch')}><GitBranch size={14} />Change branch</button>
       {!compact && <>
         <button onClick={() => onAction('split_right')}><SplitSquareVertical size={14} />Split right</button>
         <button onClick={() => onAction('split_down')}><SplitSquareHorizontal size={14} />Split down</button>

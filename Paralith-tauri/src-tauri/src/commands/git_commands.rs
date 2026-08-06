@@ -1,6 +1,6 @@
 use crate::errors::{AppError, AppResult};
 use crate::models::{
-    ApprovalDecisionRequest, GitChangedFile, IsolatedWorktreeResult, PaneGitReview,
+    ApprovalDecisionRequest, GitChangedFile, IsolatedWorktreeResult, PaneBranchInfo, PaneGitReview,
     RepositoryActor, RepositoryActorKind, RepositoryApprovalRequest, RepositoryOperation,
     RepositoryOperationContext, RepositoryOperationRequest, RepositoryOperationStatus, Workspace,
 };
@@ -39,6 +39,50 @@ pub async fn get_pane_git_review(
         .validate_workspace_caller(&workspace_id, window.label(), true)?;
     let state = state.inner().clone();
     run_git_blocking(move || get_pane_git_review_inner(&state, &workspace_id, &pane_id)).await
+}
+
+#[tauri::command]
+pub async fn list_workspace_pane_branches(
+    workspace_id: String,
+    window: Window,
+    state: State<'_, AppState>,
+) -> AppResult<Vec<PaneBranchInfo>> {
+    state
+        .windows
+        .validate_workspace_caller(&workspace_id, window.label(), true)?;
+    let state = state.inner().clone();
+    run_git_blocking(move || list_workspace_pane_branches_inner(&state, &workspace_id)).await
+}
+
+fn list_workspace_pane_branches_inner(
+    state: &AppState,
+    workspace_id: &str,
+) -> AppResult<Vec<PaneBranchInfo>> {
+    let workspace = state.database.get_workspace(workspace_id)?;
+    let project = state.database.get_project(&workspace.project_id)?;
+    let repository = git_root(Path::new(&project.root_path)).ok();
+    Ok(workspace
+        .panes
+        .iter()
+        .map(|pane| {
+            let worktree = git_root(Path::new(&pane.working_directory)).ok();
+            let branch = worktree.as_ref().and_then(|path| {
+                git_stdout(path, &["branch", "--show-current"])
+                    .ok()
+                    .map(|value| value.trim().to_owned())
+                    .filter(|value| !value.is_empty())
+            });
+            PaneBranchInfo {
+                pane_id: pane.id.clone(),
+                isolated: repository
+                    .as_ref()
+                    .zip(worktree.as_ref())
+                    .is_some_and(|(repository, worktree)| !same_path(repository, worktree)),
+                worktree_path: worktree.map(|path| path.to_string_lossy().into_owned()),
+                branch,
+            }
+        })
+        .collect())
 }
 
 fn get_pane_git_review_inner(
@@ -214,6 +258,7 @@ fn restore_pane_file_inner(
 pub async fn create_isolated_pane_worktree(
     workspace_id: String,
     pane_id: String,
+    branch_name: Option<String>,
     window: Window,
     state: State<'_, AppState>,
 ) -> AppResult<IsolatedWorktreeResult> {
@@ -223,7 +268,13 @@ pub async fn create_isolated_pane_worktree(
     let state = state.inner().clone();
     let window_label = window.label().to_owned();
     run_git_blocking(move || {
-        create_isolated_pane_worktree_inner(&state, &workspace_id, &pane_id, &window_label)
+        create_isolated_pane_worktree_inner(
+            &state,
+            &workspace_id,
+            &pane_id,
+            branch_name.as_deref(),
+            &window_label,
+        )
     })
     .await
 }
@@ -232,6 +283,7 @@ fn create_isolated_pane_worktree_inner(
     state: &AppState,
     workspace_id: &str,
     pane_id: &str,
+    selected_branch: Option<&str>,
     window_label: &str,
 ) -> AppResult<IsolatedWorktreeResult> {
     let mut workspace = state.database.get_workspace(workspace_id)?;
@@ -239,12 +291,128 @@ fn create_isolated_pane_worktree_inner(
     let pane = pane(&workspace, pane_id)?.clone();
     let repository = git_root(Path::new(&project.root_path))?;
     let current_worktree = git_root(Path::new(&pane.working_directory))?;
-    let base_ref = git_stdout(&current_worktree, &["rev-parse", "HEAD"])?
+    let scope = git_scope(Path::new(&pane.working_directory))?;
+    let assignment = if let Some(selected) = selected_branch {
+        resolve_branch_assignment(&repository, selected)?
+    } else {
+        let base_ref = git_stdout(&current_worktree, &["rev-parse", "HEAD"])?
+            .trim()
+            .to_owned();
+        let slug = slug(&format!("{}-{}", workspace.name, pane.title));
+        BranchAssignment {
+            branch_name: unique_worktree_branch(&repository, &slug)?,
+            base_ref,
+            use_existing_branch: false,
+            upstream: None,
+        }
+    };
+    let current_branch = git_stdout(&current_worktree, &["branch", "--show-current"])
+        .unwrap_or_default()
         .trim()
         .to_owned();
-    let slug = slug(&format!("{}-{}", workspace.name, pane.title));
-    let branch_name = unique_worktree_branch(&repository, &slug)?;
-    let scope = git_scope(Path::new(&pane.working_directory))?;
+    if assignment.branch_name == current_branch {
+        return Ok(IsolatedWorktreeResult {
+            workspace,
+            repository_path: repository.to_string_lossy().into_owned(),
+            worktree_path: current_worktree.to_string_lossy().into_owned(),
+            branch_name: assignment.branch_name,
+            base_ref: assignment.base_ref,
+        });
+    }
+    let old_lease = state
+        .database
+        .list_repository_worktree_leases(&project.id)?
+        .into_iter()
+        .find(|lease| {
+            lease.status == "active"
+                && same_path(Path::new(&lease.worktree_path), &current_worktree)
+        });
+    if !same_path(&current_worktree, &repository) {
+        let lease = old_lease.as_ref().ok_or_else(|| {
+            AppError::new(
+                "pane_worktree_lease_missing",
+                "PARALITH will not move a terminal away from an unowned worktree.",
+                true,
+            )
+            .entity(current_worktree.display().to_string())
+        })?;
+        if lease.agent_id != format!("pane:{pane_id}") {
+            return Err(AppError::new(
+                "pane_worktree_lease_mismatch",
+                "Another terminal or agent owns this worktree.",
+                false,
+            )
+            .entity(&lease.worktree_path));
+        }
+        if !git_stdout(&current_worktree, &["status", "--porcelain=v2", "-z"])?.is_empty() {
+            return Err(AppError::new(
+                "pane_branch_has_changes",
+                "Commit or stash this terminal's changes before changing its branch.",
+                true,
+            )
+            .entity(current_worktree.display().to_string()));
+        }
+    }
+    let target_scope = if scope != "."
+        && git_success(
+            &repository,
+            &[
+                "cat-file",
+                "-e",
+                &format!("{}:{scope}", assignment.base_ref),
+            ],
+        )? {
+        scope
+    } else {
+        ".".into()
+    };
+    let repository_branch = git_stdout(&repository, &["branch", "--show-current"])?
+        .trim()
+        .to_owned();
+    if assignment.branch_name == repository_branch {
+        let pane_working_directory = scoped_working_directory(&repository, &target_scope);
+        for item in &mut workspace.panes {
+            if item.id == pane_id {
+                item.working_directory = pane_working_directory.to_string_lossy().into_owned();
+                item.working_directory_mode = "project_relative".into();
+            }
+        }
+        let updated = save_workspace(state, &workspace)?;
+        state
+            .database
+            .deactivate_pane_worktree(workspace_id, pane_id)?;
+        cleanup_replaced_pane_worktree(state, &project.id, &repository, window_label, old_lease);
+        return Ok(IsolatedWorktreeResult {
+            workspace: updated,
+            repository_path: repository.to_string_lossy().into_owned(),
+            worktree_path: repository.to_string_lossy().into_owned(),
+            branch_name: assignment.branch_name,
+            base_ref: assignment.base_ref,
+        });
+    }
+    if assignment.use_existing_branch {
+        let checked_out = git_stdout(
+            &repository,
+            &[
+                "for-each-ref",
+                "--format=%(worktreepath)",
+                &format!("refs/heads/{}", assignment.branch_name),
+            ],
+        )?;
+        if let Some(path) = checked_out
+            .lines()
+            .map(str::trim)
+            .find(|path| !path.is_empty())
+        {
+            return Err(AppError::new(
+                "branch_already_checked_out",
+                "That branch is already assigned to another checkout.",
+                true,
+            )
+            .detail(path.to_owned())
+            .entity(&assignment.branch_name));
+        }
+    }
     let record = run_pane_operation(
         state,
         &project.id,
@@ -252,16 +420,17 @@ fn create_isolated_pane_worktree_inner(
         &current_worktree,
         window_label,
         RepositoryOperation::CreateAgentWorktree {
-            branch: branch_name.clone(),
-            base_commit: base_ref.clone(),
+            branch: assignment.branch_name.clone(),
+            base_commit: assignment.base_ref.clone(),
             agent_id: format!("pane:{pane_id}"),
             task_id: format!("workspace:{workspace_id}"),
-            file_scope: if scope == "." {
+            file_scope: if target_scope == "." {
                 Vec::new()
             } else {
-                vec![scope]
+                vec![target_scope.clone()]
             },
             expires_at: None,
+            use_existing_branch: assignment.use_existing_branch,
         },
         false,
     )?;
@@ -280,23 +449,25 @@ fn create_isolated_pane_worktree_inner(
     let lease: crate::models::RepositoryWorktreeLease =
         serde_json::from_value(lease).map_err(AppError::database)?;
     let worktree_path = PathBuf::from(&lease.worktree_path);
+    if let Some(upstream) = assignment.upstream.as_deref() {
+        git_stdout(
+            &worktree_path,
+            &[
+                "branch",
+                "--set-upstream-to",
+                upstream,
+                &assignment.branch_name,
+            ],
+        )?;
+    }
+    let pane_working_directory = scoped_working_directory(&worktree_path, &target_scope);
     for item in &mut workspace.panes {
         if item.id == pane_id {
-            item.working_directory = worktree_path.to_string_lossy().into_owned();
+            item.working_directory = pane_working_directory.to_string_lossy().into_owned();
             item.working_directory_mode = "custom".into();
         }
     }
-    let updated = state
-        .database
-        .save_workspace(&crate::models::WorkspaceSaveRequest {
-            id: Some(workspace.id.clone()),
-            project_id: workspace.project_id.clone(),
-            name: workspace.name.clone(),
-            layout: workspace.layout.clone(),
-            active_pane_id: workspace.active_pane_id.clone(),
-            restore_behavior: workspace.restore_behavior.clone(),
-            panes: workspace.panes.clone(),
-        })?;
+    let updated = save_workspace(state, &workspace)?;
     let repository_path = repository.to_string_lossy();
     let worktree_path_text = worktree_path.to_string_lossy();
     state
@@ -307,16 +478,192 @@ fn create_isolated_pane_worktree_inner(
             pane_id,
             repository_path: &repository_path,
             worktree_path: &worktree_path_text,
-            branch_name: &branch_name,
-            base_ref: &base_ref,
+            branch_name: &assignment.branch_name,
+            base_ref: &assignment.base_ref,
         })?;
+    cleanup_replaced_pane_worktree(
+        state,
+        &project.id,
+        &repository,
+        window_label,
+        old_lease.filter(|old| !same_path(Path::new(&old.worktree_path), &worktree_path)),
+    );
     Ok(IsolatedWorktreeResult {
         workspace: updated,
         repository_path: repository.to_string_lossy().into_owned(),
         worktree_path: worktree_path.to_string_lossy().into_owned(),
-        branch_name,
-        base_ref,
+        branch_name: assignment.branch_name,
+        base_ref: assignment.base_ref,
     })
+}
+
+fn scoped_working_directory(worktree: &Path, scope: &str) -> PathBuf {
+    if scope == "." {
+        worktree.to_path_buf()
+    } else {
+        worktree.join(scope.replace('/', std::path::MAIN_SEPARATOR_STR))
+    }
+}
+
+fn save_workspace(state: &AppState, workspace: &Workspace) -> AppResult<Workspace> {
+    state
+        .database
+        .save_workspace(&crate::models::WorkspaceSaveRequest {
+            id: Some(workspace.id.clone()),
+            project_id: workspace.project_id.clone(),
+            name: workspace.name.clone(),
+            layout: workspace.layout.clone(),
+            active_pane_id: workspace.active_pane_id.clone(),
+            restore_behavior: workspace.restore_behavior.clone(),
+            panes: workspace.panes.clone(),
+        })
+}
+
+fn cleanup_replaced_pane_worktree(
+    state: &AppState,
+    project_id: &str,
+    repository: &Path,
+    window_label: &str,
+    old_lease: Option<crate::models::RepositoryWorktreeLease>,
+) {
+    let Some(old_lease) = old_lease else { return };
+    if let Err(error) = run_pane_operation(
+        state,
+        project_id,
+        repository,
+        repository,
+        window_label,
+        RepositoryOperation::RemoveWorktree {
+            lease_id: old_lease.id,
+        },
+        false,
+    ) {
+        log::warn!(
+            "pane branch changed but previous worktree cleanup was preserved code={} detail={:?}",
+            error.code,
+            error.detail
+        );
+    }
+}
+
+struct BranchAssignment {
+    branch_name: String,
+    base_ref: String,
+    use_existing_branch: bool,
+    upstream: Option<String>,
+}
+
+fn resolve_branch_assignment(repository: &Path, selection: &str) -> AppResult<BranchAssignment> {
+    let selection = selection.trim();
+    if selection.is_empty()
+        || !git_success(repository, &["check-ref-format", "--branch", selection])?
+    {
+        return Err(AppError::new(
+            "invalid_branch_name",
+            "The selected Git branch name is invalid.",
+            true,
+        )
+        .entity(selection));
+    }
+    let local_ref = format!("refs/heads/{selection}");
+    if git_success(repository, &["show-ref", "--verify", "--quiet", &local_ref])? {
+        let base_ref = git_stdout(
+            repository,
+            &["rev-parse", "--verify", &format!("{local_ref}^{{commit}}")],
+        )?
+        .trim()
+        .to_owned();
+        return Ok(BranchAssignment {
+            branch_name: selection.to_owned(),
+            base_ref,
+            use_existing_branch: true,
+            upstream: None,
+        });
+    }
+    let remote_ref = format!("refs/remotes/{selection}");
+    if !git_success(
+        repository,
+        &["show-ref", "--verify", "--quiet", &remote_ref],
+    )? {
+        return Err(AppError::new(
+            "branch_not_found",
+            "The selected local or remote branch no longer exists.",
+            true,
+        )
+        .entity(selection));
+    }
+    let (_, local_name) = selection.split_once('/').ok_or_else(|| {
+        AppError::new(
+            "invalid_remote_branch",
+            "A remote branch must include its remote name.",
+            true,
+        )
+        .entity(selection)
+    })?;
+    if local_name.is_empty()
+        || !git_success(repository, &["check-ref-format", "--branch", local_name])?
+    {
+        return Err(AppError::new(
+            "invalid_branch_name",
+            "PARALITH could not derive a local branch name from that remote branch.",
+            true,
+        )
+        .entity(selection));
+    }
+    let base_ref = git_stdout(
+        repository,
+        &["rev-parse", "--verify", &format!("{remote_ref}^{{commit}}")],
+    )?
+    .trim()
+    .to_owned();
+    let derived_local_ref = format!("refs/heads/{local_name}");
+    if git_success(
+        repository,
+        &["show-ref", "--verify", "--quiet", &derived_local_ref],
+    )? {
+        let local_head = git_stdout(
+            repository,
+            &[
+                "rev-parse",
+                "--verify",
+                &format!("{derived_local_ref}^{{commit}}"),
+            ],
+        )?
+        .trim()
+        .to_owned();
+        if local_head != base_ref {
+            return Err(AppError::new(
+                "remote_branch_has_diverged_local",
+                "A local branch with this name already exists at a different commit.",
+                true,
+            )
+            .detail(format!("Select the local branch {local_name} explicitly."))
+            .entity(selection));
+        }
+        return Ok(BranchAssignment {
+            branch_name: local_name.to_owned(),
+            base_ref,
+            use_existing_branch: true,
+            upstream: Some(selection.to_owned()),
+        });
+    }
+    Ok(BranchAssignment {
+        branch_name: local_name.to_owned(),
+        base_ref,
+        use_existing_branch: false,
+        upstream: Some(selection.to_owned()),
+    })
+}
+
+fn same_path(left: &Path, right: &Path) -> bool {
+    let left = left.canonicalize().unwrap_or_else(|_| left.to_path_buf());
+    let right = right.canonicalize().unwrap_or_else(|_| right.to_path_buf());
+    if cfg!(windows) {
+        left.to_string_lossy()
+            .eq_ignore_ascii_case(&right.to_string_lossy())
+    } else {
+        left == right
+    }
 }
 
 fn pane<'a>(
@@ -634,6 +981,42 @@ mod tests {
         let root = temp_repo("collision");
         let branch = unique_worktree_branch(&root, "pane").unwrap();
         assert!(branch.starts_with("paralith/pane-"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn branch_assignment_reuses_a_local_branch_at_its_exact_head() {
+        let root = temp_repo("local-branch");
+        git_raw(&root, &["branch", "feature/local"]).unwrap();
+        let assignment = resolve_branch_assignment(&root, "feature/local").unwrap();
+        assert_eq!(assignment.branch_name, "feature/local");
+        assert!(assignment.use_existing_branch);
+        assert!(assignment.upstream.is_none());
+        assert_eq!(assignment.base_ref.len(), 40);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn branch_assignment_turns_a_remote_ref_into_a_tracking_local_branch() {
+        let root = temp_repo("remote-branch");
+        let head = git_stdout(&root, &["rev-parse", "HEAD"]).unwrap();
+        git_raw(
+            &root,
+            &[
+                "update-ref",
+                "refs/remotes/origin/feature/remote",
+                head.trim(),
+            ],
+        )
+        .unwrap();
+        let assignment = resolve_branch_assignment(&root, "origin/feature/remote").unwrap();
+        assert_eq!(assignment.branch_name, "feature/remote");
+        assert!(!assignment.use_existing_branch);
+        assert_eq!(
+            assignment.upstream.as_deref(),
+            Some("origin/feature/remote")
+        );
+        assert_eq!(assignment.base_ref, head.trim());
         fs::remove_dir_all(root).unwrap();
     }
 }

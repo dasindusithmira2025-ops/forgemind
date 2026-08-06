@@ -1607,7 +1607,13 @@ impl DatabaseService {
 
     pub fn record_pane_worktree(&self, record: PaneWorktreeRecord<'_>) -> AppResult<()> {
         let now = Utc::now().to_rfc3339();
-        self.connection.lock().execute(
+        let mut connection = self.connection.lock();
+        let transaction = connection.transaction()?;
+        transaction.execute(
+            "UPDATE pane_worktrees SET status='inactive',updated_at=?3 WHERE workspace_id=?1 AND pane_id=?2 AND status='active'",
+            params![record.workspace_id, record.pane_id, now],
+        )?;
+        transaction.execute(
             "INSERT INTO pane_worktrees(id,project_id,workspace_id,pane_id,repository_path,worktree_path,branch_name,base_ref,status,created_at,updated_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,'active',?9,?9)",
             params![
                 Uuid::new_v4().to_string(),
@@ -1620,6 +1626,15 @@ impl DatabaseService {
                 record.base_ref,
                 now,
             ],
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    pub fn deactivate_pane_worktree(&self, workspace_id: &str, pane_id: &str) -> AppResult<()> {
+        self.connection.lock().execute(
+            "UPDATE pane_worktrees SET status='inactive',updated_at=?3 WHERE workspace_id=?1 AND pane_id=?2 AND status='active'",
+            params![workspace_id, pane_id, Utc::now().to_rfc3339()],
         )?;
         Ok(())
     }
@@ -2042,6 +2057,72 @@ mod tests {
         database
             .mark_session_ended(&session.id, "exited", Some(0), b"bye")
             .unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn recording_a_new_pane_worktree_retires_the_previous_mapping() {
+        let database = DatabaseService::in_memory().unwrap();
+        let root = std::env::temp_dir().join(format!("paralith-pane-worktree-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let saved_project = database.upsert_project(&project(&root)).unwrap();
+        let workspace = database
+            .save_workspace(&workspace_request(
+                &saved_project.id,
+                "Branch fixture",
+                &root,
+            ))
+            .unwrap();
+        let pane_id = workspace.panes[0].id.as_str();
+        let repository_path = root.to_string_lossy().into_owned();
+        for (branch, worktree) in [
+            ("feature/one", "C:/worktrees/one"),
+            ("feature/two", "C:/worktrees/two"),
+        ] {
+            database
+                .record_pane_worktree(PaneWorktreeRecord {
+                    project_id: &saved_project.id,
+                    workspace_id: &workspace.id,
+                    pane_id,
+                    repository_path: &repository_path,
+                    worktree_path: worktree,
+                    branch_name: branch,
+                    base_ref: "0123456789012345678901234567890123456789",
+                })
+                .unwrap();
+        }
+
+        let connection = database.connection.lock();
+        let active: i64 = connection
+            .query_row(
+                "SELECT count(*) FROM pane_worktrees WHERE workspace_id=?1 AND pane_id=?2 AND status='active'",
+                params![workspace.id, pane_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let current_branch: String = connection
+            .query_row(
+                "SELECT branch_name FROM pane_worktrees WHERE workspace_id=?1 AND pane_id=?2 AND status='active'",
+                params![workspace.id, pane_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(active, 1);
+        assert_eq!(current_branch, "feature/two");
+        drop(connection);
+        database
+            .deactivate_pane_worktree(&workspace.id, pane_id)
+            .unwrap();
+        let connection = database.connection.lock();
+        let active: i64 = connection
+            .query_row(
+                "SELECT count(*) FROM pane_worktrees WHERE workspace_id=?1 AND pane_id=?2 AND status='active'",
+                params![workspace.id, pane_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(active, 0);
+        drop(connection);
         fs::remove_dir_all(root).unwrap();
     }
 

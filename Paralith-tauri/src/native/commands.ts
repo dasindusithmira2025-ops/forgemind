@@ -25,6 +25,7 @@ import type {
   ResumeAgentSessionRequest,
   ResumeAgentSessionResult,
   IsolatedWorktreeResult,
+  PaneBranchInfo,
   PaneGitReview,
   Workspace,
   WorkspaceSaveRequest,
@@ -116,8 +117,10 @@ export const native = {
   getPaneGitReview: (workspaceId: string, paneId: string) => invoke<PaneGitReview>('get_pane_git_review', { workspaceId, paneId }),
   stagePaneFile: (workspaceId: string, paneId: string, path: string) => invoke<PaneGitReview>('stage_pane_file', { workspaceId, paneId, path }),
   restorePaneFile: (workspaceId: string, paneId: string, path: string, confirmed: boolean) => invoke<PaneGitReview>('restore_pane_file', { workspaceId, paneId, path, confirmed }),
-  createIsolatedPaneWorktree: (workspaceId: string, paneId: string) =>
-    invoke<IsolatedWorktreeResult>('create_isolated_pane_worktree', { workspaceId, paneId }),
+  listWorkspacePaneBranches: (workspaceId: string) =>
+    invoke<PaneBranchInfo[]>('list_workspace_pane_branches', { workspaceId }),
+  createIsolatedPaneWorktree: (workspaceId: string, paneId: string, branchName?: string) =>
+    invoke<IsolatedWorktreeResult>('create_isolated_pane_worktree', { workspaceId, paneId, branchName }),
   inspectRepository: (projectId: string, repositoryPath?: string, worktreePath?: string) =>
     invoke<RepositorySnapshot>('inspect_repository', { projectId, repositoryPath, worktreePath }),
   listRepositoryBranches: (projectId: string, repositoryPath?: string) =>

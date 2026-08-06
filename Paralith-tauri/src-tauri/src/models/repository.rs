@@ -107,6 +107,8 @@ pub enum RepositoryOperation {
         task_id: String,
         file_scope: Vec<String>,
         expires_at: Option<String>,
+        #[serde(default)]
+        use_existing_branch: bool,
     },
     RemoveWorktree {
         lease_id: String,
@@ -402,6 +404,7 @@ pub struct RepositoryBranchSummary {
     pub behind: u64,
     pub latest_subject: String,
     pub latest_commit_at: String,
+    pub checked_out_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

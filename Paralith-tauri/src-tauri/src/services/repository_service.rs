@@ -126,7 +126,7 @@ impl RepositoryService {
             &[
                 "for-each-ref",
                 "--sort=-committerdate",
-                "--format=%(refname)%00%(refname:short)%00%(objectname)%00%(upstream:short)%00%(upstream:track)%00%(committerdate:iso-strict)%00%(subject)%00",
+                "--format=%(refname)%00%(refname:short)%00%(objectname)%00%(upstream:short)%00%(upstream:track)%00%(committerdate:iso-strict)%00%(subject)%00%(worktreepath)%00",
                 "refs/heads",
                 "refs/remotes",
             ],
@@ -136,7 +136,7 @@ impl RepositoryService {
         let mut branches = Vec::new();
         for line in output.split(|byte| *byte == b'\n') {
             let fields = line.split(|byte| *byte == 0).collect::<Vec<_>>();
-            if fields.len() < 7 {
+            if fields.len() < 8 {
                 continue;
             }
             let full_ref = String::from_utf8_lossy(fields[0]).into_owned();
@@ -161,6 +161,7 @@ impl RepositoryService {
                 behind,
                 latest_commit_at: String::from_utf8_lossy(fields[5]).into_owned(),
                 latest_subject: String::from_utf8_lossy(fields[6]).into_owned(),
+                checked_out_path: nonempty_string(fields[7]),
             });
         }
         Ok(branches)
@@ -1454,6 +1455,7 @@ impl RepositoryService {
                 task_id,
                 file_scope,
                 expires_at,
+                use_existing_branch,
             } => self.create_agent_worktree(
                 request,
                 repository,
@@ -1463,6 +1465,7 @@ impl RepositoryService {
                 task_id,
                 file_scope,
                 expires_at.as_deref(),
+                *use_existing_branch,
                 timeout,
                 cancellation,
             ),
@@ -1787,6 +1790,7 @@ impl RepositoryService {
         task_id: &str,
         file_scope: &[String],
         expires_at: Option<&str>,
+        use_existing_branch: bool,
         timeout: Duration,
         cancellation: &AtomicBool,
     ) -> AppResult<Value> {
@@ -1808,20 +1812,42 @@ impl RepositoryService {
             .layer("repository_lease"));
         }
         let scopes = validate_paths(file_scope)?;
-        if let Some(existing) = self
+        if use_existing_branch {
+            let branch_head = self.resolve_revision(repository, &format!("refs/heads/{branch}"))?;
+            if branch_head != base {
+                return Err(AppError::new(
+                    "stale_branch_assignment",
+                    "The selected branch moved before PARALITH could assign it to the terminal.",
+                    true,
+                )
+                .detail(format!(
+                    "Expected {base}, but {branch} now points to {branch_head}."
+                ))
+                .layer("repository_lease"));
+            }
+        }
+        let active_branch_lease = self
             .database
             .list_repository_worktree_leases(&request.context.project_id)?
             .into_iter()
-            .find(|lease| {
-                lease.status == "active"
-                    && lease.branch_name == branch
-                    && lease.agent_id == agent_id
-                    && lease.task_id == task_id
-            })
+            .find(|lease| lease.status == "active" && lease.branch_name == branch);
+        if let Some(existing) = active_branch_lease
+            .as_ref()
+            .filter(|lease| lease.agent_id == agent_id && lease.task_id == task_id)
         {
             if Path::new(&existing.worktree_path).is_dir() {
                 return Ok(json!({"lease":existing,"reopened":true}));
             }
+        }
+        if let Some(existing) = active_branch_lease {
+            return Err(AppError::new(
+                "branch_already_assigned",
+                "That branch already belongs to another terminal or agent worktree.",
+                true,
+            )
+            .detail(existing.worktree_path)
+            .entity(branch)
+            .layer("repository_lease"));
         }
         let lease_id = Uuid::new_v4().to_string();
         let parent = self.managed_worktree_root.join(&request.context.project_id);
@@ -1873,8 +1899,15 @@ impl RepositoryService {
         // every Swarm Builder task, on Windows. We create the worktree without a checkout and then
         // populate the working tree with a checkout we spawn ourselves, cwd-scoped to the new
         // worktree so git discovers its gitdir from the `.git` file with no inherited env.
-        let result = self
-            .git_text(
+        let result = if use_existing_branch {
+            self.git_text(
+                repository,
+                &["worktree", "add", "--no-checkout", &path, branch],
+                None,
+                Some((timeout, cancellation)),
+            )
+        } else {
+            self.git_text(
                 repository,
                 &[
                     "worktree",
@@ -1889,14 +1922,15 @@ impl RepositoryService {
                 None,
                 Some((timeout, cancellation)),
             )
-            .and_then(|_| {
-                self.git_text(
-                    &worktree,
-                    &["checkout", "--force"],
-                    None,
-                    Some((timeout, cancellation)),
-                )
-            });
+        }
+        .and_then(|_| {
+            self.git_text(
+                &worktree,
+                &["checkout", "--force"],
+                None,
+                Some((timeout, cancellation)),
+            )
+        });
         if let Err(error) = result {
             self.database.update_worktree_lease_status(
                 &lease_id,
@@ -3770,6 +3804,7 @@ mod tests {
                         task_id: "task:test".into(),
                         file_scope: vec!["tracked.txt".into()],
                         expires_at: None,
+                        use_existing_branch: false,
                     },
                 },
                 |_| {},
@@ -3869,6 +3904,55 @@ mod tests {
             &["worktree", "remove", "--force", "--", &lease.worktree_path],
             None,
             None,
+        );
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn existing_branch_can_be_attached_to_a_managed_worktree_without_moving_main() {
+        let root = repository("existing-branch-worktree");
+        let (service, project) = service_for(&root);
+        let base = service.inspect(&project.id, None, None).unwrap();
+        let branch = format!("feature/existing-{}", Uuid::new_v4());
+        service
+            .git_text(&root, &["branch", &branch, &base.head_sha], None, None)
+            .unwrap();
+        let result = service
+            .execute(
+                RepositoryOperationRequest {
+                    context: RepositoryOperationContext {
+                        project_id: project.id.clone(),
+                        repository_path: None,
+                        worktree_path: None,
+                        actor: actor(),
+                        base_commit: Some(base.head_sha.clone()),
+                        expected_branch: base.branch.clone(),
+                        approval_id: None,
+                        idempotency_key: "existing-branch-worktree".into(),
+                        timeout_seconds: Some(30),
+                    },
+                    operation: RepositoryOperation::CreateAgentWorktree {
+                        branch: branch.clone(),
+                        base_commit: base.head_sha,
+                        agent_id: "terminal:pane".into(),
+                        task_id: "pane-branch:workspace:pane".into(),
+                        file_scope: vec![".".into()],
+                        expires_at: None,
+                        use_existing_branch: true,
+                    },
+                },
+                |_| {},
+            )
+            .unwrap();
+        assert_eq!(result.status, RepositoryOperationStatus::Succeeded);
+        let lease = service.list_leases(&project.id).unwrap().remove(0);
+        let managed = service
+            .inspect(&project.id, None, Some(&lease.worktree_path))
+            .unwrap();
+        assert_eq!(managed.branch.as_deref(), Some(branch.as_str()));
+        assert_eq!(
+            service.inspect(&project.id, None, None).unwrap().branch,
+            base.branch
         );
         fs::remove_dir_all(root).ok();
     }

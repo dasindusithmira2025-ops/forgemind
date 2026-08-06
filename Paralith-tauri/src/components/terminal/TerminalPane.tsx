@@ -3,7 +3,7 @@ import { Terminal, type ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { SearchAddon } from '@xterm/addon-search'
 import { WebLinksAddon } from '@xterm/addon-web-links'
-import { ChevronDown, Maximize2, Minimize2, MoreHorizontal, RotateCw, Search, X } from 'lucide-react'
+import { ChevronDown, GitBranch, Maximize2, Minimize2, MoreHorizontal, RotateCw, Search, X } from 'lucide-react'
 import { Button } from '../ui/Button'
 import { native } from '../../native/commands'
 import type { AgentActivityState, AppSettings, PaneAssignment, TerminalSession } from '../../native/types'
@@ -20,6 +20,7 @@ const MAX_RENDER_BATCH_BYTES = 256 * 1024
 interface TerminalPaneProps {
   assignment: PaneAssignment
   session?: TerminalSession
+  branchName?: string
   deferred?: boolean
   active: boolean
   maximized: boolean
@@ -34,7 +35,7 @@ interface TerminalPaneProps {
   onHeaderPointerDown?: (event: ReactPointerEvent) => void
 }
 
-export function TerminalPane({ assignment, session, deferred = false, active, maximized, settings, onFocus, onMaximize, onClose, onRestart, onMenu, onHeaderPointerDown }: TerminalPaneProps) {
+export function TerminalPane({ assignment, session, branchName, deferred = false, active, maximized, settings, onFocus, onMaximize, onClose, onRestart, onMenu, onHeaderPointerDown }: TerminalPaneProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const paneRef = useRef<HTMLElement>(null)
   const terminalRef = useRef<Terminal | undefined>(undefined)
@@ -292,6 +293,7 @@ export function TerminalPane({ assignment, session, deferred = false, active, ma
     <header className={`terminal-header ${onHeaderPointerDown ? 'draggable' : ''}`} onPointerDown={onHeaderPointerDown}>
       <span className={`terminal-status status-${agentState?.state ?? currentSession?.status ?? 'loading'}`} aria-label={agentState ? agentStateLabel(agentState.state) : currentSession?.status ?? 'starting'} title={agentState?.reason} />
       <div className="terminal-title"><strong>{assignment.title}</strong><span>{providerLabel(assignment.provider)}{agentState ? ` · ${agentStateLabel(agentState.state)}` : ''}</span></div>
+      {branchName && <span className="terminal-branch" title={`Terminal branch: ${branchName}`}><GitBranch size={11} aria-hidden />{branchName}</span>}
       <span className="terminal-path" title={assignment.workingDirectory}>{assignment.workingDirectory}</span>
       {agentState?.attentionSince && <span className="agent-attention-badge" title={`${agentState.source}: ${agentState.reason}`}>Needs review</span>}
       <div className="terminal-controls">
