@@ -17,8 +17,8 @@ it to users; only a confirmed `Release Stable` run can activate the Stable manif
 
 1. requires an existing `stable-vX.Y.Z` tag and the explicit **RELEASE TO ALL STABLE USERS** choice;
 2. checks out that tag and proves its commit is on `origin/main`;
-3. cleans stale release output while preserving the persistent runner's dependency caches;
-4. verifies the runner, signing key, update endpoint, publisher, and public artifact repository;
+3. provisions a clean GitHub-hosted Windows runner with lockfile-keyed dependency caches;
+4. verifies the signing key, update endpoint, publisher, and public artifact repository;
 5. checks canonical version/changelog/schema metadata and runs the full frontend and Rust gate;
 6. builds one signed Stable MSI, one per-user NSIS installer, and both updater signatures;
 7. validates the artifact set, hashes, tag, commit, channel, and a fixed `rolloutPercent: 100`;
@@ -53,7 +53,7 @@ Required environment configuration:
 
 | Name | Kind | Purpose |
 |---|---|---|
-| `TAURI_SIGNING_PRIVATE_KEY` | secret | Password-protected Tauri updater private key or protected runner path. |
+| `TAURI_SIGNING_PRIVATE_KEY` | secret | Password-protected Tauri updater private key contents. |
 | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | secret | Private-key password; empty only when the offline key intentionally has none. |
 | `PARALITH_STABLE_UPDATE_ENDPOINT` | variable | Exact Stable `latest.json` URL derived by `update-distribution.mjs`. |
 | `PARALITH_UPDATE_PUBLISH_PROVIDER` | variable | Must be `github-artifacts`. |

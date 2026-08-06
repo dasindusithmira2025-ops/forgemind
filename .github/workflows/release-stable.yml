@@ -34,7 +34,7 @@ concurrency:
 jobs:
   release:
     name: Validate, sign, publish, and verify Stable
-    runs-on: [self-hosted, Windows, X64, paralith, paralith-release]
+    runs-on: windows-latest
     timeout-minutes: 150
     environment:
       name: stable-release
@@ -71,7 +71,6 @@ jobs:
         with:
           fetch-depth: 0
           ref: ${{ inputs.tag }}
-          clean: false
           persist-credentials: false
 
       - name: Prove the tagged commit came through main
@@ -90,24 +89,38 @@ jobs:
           "release_sha=$head" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           Write-Host "$env:RELEASE_TAG resolves to reviewed main commit $head."
 
-      # The persistent runner keeps dependency/build caches. This removes every other untracked
-      # path and all prior release bundles before the build can glob an artifact.
-      - name: Prepare the persistent runner workspace
-        working-directory: .
-        env:
-          RELEASE_SHA: ${{ steps.source.outputs.release_sha }}
-        run: pwsh -NoProfile -File scripts/ci/prepare-workspace.ps1 -ExpectedSha "$env:RELEASE_SHA" -ReleaseBuild
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: Paralith-tauri/package-lock.json
 
-      - name: Runner preflight
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          PARALITH_STABLE_UPDATE_ENDPOINT: ${{ vars.PARALITH_STABLE_UPDATE_ENDPOINT }}
-          PARALITH_UPDATE_PUBLISH_PROVIDER: ${{ vars.PARALITH_UPDATE_PUBLISH_PROVIDER }}
-          PARALITH_UPDATES_REPOSITORY: ${{ vars.PARALITH_UPDATES_REPOSITORY }}
-          PARALITH_UPDATE_MIRROR_BASE_URL: ${{ vars.PARALITH_UPDATE_MIRROR_BASE_URL }}
-          PARALITH_UPDATE_MIRROR_MODE: ${{ vars.PARALITH_UPDATE_MIRROR_MODE }}
-        run: pwsh -NoProfile -File scripts/ci/check-self-hosted-runner.ps1 -ReleaseBuild
+      - name: Configure Rust toolchain
+        run: |
+          rustup default stable
+          rustup component add rustfmt clippy
+          rustup target add x86_64-pc-windows-msvc
+          rustc --version
+          cargo --version
+
+      - name: Restore Cargo downloads
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-${{ runner.os }}-${{ hashFiles('Paralith-tauri/src-tauri/Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-
+
+      - name: Restore Tauri bundler tools
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/AppData/Local/tauri
+          key: tauri-bundlers-${{ runner.os }}-${{ hashFiles('Paralith-tauri/package-lock.json') }}
+          restore-keys: |
+            tauri-bundlers-${{ runner.os }}-
 
       - name: Install locked dependencies
         run: npm ci
@@ -347,8 +360,3 @@ jobs:
       - name: Remove temporary credentials
         if: always()
         run: pwsh -NoProfile -File scripts/ci/sweep-credentials.ps1
-
-      - name: Clean up abandoned build processes
-        if: always()
-        working-directory: .
-        run: pwsh -NoProfile -File scripts/ci/cleanup-runner-processes.ps1

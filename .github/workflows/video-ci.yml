@@ -20,30 +20,28 @@ concurrency:
 
 jobs:
   validate-video:
-    name: Validate Remotion source
-    runs-on: [self-hosted, Windows, X64, paralith]
+    name: Validate Remotion source (GitHub Linux)
+    runs-on: ubuntu-latest
     timeout-minutes: 20
-    if: >-
-      github.event_name != 'pull_request' ||
-      github.event.pull_request.head.repo.full_name == github.repository
-
     defaults:
       run:
-        shell: pwsh
+        shell: bash
         working-directory: marketing/paralith-video
 
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          fetch-depth: 0
-          clean: false
+          persist-credentials: false
 
-      - name: Prepare workspace
-        working-directory: .
-        run: pwsh -NoProfile -File scripts/ci/prepare-workspace.ps1 -ExpectedSha "$env:GITHUB_SHA"
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: marketing/paralith-video/package-lock.json
 
-      - name: Install dependencies
+      - name: Install locked dependencies
         run: npm ci
 
       - name: Type check

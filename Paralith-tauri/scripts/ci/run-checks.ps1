@@ -33,7 +33,7 @@ $global:LASTEXITCODE = 0
 $script:Steps = [System.Collections.Generic.List[object]]::new()
 
 # Runs one check, records its duration, and aborts the suite on first failure. Failing fast
-# keeps a broken tree from occupying the single self-hosted runner for a full suite.
+# keeps a broken tree from occupying a Windows runner for the full native suite.
 function Invoke-Check {
     param(
         [Parameter(Mandatory)][string]$Name,
