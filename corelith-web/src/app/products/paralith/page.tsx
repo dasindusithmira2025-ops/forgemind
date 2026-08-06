@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { products } from '@/data/products';
 import { DownloadSelector } from '@/components/DownloadSelector';
 import { FAQAccordion } from '@/components/FAQAccordion';
+import { ParalithHeroLoop } from '@/components/ParalithHeroLoop';
 import { ProductStatusBadge } from '@/components/ProductStatusBadge';
 import { Band, ClosingBand, PageMasthead, SectionMark, Ticker } from '@/components/Editorial';
 
@@ -17,6 +18,61 @@ const PLATFORMS = [
   { os: 'Windows', detail: '11 / 10 (22H2+)', artifact: 'x64 · .msi' },
   { os: 'macOS', detail: 'Ventura 13.0+', artifact: 'Universal · .dmg' },
   { os: 'Linux', detail: 'Ubuntu 22.04 / Fedora 38+', artifact: 'x86_64 · AppImage, .deb' },
+];
+
+/**
+ * The surfaces the workspace is actually made of. Each one is a real part of
+ * the application and appears in the loop above, which is the constraint this
+ * list is written under — it names what ships, not what is planned.
+ */
+const SURFACES = [
+  {
+    name: 'Projects',
+    body: 'Open a project and the workspace comes back the way you left it — the same panes, the same terminals, the same agents mid-task.',
+  },
+  {
+    name: 'Code surface',
+    body: 'An editor, a file tree, and a browser preview in one pane, so you can read what an agent changed and see the result without leaving the window.',
+  },
+  {
+    name: 'Terminals',
+    body: 'Real shells, several at a time. Agents use the same terminals you do, and anything destructive stops to ask before it runs.',
+  },
+  {
+    name: 'Swarms',
+    body: 'Give a larger piece of work to a group of agents instead of one, and watch them split it between themselves.',
+  },
+  {
+    name: 'Repository',
+    body: 'Branches and pending changes in one view. Every diff an agent produced is here to read before you let any of it through.',
+  },
+  {
+    name: 'Detached windows',
+    body: 'Pull any panel out into a window of its own and lay the workspace out across as many monitors as you have.',
+  },
+];
+
+/**
+ * The verification gate, stated as the three states a change actually passes
+ * through. This is the product's central claim, so it gets a band of its own
+ * rather than a bullet in a card.
+ */
+const GATE = [
+  {
+    state: 'Proposed',
+    title: 'The agent writes, but not into your project.',
+    body: 'Work happens against your project without landing in it. Nothing an agent produces is in your working tree while it is still being made.',
+  },
+  {
+    state: 'Checked',
+    title: 'The change has to pass before it can move.',
+    body: 'Every change is checked before it is allowed any further. A failure stops it where it is — the change waits for you to look at it rather than going in anyway.',
+  },
+  {
+    state: 'Approved',
+    title: 'You are the one who lets it through.',
+    body: 'What changed, and what was deliberately left alone, comes back as something you can read in a minute. It lands when you say so, and there is no override switch.',
+  },
 ];
 
 const RELEASE_NOTES = [
@@ -70,28 +126,46 @@ export default function ParalithPage() {
           { key: 'Downloads', value: 'Signed · SHA-256' },
           { key: 'Telemetry', value: 'Off by default' },
         ]}
-      />
-
-      {/* ── Download ─────────────────────────────────────────────────────── */}
-      <Band tone="paper-2" id="download" className="scroll-mt-24" divider>
-        <SectionMark
-          index="01"
-          kicker="Distribution"
-          title="Pull the preview build."
-          deck="Every installer is signed and published with its checksum so you can verify the artifact before it runs."
-        />
-
-        <div className="mt-14">
-          {product.downloads && (
-            <DownloadSelector productName={product.name} downloads={product.downloads} />
-          )}
-        </div>
-      </Band>
+      >
+        <ParalithHeroLoop />
+      </PageMasthead>
 
       <Ticker items={product.capabilities.map((c) => c.highlight ?? c.title)} />
 
+      {/* ── The workspace ────────────────────────────────────────────────── */}
+      <Band tone="paper-2" id="workspace" className="scroll-mt-24" divider>
+        <SectionMark
+          index="01"
+          kicker="The workspace"
+          title="What you are looking at."
+          deck="Six surfaces in one window. The loop above moves between them; this is what each one is for."
+        />
+
+        <div className="mt-14 grid grid-cols-12 gap-x-8">
+          <div className="col-span-12 border-t border-[var(--hair-strong)]">
+            {SURFACES.map((surface, i) => (
+              <article
+                key={surface.name}
+                className="grid grid-cols-12 items-baseline gap-x-8 gap-y-3 border-b border-[var(--hair)] py-6"
+              >
+                <div className="col-span-12 flex items-baseline gap-4 lg:col-span-4">
+                  <span aria-hidden="true" className="stamp text-ink-faint w-6 shrink-0">
+                    {String(i + 1).padStart(2, '0')}
+                  </span>
+                  <h3 className="text-base lg:text-lg">{surface.name}</h3>
+                </div>
+
+                <p className="text-ink-soft col-span-12 text-base lg:col-span-7 lg:col-start-6">
+                  {surface.body}
+                </p>
+              </article>
+            ))}
+          </div>
+        </div>
+      </Band>
+
       {/* ── Capabilities ─────────────────────────────────────────────────── */}
-      <Band tone="paper">
+      <Band tone="paper" id="capabilities" className="scroll-mt-24">
         <SectionMark
           index="02"
           kicker="What it does"
@@ -112,10 +186,62 @@ export default function ParalithPage() {
         </div>
       </Band>
 
+      {/* ── The gate ─────────────────────────────────────────────────────── */}
+      <Band tone="core" id="verification" className="scroll-mt-24" divider>
+        <SectionMark
+          index="03"
+          kicker="Verification"
+          title="Three states, and only one way through."
+          deck="The part of Paralith worth arguing about. Agents can write anything they like; what they cannot do is decide that it ships."
+        />
+
+        <div className="mt-14 grid grid-cols-1 gap-5 lg:grid-cols-3">
+          {GATE.map((step, i) => (
+            <article
+              key={step.state}
+              className="panel flex flex-col gap-4 p-7"
+              // The three read as a sequence, so the connective is an arrow between
+              // plates rather than three unrelated cards.
+            >
+              <div className="flex items-center gap-3">
+                <span aria-hidden="true" className="numeral text-ink text-xl">
+                  {String(i + 1).padStart(2, '0')}
+                </span>
+                <p className="stamp text-ink">{step.state}</p>
+              </div>
+              <h3 className="text-base lg:text-lg">{step.title}</h3>
+              <p className="text-ink-soft mt-auto border-t border-[var(--hair)] pt-4 text-sm">
+                {step.body}
+              </p>
+            </article>
+          ))}
+        </div>
+
+        <p className="stamp text-ink-soft mt-10 border-t border-[var(--hair)] pt-6">
+          Signed installers ◆ SHA-256 published ◆ No telemetry by default
+        </p>
+      </Band>
+
+      {/* ── Download ─────────────────────────────────────────────────────── */}
+      <Band tone="paper" id="download" className="scroll-mt-24">
+        <SectionMark
+          index="04"
+          kicker="Distribution"
+          title="Pull the preview build."
+          deck="Every installer is signed and published with its checksum so you can verify the artifact before it runs."
+        />
+
+        <div className="mt-14">
+          {product.downloads && (
+            <DownloadSelector productName={product.name} downloads={product.downloads} />
+          )}
+        </div>
+      </Band>
+
       {/* ── Platforms & audience ─────────────────────────────────────────── */}
       <Band tone="paper-2" divider>
         <SectionMark
-          index="03"
+          index="05"
           kicker="Fit"
           title="Who it is for, and where it runs."
           deck="Paralith targets engineers who are already coordinating several moving parts at once — and every desktop they do it on."
@@ -163,7 +289,7 @@ export default function ParalithPage() {
       {/* ── Release notes ────────────────────────────────────────────────── */}
       <Band tone="paper" id="release-notes" className="scroll-mt-24">
         <SectionMark
-          index="04"
+          index="06"
           kicker="Changelog"
           title="v0.9.4 preview."
           deck="Released 15 July 2026. Published with SHA-256 checksums for every artifact."
@@ -194,9 +320,9 @@ export default function ParalithPage() {
       </Band>
 
       {/* ── FAQ ──────────────────────────────────────────────────────────── */}
-      <Band tone="paper-2" divider>
+      <Band tone="paper-2" id="faq" className="scroll-mt-24" divider>
         <SectionMark
-          index="05"
+          index="07"
           kicker="Questions"
           title="What people ask first."
           deck="Architecture, privacy, model choice, and platform support — answered without hedging."
