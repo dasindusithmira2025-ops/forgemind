@@ -54,22 +54,16 @@ export interface NavLink {
 export interface NavPanelItem {
   label: string;
   href: string;
+  /** Shown in the mobile drawer, where a bare label has room to be explained. */
   description: string;
+  badge?: string;
 }
 
-/**
- * The right-hand column of a navigation panel: a still of the thing the branch
- * is about, one line about it, and the single action it hands off to. A picture
- * of the product beats a table of claims about it.
- */
-export interface NavPanelPlate {
-  image: string;
-  /** Empty when the image is the company mark, which the wordmark already names. */
-  imageAlt: string;
-  /** `cover` fills the plate (screenshots); `contain` sits inside it (the mark). */
-  fit: 'cover' | 'contain';
-  caption: string;
-  statement: string;
+/** The right column of a navigation panel: a summary, checkable facts, one action. */
+export interface NavPanelAside {
+  heading: string;
+  body: string;
+  facts: string[];
   cta: { label: string; href: string };
 }
 
@@ -82,8 +76,10 @@ export type NavItem =
       label: string;
       /** Where the trigger points when the panel is bypassed (mobile, no JS). */
       href: string;
+      /** Small tracked heading over the destination column. */
+      heading: string;
       items: NavPanelItem[];
-      plate: NavPanelPlate;
+      aside: NavPanelAside;
     };
 
 export interface CareerRole {

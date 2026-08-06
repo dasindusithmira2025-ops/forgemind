@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { mainNav } from '@/data/navigation';
@@ -12,19 +11,19 @@ import { BrandLogo } from './BrandLogo';
  *  from the trigger down into the panel does not dismiss it mid-travel. */
 const CLOSE_DELAY_MS = 120;
 
-/** The only chevron in the system. A drawn caret, never a `▼` glyph — a text
- *  arrow inherits the font's weight and baseline and reads as a typo. */
+/** A drawn caret, never a `▼` glyph — a text arrow inherits the font's weight
+ *  and baseline and reads as a typo. */
 function Caret({ open }: { open: boolean }) {
   return (
     <svg
       aria-hidden="true"
       viewBox="0 0 10 6"
-      className={`h-[5px] w-[9px] shrink-0 transition-transform duration-200 ${
+      className={`h-[6px] w-[10px] shrink-0 transition-transform duration-200 ${
         open ? 'rotate-180' : ''
       }`}
       fill="none"
       stroke="currentColor"
-      strokeWidth="1.4"
+      strokeWidth="1.5"
       strokeLinecap="round"
       strokeLinejoin="round"
     >
@@ -49,8 +48,6 @@ export function Header() {
   useEffect(() => {
     const handleScroll = () => {
       setScrolled(window.scrollY > 8);
-      // The header is sticky, so an open panel would ride down the page with it
-      // and sit over content the reader has moved on to.
       setOpenMenuId(null);
     };
     window.addEventListener('scroll', handleScroll, { passive: true });
@@ -139,104 +136,167 @@ export function Header() {
   const isBranchCurrent = (entry: NavItem) =>
     entry.kind === 'link' ? isUnder(entry.href) : entry.items.some((item) => isUnder(item.href));
 
-  const openEntry = mainNav.find((entry) => entry.kind === 'menu' && entry.id === openMenuId);
+  /**
+   * Shared geometry for every item in the bar: 14px, medium, 40px tall.
+   * `leading-5` is load-bearing — the body scale sets 14px on a 1.6 line, which
+   * would make each item 42px and throw the row off the 40px grid.
+   */
+  const barItem =
+    'flex items-center gap-1.5 px-4 py-2.5 text-sm leading-5 font-medium transition-colors duration-200';
 
   return (
     <header
       ref={headerRef}
       onMouseLeave={scheduleClose}
-      // One hairline, and only once the page has moved. No blur, no shadow, no
-      // second strip — the bar sits on the stock rather than floating above it.
-      className={`bg-paper sticky top-0 z-50 border-b transition-colors duration-200 ${
+      className={`bg-paper sticky top-0 z-50 border-b py-4 transition-colors duration-300 ${
         scrolled || openMenuId ? 'border-[var(--hair)]' : 'border-transparent'
       }`}
     >
-      <div className="mx-auto flex h-14 max-w-[var(--measure)] items-center gap-10 px-6 lg:px-10">
-        <div className="flex items-center gap-3">
-          <BrandLogo size="sm" />
-          {/* The release lives in the bar as a machine value rather than in a strip
-              of its own. It is a fact about the build, which is what mono is for. */}
-          <Link
-            href="/products/paralith#release-notes"
-            // Not `.stamp`: that class force-uppercases, and a version string is
-            // written with a lowercase v. `.stamp` is unlayered so a `normal-case`
-            // utility loses to it — the treatment is spelled out instead.
-            className="text-ink-faint hover:text-core-ink hidden font-mono text-xs leading-none font-medium tracking-[0.13em] transition-colors sm:inline"
-          >
-            v0.9.4
-          </Link>
-        </div>
+      <div className="mx-auto flex h-10 max-w-[var(--measure)] items-center gap-6 px-6 lg:px-10">
+        <BrandLogo size="sm" />
 
-        <nav aria-label="Primary" className="hidden md:block">
-          <ul className="flex items-center gap-7">
-            {mainNav.map((entry) => {
-              const active = isBranchCurrent(entry);
-              const open = entry.kind === 'menu' && openMenuId === entry.id;
+        <nav aria-label="Primary" className="hidden min-w-0 flex-1 items-center gap-x-2 px-6 lg:flex">
+          {mainNav.map((entry) => {
+            const active = isBranchCurrent(entry);
 
-              // The one hover/active device in the bar: a blue rule struck under
-              // the word, the same mark `.flare` puts under an accented headline.
-              const rule =
-                'after:absolute after:inset-x-0 after:-bottom-1.5 after:h-px after:origin-left after:bg-core-ink after:transition-transform after:duration-200';
-              const ruleState = active || open ? 'after:scale-x-100' : 'after:scale-x-0';
-
-              if (entry.kind === 'link') {
-                return (
-                  <li key={entry.href}>
-                    <Link
-                      href={entry.href}
-                      aria-current={active ? 'page' : undefined}
-                      onMouseEnter={scheduleClose}
-                      className={`text-ink-soft hover:text-ink relative py-1 text-sm transition-colors hover:after:scale-x-100 ${rule} ${ruleState} ${
-                        active ? 'text-ink' : ''
-                      }`}
-                    >
-                      {entry.label}
-                    </Link>
-                  </li>
-                );
-              }
-
+            if (entry.kind === 'link') {
               return (
-                <li key={entry.id} onMouseEnter={() => {
+                <Link
+                  key={entry.href}
+                  href={entry.href}
+                  aria-current={active ? 'page' : undefined}
+                  onMouseEnter={scheduleClose}
+                  className={`${barItem} hover:text-ink ${active ? 'text-ink' : 'text-ink-soft'}`}
+                >
+                  {entry.label}
+                </Link>
+              );
+            }
+
+            const open = openMenuId === entry.id;
+
+            return (
+              <div
+                key={entry.id}
+                className="relative"
+                onMouseEnter={() => {
                   cancelClose();
                   setOpenMenuId(entry.id);
-                }}>
-                  <button
-                    type="button"
-                    ref={(node) => {
-                      triggerRefs.current[entry.id] = node;
-                    }}
-                    aria-expanded={open}
-                    aria-controls="nav-panel"
-                    onClick={() => setOpenMenuId(open ? null : entry.id)}
-                    onKeyDown={(event) => {
-                      if (event.key !== 'ArrowDown') return;
-                      event.preventDefault();
-                      focusPanelOnOpen.current = true;
-                      setOpenMenuId(entry.id);
-                    }}
-                    className={`text-ink-soft hover:text-ink relative flex cursor-pointer items-center gap-2 py-1 text-sm transition-colors hover:after:scale-x-100 ${rule} ${ruleState} ${
-                      active || open ? 'text-ink' : ''
-                    }`}
+                }}
+              >
+                <button
+                  type="button"
+                  ref={(node) => {
+                    triggerRefs.current[entry.id] = node;
+                  }}
+                  aria-expanded={open}
+                  aria-controls="nav-panel"
+                  onClick={() => setOpenMenuId(open ? null : entry.id)}
+                  onKeyDown={(event) => {
+                    if (event.key !== 'ArrowDown') return;
+                    event.preventDefault();
+                    focusPanelOnOpen.current = true;
+                    setOpenMenuId(entry.id);
+                  }}
+                  className={`${barItem} hover:text-ink cursor-pointer ${
+                    active || open ? 'text-ink' : 'text-ink-soft'
+                  }`}
+                >
+                  {entry.label}
+                  <Caret open={open} />
+                </button>
+
+                {open && (
+                  <div
+                    id="nav-panel"
+                    ref={panelRef}
+                    onMouseEnter={cancelClose}
+                    // 520px, anchored to the trigger's left edge, 8px clear of the bar.
+                    className="absolute top-full left-0 z-50 mt-2 w-[520px] overflow-hidden rounded-2xl border border-[var(--hair)] bg-[rgba(13,15,19,0.95)] shadow-[0_25px_50px_-12px_rgba(0,0,0,0.5)] backdrop-blur-[64px]"
                   >
-                    {entry.label}
-                    <Caret open={open} />
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
+                    <div className="grid grid-cols-[1fr_1px_1fr]">
+                      {/* Destinations */}
+                      <div className="p-2.5">
+                        <p className="text-ink-faint px-3 pt-1.5 pb-2 text-[10px] leading-none font-medium tracking-[1.5px]">
+                          {entry.heading}
+                        </p>
+
+                        <ul>
+                          {entry.items.map((item) => {
+                            const current = isHere(item.href);
+                            return (
+                              <li key={item.href}>
+                                <Link
+                                  href={item.href}
+                                  aria-current={current ? 'page' : undefined}
+                                  className={`flex items-center gap-2 rounded-md px-3 py-2.5 text-sm leading-5 transition-colors hover:bg-[rgba(242,242,244,0.05)] ${
+                                    current ? 'text-core-ink' : 'text-ink'
+                                  }`}
+                                >
+                                  {item.label}
+                                  {item.badge && (
+                                    <span className="text-ink-faint border border-[var(--hair)] bg-[rgba(242,242,244,0.02)] px-1.5 py-px font-mono text-[9px] leading-normal tracking-[1.35px]">
+                                      {item.badge}
+                                    </span>
+                                  )}
+                                </Link>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      </div>
+
+                      {/* The divider is a column of the grid, not a border, so it
+                          runs the full height whichever side is taller. */}
+                      <div aria-hidden="true" className="bg-[rgba(242,242,244,0.06)]" />
+
+                      {/* Summary */}
+                      <div className="flex flex-col justify-between p-4">
+                        <div>
+                          <p className="text-ink text-base leading-snug">{entry.aside.heading}</p>
+                          <p className="text-ink-soft mt-2 text-xs leading-relaxed">
+                            {entry.aside.body}
+                          </p>
+
+                          <ul className="mt-4 space-y-2">
+                            {entry.aside.facts.map((fact) => (
+                              <li
+                                key={fact}
+                                className="text-ink-faint flex items-center gap-2.5 font-mono text-[11px]"
+                              >
+                                <span aria-hidden="true" className="node h-1 w-1 shrink-0" />
+                                {fact}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+
+                        <Link
+                          href={entry.aside.cta.href}
+                          className="text-core-ink hover:text-ink mt-5 inline-flex items-center gap-2 text-xs font-medium transition-colors"
+                        >
+                          {entry.aside.cta.label}
+                          <span aria-hidden="true">→</span>
+                        </Link>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </nav>
 
-        <div className="ml-auto hidden items-center gap-6 md:flex">
-          <Link href="/contact" className="text-ink-soft hover:text-ink text-sm transition-colors">
+        <div className="ml-auto hidden items-center gap-4 lg:flex">
+          <Link
+            href="/contact"
+            className="text-ink-soft hover:text-ink text-sm font-medium transition-colors"
+          >
             Contact
           </Link>
-          {/* The only filled colour in the bar. The mark carries one blue facet;
-              so does the header. */}
           <Link
             href="/products/paralith#download"
-            className="bg-core rounded-full px-4 py-2 text-sm leading-none font-medium text-white transition-colors hover:bg-[#3355d8]"
+            className="bg-core rounded-md px-5 py-2 text-sm leading-tight font-semibold text-white transition-colors duration-300 hover:bg-[#3355d8]"
           >
             Get Paralith
           </Link>
@@ -245,7 +305,7 @@ export function Header() {
         <button
           type="button"
           onClick={() => setMobileMenuOpen((open) => !open)}
-          className="ml-auto flex h-9 w-9 items-center justify-center md:hidden"
+          className="ml-auto flex h-9 w-9 items-center justify-center lg:hidden"
           aria-label={mobileMenuOpen ? 'Close navigation' : 'Open navigation'}
           aria-expanded={mobileMenuOpen}
         >
@@ -269,80 +329,8 @@ export function Header() {
         </button>
       </div>
 
-      {/* The panel. Full-bleed, printed on the second weight of stock with the
-          same halftone every band carries, and closed by a hairline — a band of
-          the page that happens to be temporary, not a card floating over it. */}
-      {openEntry?.kind === 'menu' && (
-        <div
-          id="nav-panel"
-          ref={panelRef}
-          onMouseEnter={cancelClose}
-          className="tone-paper-2 absolute inset-x-0 top-full hidden border-b border-[var(--hair)] md:block"
-        >
-          <div className="mx-auto grid max-w-[var(--measure)] grid-cols-12 gap-x-10 px-6 py-10 lg:px-10">
-            <ul className="col-span-7 border-t border-[var(--hair)]">
-              {openEntry.items.map((item) => {
-                const current = isHere(item.href);
-                return (
-                  <li key={item.href}>
-                    <Link
-                      href={item.href}
-                      aria-current={current ? 'page' : undefined}
-                      className="group flex items-baseline justify-between gap-8 border-b border-[var(--hair)] py-3.5"
-                    >
-                      <span
-                        className={`group-hover:text-core-ink text-[15px] transition-colors ${
-                          current ? 'text-core-ink' : 'text-ink'
-                        }`}
-                      >
-                        {item.label}
-                      </span>
-                      <span className="text-ink-faint text-right text-xs">{item.description}</span>
-                    </Link>
-                  </li>
-                );
-              })}
-            </ul>
-
-            <div className="col-span-5 col-start-8">
-              <div className="border border-[var(--hair)] bg-[rgba(0,0,0,0.32)] p-2">
-                <Image
-                  src={openEntry.plate.image}
-                  alt={openEntry.plate.imageAlt}
-                  width={760}
-                  height={476}
-                  // A fixed plate height rather than a fixed ratio: the two panels
-                  // hold six rows and four, and a ratio-sized plate leaves the
-                  // shorter one hanging well below its own list.
-                  className={`block h-36 w-full ${
-                    openEntry.plate.fit === 'cover'
-                      ? 'object-cover object-left-top'
-                      : 'scale-[0.45] object-contain'
-                  }`}
-                />
-              </div>
-
-              {/* A value, not a key — the system sets values in normal-case mono
-                  and reserves uppercase for the label beside them. */}
-              <p className="text-ink-faint mt-4 font-mono text-xs leading-none tracking-[0.13em]">
-                {openEntry.plate.caption}
-              </p>
-              <p className="text-ink-soft mt-2 text-sm">{openEntry.plate.statement}</p>
-
-              <Link
-                href={openEntry.plate.cta.href}
-                className="text-core-ink hover:text-ink mt-4 inline-flex items-center gap-2 text-sm transition-colors"
-              >
-                {openEntry.plate.cta.label}
-                <span aria-hidden="true">→</span>
-              </Link>
-            </div>
-          </div>
-        </div>
-      )}
-
       {mobileMenuOpen && (
-        <div className="bg-paper absolute inset-x-0 top-full flex max-h-[calc(100dvh-3.5rem)] flex-col overflow-y-auto border-b border-[var(--hair)] md:hidden">
+        <div className="bg-paper absolute inset-x-0 top-full flex max-h-[calc(100dvh-4.5rem)] flex-col overflow-y-auto border-b border-[var(--hair)] lg:hidden">
           <nav aria-label="Mobile" className="flex flex-col p-6">
             {mainNav.map((entry) => {
               const items =
@@ -351,7 +339,12 @@ export function Header() {
                   : entry.items;
 
               return (
-                <ul key={entry.kind === 'link' ? entry.href : entry.id} className="mb-8 last:mb-0">
+                <ul key={entry.kind === 'link' ? entry.href : entry.id} className="mb-7 last:mb-0">
+                  {entry.kind === 'menu' && (
+                    <li className="text-ink-faint pb-2 text-[10px] leading-none font-medium tracking-[1.5px]">
+                      {entry.heading}
+                    </li>
+                  )}
                   {items.map((item) => (
                     <li key={item.href}>
                       <Link
@@ -380,11 +373,11 @@ export function Header() {
           <div className="mt-auto flex items-center gap-4 border-t border-[var(--hair)] p-6">
             <Link
               href="/products/paralith#download"
-              className="bg-core flex-1 rounded-full px-4 py-3 text-center text-sm font-medium text-white"
+              className="bg-core flex-1 rounded-md px-4 py-3 text-center text-sm font-semibold text-white"
             >
               Get Paralith
             </Link>
-            <Link href="/contact" className="text-ink-soft px-4 py-3 text-sm">
+            <Link href="/contact" className="text-ink-soft px-4 py-3 text-sm font-medium">
               Contact
             </Link>
           </div>
