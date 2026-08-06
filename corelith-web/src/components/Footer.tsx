@@ -20,14 +20,17 @@ const SOCIAL = [
 export function Footer() {
   return (
     <footer className="tone-paper-2 relative isolate overflow-hidden border-t border-[var(--hair)]">
+      {/* Retinted to the mark's own blue. This was a violet wash that appears
+          nowhere else in the palette, which made the last thing on every page
+          the one thing not printed in the brand's ink. */}
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute inset-x-0 bottom-0 -z-10 h-64 bg-[radial-gradient(60%_100%_at_50%_100%,rgba(122,92,255,0.16)_0%,transparent_70%)]"
+        className="pointer-events-none absolute inset-x-0 bottom-0 -z-10 h-64 bg-[radial-gradient(60%_100%_at_50%_100%,rgba(65,102,228,0.16)_0%,transparent_70%)]"
       />
 
-      <div className="mx-auto max-w-[var(--measure)] px-6 lg:px-10">
+      <div data-reveal-group="" className="mx-auto max-w-[var(--measure)] px-6 lg:px-10">
         <div className="grid grid-cols-12 gap-x-8 gap-y-12 py-16">
-          <div className="col-span-12 space-y-6 lg:col-span-4">
+          <div data-reveal="up" className="col-span-12 space-y-6 lg:col-span-4">
             <BrandLogo size="lg" showTagline />
             <p className="text-ink-soft max-w-sm text-sm">{siteConfig.description}</p>
             <p className="stamp text-success flex items-center gap-2.5">
@@ -37,7 +40,12 @@ export function Footer() {
           </div>
 
           {COLUMNS.map((column) => (
-            <nav key={column.heading} aria-label={column.heading} className="col-span-6 lg:col-span-2">
+            <nav
+              key={column.heading}
+              aria-label={column.heading}
+              data-reveal="up"
+              className="col-span-6 lg:col-span-2"
+            >
               <h2 className="stamp text-ink-faint border-b border-[var(--hair)] pb-3">
                 {column.heading}
               </h2>
@@ -64,7 +72,7 @@ export function Footer() {
             </nav>
           ))}
 
-          <div className="col-span-12 lg:col-span-2">
+          <div data-reveal="up" className="col-span-12 lg:col-span-2">
             <h2 className="stamp text-ink-faint border-b border-[var(--hair)] pb-3">Elsewhere</h2>
             <ul className="mt-4 space-y-3">
               {SOCIAL.map((social) => (

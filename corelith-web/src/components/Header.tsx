@@ -152,6 +152,14 @@ export function Header() {
         scrolled || openMenuId ? 'border-[var(--hair)]' : 'border-transparent'
       }`}
     >
+      {/* Reading position, printed on the header's own bottom rule. It is driven
+          entirely by `--scroll-p` — a transform on a one-pixel element, so the
+          bar tracks the scroll on the compositor and this component never
+          re-renders while the page moves. */}
+      <span
+        aria-hidden="true"
+        className="read-line pointer-events-none absolute inset-x-0 -bottom-px"
+      />
       <div className="mx-auto flex h-10 max-w-[var(--measure)] items-center gap-6 px-6 lg:px-10">
         <BrandLogo size="sm" />
 

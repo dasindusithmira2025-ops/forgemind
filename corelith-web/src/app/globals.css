@@ -144,6 +144,27 @@
 
     --band: clamp(72px, 9vw, 136px);
     --measure: 84rem;
+
+    /* Scroll position of the document, 0→1. Written once per frame by the
+       motion engine and read by anything that tracks the reader's progress —
+       the rail bead, the header hairline. A custom property rather than React
+       state so a 60fps value never costs a render. */
+    --scroll-p: 0;
+  }
+
+  /* The sheet grows on large stock. Below this the measure already fills the
+     window and the trim has nothing to hold; above it, holding 84rem leaves a
+     third of a 2560px display as bare margin, which is the whole complaint. */
+  @media (min-width: 1600px) {
+    :root {
+      --measure: 92rem;
+    }
+  }
+
+  @media (min-width: 1920px) {
+    :root {
+      --measure: 98rem;
+    }
   }
 
   html {
@@ -430,6 +451,13 @@
     color 160ms ease;
 }
 
+/* The heavier footprint, for the one or two actions a page is actually built
+   around. Same geometry, one step up the type scale. */
+.btn-lg {
+  padding: 15px 24px;
+  font-size: var(--text-base);
+}
+
 .btn:hover:not(:disabled) {
   transform: translateY(-1px);
 }
@@ -603,6 +631,610 @@ select.field {
   animation: node-pulse 2.4s ease-in-out infinite;
 }
 
+/* ============================================================================
+   THE TRIM
+   A press sheet is not the same size as the paper it is printed on. Everything
+   below occupies the strip between the two — the area a real proof reserves for
+   registration marks, plate labels, and the trim edge.
+
+   This is the answer to a wide display. Holding the measure and leaving the
+   remainder bare makes the page look like it was designed for a laptop and
+   stretched; giving the remainder a *job* — a darker trim, a ruled edge, the
+   plate's own furniture — makes the same measure read as a deliberate sheet
+   laid on a larger surface.
+
+   The whole layer is `position: fixed` and above the bands rather than behind
+   them: bands are full-bleed and opaque, so a background layer would simply be
+   covered. It is `pointer-events: none` throughout and carries no content the
+   page needs — a screen reader gets none of it, and nothing here is the only
+   place any fact appears.
+   ========================================================================== */
+
+.furniture {
+  position: fixed;
+  inset: 0;
+  /* Above the sticky header (50) so the trim runs unbroken from the top of the
+     window to the bottom — stopping it under the header would put a lit notch
+     in the margin exactly where the eye enters the page. Below the skip link
+     (60), which has to stay reachable and lands in this same corner. */
+  z-index: 55;
+  display: none;
+  pointer-events: none;
+  /* Three columns: trim, sheet, trim. `min()` means the sheet never demands
+     more than the window, so the trims collapse to nothing rather than pushing
+     the measure off-screen at intermediate widths. */
+  grid-template-columns: 1fr min(100%, var(--measure)) 1fr;
+}
+
+/* Below this the gutter is narrower than the furniture needs and the marks
+   would crowd the measure instead of framing it. */
+@media (min-width: 1440px) {
+  .furniture {
+    display: grid;
+  }
+}
+
+/* The trim itself: the stock, knocked back. Because it sits *over* the bands,
+   one rule darkens the margin on every tone the page uses — including the core
+   block, where the effect is exactly right: the plate is inked to the trim line
+   and no further. The hatch is the tooth that keeps a knocked-back area from
+   reading as a rendering artefact. */
+.trim {
+  position: relative;
+  overflow: hidden;
+  background-color: rgba(0, 0, 0, 0.32);
+  background-image: repeating-linear-gradient(
+    -45deg,
+    rgba(242, 242, 244, 0.026) 0 1px,
+    transparent 1px 10px
+  );
+}
+
+.trim-l {
+  border-right: 1px solid var(--hair);
+}
+
+.trim-r {
+  border-left: 1px solid var(--hair);
+}
+
+/* A registration light running the trim edge. One pass every eleven seconds —
+   slow enough that it is never the thing you are looking at, present enough
+   that the margin is not dead. */
+@keyframes trim-scan {
+  0% {
+    transform: translateY(-32vh);
+    opacity: 0;
+  }
+  10%,
+  85% {
+    opacity: 0.55;
+  }
+  100% {
+    transform: translateY(128vh);
+    opacity: 0;
+  }
+}
+
+.trim-scan {
+  position: absolute;
+  top: 0;
+  width: 1px;
+  height: 32vh;
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    var(--color-core-ink) 45%,
+    var(--color-core-ink) 55%,
+    transparent
+  );
+  animation: trim-scan 11s linear infinite;
+}
+
+.trim-l .trim-scan {
+  right: -1px;
+}
+
+.trim-r .trim-scan {
+  left: -1px;
+  animation-delay: -5.5s;
+}
+
+/* --- Rail contents -------------------------------------------------------
+   The furniture proper: plate label, ruler, progress bead, chapter readout.
+   Everything is set in the mono face at the stamp size — this is machine
+   marginalia, not copy. */
+
+.rail {
+  position: absolute;
+  inset-block: 0;
+  /* Scales with the trim it sits in. At 1440px the gutter is 48px and the rail
+     takes all of it; at 2560px it grows to 76px so the furniture stays in
+     proportion to the margin rather than becoming a thin strip at the far edge
+     of a very wide one. */
+  width: clamp(48px, 34%, 76px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  padding-block: 88px 28px;
+  gap: 20px;
+}
+
+.rail-l {
+  left: 0;
+}
+
+.rail-r {
+  right: 0;
+}
+
+/* Vertical plate label. `mixed` orientation keeps the digits upright inside an
+   otherwise rotated string, which is what a real plate stamp does. */
+.rail-type {
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: clip;
+}
+
+.rail-l .rail-type {
+  transform: rotate(180deg);
+}
+
+/* The ruler: a tick every 8px, heavier every fifth. Fades at both ends so it
+   reads as a length of rule rather than a bounded object. */
+.rail-ruler {
+  position: relative;
+  flex: 1;
+  width: 100%;
+  background-image:
+    linear-gradient(to bottom, var(--hair) 0 1px, transparent 1px 8px),
+    linear-gradient(to bottom, var(--hair-strong) 0 1px, transparent 1px 40px);
+  background-size:
+    9px 8px,
+    15px 40px;
+  background-position:
+    center top,
+    center top;
+  background-repeat: repeat-y;
+  mask-image: linear-gradient(to bottom, transparent, #000 12%, #000 88%, transparent);
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 12%, #000 88%, transparent);
+}
+
+/* Reading position, printed on the ruler. Driven entirely by `--scroll-p`, so
+   it tracks at frame rate without React ever hearing about the scroll. */
+.rail-bead {
+  position: absolute;
+  left: 50%;
+  top: clamp(0%, calc(var(--scroll-p) * 100%), 100%);
+  width: 15px;
+  height: 2px;
+  translate: -50% -50%;
+  background-color: var(--color-core);
+  box-shadow: 0 0 0 3px rgba(7, 7, 7, 0.85);
+}
+
+.rail-bead::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 5px;
+  height: 5px;
+  translate: -50% -50%;
+  rotate: 45deg;
+  background-color: var(--color-core-ink);
+}
+
+/* The chapter readout on the right rail. React remounts this on every change,
+   which is what replays the animation — the swap is a content change and needs
+   to be legible as one, but it stays a short settle rather than a slide, since
+   a string travelling in the margin pulls the eye off the measure. */
+@keyframes chapter-in {
+  from {
+    opacity: 0;
+    transform: translateY(7px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.rail-chapter {
+  animation: chapter-in 340ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Return to the head of the sheet. The only thing in the trim that accepts a
+   pointer, so it opts back in explicitly. Hidden until there is something to
+   return from — the class is toggled from the same frame loop that moves the
+   bead, so arriving at the top and leaving it costs no render. */
+.rail-top {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--hair-strong);
+  border-radius: var(--radius-sm);
+  color: var(--color-ink-faint);
+  background-color: rgba(7, 7, 7, 0.7);
+  opacity: 0;
+  transform: translateY(6px);
+  transition:
+    opacity 260ms ease,
+    transform 260ms ease,
+    color 160ms ease,
+    border-color 160ms ease;
+}
+
+.rail-top[data-visible='true'] {
+  opacity: 1;
+  transform: none;
+}
+
+.rail-top:hover {
+  color: var(--color-core-ink);
+  border-color: var(--color-core-ink);
+}
+
+.rail-top[data-visible='false'] {
+  pointer-events: none;
+}
+
+/* Corner registration Ls, one per trim corner. The same device as `.crop`, at
+   the scale of the sheet rather than a single plate. */
+.trim-mark {
+  position: absolute;
+  width: 13px;
+  height: 13px;
+  border-color: var(--hair-strong);
+  border-style: solid;
+  border-width: 0;
+}
+
+/* Horizontal ticks only, struck against the trim line. A full L would double
+   the trim's own border for half its length and read as a thickening rather
+   than as a mark. */
+.trim-mark-tl,
+.trim-mark-tr {
+  top: 74px;
+  border-top-width: 1px;
+}
+
+.trim-mark-bl,
+.trim-mark-br {
+  bottom: 16px;
+  border-bottom-width: 1px;
+}
+
+.trim-l .trim-mark {
+  right: 0;
+}
+
+.trim-r .trim-mark {
+  left: 0;
+}
+
+/* --- Grain ---------------------------------------------------------------
+   Photographic tooth over the entire window, resampled six times a second. The
+   halftone screen already makes a band read as printed; this makes the *whole
+   sheet* read as a physical object under a light, and it is the one thing that
+   stops a flat dark page from looking like an empty div. Kept at 3.5% — any
+   stronger and it fights the 12px mono stamps for legibility. */
+@keyframes grain-shift {
+  0% {
+    transform: translate(0, 0);
+  }
+  20% {
+    transform: translate(-6%, 4%);
+  }
+  40% {
+    transform: translate(4%, -6%);
+  }
+  60% {
+    transform: translate(-3%, -3%);
+  }
+  80% {
+    transform: translate(5%, 5%);
+  }
+  100% {
+    transform: translate(0, 0);
+  }
+}
+
+.grain {
+  position: fixed;
+  /* Just enough overhang to cover the 6% resampling drift. The layer is
+     composited every frame it changes, so its area is a real cost. */
+  inset: -10%;
+  /* Over the trim as well as the sheet: grain belongs to the photograph, not to
+     one object inside it, and a margin without it would read as a different
+     material. */
+  z-index: 56;
+  pointer-events: none;
+  opacity: 0.035;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  animation: grain-shift 1.1s steps(5) infinite;
+}
+
+/* ============================================================================
+   REVEAL
+   Sections arrive as a plate is laid down: the ink lands, it does not fly in.
+   Short travel, long ease, no overshoot, no scale on anything holding type.
+
+   The hidden state is scoped to `.motion-ready`, a class set by a blocking
+   script in the document head. If that script never runs — JS disabled, bundle
+   failed — nothing is ever hidden and the page is simply the static document.
+   The alternative, hiding by default and revealing from React, turns any
+   client-side failure into a blank page.
+   ========================================================================== */
+
+.motion-ready [data-reveal] {
+  opacity: 0;
+  transition:
+    opacity 640ms cubic-bezier(0.16, 1, 0.3, 1),
+    transform 640ms cubic-bezier(0.16, 1, 0.3, 1),
+    clip-path 780ms cubic-bezier(0.16, 1, 0.3, 1);
+  transition-delay: var(--reveal-delay, 0ms);
+}
+
+.motion-ready [data-reveal='up'],
+.motion-ready [data-reveal=''] {
+  transform: translate3d(0, 22px, 0);
+}
+
+.motion-ready [data-reveal='right'] {
+  transform: translate3d(-26px, 0, 0);
+}
+
+.motion-ready [data-reveal='left'] {
+  transform: translate3d(26px, 0, 0);
+}
+
+/* Headline treatment: the line is wiped in from its own baseline, which is the
+   closest a browser gets to ink meeting paper. Paired with a small rise so it
+   does not read as a mask sliding over static text.
+
+   The clip is scoped to this one variant and never released to `inset(0)`. Two
+   reasons, both of which are visible bugs otherwise. Applied broadly, a resting
+   `inset(0)` would clip every revealed element to its border box — cutting the
+   lift shadow off every panel and erasing the crop marks, which sit 13px
+   outside their plate. And on a headline specifically, the display scale runs a
+   line-height below 1, so the border box is *shorter* than the glyphs: clipping
+   an `h1` to `inset(0)` shaves its ascenders. Resolving to a negative inset
+   expands the clip well clear of both. Browsers that reject negative insets
+   clamp them to zero and land on the old behaviour rather than breaking. */
+.motion-ready [data-reveal='print'] {
+  clip-path: inset(-40% 0 108% 0);
+  transform: translate3d(0, 10px, 0);
+}
+
+.motion-ready [data-reveal='print'].is-revealed {
+  clip-path: inset(-40% 0 -40% 0);
+}
+
+/* Rules draw from the left, in the direction they are read. */
+.motion-ready [data-reveal='rule'] {
+  transform: scaleX(0);
+  transform-origin: left center;
+}
+
+.motion-ready [data-reveal].is-revealed {
+  opacity: 1;
+  transform: none;
+}
+
+/* --- Pointer light -------------------------------------------------------
+   A card lit by a raking light rather than a card that glows. The gradient is
+   anchored to the pointer through `--lx`/`--ly`, written by the motion engine
+   on the hovered element only.
+
+   Two layers, and the distinction matters: `::before` is a masked one-pixel
+   ring, so the *edge* of the plate catches the light the way a cut edge does;
+   `::after` is a very weak wash across the face. Face-only would be a glow, and
+   the system does not glow. */
+.lit {
+  position: relative;
+}
+
+.lit::before,
+.lit::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 260ms ease;
+}
+
+.lit::before {
+  padding: 1px;
+  background: radial-gradient(
+    240px circle at var(--lx, 50%) var(--ly, 50%),
+    var(--color-core-ink),
+    transparent 62%
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+}
+
+.lit::after {
+  background: radial-gradient(
+    280px circle at var(--lx, 50%) var(--ly, 50%),
+    color-mix(in srgb, var(--color-core-ink) 9%, transparent),
+    transparent 68%
+  );
+}
+
+/* Deliberately not applied to the product film's plate: the face wash would sit
+   over playing footage, and a film is the one surface on the page that has to
+   be shown untinted. */
+.lit:hover::before {
+  opacity: 0.75;
+}
+
+.lit:hover::after {
+  opacity: 1;
+}
+
+/* --- Ruled-row light -----------------------------------------------------
+   The same idea for rows that share hairlines instead of floating as cards: a
+   band of light travels the row under the pointer. No border ring, because the
+   row has no cut edge of its own. */
+.lit-row {
+  position: relative;
+}
+
+.lit-row::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 300ms ease;
+  background: radial-gradient(
+    420px circle at var(--lx, 50%) var(--ly, 50%),
+    color-mix(in srgb, var(--color-core-ink) 11%, transparent),
+    transparent 60%
+  );
+}
+
+.lit-row:hover::after {
+  opacity: 1;
+}
+
+/* A marker on the leading edge of a ruled row, drawn on hover. This is what
+   makes an index feel like it is tracking the reader. */
+.lit-row::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  pointer-events: none;
+  background-color: var(--color-core);
+  transform: scaleY(0);
+  transform-origin: center top;
+  transition: transform 280ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.lit-row:hover::before {
+  transform: scaleY(1);
+}
+
+/* --- Button shine --------------------------------------------------------
+   One pass of light across the face on hover. It fires once per pointer entry
+   rather than looping — a button that shines continuously is an advertisement,
+   a button that catches the light when you reach for it is a surface. */
+@keyframes btn-shine {
+  from {
+    transform: translateX(-140%) skewX(-18deg);
+  }
+  to {
+    transform: translateX(320%) skewX(-18deg);
+  }
+}
+
+.btn {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.btn::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: -1;
+  width: 42%;
+  transform: translateX(-140%) skewX(-18deg);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.16), transparent);
+}
+
+.btn:hover:not(:disabled)::after {
+  animation: btn-shine 700ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* --- Live marker ---------------------------------------------------------
+   A registration ping on a node that is reporting something genuinely live.
+   Opt-in and rare: `.node` appears dozens of times per page, and pinging all of
+   them turns the signal into wallpaper. A ring rather than a bloom — flat ink
+   expanding, not light emitting. */
+@keyframes node-ping {
+  0% {
+    transform: scale(1);
+    opacity: 0.7;
+  }
+  70%,
+  100% {
+    transform: scale(3.4);
+    opacity: 0;
+  }
+}
+
+.node-live {
+  position: relative;
+}
+
+.node-live::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 99px;
+  border: 1px solid var(--color-core);
+  animation: node-ping 2.8s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+
+.tone-core .node-live::after {
+  border-color: var(--color-ink);
+}
+
+/* --- Section index digits ------------------------------------------------
+   The mono index beside a section mark, counted up on reveal. The engine writes
+   the digits; this only holds the width so the rule beside it never reflows. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- Reading hairline ----------------------------------------------------
+   Progress across the top of the header. Scale rather than width so it is a
+   compositor-only change, and origin-left so it reads as filling. */
+.read-line {
+  height: 1px;
+  transform: scaleX(clamp(0, var(--scroll-p), 1));
+  transform-origin: left center;
+  background: linear-gradient(to right, var(--color-core), var(--color-core-ink));
+}
+
+/* --- Lattice -------------------------------------------------------------
+   The canvas field behind the hero. Masked hard on the left so it never sits
+   under the headline: the copy has to win, and a field of moving marks under
+   type is the single fastest way to make a page unreadable. */
+.lattice {
+  mask-image:
+    linear-gradient(to right, transparent, #000 62%),
+    linear-gradient(to bottom, transparent, #000 22%, #000 78%, transparent);
+  -webkit-mask-image:
+    linear-gradient(to right, transparent, #000 62%),
+    linear-gradient(to bottom, transparent, #000 22%, #000 78%, transparent);
+  mask-composite: intersect;
+  -webkit-mask-composite: source-in;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   ::before,
@@ -621,5 +1253,24 @@ select.field {
   .panel-hover:hover,
   .btn:hover:not(:disabled) {
     transform: none;
+  }
+
+  /* Reveals are the one case that cannot simply be shortened: an element whose
+     resting state is `opacity: 0` must be given its revealed state outright, or
+     a reader who has asked for no motion gets an empty page. */
+  .motion-ready [data-reveal] {
+    opacity: 1 !important;
+    transform: none !important;
+    clip-path: none !important;
+  }
+
+  .grain,
+  .trim-scan,
+  .node-live::after {
+    animation: none;
+  }
+
+  .trim-scan {
+    display: none;
   }
 }

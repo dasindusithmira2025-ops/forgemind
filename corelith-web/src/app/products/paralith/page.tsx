@@ -146,7 +146,8 @@ export default function ParalithPage() {
             {SURFACES.map((surface, i) => (
               <article
                 key={surface.name}
-                className="grid grid-cols-12 items-baseline gap-x-8 gap-y-3 border-b border-[var(--hair)] py-6"
+                data-reveal="up"
+                className="lit-row grid grid-cols-12 items-baseline gap-x-8 gap-y-3 border-b border-[var(--hair)] py-6"
               >
                 <div className="col-span-12 flex items-baseline gap-4 lg:col-span-4">
                   <span aria-hidden="true" className="stamp text-ink-faint w-6 shrink-0">
@@ -175,7 +176,11 @@ export default function ParalithPage() {
 
         <div className="mt-14 grid grid-cols-1 gap-5 md:grid-cols-2 lg:grid-cols-3">
           {product.capabilities.map((cap) => (
-            <article key={cap.title} className="panel panel-hover flex flex-col gap-4 p-7">
+            <article
+              key={cap.title}
+              data-reveal="up"
+              className="panel panel-hover lit flex flex-col gap-4 p-7"
+            >
               <p className="stamp text-[var(--kicker)]">{cap.highlight ?? 'Core system'}</p>
               <h3 className="text-lg text-ink">{cap.title}</h3>
               <p className="text-ink-soft mt-auto border-t border-[var(--hair)] pt-4 text-sm">
@@ -199,7 +204,8 @@ export default function ParalithPage() {
           {GATE.map((step, i) => (
             <article
               key={step.state}
-              className="panel flex flex-col gap-4 p-7"
+              data-reveal="up"
+              className="panel lit flex flex-col gap-4 p-7"
               // The three read as a sequence, so the connective is an arrow between
               // plates rather than three unrelated cards.
             >
@@ -217,7 +223,7 @@ export default function ParalithPage() {
           ))}
         </div>
 
-        <p className="stamp text-ink-soft mt-10 border-t border-[var(--hair)] pt-6">
+        <p data-reveal="up" className="stamp text-ink-soft mt-10 border-t border-[var(--hair)] pt-6">
           Signed installers ◆ SHA-256 published ◆ No telemetry by default
         </p>
       </Band>
@@ -231,7 +237,7 @@ export default function ParalithPage() {
           deck="Every installer is signed and published with its checksum so you can verify the artifact before it runs."
         />
 
-        <div className="mt-14">
+        <div data-reveal="up" className="mt-14">
           {product.downloads && (
             <DownloadSelector productName={product.name} downloads={product.downloads} />
           )}
@@ -248,7 +254,7 @@ export default function ParalithPage() {
         />
 
         <div className="mt-14 grid grid-cols-12 gap-x-8 gap-y-12">
-          <div className="col-span-12 lg:col-span-5">
+          <div data-reveal="up" className="col-span-12 lg:col-span-5">
             <h3 className="stamp text-core-ink border-b border-[var(--hair-strong)] pb-3">
               Built for
             </h3>
@@ -267,7 +273,7 @@ export default function ParalithPage() {
             </ul>
           </div>
 
-          <div className="col-span-12 lg:col-span-6 lg:col-start-7">
+          <div data-reveal="up" className="col-span-12 lg:col-span-6 lg:col-start-7">
             <h3 className="stamp text-core-ink border-b border-[var(--hair-strong)] pb-3">
               Supported targets
             </h3>
@@ -299,6 +305,7 @@ export default function ParalithPage() {
           {RELEASE_NOTES.map((group, i) => (
             <section
               key={group.heading}
+              data-reveal="up"
               className={`col-span-12 lg:col-span-5 ${i === 1 ? 'lg:col-start-8' : ''}`}
             >
               <h3 className="stamp text-core-ink border-b border-[var(--hair-strong)] pb-3">
@@ -328,7 +335,7 @@ export default function ParalithPage() {
           deck="Architecture, privacy, model choice, and platform support — answered without hedging."
         />
 
-        <div className="mt-14">
+        <div data-reveal="up" className="mt-14">
           <FAQAccordion faqs={product.faqs} />
         </div>
       </Band>

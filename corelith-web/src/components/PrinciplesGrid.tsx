@@ -14,7 +14,8 @@ export function PrinciplesGrid() {
       {companyData.principles.map((item) => (
         <article
           key={item.title}
-          className="flex flex-col gap-4 border-r border-b border-[var(--hair)] p-7 transition-colors hover:bg-[rgba(245,237,224,0.03)]"
+          data-reveal="up"
+          className="lit flex flex-col gap-4 border-r border-b border-[var(--hair)] p-7 transition-colors hover:bg-[rgba(245,237,224,0.03)]"
         >
           <p className="stamp text-[var(--kicker)]">{item.subtitle}</p>
 

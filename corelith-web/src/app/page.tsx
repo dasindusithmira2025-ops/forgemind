@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { ParalithLaunchFilm } from '@/components/ParalithLaunchFilm';
 import { CapabilitiesGrid } from '@/components/CapabilitiesGrid';
 import { PrinciplesGrid } from '@/components/PrinciplesGrid';
+import { AgentLattice } from '@/components/vfx/AgentLattice';
 import { Band, ClosingBand, MetaStrip, SectionMark, Ticker } from '@/components/Editorial';
 import { companyData } from '@/data/company';
 import { products } from '@/data/products';
@@ -39,11 +40,13 @@ export default function HomePage() {
   return (
     <>
       {/* ── 01 · Hero ────────────────────────────────────────────────────── */}
-      <Band tone="paper">
-        <div className="grid grid-cols-12 gap-x-8 gap-y-10">
-          <div className="col-span-12">
+      <Band tone="paper" backdrop={<AgentLattice />}>
+        <div data-chapter="Paralith" className="grid grid-cols-12 gap-x-8 gap-y-10">
+          <div data-reveal="right" className="col-span-12">
             <span className="chip stamp text-ink-soft">
-              <span aria-hidden="true" className="node" />
+              {/* The one pinging marker on the page. It sits against a release
+                  state, which is the only thing here that is genuinely live. */}
+              <span aria-hidden="true" className="node node-live" />
               Corelith Technologies
               <span aria-hidden="true" className="text-ink-faint">
                 /
@@ -54,20 +57,23 @@ export default function HomePage() {
 
           {/* Short enough that `text-wrap: balance` can hold it to two even lines
               at every width — authored <br>s orphan the last word below 1600px. */}
-          <h1 className="col-span-12 text-4xl lg:col-span-10 lg:text-5xl">
+          <h1 data-reveal="print" className="col-span-12 text-4xl lg:col-span-10 lg:text-5xl">
             Agents do the work.
             <br />
             Nothing ships <span className="flare">unverified</span>.
           </h1>
 
-          <div className="col-span-12 self-start lg:col-span-5">
+          <div data-reveal="up" className="col-span-12 self-start lg:col-span-5">
             <p className="text-ink-soft border-l border-[var(--hair-strong)] pl-5 text-base">
               Paralith puts your projects, your terminals, and a team of AI agents in one workspace
               — and keeps every line of your code on your own machine while they work.
             </p>
           </div>
 
-          <div className="col-span-12 flex flex-wrap items-center gap-4 self-start lg:col-span-6 lg:col-start-7 lg:justify-end">
+          <div
+            data-reveal="up"
+            className="col-span-12 flex flex-wrap items-center gap-4 self-start lg:col-span-6 lg:col-start-7 lg:justify-end"
+          >
             <Link href="/products/paralith#download" className="btn btn-primary btn-lg">
               Download the preview
               <span aria-hidden="true">→</span>
@@ -87,7 +93,7 @@ export default function HomePage() {
             ]}
           />
 
-          <div className="col-span-12 mt-2">
+          <div data-reveal="up" className="col-span-12 mt-2">
             <ParalithLaunchFilm />
           </div>
         </div>
@@ -106,7 +112,11 @@ export default function HomePage() {
 
         <div className="mt-14 grid grid-cols-1 gap-5 lg:grid-cols-3">
           {PILLARS.map((pillar) => (
-            <article key={pillar.title} className="panel panel-hover flex flex-col gap-5 p-7">
+            <article
+              key={pillar.title}
+              data-reveal="up"
+              className="panel panel-hover lit flex flex-col gap-5 p-7"
+            >
               <h3 className="max-w-[16ch] text-lg text-ink lg:text-xl">{pillar.title}</h3>
               <p className="text-ink-soft text-base">{pillar.body}</p>
               <p className="stamp text-[var(--kicker)] mt-auto border-t border-[var(--hair)] pt-5">
@@ -116,7 +126,7 @@ export default function HomePage() {
           ))}
         </div>
 
-        <div className="mt-10 flex flex-wrap items-center gap-x-6 gap-y-4">
+        <div data-reveal="up" className="mt-10 flex flex-wrap items-center gap-x-6 gap-y-4">
           <Link href="/products/paralith" className="btn btn-primary">
             Explore Paralith
             <span aria-hidden="true">→</span>
@@ -143,18 +153,26 @@ export default function HomePage() {
 
       {/* ── 04 · Directive ───────────────────────────────────────────────── */}
       <Band tone="core" divider>
-        <div className="grid grid-cols-12 gap-x-8 gap-y-8">
-          <p className="stamp text-core-ink col-span-12 lg:col-span-2">Directive</p>
+        <div data-chapter="Directive" className="grid grid-cols-12 gap-x-8 gap-y-8">
+          <p data-reveal="right" className="stamp text-core-ink col-span-12 lg:col-span-2">
+            Directive
+          </p>
 
           <blockquote className="col-span-12 lg:col-span-9">
-            <p className="font-display text-xl leading-[1.2] font-semibold tracking-tight text-balance sm:text-2xl lg:text-3xl">
+            <p
+              data-reveal="print"
+              className="font-display text-xl leading-[1.2] font-semibold tracking-tight text-balance sm:text-2xl lg:text-3xl"
+            >
               Corelith exists to turn ambitious software ideas into products people can depend on.
             </p>
-            <p className="text-ink-soft mt-8 max-w-2xl text-base">
+            <p data-reveal="up" className="text-ink-soft mt-8 max-w-2xl text-base">
               We combine engineering discipline, intelligent automation, and careful product design
               to build systems that remain useful after the novelty disappears.
             </p>
-            <footer className="stamp text-ink-faint mt-10 border-t border-[var(--hair)] pt-5">
+            <footer
+              data-reveal="up"
+              className="stamp text-ink-faint mt-10 border-t border-[var(--hair)] pt-5"
+            >
               {companyData.mission}
             </footer>
           </blockquote>

@@ -37,17 +37,26 @@ export default function CompanyPage() {
 
       {/* ── Directive ────────────────────────────────────────────────────── */}
       <Band tone="core" divider>
-        <div className="grid grid-cols-12 gap-x-8 gap-y-10">
-          <p className="stamp text-core-ink col-span-12 lg:col-span-2">Operating mission</p>
+        <div data-chapter="Operating mission" className="grid grid-cols-12 gap-x-8 gap-y-10">
+          <p data-reveal="right" className="stamp text-core-ink col-span-12 lg:col-span-2">
+            Operating mission
+          </p>
 
           <blockquote className="col-span-12 lg:col-span-9">
-            <p className="font-display text-xl leading-[1.2] font-semibold tracking-tight text-balance sm:text-2xl lg:text-3xl">
+            <p
+              data-reveal="print"
+              className="font-display text-xl leading-[1.2] font-semibold tracking-tight text-balance sm:text-2xl lg:text-3xl"
+            >
               {companyData.tagline}
             </p>
 
             <dl className="mt-12 grid grid-cols-1 overflow-hidden rounded-lg border border-[var(--hair-strong)] bg-surface sm:grid-cols-3">
               {STANCES.map((stance) => (
-                <div key={stance.k} className="border-r border-[var(--hair)] px-5 py-4 last:border-r-0">
+                <div
+                  key={stance.k}
+                  data-reveal="up"
+                  className="lit-row border-r border-[var(--hair)] px-5 py-4 last:border-r-0"
+                >
                   <dt className="stamp text-ink-faint">{stance.k}</dt>
                   <dd className="mt-2.5 font-mono text-sm">{stance.v}</dd>
                 </div>
@@ -66,7 +75,7 @@ export default function CompanyPage() {
           deck="Six standards that govern every piece of software Corelith ships. They are constraints, not values on a wall."
         />
 
-        <div className="mt-14">
+        <div data-reveal="up" className="mt-14">
           <PrinciplesGrid />
         </div>
       </Band>
