@@ -55,6 +55,20 @@ first-party and unaffected.
 Note also that ElevenLabs' Music API (`/v1/music`), which composes a finished track rather than
 textures, is itself gated to paid plans and returned `402 paid_plan_required` on the key used here.
 
+## The gate film's score
+
+`public/audio/paralith-gate-score*.mp3` are first-party in full and carry no third-party licence
+condition of any kind. They are synthesised by `scripts/build-gate-score.mjs` from oscillators and
+seeded pseudo-random noise — no samples, no stems, no sound library, no generation API, and no
+network access. `ffmpeg` encodes the finished buffer and does nothing else.
+
+This is deliberate. The campaign score's ElevenLabs stem licence is unresolved for commercial use
+(see above), and a new film built on the same stems would have inherited that blocker. The gate
+film can be published without waiting for it.
+
+Everything else the gate film uses is already covered above: the PARALITH mark and wordmark from
+the repository logo pack, and Chakra Petch and JetBrains Mono under the SIL Open Font License.
+
 ## Public URL verification
 
 `https://corelithtechnologies.com/` returned HTTP 200 during production on 29 July 2026.

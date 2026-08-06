@@ -1,7 +1,13 @@
 # PARALITH films
 
-Remotion source for three deliverables, newest first:
+Remotion source for four deliverables, newest first:
 
+- **The gate film** — "The only way through." A 78-second cut in seven sequences that follows one
+  change from the sentence that asks for it to the commit that lands it, through the three gates
+  the product will not let it skip: isolation, verification, consent. Not a re-cut — it shares no
+  scene, score, stem, copy line or delivered filename with anything below it. Ships a 4K master, a
+  1080p clean version, a captioned version, 60/30/15-second cuts, a silent hero loop, a poster and
+  caption sidecars. See [`docs/GATE_FILM.md`](docs/GATE_FILM.md).
 - **The campaign film** — "Build beyond the editor." A 95-second, score-and-type cut in eight
   sequences, and the current master. Ships a 4K master, a 1080p clean version, a captioned version,
   60/30/15-second cuts, a 9:16 social cut, a silent website hero loop, a poster, and caption
@@ -13,12 +19,27 @@ Remotion source for three deliverables, newest first:
   vertical, square, captioned, clean, trailer, teaser, and poster deliveries. See
   [`docs/PRODUCTION_BIBLE.md`](docs/PRODUCTION_BIBLE.md).
 
-All three are registered in `src/Root.tsx` and render from the same package. Asset provenance and
+All four are registered in `src/Root.tsx` and render from the same package. Asset provenance and
 license notes for all of them are in [`docs/ASSET_LICENSES.md`](docs/ASSET_LICENSES.md).
 
 The brand and campaign films' interface is not drawn by hand: `scripts/sync-product-ui.mjs`
 generates `src/product/generated/` from `Paralith-tauri`'s own stylesheet and theme engine, and
 `npm run sync:product:check` fails the build if the two have drifted apart.
+
+## The gate film, end to end
+
+```powershell
+Set-Location marketing/paralith-video
+npm ci
+npm run typecheck
+npm run score:gate          # five scores, one per cut length, fully synthesised
+npm run render:gate         # every delivery, plus poster and captions
+npm run verify:gate         # codec, duration, loudness and sidecar assertions
+```
+
+The gate film draws its own surfaces rather than using the product twin in `src/product/`, and its
+score is generated from oscillators rather than arranged from stems, so neither
+`sync:product:check` nor the ElevenLabs stem licence in `docs/ASSET_LICENSES.md` applies to it.
 
 ## The campaign film, end to end
 

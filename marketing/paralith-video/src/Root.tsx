@@ -15,6 +15,9 @@ import {
   SwarmTasksProof,
 } from './product/SurfaceProof';
 import { BrandFilm } from './film/BrandFilm';
+import { GateFilm } from './gate/GateFilm';
+import { GatePoster } from './gate/Poster';
+import { CUT_FRAMES as GATE_FRAMES } from './gate/script';
 import { DURATION } from './film/script';
 import {
   FPS,
@@ -235,6 +238,97 @@ export const RemotionRoot: React.FC = () => (
     <Composition
       id="ParalithCampaignPoster"
       component={CampaignPoster}
+      durationInFrames={1}
+      fps={FPS}
+      width={3840}
+      height={2160}
+    />
+
+    {/*
+      The gate film — "The only way through." `src/gate`; see GateFilm.tsx. A new film rather than a
+      re-cut: it follows one change through isolation, verification and consent, and shares no scene,
+      score, stem, copy line or delivered file name with any composition above. Those stay registered
+      so their delivered masters remain reproducible from source.
+    */}
+    <Composition
+      id="ParalithGate4K"
+      component={GateFilm}
+      durationInFrames={GATE_FRAMES.master}
+      fps={FPS}
+      width={3840}
+      height={2160}
+      defaultProps={{ cut: 'master' as const, copy: 'cinematic' as const }}
+    />
+    <Composition
+      id="ParalithGate1080p"
+      component={GateFilm}
+      durationInFrames={GATE_FRAMES.master}
+      fps={FPS}
+      width={1920}
+      height={1080}
+      defaultProps={{ cut: 'master' as const, copy: 'cinematic' as const }}
+    />
+    <Composition
+      id="ParalithGateCaptioned"
+      component={GateFilm}
+      durationInFrames={GATE_FRAMES.master}
+      fps={FPS}
+      width={1920}
+      height={1080}
+      defaultProps={{ cut: 'master' as const, copy: 'captioned' as const }}
+    />
+    <Composition
+      id="ParalithGate60"
+      component={GateFilm}
+      durationInFrames={GATE_FRAMES.sixty}
+      fps={FPS}
+      width={1920}
+      height={1080}
+      defaultProps={{ cut: 'sixty' as const, copy: 'cinematic' as const }}
+    />
+    <Composition
+      id="ParalithGate30"
+      component={GateFilm}
+      durationInFrames={GATE_FRAMES.thirty}
+      fps={FPS}
+      width={1920}
+      height={1080}
+      defaultProps={{ cut: 'thirty' as const, copy: 'cinematic' as const }}
+    />
+    <Composition
+      id="ParalithGate15"
+      component={GateFilm}
+      durationInFrames={GATE_FRAMES.teaser}
+      fps={FPS}
+      width={1920}
+      height={1080}
+      defaultProps={{ cut: 'teaser' as const, copy: 'cinematic' as const }}
+    />
+    {/*
+      There is no 9:16 or 1:1 gate composition, and that is a decision rather than an omission.
+      This film's subject is a horizontal transport line 1,900 design-pixels wide, and every one of
+      its sequences reads left to right across the full frame. Scaling that into a 1080-wide
+      portrait canvas puts the machine text — branch names, check names, paths, the ledger — at
+      seven physical pixels, which is not small, it is illegible; a vertical rendered at frame 900
+      was checked and the interface detail could not be read at all.
+      
+      A credible vertical needs its own layout, with the rail running down the frame instead of
+      across it, and that is a second design pass rather than a responsive rule. The captioned 16:9
+      cut is the sound-off delivery until it exists.
+    */}
+    {/* The website hero loop: silent, captionless, and cut to loop cleanly. */}
+    <Composition
+      id="ParalithGateLoop"
+      component={GateFilm}
+      durationInFrames={GATE_FRAMES.loop}
+      fps={FPS}
+      width={1920}
+      height={1080}
+      defaultProps={{ cut: 'loop' as const, copy: 'none' as const, score: false }}
+    />
+    <Composition
+      id="ParalithGatePoster"
+      component={GatePoster}
       durationInFrames={1}
       fps={FPS}
       width={3840}
