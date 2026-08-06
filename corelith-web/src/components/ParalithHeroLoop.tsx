@@ -79,8 +79,14 @@ export function ParalithHeroLoop() {
           playsInline
           preload="metadata"
           poster="/media/paralith-hero-loop-poster.jpg"
-          onPlay={() => setPlaying(true)}
+          // `playing` rather than `play`: play() resolving only means playback was
+          // requested. A backgrounded tab, a stalled network, or a browser that
+          // defers autoplay all leave the element unpaused with nothing on screen,
+          // and the control would then offer to pause a still frame.
+          onPlaying={() => setPlaying(true)}
           onPause={() => setPlaying(false)}
+          onWaiting={() => setPlaying(false)}
+          onEnded={() => setPlaying(false)}
           aria-label="Silent loop of the Paralith workspace: six agents working in parallel across terminal panes, with their changes held for review."
         >
           <source src="/media/paralith-hero-loop.mp4" type="video/mp4" />
