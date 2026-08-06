@@ -17,7 +17,7 @@ import { useSwarmStore } from './swarmStore'
 import { roleLabel, runtimeLabel } from './swarmPresentation'
 
 type Step = 'team' | 'mission' | 'review'
-interface RosterAgent { id: string; role: SwarmRole; runtime: Exclude<SwarmRuntimeKind, 'auto'>; modelConfig: SwarmMemberModelConfig }
+interface RosterAgent { id: string; role: SwarmRole; runtime: Exclude<SwarmRuntimeKind, 'auto'>; modelConfig: SwarmMemberModelConfig; autoRuntime?: boolean }
 
 const ROLES: SwarmRole[] = ['coordinator', 'scout', 'builder', 'debugger', 'reviewer', 'integrator']
 const RESPONSIBILITY: Record<SwarmRole, string> = {
@@ -58,7 +58,21 @@ export function SwarmCreatePanel({ projectId, onCreated, onCancel }: {
   const [models, setModels] = useState<SwarmModelCapability[]>([])
 
   useEffect(() => { if (presets.length === 0) void loadPresets() }, [loadPresets, presets.length])
-  useEffect(() => { const load = native.listSwarmModelRegistry; if (load) void load().then(setModels).catch(() => setModels([])) }, [])
+  useEffect(() => {
+    const load = native.listSwarmModelRegistry
+    if (!load) return
+    void load().then((registry) => {
+      setModels(registry)
+      // Presets can arrive before provider discovery. Fill only unresolved entries so a saved
+      // member choice is never overwritten when the registry response arrives later.
+      setRoster((current) => current.map((agent) => {
+        if (agent.modelConfig.modelId !== 'unconfigured') return agent
+        const runtime = agent.autoRuntime ? preferredRuntime(registry, agent.role) : agent.runtime
+        const model = recommendedModel(registry.filter((item) => item.providerId === runtime), agent.role)
+        return model ? { ...agent, runtime, modelConfig: configFromModel(model) } : agent
+      }))
+    }).catch(() => setModels([]))
+  }, [])
   useEffect(() => {
     const load = native.getProject?.(projectId)
     void load?.then(setProject).catch(() => undefined)
@@ -81,7 +95,7 @@ export function SwarmCreatePanel({ projectId, onCreated, onCancel }: {
     setCustomPresetId(preset.builtin ? undefined : preset.id)
     setPresetName(preset.builtin ? `${preset.name} copy` : preset.name)
     setPresetDefault(preset.isDefault)
-    setRoster(expandRoster(preset.roles))
+    setRoster(expandRoster(preset.roles, models))
     setMaxParallel(preset.maxParallel)
     setPreview(undefined)
     setError('')
@@ -138,7 +152,7 @@ export function SwarmCreatePanel({ projectId, onCreated, onCancel }: {
     const ordinal = roster.filter((agent) => agent.role === 'builder').length + 1
     const model = recommendedModel(models, 'builder')
     if (!model) { setError('Model registry is unavailable. Refresh and select a provider before adding a member.'); return }
-    setRoster((current) => [...current, { id: `builder-${ordinal}-${crypto.randomUUID()}`, role: 'builder', runtime: 'codex', modelConfig: configFromModel(model) }])
+    setRoster((current) => [...current, { id: `builder-${ordinal}-${crypto.randomUUID()}`, role: 'builder', runtime: model.providerId as RosterAgent['runtime'], modelConfig: configFromModel(model), autoRuntime: false }])
     setPresetId('__custom__')
   }
 
@@ -194,12 +208,17 @@ export function SwarmCreatePanel({ projectId, onCreated, onCancel }: {
     if (!preview?.canLaunch) return
     setBusy(true)
     setError('')
+    let createdSwarmId: string | undefined
     try {
       const swarm = await create(request())
+      createdSwarmId = swarm.id
       await start(swarm.id)
       onCreated(swarm.id)
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'The Swarm could not launch.')
+      // Creation is durable even when runtime preparation fails. Open that same repairable Draft
+      // instead of leaving it hidden and encouraging a second click to create a duplicate.
+      if (createdSwarmId) onCreated(createdSwarmId)
     } finally {
       setBusy(false)
     }
@@ -237,7 +256,7 @@ export function SwarmCreatePanel({ projectId, onCreated, onCancel }: {
           <div className="swarm-preset-strip" role="radiogroup" aria-label="Team preset">
             {presets.map((preset) => (
               <button key={preset.id} type="button" role="radio" aria-checked={presetId === preset.id} className={presetId === preset.id ? 'is-selected' : ''} onClick={() => selectPreset(preset)}>
-                <strong>{preset.name}</strong><span>{expandRoster(preset.roles).length} agents · {preset.maxParallel} parallel</span>
+                <strong>{preset.name}</strong><span>{expandRoster(preset.roles, models).length} agents · {preset.maxParallel} parallel</span>
               </button>
             ))}
             <button type="button" role="radio" aria-checked={presetId === '__custom__'} className={presetId === '__custom__' ? 'is-selected' : ''} onClick={() => setPresetId('__custom__')}>
@@ -271,7 +290,7 @@ export function SwarmCreatePanel({ projectId, onCreated, onCancel }: {
                     <div className="swarm-roster-detail">
                       <p>{RESPONSIBILITY[agent.role]}</p>
                       <label>Role<select value={agent.role} onChange={(event) => updateAgent(agent.id, { role: event.target.value as SwarmRole })}>{ROLES.map((role) => <option key={role} value={role}>{roleLabel(role).replace(/s$/, '')}</option>)}</select></label>
-                      <label>Provider<select value={agent.modelConfig.providerId} onChange={(event) => { const model = recommendedModel(models.filter((item) => item.providerId === event.target.value), agent.role); if (model) updateAgent(agent.id, { runtime: model.providerId as RosterAgent['runtime'], modelConfig: preserveConfig(agent.modelConfig, model) }) }}><option value="claude">Claude</option><option value="codex">Codex</option></select></label>
+                      <label>Provider<select value={agent.modelConfig.providerId} onChange={(event) => { const model = recommendedModel(models.filter((item) => item.providerId === event.target.value), agent.role); if (model) updateAgent(agent.id, { runtime: model.providerId as RosterAgent['runtime'], modelConfig: preserveConfig(agent.modelConfig, model), autoRuntime: false }) }}><option value="claude">Claude</option><option value="codex">Codex</option></select></label>
                       <label>Model<select value={agent.modelConfig.modelId} onChange={(event) => { const model = models.find((item) => item.providerId === agent.modelConfig.providerId && item.modelId === event.target.value); if (model) updateAgent(agent.id, { modelConfig: preserveConfig(agent.modelConfig, model) }) }}>{models.filter((item) => item.providerId === agent.modelConfig.providerId).map((model) => <option key={model.modelId} value={model.modelId} disabled={!model.available}>{model.displayName}{model.available ? ` — ${model.description}` : ' — unavailable'}</option>)}</select></label>
                       <label>Reasoning<select value={agent.modelConfig.reasoningEffort} onChange={(event) => updateAgent(agent.id, { modelConfig: { ...agent.modelConfig, reasoningEffort: event.target.value as SwarmMemberModelConfig['reasoningEffort'] } })}>{['low','medium','high','max'].map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
                       <label>Mode<select value={agent.modelConfig.executionMode} onChange={(event) => updateAgent(agent.id, { modelConfig: { ...agent.modelConfig, executionMode: event.target.value as SwarmMemberModelConfig['executionMode'] } })}>{['interactive','autonomous','review'].map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
@@ -327,13 +346,17 @@ export function SwarmCreatePanel({ projectId, onCreated, onCancel }: {
   )
 }
 
-function expandRoster(roles: SwarmRoleConfig[]): RosterAgent[] {
+function expandRoster(roles: SwarmRoleConfig[], models: SwarmModelCapability[] = []): RosterAgent[] {
   const result: RosterAgent[] = []
   for (const role of roles.filter((item) => item.enabled)) {
     for (const allocation of role.allocations) {
-      const runtime = allocation.runtime === 'auto' ? (role.role === 'reviewer' ? 'codex' : 'claude') : allocation.runtime
-      const modelConfig = allocation.modelConfig ?? unconfiguredModel(runtime)
-      for (let index = 0; index < allocation.count; index += 1) result.push({ id: `${role.role}-${runtime}-${index}-${crypto.randomUUID()}`, role: role.role, runtime, modelConfig })
+      const configuredRuntime = allocation.modelConfig?.providerId === 'claude' || allocation.modelConfig?.providerId === 'codex'
+        ? allocation.modelConfig.providerId
+        : undefined
+      const runtime = allocation.runtime === 'auto' ? (configuredRuntime ?? preferredRuntime(models, role.role)) : allocation.runtime
+      const model = recommendedModel(models.filter((item) => item.providerId === runtime), role.role)
+      const modelConfig = allocation.modelConfig ?? (model ? configFromModel(model) : unconfiguredModel(runtime))
+      for (let index = 0; index < allocation.count; index += 1) result.push({ id: `${role.role}-${runtime}-${index}-${crypto.randomUUID()}`, role: role.role, runtime, modelConfig, autoRuntime: allocation.runtime === 'auto' })
     }
   }
   return result
@@ -353,6 +376,7 @@ function rosterToRoles(roster: RosterAgent[]): SwarmRoleConfig[] {
 function configFromModel(model: SwarmModelCapability): SwarmMemberModelConfig { return { providerId: model.providerId, providerDisplayName: model.providerDisplayName, modelId: model.modelId, modelDisplayName: model.displayName, reasoningEffort: (model.supportedReasoningEfforts.includes('high') ? 'high' : model.supportedReasoningEfforts[0] ?? 'medium') as SwarmMemberModelConfig['reasoningEffort'], executionMode: 'autonomous', contextStrategy: 'balanced', permissionMode: 'ask', providerOptions: {}, configVersion: 1, lastValidationStatus: model.available ? 'valid' : 'provider_unavailable' } }
 function preserveConfig(previous: SwarmMemberModelConfig, model: SwarmModelCapability): SwarmMemberModelConfig { const next = configFromModel(model); return { ...next, reasoningEffort: model.supportedReasoningEfforts.includes(previous.reasoningEffort) ? previous.reasoningEffort : next.reasoningEffort, executionMode: model.supportedExecutionModes.includes(previous.executionMode) ? previous.executionMode : next.executionMode, contextStrategy: previous.contextStrategy, permissionMode: previous.permissionMode, fallback: previous.fallback, providerOptions: previous.providerOptions } }
 function recommendedModel(models: SwarmModelCapability[], role: SwarmRole): SwarmModelCapability | undefined { const recommended = models.find((model) => model.available && model.recommendedRoles.includes(role)); return recommended ?? models.find((model) => model.available) ?? models[0] }
+function preferredRuntime(models: SwarmModelCapability[], role: SwarmRole): RosterAgent['runtime'] { const preferred: RosterAgent['runtime'] = role === 'reviewer' ? 'codex' : 'claude'; const alternative = preferred === 'claude' ? 'codex' : 'claude'; if (models.some((model) => model.providerId === preferred && model.available)) return preferred; if (models.some((model) => model.providerId === alternative && model.available)) return alternative; return preferred }
 function unconfiguredModel(providerId: Exclude<SwarmRuntimeKind, 'auto'>): SwarmMemberModelConfig { return { providerId, providerDisplayName: providerId === 'claude' ? 'Claude' : 'Codex', modelId: 'unconfigured', modelDisplayName: 'Model not configured', reasoningEffort: 'medium', executionMode: 'autonomous', contextStrategy: 'balanced', permissionMode: 'ask', providerOptions: {}, configVersion: 1, lastValidationStatus: 'unvalidated' } }
 
 function displayName(agent: RosterAgent, roster: RosterAgent[]): string {

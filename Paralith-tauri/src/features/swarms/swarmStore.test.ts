@@ -42,7 +42,7 @@ describe('swarmStore (backend-authoritative)', () => {
     state.swarms = []
     state.detail = null
     vi.clearAllMocks()
-    useSwarmStore.setState({ presets: [], itemsByProject: {}, detailById: {}, pendingBySwarm: {}, error: undefined })
+    useSwarmStore.setState({ presets: [], itemsByProject: {}, detailById: {}, includeArchivedByProject: {}, loadingDetailById: {}, detailErrors: {}, pendingBySwarm: {}, error: undefined })
   })
 
   it('creates a swarm and reloads the project list from the backend', async () => {
@@ -115,5 +115,20 @@ describe('swarmStore (backend-authoritative)', () => {
     await first
 
     expect(useSwarmStore.getState().detailById.s1.swarm.revision).toBe(2)
+  })
+
+  it('preserves history mode when an action refreshes the project list', async () => {
+    state.swarms = [{ swarm: { id: 's1', projectId: 'p1', name: 'History', lifecycle: 'archived', progress: 1 }, activity: {} }]
+    await useSwarmStore.getState().loadSwarms('p1', true)
+    await useSwarmStore.getState().start('s1')
+    expect(listSwarms).toHaveBeenLastCalledWith('p1', true)
+    expect(useSwarmStore.getState().includeArchivedByProject.p1).toBe(true)
+  })
+
+  it('records a terminal detail-load error instead of leaving an endless loading state', async () => {
+    getSwarmDetail.mockRejectedValueOnce(new Error('detail unavailable'))
+    await useSwarmStore.getState().loadDetail('p1', 'missing')
+    expect(useSwarmStore.getState().loadingDetailById.missing).toBe(false)
+    expect(useSwarmStore.getState().detailErrors.missing).toBe('detail unavailable')
   })
 })

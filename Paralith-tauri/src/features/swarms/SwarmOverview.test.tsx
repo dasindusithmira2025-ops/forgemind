@@ -9,13 +9,14 @@ const saveSwarmCommandDraft = vi.fn(async (..._args: unknown[]) => undefined)
 const focusSwarmAgentTerminal = vi.fn(async (..._args: unknown[]) => 'swarm-runtime-s1')
 const retrySwarmTest = vi.fn(async (..._args: unknown[]) => undefined)
 const generateSwarmFixTask = vi.fn(async (..._args: unknown[]) => undefined)
+const getSwarmCommandDraft = vi.fn(async (_projectId: string, swarmId: string) => swarmId === 's1' ? ({ swarmId: 's1', target: '@builders', body: 'Preserve the API', updatedAt: '' }) : null)
 
 vi.mock('@tauri-apps/plugin-dialog', () => ({ confirm: vi.fn(async () => true), save: vi.fn(async () => null) }))
 vi.mock('@tauri-apps/plugin-fs', () => ({ writeTextFile: vi.fn(async () => undefined) }))
 vi.mock('../../native/commands', () => ({
   asNativeError: (error: unknown) => ({ message: String(error) }),
   native: {
-    getSwarmCommandDraft: vi.fn(async () => ({ swarmId: 's1', target: '@builders', body: 'Preserve the API', updatedAt: '' })),
+    getSwarmCommandDraft: (...args: unknown[]) => getSwarmCommandDraft(...(args as [string, string])),
     saveSwarmCommandDraft: (...args: unknown[]) => saveSwarmCommandDraft(...(args as [string, string, string, string])),
     sendSwarmMessage: (...args: unknown[]) => sendSwarmMessage(...(args as [string, string, string, string])),
     focusSwarmAgentTerminal: (...args: unknown[]) => focusSwarmAgentTerminal(...(args as [string, string, string])),
@@ -176,5 +177,31 @@ describe('SwarmOverview live backend projection', () => {
     await userEvent.type(screen.getByLabelText('Response for agent'), 'Run the scoped test only')
     await userEvent.click(screen.getByRole('button', { name: 'Approve and continue' }))
     expect(resolveAttention).toHaveBeenCalledWith('s1', 'permission-1', 'Run the scoped test only', true)
+  })
+
+  it('clears command state when navigating to a cached Swarm without a draft', async () => {
+    const second = { ...detail, swarm: { ...detail.swarm, id: 's2' } } as SwarmDetail
+    const view = render(<MemoryRouter><SwarmOverview detail={detail} /></MemoryRouter>)
+    await waitFor(() => expect(screen.getByPlaceholderText(/Give the team/i)).toHaveValue('Preserve the API'))
+    view.rerender(<MemoryRouter><SwarmOverview detail={second} /></MemoryRouter>)
+    await waitFor(() => expect(screen.getByPlaceholderText(/Give the team/i)).toHaveValue(''))
+    expect(screen.getByLabelText('Instruction target')).toHaveValue('@swarm')
+  })
+
+  it('renders archived history without mutation controls', async () => {
+    const archived = { ...detail, swarm: { ...detail.swarm, lifecycle: 'archived', archived: true } } as SwarmDetail
+    const { container } = render(<MemoryRouter><SwarmOverview detail={archived} /></MemoryRouter>)
+    expect(screen.queryByPlaceholderText(/Give the team/i)).not.toBeInTheDocument()
+    expect(screen.queryByText('Swarm defaults')).not.toBeInTheDocument()
+    await userEvent.click(container.querySelector('.swarm-agent-node.role-builder') as HTMLElement)
+    expect(screen.queryByText('Next execution model')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Validate configuration' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Message' })).not.toBeInTheDocument()
+  })
+
+  it('does not offer Pause during a conflicting stopping transition', () => {
+    const stopping = { ...detail, swarm: { ...detail.swarm, lifecycle: 'stopping' } } as SwarmDetail
+    render(<MemoryRouter><SwarmOverview detail={stopping} /></MemoryRouter>)
+    expect(screen.queryByRole('button', { name: /^Pause$/ })).not.toBeInTheDocument()
   })
 })

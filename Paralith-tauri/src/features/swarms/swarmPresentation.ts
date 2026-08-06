@@ -82,6 +82,23 @@ export function isActiveLifecycle(state: SwarmLifecycle): boolean {
   ].includes(state)
 }
 
+/** States from which the backend can checkpoint active work into Paused. Transitional stop,
+ * resume, and pause states stay visible as active but must not offer a conflicting Pause action. */
+export function isPausableLifecycle(state: SwarmLifecycle): boolean {
+  return [
+    'preparing',
+    'understanding',
+    'planning',
+    'building',
+    'running',
+    'verifying',
+    'reviewing',
+    'decision_required',
+    'decision_needed',
+    'recovering',
+  ].includes(state)
+}
+
 export function roleLabel(role: SwarmRole): string {
   const plural: Record<SwarmRole, string> = {
     coordinator: 'Coordinator',

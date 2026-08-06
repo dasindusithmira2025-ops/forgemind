@@ -33,6 +33,7 @@ export function SwarmWorkspace({
     return value?.swarm.projectId === projectId ? value : undefined
   })
   const error = useSwarmStore((state) => state.error)
+  const detailError = useSwarmStore((state) => swarmId ? state.detailErrors[swarmId] : undefined)
   const loadSwarms = useSwarmStore((state) => state.loadSwarms)
   const loadDetail = useSwarmStore((state) => state.loadDetail)
   const refresh = useSwarmStore((state) => state.refresh)
@@ -141,6 +142,8 @@ export function SwarmWorkspace({
               <Plus size={15} /> New Swarm
             </button>
           </div>
+        ) : detailError ? (
+          <div className="swarm-placeholder"><p>Swarm details could not be loaded: {detailError}</p><button type="button" className="button button-secondary" onClick={() => void loadDetail(projectId, swarmId)}>Retry</button></div>
         ) : (
           <div className="swarm-placeholder"><p>Loading Swarm…</p></div>
         )}

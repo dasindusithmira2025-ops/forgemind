@@ -526,6 +526,23 @@ impl DatabaseService {
         Ok(())
     }
 
+    #[cfg(test)]
+    pub fn seed_swarm_provider_session_for_test(
+        &self,
+        swarm_id: &str,
+        project_id: &str,
+        agent_id: &str,
+        runtime: SwarmRuntimeKind,
+        provider_session_id: &str,
+    ) -> AppResult<()> {
+        let now = Utc::now().to_rfc3339();
+        self.connection.lock().execute(
+            "INSERT INTO swarm_runtime_sessions(id,swarm_id,project_id,agent_id,task_id,runtime,provider_session_id,terminal_session_id,state,resumable,working_directory,instruction_hash,usage_json,failure_class,started_at,updated_at,ended_at) VALUES(?1,?2,?3,?4,NULL,?5,?6,NULL,'finished',1,'','test','{}',NULL,?7,?7,?7)",
+            params![Uuid::new_v4().to_string(), swarm_id, project_id, agent_id, runtime.as_str(), provider_session_id, now],
+        )?;
+        Ok(())
+    }
+
     pub fn create_swarm_run(&self, swarm: &Swarm) -> AppResult<String> {
         let now = Utc::now().to_rfc3339();
         let id = Uuid::new_v4().to_string();
@@ -798,6 +815,17 @@ impl DatabaseService {
     pub fn count_active_swarms(&self) -> AppResult<usize> {
         let count: i64 = self.connection.lock().query_row(
             "SELECT count(*) FROM swarms WHERE archived=0 AND lifecycle IN ('validating','preparing','understanding','planning','building','running','verifying','decision_required','decision_needed','pausing','resuming','stopping','reviewing','recovering')",
+            [],
+            |row| row.get(0),
+        ).map_err(AppError::database)?;
+        Ok(count.max(0) as usize)
+    }
+
+    /// Capacity is process ownership, not a lifecycle projection. Decision/recovery states can
+    /// retain active workers, so count the authoritative agent rows across every live Swarm.
+    pub fn count_active_swarm_agents(&self) -> AppResult<usize> {
+        let count: i64 = self.connection.lock().query_row(
+            "SELECT count(*) FROM swarm_agents a JOIN swarms s ON s.id=a.swarm_id WHERE s.archived=0 AND a.status='active' AND a.role<>'coordinator'",
             [],
             |row| row.get(0),
         ).map_err(AppError::database)?;
@@ -1495,10 +1523,14 @@ impl DatabaseService {
         Ok(())
     }
 
-    pub fn latest_swarm_provider_session_id(&self, agent_id: &str) -> AppResult<Option<String>> {
+    pub fn latest_swarm_provider_session_id(
+        &self,
+        agent_id: &str,
+        runtime: SwarmRuntimeKind,
+    ) -> AppResult<Option<String>> {
         self.connection.lock().query_row(
-            "SELECT provider_session_id FROM swarm_runtime_sessions WHERE agent_id=?1 AND provider_session_id IS NOT NULL AND resumable=1 ORDER BY started_at DESC LIMIT 1",
-            [agent_id],
+            "SELECT provider_session_id FROM swarm_runtime_sessions WHERE agent_id=?1 AND runtime=?2 AND provider_session_id IS NOT NULL AND resumable=1 ORDER BY started_at DESC LIMIT 1",
+            params![agent_id, runtime.as_str()],
             |row| row.get(0),
         ).optional().map_err(Into::into)
     }
@@ -1985,17 +2017,22 @@ fn load_roles(connection: &Connection, swarm_id: &str) -> AppResult<Vec<SwarmRol
             let config_json: String = row.get(4)?;
             let mut allocation =
                 SwarmRoleAllocation::new(row.get::<_, String>(0)?, runtime, row.get::<_, i64>(3)?);
-            allocation.model_config = if config_json.trim() == "{}" {
-                Some(crate::agents::model_registry::unvalidated_for(
-                    runtime.as_str(),
-                ))
-            } else {
-                serde_json::from_str(&config_json).ok().or_else(|| {
+            allocation.model_config =
+                if config_json.trim() == "{}" && runtime == SwarmRuntimeKind::Auto {
+                    // Auto is intentionally unresolved until launch; the selected concrete provider
+                    // receives its registry-backed default when workers are materialized.
+                    None
+                } else if config_json.trim() == "{}" {
                     Some(crate::agents::model_registry::unvalidated_for(
                         runtime.as_str(),
                     ))
-                })
-            };
+                } else {
+                    serde_json::from_str(&config_json).ok().or_else(|| {
+                        Some(crate::agents::model_registry::unvalidated_for(
+                            runtime.as_str(),
+                        ))
+                    })
+                };
             Ok((
                 SwarmRole::from_db(&role_raw).unwrap_or(SwarmRole::Builder),
                 allocation,

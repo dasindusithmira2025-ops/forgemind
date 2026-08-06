@@ -320,6 +320,7 @@ impl SwarmLifecycle {
                 next,
                 Self::Building
                     | Self::Verifying
+                    | Self::Pausing
                     | Self::Paused
                     | Self::Stopping
                     | Self::Recovering
@@ -356,6 +357,7 @@ impl SwarmLifecycle {
                     | Self::Building
                     | Self::Verifying
                     | Self::DecisionRequired
+                    | Self::Pausing
                     | Self::Paused
                     | Self::Stopping
                     | Self::Failed

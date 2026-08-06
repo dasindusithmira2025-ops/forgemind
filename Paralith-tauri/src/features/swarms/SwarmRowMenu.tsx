@@ -4,7 +4,7 @@ import { Archive, Copy, Download, MoreHorizontal, Pause, Pencil, Play, RotateCcw
 import type { Swarm, SwarmListItem } from '../../native/types'
 import { asNativeError, native } from '../../native/commands'
 import { useSwarmStore } from './swarmStore'
-import { isActiveLifecycle } from './swarmPresentation'
+import { isActiveLifecycle, isPausableLifecycle } from './swarmPresentation'
 
 export function SwarmRowMenu({ item, onOpen, onCreated }: {
   item: SwarmListItem
@@ -24,6 +24,7 @@ export function SwarmRowMenu({ item, onOpen, onCreated }: {
   const create = useSwarmStore((state) => state.create)
   const swarm = item.swarm
   const active = isActiveLifecycle(swarm.lifecycle) || swarm.lifecycle === 'decision_required'
+  const canPause = isPausableLifecycle(swarm.lifecycle)
   const canDelete = swarm.lifecycle === 'draft' || ['completed', 'failed', 'cancelled', 'archived', 'ready_for_review'].includes(swarm.lifecycle)
   const canArchive = ['completed', 'failed', 'cancelled', 'ready_for_review'].includes(swarm.lifecycle)
   const canFollowUp = ['completed', 'failed', 'cancelled', 'archived', 'ready_for_review'].includes(swarm.lifecycle)
@@ -51,7 +52,7 @@ export function SwarmRowMenu({ item, onOpen, onCreated }: {
       {swarm.lifecycle === 'draft' ? <button role="menuitem" onClick={() => void run(() => start(swarm.id))}><Play size={13} /> Validate &amp; launch</button> : null}
       {swarm.lifecycle !== 'archived' ? <button role="menuitem" onClick={() => { setOpen(false); setRenameValue(swarm.name) }}><Pencil size={13} /> Rename</button> : null}
       <button role="menuitem" onClick={() => void run(async () => onCreated((await duplicateConfiguration(create, swarm, false)).id))}><Copy size={13} /> Duplicate configuration</button>
-      {active ? <button role="menuitem" onClick={() => void run(() => pause(swarm.id))}><Pause size={13} /> Pause</button> : null}
+      {canPause ? <button role="menuitem" onClick={() => void run(() => pause(swarm.id))}><Pause size={13} /> Pause</button> : null}
       {swarm.lifecycle === 'paused' ? <button role="menuitem" onClick={() => void run(() => resume(swarm.id))}><Play size={13} /> Resume</button> : null}
       {active || swarm.lifecycle === 'paused' ? <button role="menuitem" onClick={() => void run(() => stop(swarm.id, false))}><Square size={13} /> Stop</button> : null}
       <button role="menuitem" onClick={() => void run(() => exportReport(swarm))}><Download size={13} /> Export report</button>

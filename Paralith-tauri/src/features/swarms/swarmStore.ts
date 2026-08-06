@@ -22,6 +22,9 @@ interface SwarmState {
   itemsByProject: Record<string, SwarmListItem[]>
   /** Full detail keyed by swarmId (Overview / Team / Work views). */
   detailById: Record<string, SwarmDetail>
+  includeArchivedByProject: Record<string, boolean>
+  loadingDetailById: Record<string, boolean | undefined>
+  detailErrors: Record<string, string | undefined>
   loadingProject?: string
   error?: string
   pendingBySwarm: Record<string, string | undefined>
@@ -67,6 +70,9 @@ export const useSwarmStore = create<SwarmState>((set, get) => ({
   presets: [],
   itemsByProject: {},
   detailById: {},
+  includeArchivedByProject: {},
+  loadingDetailById: {},
+  detailErrors: {},
   pendingBySwarm: {},
 
   loadPresets: async () => {
@@ -81,7 +87,10 @@ export const useSwarmStore = create<SwarmState>((set, get) => ({
   loadSwarms: async (projectId, includeArchived = false) => {
     const requestVersion = (projectRequestVersions.get(projectId) ?? 0) + 1
     projectRequestVersions.set(projectId, requestVersion)
-    set({ loadingProject: projectId })
+    set((state) => ({
+      loadingProject: projectId,
+      includeArchivedByProject: { ...state.includeArchivedByProject, [projectId]: includeArchived },
+    }))
     try {
       const items = await native.listSwarms(projectId, includeArchived)
       if (projectRequestVersions.get(projectId) !== requestVersion) return
@@ -98,18 +107,33 @@ export const useSwarmStore = create<SwarmState>((set, get) => ({
   loadDetail: async (projectId, swarmId) => {
     const requestVersion = (detailRequestVersions.get(swarmId) ?? 0) + 1
     detailRequestVersions.set(swarmId, requestVersion)
+    set((state) => ({
+      loadingDetailById: { ...state.loadingDetailById, [swarmId]: true },
+      detailErrors: { ...state.detailErrors, [swarmId]: undefined },
+    }))
     try {
       const detail = await native.getSwarmDetail(projectId, swarmId)
       if (detailRequestVersions.get(swarmId) !== requestVersion) return undefined
       set((state) => {
         const current = state.detailById[swarmId]
-        if (current && current.swarm.revision > detail.swarm.revision) return state
-        return { detailById: { ...state.detailById, [swarmId]: detail } }
+        if (current && current.swarm.revision > detail.swarm.revision) {
+          return { loadingDetailById: { ...state.loadingDetailById, [swarmId]: false } }
+        }
+        return {
+          detailById: { ...state.detailById, [swarmId]: detail },
+          loadingDetailById: { ...state.loadingDetailById, [swarmId]: false },
+          detailErrors: { ...state.detailErrors, [swarmId]: undefined },
+        }
       })
       return detail
     } catch (error) {
       if (detailRequestVersions.get(swarmId) !== requestVersion) return undefined
-      set({ error: asNativeError(error).message })
+      const message = asNativeError(error).message
+      set((state) => ({
+        error: message,
+        loadingDetailById: { ...state.loadingDetailById, [swarmId]: false },
+        detailErrors: { ...state.detailErrors, [swarmId]: message },
+      }))
       return undefined
     }
   },
@@ -118,14 +142,14 @@ export const useSwarmStore = create<SwarmState>((set, get) => ({
     const state = get()
     const tasks: Promise<unknown>[] = []
     if (state.detailById[swarmId]) tasks.push(state.loadDetail(projectId, swarmId))
-    tasks.push(state.loadSwarms(projectId))
+    tasks.push(state.loadSwarms(projectId, state.includeArchivedByProject[projectId] ?? false))
     await Promise.all(tasks)
   },
 
   create: async (request) => {
     try {
       const swarm = await native.createSwarm(request)
-      await get().loadSwarms(request.projectId)
+      await get().loadSwarms(request.projectId, get().includeArchivedByProject[request.projectId] ?? false)
       return swarm
     } catch (error) {
       const message = asNativeError(error).message
@@ -160,7 +184,7 @@ export const useSwarmStore = create<SwarmState>((set, get) => ({
         delete detailById[swarmId]
         return { detailById }
       })
-      await get().loadSwarms(projectId)
+      await get().loadSwarms(projectId, get().includeArchivedByProject[projectId] ?? false)
     } catch (error) {
       const message = asNativeError(error).message
       set({ error: message })
