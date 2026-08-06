@@ -3,12 +3,15 @@ import { NavItem, NavLink } from '@/types';
 /**
  * The primary navigation.
  *
- * Two of the three entries open a panel rather than navigating: a ruled list of
- * destinations on the left, and on the right a facts panel stating the current
- * state of whatever the panel covers. The right-hand column is deliberately not
- * a promotional slot — it prints values the reader can check (release, targets,
- * telemetry) so the menu carries the same evidential register as the pages it
- * leads to.
+ * Two of the three entries open a panel. The panel is not a floating card — it
+ * is another band of the page that happens to be temporary, printed on the
+ * second weight of stock and closed top and bottom by a hairline, so opening the
+ * menu reads as the sheet extending rather than a widget appearing over it.
+ *
+ * The right-hand column of each panel shows the thing itself: a still of the
+ * workspace for the product, the company mark for the company. A menu that
+ * shows you the product is worth more than one that describes it, and the still
+ * is the poster frame of a loop the site already ships.
  */
 export const mainNav: NavItem[] = [
   {
@@ -16,51 +19,45 @@ export const mainNav: NavItem[] = [
     id: 'paralith',
     label: 'Paralith',
     href: '/products/paralith',
-    columnKicker: 'Product',
     items: [
       {
         label: 'Overview',
         href: '/products/paralith',
-        description: 'What Paralith is, and who it is built for.',
+        description: 'What it is, and who it is built for',
       },
       {
         label: 'Capabilities',
         href: '/products/paralith#capabilities',
-        description: 'Six things it takes off your hands, and one it never takes.',
+        description: 'Six things it takes off your hands',
       },
       {
         label: 'How a task runs',
         href: '/technology',
-        description: 'From your sentence to an approved change, step by step.',
+        description: 'From your sentence to an approved change',
       },
       {
         label: 'Downloads',
         href: '/products/paralith#download',
-        description: 'Signed builds for Windows, macOS, and Linux.',
-        badge: 'v0.9.4',
+        description: 'Signed builds for Windows, macOS, and Linux',
       },
       {
         label: 'Release notes',
         href: '/products/paralith#release-notes',
-        description: 'What changed in the current preview.',
+        description: 'What changed in the current preview',
       },
       {
         label: 'Questions',
         href: '/products/paralith#faq',
-        description: 'Privacy, model choice, and platform support.',
+        description: 'Privacy, model choice, platform support',
       },
     ],
-    aside: {
-      kicker: 'Current build',
-      title: 'Paralith v0.9.4 preview',
-      body: 'Preview binaries are issued individually while Paralith is in early access. Every artifact is signed and published with its checksum.',
-      facts: [
-        { key: 'Release', value: 'v0.9.4 preview', accent: true },
-        { key: 'Runs on', value: 'Windows · macOS · Linux' },
-        { key: 'Your code', value: 'Stays on your machine' },
-        { key: 'Telemetry', value: 'Off by default' },
-      ],
-      cta: { label: 'Get Paralith', href: '/products/paralith#download' },
+    plate: {
+      image: '/media/paralith-workspace-plate.jpg',
+      imageAlt: 'The Paralith workspace: six agents working across terminal panes.',
+      fit: 'cover',
+      caption: 'v0.9.4 preview',
+      statement: 'Six agents, one build, nothing landing unchecked.',
+      cta: { label: 'Get the build', href: '/products/paralith#download' },
     },
   },
   {
@@ -74,39 +71,34 @@ export const mainNav: NavItem[] = [
     id: 'company',
     label: 'Company',
     href: '/company',
-    columnKicker: 'Corelith',
     items: [
       {
         label: 'About Corelith',
         href: '/company',
-        description: 'Mission, engineering scope, and the standards we build to.',
+        description: 'Mission, scope, and the standards we build to',
       },
       {
         label: 'Security & trust',
         href: '/security',
-        description: 'Data handling, signed releases, and disclosure.',
+        description: 'Data handling, signed releases, disclosure',
       },
       {
         label: 'Careers',
         href: '/careers',
-        description: 'Engineering culture and the roles we are hiring for.',
+        description: 'Engineering culture and open roles',
       },
       {
         label: 'Contact',
         href: '/contact',
-        description: 'Reach the engineering team directly.',
+        description: 'Reach the engineering team directly',
       },
     ],
-    aside: {
-      kicker: 'Directive',
-      title: 'Building powerful software for the people shaping what comes next.',
-      body: 'Four domains where technical depth and interface precision both have to hold. We do not staff a fifth.',
-      facts: [
-        { key: 'Company', value: 'Independent, product-led' },
-        { key: 'Engineering', value: 'Global / distributed' },
-        { key: 'Flagship', value: 'Paralith', accent: true },
-        { key: 'Disclosure', value: 'Coordinated' },
-      ],
+    plate: {
+      image: '/brand/corelith-mark.png',
+      imageAlt: '',
+      fit: 'contain',
+      caption: 'Corelith Technologies',
+      statement: 'Building powerful software for the people shaping what comes next.',
       cta: { label: 'Contact engineering', href: '/contact' },
     },
   },
@@ -114,9 +106,8 @@ export const mainNav: NavItem[] = [
 
 /**
  * Flat list of every destination in the primary nav, in reading order. The
- * mobile drawer numbers its entries, and screen-reader users get one ordered
- * set rather than a nest — so the drawer builds from this rather than walking
- * the panel tree.
+ * mobile drawer numbers nothing and nests nothing — screen-reader users get one
+ * ordered set — so it builds from this rather than walking the panel tree.
  */
 export const mainNavLinks: NavLink[] = mainNav.flatMap((entry) =>
   entry.kind === 'link'
@@ -125,7 +116,6 @@ export const mainNavLinks: NavLink[] = mainNav.flatMap((entry) =>
         label: item.label,
         href: item.href,
         description: item.description,
-        badge: item.badge,
       })),
 );
 
