@@ -397,19 +397,12 @@ describe('idempotent internal release publication', () => {
     expect(() => planReleasePublication({ existingTags: [], tag: '' })).toThrow('release tag is required')
   })
 })
-
-describe('release workflow wiring', () => {
-  it('publishes public payloads first, then deploys a JSON-only Firebase compatibility bridge', async () => {
-    const workflow = await readFile(join(repositoryRoot, '.github', 'workflows', 'release-internal.yml'), 'utf8')
-    const stagingReferences = workflow.match(/\.artifacts\/update-bridge-dist/g) || []
-    expect(stagingReferences.length).toBeGreaterThanOrEqual(3)
-    expect(workflow.indexOf('github-artifacts-publisher.mjs publish')).toBeLessThan(workflow.indexOf('firebase-manifest-bridge.mjs stage'))
-    expect(workflow.indexOf('assert-json-only')).toBeLessThan(workflow.indexOf('firebase deploy --only hosting'))
-  })
-
-  it('publishes the internal prerelease idempotently by superseding an existing tag', async () => {
-    const workflow = await readFile(join(repositoryRoot, '.github', 'workflows', 'release-internal.yml'), 'utf8')
-    expect(workflow).toContain('gh release view $tag')
-    expect(workflow).toContain('gh release delete $tag --yes --cleanup-tag')
+// These helpers remain covered as library code; the Stable workflow does not deploy Firebase.
+describe('Stable release workflow wiring', () => {
+  it('does not deploy the retired Preview Firebase bridge', async () => {
+    const workflow = await readFile(join(repositoryRoot, '.github', 'workflows', 'release-stable.yml'), 'utf8')
+    expect(workflow).not.toContain('firebase-manifest-bridge.mjs')
+    expect(workflow).not.toContain('firebase deploy')
+    expect(workflow).toContain('Publish and atomically activate the public Stable update')
   })
 })

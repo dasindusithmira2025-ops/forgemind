@@ -1351,7 +1351,7 @@ html[data-theme-swapping] *, html[data-theme-swapping] *::before, html[data-them
 .update-toast-progressive .update-toast-actions { grid-column: 1 / -1; flex-wrap: wrap; }
 /* Genome rule 3: the highest-emphasis button stays achromatic. This rule used to repaint it in
    `--accent` against an undefined `--accent-contrast`, so the colour was invalid at
-   computed-value time and the label fell back to inherited `--text` — near-white on violet, 2.65:1.
+   computed-value time and the label fell back to inherited `--text` - near-white on violet, 2.65:1.
    The inherited `.button-primary` pairing is `--primary`/`--on-primary` at 14.4:1. */
 .update-toast-progressive .update-toast-actions .button-primary { gap: 6px; }
 .update-toast-progressive .update-toast-actions button:disabled { cursor: default; opacity: .55; }

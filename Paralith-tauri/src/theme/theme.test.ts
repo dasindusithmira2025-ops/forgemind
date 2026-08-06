@@ -3,14 +3,6 @@ import indexCss from '../index.css?raw'
 import codeSurfaceCss from '../features/code-surface/codeSurface.css?raw'
 import toolPanelCss from '../features/code-surface/workspaceToolPanel.css?raw'
 import browserCss from '../features/code-surface/browser/browser.css?raw'
-
-/** Every stylesheet that carries component rules, so genome checks cover the whole app. */
-const COMPONENT_STYLESHEETS = {
-  'index.css': indexCss,
-  'codeSurface.css': codeSurfaceCss,
-  'workspaceToolPanel.css': toolPanelCss,
-  'browser.css': browserCss,
-}
 import indexHtml from '../../index.html?raw'
 import {
   REQUIRED_CSS_VARS, monacoThemeName, toCssVars, toMonacoColors, toTerminalTheme,
@@ -191,7 +183,7 @@ describe('design genome', () => {
     // an accented control then looks permanently focused. Component rules must reference
     // `--focus-outline`/`--focus-shadow` instead of inventing a ring.
     expect(indexCss).toContain('--focus-outline:')
-    for (const [name, sheet] of Object.entries(COMPONENT_STYLESHEETS)) {
+    for (const [name, sheet] of Object.entries(GENOME_STYLESHEETS)) {
       for (const rule of sheet.split('}')) {
         if (!/:focus(-visible|-within)?\b/.test(rule)) continue
         const outline = /outline:\s*([^;]+)/.exec(rule)
@@ -217,7 +209,6 @@ describe('design genome', () => {
     expect(focusEdge).toBeGreaterThan(-1)
     expect(focusEdge, 'focus edge must win over agent-state header edges').toBeGreaterThan(agentEdge)
   })
-
   // Every stylesheet that carries component rules, so genome checks cover the whole app and not
   // just the token layer. Rules 1 and 3 are breakable in component CSS, not only in a palette.
   const GENOME_STYLESHEETS = {

@@ -49,6 +49,6 @@ PARALITH writes a rotating log (`paralith.log`, capped at 5 MB) to the edition-s
 - Windows Preview: `%APPDATA%\com.corelith.paralith.preview\logs\`
 
 If startup fails (for example, the application data directory or SQLite database cannot be opened), the app shows a native error dialog explaining the cause instead of exiting silently. The renderer is wrapped in an error boundary that offers a reload path if the interface hits an unexpected error.
-# Internal Windows distribution
+# Stable Windows distribution
 
-PARALITH has separate Stable and Preview Windows editions, protected GitHub validation/release workflows, signed in-app updates through a company-controlled endpoint, pre-migration backups, post-update health confirmation, and Safe Recovery. Administrator setup and release policy are documented in [docs/INTERNAL_RELEASES.md](docs/INTERNAL_RELEASES.md); the end-to-end recovery test is in [docs/UPDATE_RECOVERY.md](docs/UPDATE_RECOVERY.md).
+PARALITH ships through one manually confirmed Stable workflow. It validates tagged `main` source, builds signed Windows updater artifacts, atomically activates a 100% Stable manifest, and verifies the public checksums and live endpoint before reporting success. Administrator setup and release policy are documented in [docs/INTERNAL_RELEASES.md](docs/INTERNAL_RELEASES.md); the end-to-end recovery test is in [docs/UPDATE_RECOVERY.md](docs/UPDATE_RECOVERY.md).

@@ -66,6 +66,19 @@ describe('validateManifest', () => {
     const errors = validateManifest(manifest({ version: '0.4.1-1002' }), { ...opts, previousVersion: '0.4.1-1002' })
     expect(errors.join(' ')).toMatch(/not strictly newer/)
   })
+
+  it('requires an exact rollout when the publisher targets every Stable installation', () => {
+    const stable = manifest({
+      version: '0.4.2',
+      paralith: { edition: 'stable', channel: 'stable', schemaVersion: 22, rolloutPercent: 100 },
+    })
+    const stableOptions = { expectedVersion: '0.4.2', edition: 'stable', expectedRolloutPercent: 100 }
+    expect(validateManifest(stable, stableOptions)).toEqual([])
+    expect(validateManifest({
+      ...stable,
+      paralith: { ...stable.paralith, rolloutPercent: 99 },
+    }, stableOptions).join(' ')).toMatch(/rolloutPercent "99" is not 100/)
+  })
 })
 
 describe('missingPublishKeys', () => {

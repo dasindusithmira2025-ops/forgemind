@@ -1,0 +1,27 @@
+{
+  "version": "0.4.4",
+  "channel": "stable",
+  "date": "2026-08-01",
+  "highlights": [
+    "Bound automatic terminal restoration across all open Workspaces with one application-wide launch budget",
+    "Publish updater assets through the protected public update repository and configured push mirror"
+  ],
+  "fixes": [
+    "Prevent each Workspace from independently consuming the full restoration budget during startup",
+    "Serialize concurrent Workspace restores so each restore observes the current live-session count",
+    "Keep over-budget Panes visible as deferred instead of launching an unbounded terminal and agent burst"
+  ],
+  "databaseChanges": [
+    "No database schema changes",
+    "Preserve existing Projects, Workspaces, terminals, Missions, Memory, settings, and Stable updater state"
+  ],
+  "knownIssues": [
+    "A Windows LSASS or RPC crash is an operating-system failure; this release removes PARALITH's confirmed restoration load amplifier but cannot repair an independent Windows fault",
+    "Open in default app remains restricted by the opener path policy; Reveal in file explorer is available",
+    "GitHub App installation-token exchange and public webhook ingress require the separately deployed Corelith backend service",
+    "Remote repository synchronization remains explicit-refresh only"
+  ],
+  "requiredManualActions": [
+    "Use the in-app Stable update button and approve the safe restart; no manual installer download is required"
+  ]
+}

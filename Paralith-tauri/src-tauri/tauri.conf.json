@@ -2,7 +2,7 @@
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "PARALITH",
   "mainBinaryName": "PARALITH",
-  "version": "0.4.3",
+  "version": "0.4.6",
   "identifier": "com.corelith.paralith",
   "build": {
     "frontendDist": "../dist",

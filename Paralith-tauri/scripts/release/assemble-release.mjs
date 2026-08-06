@@ -14,6 +14,13 @@ const commit = process.env.PARALITH_GIT_COMMIT || process.env.GITHUB_SHA || (awa
 const buildTimestamp = process.env.PARALITH_BUILD_TIMESTAMP || new Date().toISOString()
 const artifactBase = (process.env.PARALITH_UPDATE_ARTIFACT_BASE_URL || `http://127.0.0.1:4179/${edition}`).replace(/\/$/, '')
 const flatArtifactLayout = process.env.PARALITH_UPDATE_PUBLISH_PROVIDER === 'github-artifacts'
+const rolloutPercent = Number(process.env.PARALITH_ROLLOUT_PERCENT || 100)
+if (!Number.isInteger(rolloutPercent) || rolloutPercent < 0 || rolloutPercent > 100) {
+  throw new Error('PARALITH_ROLLOUT_PERCENT must be an integer from 0 through 100')
+}
+if (edition === 'stable' && rolloutPercent !== 100) {
+  throw new Error('Stable releases must target 100% of eligible installations')
+}
 const bundleRoot = process.env.PARALITH_BUNDLE_DIR || join(root, 'src-tauri', 'target', 'release', 'bundle')
 const output = join(root, '.artifacts', 'release', edition, version)
 const siteVersion = join(root, '.artifacts', 'update-site', edition, version)
@@ -76,7 +83,7 @@ const latest = {
     schemaVersion: canonical.schemaVersion,
     minSchemaVersion: Number(process.env.PARALITH_MIN_SCHEMA_VERSION || 1),
     maxSchemaVersion: Number(process.env.PARALITH_MAX_SCHEMA_VERSION || canonical.schemaVersion),
-    rolloutPercent: Number(process.env.PARALITH_ROLLOUT_PERCENT || 100),
+    rolloutPercent,
     commit,
     buildTimestamp,
     previousInstallerUrl: releaseManifest.previousInstallerUrl,

@@ -16,8 +16,6 @@ const PUBLIC_METADATA = new Set([
   'release-notes.md',
 ])
 
-export const PUBLICATION_CONCURRENCY_GROUP = 'paralith-update-publication'
-
 // The canonical GitHub locations. A mirror may sit in front of these for installed clients, but
 // publication and anonymous verification always go through the origin. See update-distribution.mjs.
 export const releaseAssetBaseUrl = githubArtifactBaseUrl
@@ -60,7 +58,11 @@ export function validatePublicArtifactNames(names) {
 }
 
 export function validateGithubManifest(manifest, { repository, tag, channel, version, env = process.env }) {
-  const problems = validateManifest(manifest, { expectedVersion: version, edition: channel })
+  const problems = validateManifest(manifest, {
+    expectedVersion: version,
+    edition: channel,
+    expectedRolloutPercent: channel === 'stable' ? 100 : null,
+  })
   if (manifest?.paralith?.edition !== channel) {
     problems.push(`manifest edition "${manifest?.paralith?.edition}" is not "${channel}"`)
   }
