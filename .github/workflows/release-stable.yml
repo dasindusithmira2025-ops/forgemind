@@ -1,21 +1,354 @@
 name: Release Stable
+run-name: Release ${{ inputs.tag }} to all Stable users
 
+# Stable is the only published PARALITH channel. A release is deliberately manual: the operator
+# selects an existing stable-vX.Y.Z tag and confirms that activating its manifest makes the update
+# visible to the entire Stable cohort. The stable-release environment is the policy boundary for
+# reviewer approval and release secrets.
 on:
-  push:
-    tags: ['stable-v*']
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing protected stable-vX.Y.Z tag
+        description: Existing stable-vX.Y.Z tag on main
         required: true
+        type: string
+      confirm_all_users:
+        description: Confirm that this release targets 100% of Stable installations
+        required: true
+        default: DO NOT RELEASE
+        type: choice
+        options:
+          - DO NOT RELEASE
+          - RELEASE TO ALL STABLE USERS
 
 permissions:
-  contents: write
+  contents: read
+
+# Stable releases mutate one customer-facing manifest. Queue every version behind the same lock
+# and never cancel an in-flight publication, because cancellation after activation can leave the
+# release only partially verified.
+concurrency:
+  group: paralith-stable-release
+  cancel-in-progress: false
 
 jobs:
   release:
-    uses: ./.github/workflows/release-windows.yml
-    with:
-      edition: stable
-      tag: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
-    secrets: inherit
+    name: Validate, sign, publish, and verify Stable
+    runs-on: [self-hosted, Windows, X64, paralith, paralith-release]
+    timeout-minutes: 150
+    environment:
+      name: stable-release
+      url: ${{ vars.PARALITH_STABLE_UPDATE_ENDPOINT }}
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: Paralith-tauri
+    env:
+      RELEASE_TAG: ${{ inputs.tag }}
+      PARALITH_ROLLOUT_PERCENT: '100'
+
+    steps:
+      - name: Confirm customer-release intent
+        working-directory: .
+        env:
+          RELEASE_CONFIRMATION: ${{ inputs.confirm_all_users }}
+          WORKFLOW_REF: ${{ github.ref }}
+        run: |
+          if ($env:WORKFLOW_REF -ne 'refs/heads/main') {
+            throw 'Release Stable must be dispatched from main so the workflow definition is reviewed.'
+          }
+          if ($env:RELEASE_CONFIRMATION -ne 'RELEASE TO ALL STABLE USERS') {
+            throw 'Stable release cancelled: the 100% rollout confirmation was not selected.'
+          }
+          if ($env:RELEASE_TAG -notmatch '^stable-v\d+\.\d+\.\d+$') {
+            throw "Release tag '$env:RELEASE_TAG' must exactly match stable-vX.Y.Z."
+          }
+
+      - name: Checkout the protected Stable tag
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.tag }}
+          clean: false
+          persist-credentials: false
+
+      - name: Prove the tagged commit came through main
+        id: source
+        working-directory: .
+        run: |
+          $head = (git rev-parse HEAD).Trim()
+          $tagged = (git rev-parse "$env:RELEASE_TAG^{commit}").Trim()
+          if ($head -ne $tagged) {
+            throw "Checked-out commit $head does not match $env:RELEASE_TAG ($tagged)."
+          }
+          git merge-base --is-ancestor $head origin/main
+          if ($LASTEXITCODE -ne 0) {
+            throw "Stable tag $env:RELEASE_TAG is not on origin/main; refusing to publish unmerged code."
+          }
+          "release_sha=$head" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host "$env:RELEASE_TAG resolves to reviewed main commit $head."
+
+      # The persistent runner keeps dependency/build caches. This removes every other untracked
+      # path and all prior release bundles before the build can glob an artifact.
+      - name: Prepare the persistent runner workspace
+        working-directory: .
+        env:
+          RELEASE_SHA: ${{ steps.source.outputs.release_sha }}
+        run: pwsh -NoProfile -File scripts/ci/prepare-workspace.ps1 -ExpectedSha "$env:RELEASE_SHA" -ReleaseBuild
+
+      - name: Runner preflight
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          PARALITH_STABLE_UPDATE_ENDPOINT: ${{ vars.PARALITH_STABLE_UPDATE_ENDPOINT }}
+          PARALITH_UPDATE_PUBLISH_PROVIDER: ${{ vars.PARALITH_UPDATE_PUBLISH_PROVIDER }}
+          PARALITH_UPDATES_REPOSITORY: ${{ vars.PARALITH_UPDATES_REPOSITORY }}
+          PARALITH_UPDATE_MIRROR_BASE_URL: ${{ vars.PARALITH_UPDATE_MIRROR_BASE_URL }}
+          PARALITH_UPDATE_MIRROR_MODE: ${{ vars.PARALITH_UPDATE_MIRROR_MODE }}
+        run: pwsh -NoProfile -File scripts/ci/check-self-hosted-runner.ps1 -ReleaseBuild
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      # Fail before validation and compilation if this run cannot activate the public updater.
+      # update-distribution derives the exact endpoint compiled into the app and the immutable
+      # artifact base URL written into latest.json, then exports both through GITHUB_ENV.
+      - name: Validate Stable publication configuration
+        env:
+          PARALITH_STABLE_UPDATE_ENDPOINT: ${{ vars.PARALITH_STABLE_UPDATE_ENDPOINT }}
+          PARALITH_UPDATE_PUBLISH_PROVIDER: ${{ vars.PARALITH_UPDATE_PUBLISH_PROVIDER }}
+          PARALITH_UPDATES_REPOSITORY: ${{ vars.PARALITH_UPDATES_REPOSITORY }}
+          PARALITH_UPDATES_TOKEN: ${{ secrets.PARALITH_UPDATES_TOKEN }}
+          PARALITH_UPDATES_DEPLOY_KEY: ${{ secrets.PARALITH_UPDATES_DEPLOY_KEY }}
+          PARALITH_UPDATE_MIRROR_BASE_URL: ${{ vars.PARALITH_UPDATE_MIRROR_BASE_URL }}
+          PARALITH_UPDATE_MIRROR_MODE: ${{ vars.PARALITH_UPDATE_MIRROR_MODE }}
+        run: |
+          if ($env:PARALITH_UPDATE_PUBLISH_PROVIDER -ne 'github-artifacts') {
+            throw 'Stable releases require PARALITH_UPDATE_PUBLISH_PROVIDER=github-artifacts.'
+          }
+          if (-not $env:PARALITH_UPDATES_REPOSITORY) { throw 'PARALITH_UPDATES_REPOSITORY is required.' }
+          if (-not $env:PARALITH_UPDATES_TOKEN -and -not $env:PARALITH_UPDATES_DEPLOY_KEY) {
+            throw 'PARALITH_UPDATES_TOKEN or PARALITH_UPDATES_DEPLOY_KEY is required.'
+          }
+          node scripts/release/update-distribution.mjs stable "$env:RELEASE_TAG"
+
+      - name: Validate canonical release metadata and tag identity
+        run: |
+          npm run release:check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node scripts/release/verify-release.mjs stable "$env:RELEASE_TAG"
+
+      # This is the complete release gate minus a throwaway no-bundle compile. The signed Tauri
+      # bundle below compiles the same tagged source once and is the stronger compile proof.
+      - name: Run the release validation suite
+        run: pwsh -NoProfile -File scripts/ci/run-checks.ps1 -SummaryTitle "Stable $env:RELEASE_TAG pre-release validation"
+
+      - name: Build signed Stable MSI, NSIS, and updater artifacts
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          PARALITH_STABLE_UPDATE_ENDPOINT: ${{ vars.PARALITH_STABLE_UPDATE_ENDPOINT }}
+          PARALITH_UPDATE_PUBLISH_PROVIDER: ${{ vars.PARALITH_UPDATE_PUBLISH_PROVIDER }}
+          PARALITH_UPDATES_REPOSITORY: ${{ vars.PARALITH_UPDATES_REPOSITORY }}
+          PARALITH_PREVIOUS_INSTALLER_URL: ${{ vars.PARALITH_PREVIOUS_INSTALLER_URL }}
+          PARALITH_WINDOWS_SIGN_COMMAND: ${{ secrets.PARALITH_WINDOWS_SIGN_COMMAND }}
+          RELEASE_SHA: ${{ steps.source.outputs.release_sha }}
+        run: |
+          if (-not $env:TAURI_SIGNING_PRIVATE_KEY) { throw 'TAURI_SIGNING_PRIVATE_KEY is required.' }
+          if (-not $env:PARALITH_UPDATE_ENDPOINT) { throw 'Stable update endpoint was not resolved.' }
+          if (-not $env:PARALITH_UPDATE_ARTIFACT_BASE_URL) { throw 'Stable artifact base URL was not resolved.' }
+          $env:PARALITH_EDITION = 'stable'
+          $env:PARALITH_RELEASE_CHANNEL = 'stable'
+          $env:PARALITH_GIT_COMMIT = $env:RELEASE_SHA
+          $env:PARALITH_BUILD_TIMESTAMP = (Get-Date).ToUniversalTime().ToString('o')
+          $config = node scripts/release/render-tauri-config.mjs stable release | Select-Object -Last 1
+          npm run tauri -- build --bundles msi,nsis --config $config
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node scripts/release/assemble-release.mjs stable
+
+      - name: Verify the assembled 100% Stable release
+        id: artifacts
+        env:
+          RELEASE_SHA: ${{ steps.source.outputs.release_sha }}
+        run: |
+          $directories = @(Get-ChildItem '.artifacts/release/stable' -Directory)
+          if ($directories.Count -ne 1) { throw "Expected one assembled Stable release, found $($directories.Count)." }
+          $directory = $directories[0]
+          $version = (Get-Content 'release/version.json' -Raw | ConvertFrom-Json).version
+          if ($directory.Name -ne $version) { throw "Artifact directory $($directory.Name) does not match version $version." }
+
+          $files = @(Get-ChildItem $directory.FullName -File)
+          $msi = @($files | Where-Object Extension -eq '.msi')
+          $nsis = @($files | Where-Object Name -like '*-setup.exe')
+          if ($msi.Count -ne 1 -or $nsis.Count -ne 1) { throw 'Exactly one MSI and one NSIS installer are required.' }
+          foreach ($installer in @($msi[0], $nsis[0])) {
+            if ($installer.Name -notlike "*$version*") { throw "$($installer.Name) does not contain version $version." }
+            if (-not (Test-Path -LiteralPath "$($installer.FullName).sig" -PathType Leaf)) {
+              throw "Updater signature for $($installer.Name) is missing."
+            }
+          }
+
+          $manifest = Get-Content (Join-Path $directory.FullName 'latest.json') -Raw | ConvertFrom-Json
+          if ($manifest.version -ne $version) { throw 'Updater manifest version is wrong.' }
+          if ($manifest.paralith.edition -ne 'stable' -or $manifest.paralith.channel -ne 'stable') {
+            throw 'Updater manifest is not Stable.'
+          }
+          if ([int]$manifest.paralith.rolloutPercent -ne 100) {
+            throw 'Stable publication must target exactly 100% of eligible installations.'
+          }
+          if ($manifest.paralith.commit -ne $env:RELEASE_SHA) { throw 'Updater manifest commit is wrong.' }
+
+          foreach ($line in Get-Content (Join-Path $directory.FullName 'checksums.sha256')) {
+            if (-not $line.Trim()) { continue }
+            if ($line -notmatch '^([0-9a-fA-F]{64})\s+\*?(.+)$') { throw "Malformed checksum line: $line" }
+            $path = Join-Path $directory.FullName $Matches[2]
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Checksum references missing file $($Matches[2])." }
+            $actual = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actual -ne $Matches[1].ToLowerInvariant()) { throw "Checksum mismatch for $($Matches[2])." }
+          }
+
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "release_dir=$($directory.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host "Verified signed Stable $version artifacts and 100% rollout manifest."
+
+      - name: Archive immutable workflow evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: paralith-stable-${{ steps.artifacts.outputs.version }}
+          path: Paralith-tauri/.artifacts/release/stable/**
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 0
+
+      - name: Create or verify the private source release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_DIR: ${{ steps.artifacts.outputs.release_dir }}
+          RELEASE_SHA: ${{ steps.source.outputs.release_sha }}
+        run: |
+          $notes = Join-Path $env:RELEASE_DIR 'release-notes.md'
+          $assets = @(Get-ChildItem $env:RELEASE_DIR -File | ForEach-Object FullName)
+          gh release view "$env:RELEASE_TAG" --json tagName,targetCommitish,isDraft,isPrerelease *> $null
+          if ($LASTEXITCODE -eq 0) {
+            $release = gh release view "$env:RELEASE_TAG" --json tagName,targetCommitish,isDraft,isPrerelease | ConvertFrom-Json
+            if ($release.isDraft -or $release.isPrerelease) { throw 'Existing Stable source release is draft or prerelease.' }
+            if ($release.targetCommitish -ne $env:RELEASE_SHA) { throw 'Existing Stable source release targets a different commit.' }
+            $inspection = Join-Path $env:RUNNER_TEMP "paralith-source-$($env:GITHUB_RUN_ID)-$($env:GITHUB_RUN_ATTEMPT)"
+            New-Item -ItemType Directory -Path $inspection -Force | Out-Null
+            gh release download "$env:RELEASE_TAG" --pattern checksums.sha256 --dir $inspection
+            if ($LASTEXITCODE -ne 0) { throw 'Failed to download existing source-release checksums.' }
+            $existing = (Get-Content (Join-Path $inspection 'checksums.sha256') -Raw).Replace("`r`n", "`n")
+            $local = (Get-Content (Join-Path $env:RELEASE_DIR 'checksums.sha256') -Raw).Replace("`r`n", "`n")
+            if ($existing -ne $local) { throw 'Existing Stable source release has different checksums.' }
+            Write-Host "Reused matching private release $env:RELEASE_TAG."
+          } else {
+            gh release create "$env:RELEASE_TAG" $assets `
+              --title "PARALITH Stable ${{ steps.artifacts.outputs.version }}" `
+              --notes-file $notes `
+              --target $env:RELEASE_SHA `
+              --latest
+            if ($LASTEXITCODE -ne 0) { throw 'Failed to create the private Stable release.' }
+          }
+
+      # The publisher uploads immutable payloads first, verifies anonymous access, and activates
+      # channels/stable/latest.json last with optimistic SHA protection. Installed apps receive no
+      # GitHub credential; they read only the anonymous HTTPS endpoint.
+      - name: Publish and atomically activate the public Stable update
+        env:
+          PARALITH_UPDATES_REPOSITORY: ${{ vars.PARALITH_UPDATES_REPOSITORY }}
+          PARALITH_UPDATES_TOKEN: ${{ secrets.PARALITH_UPDATES_TOKEN }}
+          PARALITH_UPDATES_DEPLOY_KEY: ${{ secrets.PARALITH_UPDATES_DEPLOY_KEY }}
+          RELEASE_DIR: ${{ steps.artifacts.outputs.release_dir }}
+        run: |
+          if ($env:PARALITH_UPDATES_DEPLOY_KEY) {
+            pwsh -NoProfile -File scripts/release/push-publication-handoff.ps1 `
+              -Channel stable `
+              -Tag "$env:RELEASE_TAG" `
+              -SourceDirectory "$env:RELEASE_DIR" `
+              -Version "${{ steps.artifacts.outputs.version }}"
+          } else {
+            node scripts/release/github-artifacts-publisher.mjs publish stable `
+              "$env:RELEASE_TAG" `
+              "$env:RELEASE_DIR" `
+              "${{ steps.artifacts.outputs.version }}"
+          }
+
+      # A push mirror is optional. Canonical publication always succeeds first; mirror activation
+      # remains payloads-first and manifest-last through an atomic SFTP rename.
+      - name: Publish the partner-hosted Stable mirror
+        if: ${{ vars.PARALITH_UPDATE_MIRROR_BASE_URL != '' }}
+        env:
+          PARALITH_UPDATE_MIRROR_MODE: ${{ vars.PARALITH_UPDATE_MIRROR_MODE }}
+          PARALITH_MIRROR_SSH_HOST: ${{ vars.PARALITH_MIRROR_SSH_HOST }}
+          PARALITH_MIRROR_SSH_PORT: ${{ vars.PARALITH_MIRROR_SSH_PORT }}
+          PARALITH_MIRROR_SSH_USER: ${{ vars.PARALITH_MIRROR_SSH_USER }}
+          PARALITH_MIRROR_REMOTE_ROOT: ${{ vars.PARALITH_MIRROR_REMOTE_ROOT }}
+          PARALITH_MIRROR_SSH_KEY: ${{ secrets.PARALITH_MIRROR_SSH_KEY }}
+          PARALITH_MIRROR_SSH_HOST_KEY: ${{ secrets.PARALITH_MIRROR_SSH_HOST_KEY }}
+          RELEASE_DIR: ${{ steps.artifacts.outputs.release_dir }}
+        run: |
+          pwsh -NoProfile -File scripts/release/push-mirror-publication.ps1 `
+            -Channel stable `
+            -Tag "$env:RELEASE_TAG" `
+            -SourceDirectory "$env:RELEASE_DIR"
+
+      - name: Verify public release checksums
+        env:
+          PARALITH_UPDATES_REPOSITORY: ${{ vars.PARALITH_UPDATES_REPOSITORY }}
+          RELEASE_DIR: ${{ steps.artifacts.outputs.release_dir }}
+        run: |
+          $inspection = Join-Path $env:RUNNER_TEMP "paralith-public-$($env:GITHUB_RUN_ID)-$($env:GITHUB_RUN_ATTEMPT)"
+          New-Item -ItemType Directory -Path $inspection -Force | Out-Null
+          $checksumPath = Join-Path $inspection 'checksums.sha256'
+          $checksumUrl = "https://github.com/$env:PARALITH_UPDATES_REPOSITORY/releases/download/$env:RELEASE_TAG/checksums.sha256"
+          Invoke-WebRequest -UseBasicParsing -Uri $checksumUrl -OutFile $checksumPath -MaximumRedirection 10
+          $published = (Get-Content $checksumPath -Raw).Replace("`r`n", "`n")
+          $local = (Get-Content (Join-Path $env:RELEASE_DIR 'checksums.sha256') -Raw).Replace("`r`n", "`n")
+          if ($published -ne $local) { throw 'Public Stable release checksums do not match the signed build.' }
+
+      - name: Verify the canonical Stable origin
+        run: |
+          node scripts/release/verify-published-manifest.mjs stable `
+            "$env:PARALITH_UPDATE_CANONICAL_ENDPOINT" `
+            "${{ steps.artifacts.outputs.version }}" `
+            --rollout=100 `
+            --attempts=30
+
+      - name: Verify the endpoint installed Stable apps poll
+        if: ${{ vars.PARALITH_UPDATE_MIRROR_BASE_URL != '' }}
+        run: |
+          node scripts/release/verify-published-manifest.mjs stable `
+            "$env:PARALITH_UPDATE_ENDPOINT" `
+            "${{ steps.artifacts.outputs.version }}" `
+            --rollout=100 `
+            --attempts=30
+
+      - name: Publish release summary
+        env:
+          RELEASE_SHA: ${{ steps.source.outputs.release_sha }}
+        run: |
+          @"
+          ### PARALITH Stable ${{ steps.artifacts.outputs.version }}
+
+          | Evidence | Value |
+          |---|---|
+          | Tag | ``$env:RELEASE_TAG`` |
+          | Commit | ``$env:RELEASE_SHA`` |
+          | Rollout | **100% of eligible Stable installations** |
+          | Manifest | $env:PARALITH_UPDATE_ENDPOINT |
+          | Source archive | $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/releases/tag/$env:RELEASE_TAG |
+          | Public assets | https://github.com/${{ vars.PARALITH_UPDATES_REPOSITORY }}/releases/tag/$env:RELEASE_TAG |
+
+          The signed manifest and installer checksums were fetched back from their public URLs.
+          "@ | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+      - name: Remove temporary credentials
+        if: always()
+        run: pwsh -NoProfile -File scripts/ci/sweep-credentials.ps1
+
+      - name: Clean up abandoned build processes
+        if: always()
+        working-directory: .
+        run: pwsh -NoProfile -File scripts/ci/cleanup-runner-processes.ps1

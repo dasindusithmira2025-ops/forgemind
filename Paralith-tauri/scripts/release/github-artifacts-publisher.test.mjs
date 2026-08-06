@@ -1,9 +1,8 @@
-import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import {
-  PUBLICATION_CONCURRENCY_GROUP,
   channelManifestUrl,
   githubReleaseAssetName,
   publishPreparedRelease,
@@ -124,12 +123,16 @@ describe('public update repository contract', () => {
     ])).toContainEqual(expect.stringContaining('canonical GitHub Release filename'))
   })
 
-  it('serializes Preview and Stable manifest publication through the shared workflow lock', async () => {
-    expect(PUBLICATION_CONCURRENCY_GROUP).toBe('paralith-update-publication')
-    for (const workflow of ['release-internal.yml', 'release-windows.yml']) {
-      expect(await readFile(join(repositoryRoot, '.github', 'workflows', workflow), 'utf8'))
-        .toContain(`group: ${PUBLICATION_CONCURRENCY_GROUP}`)
-    }
+  it('keeps one serialized Stable release workflow with an explicit 100% rollout gate', async () => {
+    const workflowDirectory = join(repositoryRoot, '.github', 'workflows')
+    const releaseWorkflows = (await readdir(workflowDirectory))
+      .filter((name) => name.startsWith('release-') && name.endsWith('.yml'))
+    expect(releaseWorkflows).toEqual(['release-stable.yml'])
+    const workflow = await readFile(join(workflowDirectory, 'release-stable.yml'), 'utf8')
+    expect(workflow).toContain('group: paralith-stable-release')
+    expect(workflow).toContain("PARALITH_ROLLOUT_PERCENT: '100'")
+    expect(workflow).toContain('RELEASE TO ALL STABLE USERS')
+    expect(workflow).toContain('git merge-base --is-ancestor $head origin/main')
   })
 
   it('writes the deploy key as LF UTF-8 without a BOM and restores cleanup access', async () => {
@@ -161,6 +164,27 @@ describe('public update repository contract', () => {
       expect.stringContaining('edition'),
       expect.stringContaining('does not reference release'),
     ]))
+  })
+
+  it('rejects a staged Stable manifest that does not target the full cohort', () => {
+    const stableTag = 'stable-v0.4.2'
+    const stableVersion = '0.4.2'
+    const stableBase = releaseAssetBaseUrl(repository, stableTag)
+    const stable = manifest({
+      version: stableVersion,
+      platforms: {
+        'windows-x86_64': { url: `${stableBase}/PARALITH_${stableVersion}_x64-setup.exe`, signature: 'sig' },
+        'windows-x86_64-nsis': { url: `${stableBase}/PARALITH_${stableVersion}_x64-setup.exe`, signature: 'sig' },
+        'windows-x86_64-msi': { url: `${stableBase}/PARALITH_${stableVersion}_x64_en-US.msi`, signature: 'sig' },
+      },
+      paralith: { edition: 'stable', channel: 'stable', schemaVersion: 22, rolloutPercent: 99 },
+    })
+    expect(validateGithubManifest(stable, {
+      repository,
+      tag: stableTag,
+      channel: 'stable',
+      version: stableVersion,
+    })).toContainEqual(expect.stringContaining('rolloutPercent "99" is not 100'))
   })
 
   it('accepts mirror-hosted installer URLs only when the mirror is declared in full mode', () => {

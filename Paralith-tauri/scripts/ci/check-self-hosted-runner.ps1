@@ -20,7 +20,7 @@
 .PARAMETER ReleaseBuild
     Apply release-build expectations: a much higher disk floor (Paralith's Rust target
     directory alone reaches ~75 GB) and presence checks for the signing/publish
-    configuration that Release Internal requires.
+    configuration that the Stable customer release requires.
 
 .EXAMPLE
     Set-Location Paralith-tauri
@@ -225,14 +225,16 @@ foreach ($b in $bundlers) {
 # ---------------------------------------------------------------------------- secrets
 # Presence and length only. Values are never printed, logged, or written to a summary.
 if ($ReleaseBuild) {
-    $required = @('TAURI_SIGNING_PRIVATE_KEY')
+    $required = @(
+        'TAURI_SIGNING_PRIVATE_KEY'
+        'PARALITH_STABLE_UPDATE_ENDPOINT'
+        'PARALITH_UPDATE_PUBLISH_PROVIDER'
+        'PARALITH_UPDATES_REPOSITORY'
+    )
     $optional = @(
         'TAURI_SIGNING_PRIVATE_KEY_PASSWORD'
-        'PARALITH_PREVIEW_UPDATE_ENDPOINT'
-        'PARALITH_UPDATE_ARTIFACT_BASE_URL'
-        'PARALITH_UPDATE_PUBLISH_PROVIDER'
-        'FIREBASE_PROJECT_ID'
-        'FIREBASE_HOSTING_SITE'
+        'PARALITH_UPDATE_MIRROR_BASE_URL'
+        'PARALITH_UPDATE_MIRROR_MODE'
     )
     foreach ($name in $required) {
         $value = [Environment]::GetEnvironmentVariable($name)

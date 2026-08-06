@@ -20,6 +20,7 @@ on:
       - '.gitattributes'
       - '.gitignore'
       - '.github/workflows/ci.yml'
+      - '.github/workflows/release-stable.yml'
   push:
     # `integration` is preserved from the previous configuration alongside `main`.
     branches: [main, integration]
@@ -30,6 +31,7 @@ on:
       - '.gitattributes'
       - '.gitignore'
       - '.github/workflows/ci.yml'
+      - '.github/workflows/release-stable.yml'
 
 # No `workflow_call` entry point. The release workflows used to call this one and then compile
 # the same commit a second time for real; they now run the shared check script inline instead,

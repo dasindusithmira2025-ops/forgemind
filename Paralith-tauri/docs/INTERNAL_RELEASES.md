@@ -1,117 +1,114 @@
-# PARALITH internal Windows releases
+# PARALITH Stable Windows releases
 
-PARALITH source remains private in `dasindusithmira2025-ops/forgemind`. Signed installers, updater signatures, checksums, release notes, and channel manifests are distributed from the public artifact-only repository [`dasindusithmira2025-ops/paralith-updates`](https://github.com/dasindusithmira2025-ops/paralith-updates). Installed applications use anonymous HTTPS and never receive a GitHub credential.
+PARALITH has one customer release channel: **Stable**. The private source repository validates and
+builds the tagged source; the public artifact-only repository
+[`dasindusithmira2025-ops/paralith-updates`](https://github.com/dasindusithmira2025-ops/paralith-updates)
+holds immutable signed installers and the manifest installed applications poll:
 
-Versioned binaries are immutable GitHub Release assets. The discoverable manifests are:
+`https://raw.githubusercontent.com/dasindusithmira2025-ops/paralith-updates/main/channels/stable/latest.json`
 
-- Preview: `https://raw.githubusercontent.com/dasindusithmira2025-ops/paralith-updates/main/channels/preview/latest.json`
-- Stable: `https://raw.githubusercontent.com/dasindusithmira2025-ops/paralith-updates/main/channels/stable/latest.json`
+Installed applications use anonymous HTTPS and never receive a GitHub credential. Preview and
+automatic push-to-main release workflows are intentionally absent. Merging a feature does not ship
+it to users; only a confirmed `Release Stable` run can activate the Stable manifest.
 
-The private workflow validates each signed payload and pushes a publication batch with a repository-scoped deploy key. The public repository's own workflow creates the GitHub Release, proves anonymous reachability, then updates only the selected channel manifest after comparing the current blob SHA. A stale or concurrent activation fails instead of overwriting a newer manifest. The private source-repository release remains the authenticated engineering archive.
+## Release guarantees
 
-## Editions and data isolation
+`.github/workflows/release-stable.yml` is the complete Stable delivery pipeline. One run:
 
-| Property | Stable | Preview |
+1. requires an existing `stable-vX.Y.Z` tag and the explicit **RELEASE TO ALL STABLE USERS** choice;
+2. checks out that tag and proves its commit is on `origin/main`;
+3. cleans stale release output while preserving the persistent runner's dependency caches;
+4. verifies the runner, signing key, update endpoint, publisher, and public artifact repository;
+5. checks canonical version/changelog/schema metadata and runs the full frontend and Rust gate;
+6. builds one signed Stable MSI, one per-user NSIS installer, and both updater signatures;
+7. validates the artifact set, hashes, tag, commit, channel, and a fixed `rolloutPercent: 100`;
+8. archives the evidence and creates or verifies the private source release;
+9. publishes immutable assets before atomically activating `channels/stable/latest.json`;
+10. publishes the optional mirror after the canonical origin and verifies the public checksums,
+    canonical manifest, installed-app endpoint, signed artifact reachability, and full rollout.
+
+All Stable runs share one non-cancelling concurrency group. A second version waits instead of
+interrupting publication in flight. Publication fails closed: the previous Stable manifest remains
+active until the new signed payloads are anonymously reachable.
+
+## What “all users” means
+
+The Stable manifest is always published with `rolloutPercent: 100`; staged Stable rollouts are not
+supported by this workflow. Every compatible Stable installation is therefore eligible for the same
+release. The application checks after a healthy startup and every 45 minutes by default, then offers
+the signed update through the Safe Update Gate.
+
+This is intentionally not a forced process termination. A user who is offline, has disabled
+automatic checks, or has active work protected by the restart gate receives the update on a later
+check or after choosing a safe restart. The workflow makes the release available to the entire
+eligible cohort; it cannot truthfully prove that every device is online and has installed it.
+
+## GitHub environment
+
+Create a `stable-release` environment and configure required reviewers. Disable administrator bypass
+where repository policy permits it. Restrict deployment branches/tags to the intended release policy.
+The workflow is manual-only, but the environment remains the final approval and secret boundary.
+
+Required environment configuration:
+
+| Name | Kind | Purpose |
 |---|---|---|
-| Product | PARALITH | PARALITH Preview |
-| Identifier | `com.corelith.paralith` | `com.corelith.paralith.preview` |
-| Channel | `stable` | `preview` |
-| Update manifest | `PARALITH_STABLE_UPDATE_ENDPOINT` | `PARALITH_PREVIEW_UPDATE_ENDPOINT` |
+| `TAURI_SIGNING_PRIVATE_KEY` | secret | Password-protected Tauri updater private key or protected runner path. |
+| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | secret | Private-key password; empty only when the offline key intentionally has none. |
+| `PARALITH_STABLE_UPDATE_ENDPOINT` | variable | Exact Stable `latest.json` URL derived by `update-distribution.mjs`. |
+| `PARALITH_UPDATE_PUBLISH_PROVIDER` | variable | Must be `github-artifacts`. |
+| `PARALITH_UPDATES_REPOSITORY` | variable | `dasindusithmira2025-ops/paralith-updates`. |
+| `PARALITH_UPDATES_DEPLOY_KEY` | secret | Preferred: write-enabled deploy key scoped only to the artifact repository. |
+| `PARALITH_UPDATES_TOKEN` | secret | Fine-grained Contents/Releases write fallback when no deploy key is configured. |
+| `PARALITH_WINDOWS_SIGN_COMMAND` | secret | Optional Tauri `signCommand` for company Authenticode signing. |
+| `PARALITH_PREVIOUS_INSTALLER_URL` | variable | Recovery URL for the preceding Stable installer. |
 
-Stable performs a one-time, validated migration from the legacy `com.forgemind.workspace` profile into `com.corelith.paralith`; the original profile and its external recovery backup remain intact. Preview never reads Stable or legacy Stable data. Its different identifier gives it an independent installation, WebView storage, database, settings, logs, recovery backups, updater state, and single-instance lock. Projects are external folders and are never copied, deleted, or uninstalled by PARALITH.
+The updater key is mandatory. Authenticode is a separate trust system: do not describe an installer
+as Windows code-signed unless the configured signing command ran and the resulting signature was
+verified.
 
-## Administrator setup
-
-Generate one updater key per edition on a protected offline administrator machine:
+Generate and store the updater key on a protected offline administrator machine:
 
 ```powershell
-npm run tauri signer generate -- -w D:\OfflineBackup\paralith-preview-updater.key
 npm run tauri signer generate -- -w D:\OfflineBackup\paralith-stable-updater.key
-```
-
-Keep each password-protected private key and password in the protected offline backup. Commit only the Preview public key to `release/updater.pubkey` and the Stable public key to `release/updater.stable.pubkey`. The build selects the key from the edition, so rotating one channel cannot invalidate the other. Set each private key in its matching protected environment without printing it:
-
-```powershell
-gh secret set TAURI_SIGNING_PRIVATE_KEY --repo OWNER/PRIVATE_REPOSITORY --env preview-release < D:\OfflineBackup\paralith-preview-updater.key
-gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD --repo OWNER/PRIVATE_REPOSITORY --env preview-release
 gh secret set TAURI_SIGNING_PRIVATE_KEY --repo OWNER/PRIVATE_REPOSITORY --env stable-release < D:\OfflineBackup\paralith-stable-updater.key
 gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD --repo OWNER/PRIVATE_REPOSITORY --env stable-release
 ```
 
-Required GitHub Actions configuration:
+Commit only `release/updater.stable.pubkey`. Never commit the private key, password, deployment key,
+token, or signing command.
 
-- Environment secret `TAURI_SIGNING_PRIVATE_KEY`: the edition's complete Tauri updater private key or protected runner path.
-- Environment secret `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`: the edition's updater key password; configure an empty value only if the offline key intentionally has no password.
-- Variable `PARALITH_STABLE_UPDATE_ENDPOINT`: Stable HTTPS `latest.json` URL.
-- Variable `PARALITH_PREVIEW_UPDATE_ENDPOINT`: Preview HTTPS `latest.json` URL.
-- Variable `PARALITH_UPDATES_REPOSITORY`: `dasindusithmira2025-ops/paralith-updates`.
-- Variable `PARALITH_UPDATE_PUBLISH_PROVIDER`: `github-artifacts`.
-- Secret `PARALITH_UPDATES_DEPLOY_KEY`: private half of a write-enabled deploy key attached only to `paralith-updates`. The source workflow can stage publication batches but cannot use it to read the private source repository or access any other repository. A fine-grained `PARALITH_UPDATES_TOKEN` with Contents and Releases write access remains supported as a fallback.
-- Variable `PARALITH_PREVIEW_BRIDGE_ENDPOINT`: `https://corelith-paralith-updates.web.app/preview/latest.json`, retained only for the installed `0.4.1-1023` migration bridge.
-- Variable `PARALITH_UPDATE_ARTIFACT_BASE_URL`: legacy static-host provider input. GitHub publication derives the versioned Release URL inside the workflow.
-- Secret `PARALITH_UPDATE_PUBLISH_TARGET`: provider destination. It may contain private infrastructure routing but must not be bundled.
-- Secret `PARALITH_UPDATE_PUBLISH_TOKEN`: required only by the HTTP PUT adapter.
-- Variable `PARALITH_ROLLOUT_PERCENT`: integer 0-100; start Preview at 100 and Stable with the approved office cohort.
-- Variable `PARALITH_PREVIOUS_INSTALLER_URL`: internal URL for the previous Stable installer retained for recovery.
-- Optional secret `PARALITH_WINDOWS_SIGN_COMMAND`: Tauri `signCommand` for the company's Authenticode service. The updater signature is mandatory even when Authenticode is not configured.
+Optional mirror variables and secrets are documented in [UPDATE_DISTRIBUTION.md](UPDATE_DISTRIBUTION.md).
 
-GitHub's generated `GITHUB_TOKEN` is used only by Actions to create the private repository release. It is never compiled into PARALITH.
+## Publishing Stable
 
-### Firebase Preview compatibility bridge
+1. Update `release/version.json` to a strictly newer `X.Y.Z`.
+2. Add `release/changelog/X.Y.Z.json` with `channel: "stable"` and run `npm run release:sync`.
+3. Land the release commit on `main` through the normal pull-request and validation path.
+4. Create `stable-vX.Y.Z` at that merged commit and push the tag. Pushing the tag alone publishes
+   nothing.
+5. Run **Actions → Release Stable → Run workflow** from `main`. Enter the tag and select
+   **RELEASE TO ALL STABLE USERS**.
+6. Approve the `stable-release` deployment when its reviewer gate opens.
+7. Do not report success until the workflow verifies the public release checksums and live manifest.
 
-Installed Preview `0.4.1-1023` polls `https://corelith-paralith-updates.web.app/preview/latest.json`. The first migrated release therefore deploys the same signed manifest to that URL after the public GitHub assets and canonical public Preview manifest are live. Firebase receives JSON only; `.exe`, `.msi`, and signature payloads never enter Firebase Hosting.
+CLI dispatch is equivalent:
 
-Set these **preview-release environment variables**:
+```powershell
+gh workflow run "Release Stable" `
+  --repo dasindusithmira2025-ops/forgemind `
+  --ref main `
+  -f tag=stable-vX.Y.Z `
+  -f confirm_all_users="RELEASE TO ALL STABLE USERS"
+```
 
-- `PARALITH_UPDATE_PUBLISH_PROVIDER=github-artifacts`
-- `PARALITH_PREVIEW_BRIDGE_ENDPOINT=https://corelith-paralith-updates.web.app/preview/latest.json`
-- `FIREBASE_PROJECT_ID`: Firebase project ID supplied by the Firebase administrator.
-- `FIREBASE_HOSTING_SITE`: Firebase Hosting site ID supplied by the Firebase administrator.
-- `GCP_WORKLOAD_IDENTITY_PROVIDER`: full Workload Identity Provider resource name.
-- `GCP_SERVICE_ACCOUNT`: deployer service-account email.
+## Version ownership and local checks
 
-The preferred authentication method is Workload Identity Federation. The workflow requests `id-token: write` and uses `google-github-actions/auth@v3` immediately before deployment. Restrict the provider to `dasindusithmira2025-ops/forgemind` and the `preview-release` environment. Grant the deployer service account exactly `roles/firebasehosting.admin` and `roles/serviceusage.apiKeysViewer` (the latter is required by Firebase CLI deployment); grant the GitHub Workload Identity principal only `roles/iam.workloadIdentityUser` on that service account. If WIF cannot be provisioned, leave both WIF variables unset and set only the `FIREBASE_SERVICE_ACCOUNT_JSON` secret with credentials for that same least-privilege deployer service account.
+`release/version.json` is canonical. `npm run release:sync` updates `package.json`,
+`src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json`, and
+`release/generated/current-release.json`. `npm run release:check` fails on drift.
 
-No updater executable is staged in the Firebase public directory. Credential files emitted by Google authentication and generated Firebase deployment configuration are ignored and never packaged.
-
-The bridge reads `/stable/latest.json` before deployment: HTTP 200 is preserved byte-for-byte and checked by SHA-256 afterward; HTTP 404 remains absent; any other response fails closed. The staged tree is rejected if it contains anything except channel `latest.json` files. There is no SPA rewrite.
-
-Protect the `stable-release` and `preview-release` environments with required reviewers. Protect `stable-v*` and `preview-v*` tags. Require the `Validate` workflow on `integration` and `main`.
-
-## Release channels
-
-| Channel | Edition | Trigger | Version shape | Workflow |
-|---|---|---|---|---|
-| internal | `preview` | automatic on push/merge to `main` | `X.Y.Z-<1001 + runNumber>` | `release-internal.yml` |
-| stable | `stable` | protected tag `stable-vX.Y.Z` | `X.Y.Z` | `release-stable.yml` |
-
-The **internal channel is delivered on the `preview` edition** (separate identifier, data, updater state, and update endpoint from stable). A `beta` channel can be added later by introducing a third edition config plus a `ProductEdition` variant without changing the updater flow. Internal installs only ever query `PARALITH_PREVIEW_UPDATE_ENDPOINT`; stable installs only ever query `PARALITH_STABLE_UPDATE_ENDPOINT`. Internal releases publish only the preview manifest and never touch the stable manifest; stable releases use clean `X.Y.Z` versions. Within a channel the Tauri updater rejects same-or-lower versions, so an accidental downgrade is refused.
-
-## Automatic internal releases (push to `main`)
-
-Every merge or push to `main` runs `release-internal.yml`: validation gates a unique internal version and signed Preview bundles; the private repository receives the engineering archive; the public artifact repository receives the immutable assets; anonymous verification passes; the public Preview manifest activates with optimistic SHA protection; and the JSON-only Firebase bridge is refreshed for the migration cohort. No manual tagging or version editing is required.
-
-- **Versioning.** `scripts/release/internal-version.mjs` derives `X.Y.(Z+1)-<1001 + github.run_number>` from the shipped stable base in `release/version.json`. The `1001` floor keeps every automatic build strictly above the updater bootstrap version while the numeric prerelease remains MSI-compatible. Each build is therefore a valid upgrade over the previous one, sorts above the current stable, and sorts below the eventual stable release of that patch (`0.4.1-1002 < 0.4.1-1003 < 0.4.1`).
-- **Ephemeral, never committed.** The version bump and its generated changelog are written only inside the runner and are never committed back to `main`, so `main` stays on its canonical stable version.
-- **Fail-closed and de-duplicated.** The job aborts if `TAURI_SIGNING_PRIVATE_KEY` or `PARALITH_PREVIEW_UPDATE_ENDPOINT` is missing, so a build never ships unsigned or unpublishable. A `concurrency` group keyed to the commit SHA prevents two runs from publishing the same commit; the unique per-run version prevents accumulating conflicting drafts.
-- **Emergency disablement.** Disable `Release Internal` under the repository Actions tab (or remove the `preview-release` environment's signing secret) to immediately stop internal publication without affecting stable.
-
-## Practical branch and release policy
-
-1. Work on a short feature or fix branch.
-2. Open a pull request; CI validation (`ci.yml`) runs on the PR and must pass. No release is produced from a PR.
-3. Merge to `main`. This automatically produces and publishes a signed **Preview** build — no tag needed.
-4. To cut a **stable** release, set `release/version.json`, add its single `release/changelog/` entry, land it on `main`, then create the protected `stable-vX.Y.Z` tag. Stable tags must point to a committed, clean tree.
-
-The release workflows build MSI, NSIS, updater signatures, checksums, `latest.json`, release manifest, release notes, build metadata, and schema metadata. They archive all files in the private GitHub release and then run the configured internal publication adapter.
-
-## Version and changelog ownership
-
-`release/version.json` is canonical. `npm run release:sync` updates the Tauri config, Cargo package, frontend package, and bundled release entry. `npm run release:check` fails CI on drift. The versioned changelog entry supplies GitHub notes, updater notes, What's New, diagnostics build metadata, and internal release documentation.
-
-## Local packaging
-
-Unsigned local installers can be produced without a private updater key:
+An unsigned local Stable bundle can be built for non-production testing:
 
 ```powershell
 $env:PARALITH_EDITION='stable'
@@ -121,37 +118,17 @@ $config = node scripts/release/render-tauri-config.mjs stable local | Select-Obj
 npm run tauri -- build --bundles msi,nsis --config $config
 ```
 
-Repeat with `preview`. Production `release` mode refuses placeholder public keys, non-HTTPS endpoints, missing signing secrets, dirty/tag-version mismatches, or failed validation.
+Release mode refuses placeholder keys, non-HTTPS endpoints, metadata drift, wrong tags, non-main
+commits, incomplete signed artifacts, non-100% Stable rollout, checksum mismatches, or failed live
+verification.
 
-## Bootstrap: the one required manual install
+## Bootstrap and rollback
 
-An existing installation that predates updater support cannot update itself — it has no updater public key, endpoint, or coordinator. Deliver the **first** updater-enabled internal build by hand once:
+An installation that predates updater support cannot update itself. Install the first updater-enabled
+Stable NSIS package once; later Stable releases arrive through the application updater.
 
-1. Merge the updater-enabled code to `main` (or run `npm run build:preview` locally with production signing configured) to produce a signed `preview` NSIS installer.
-2. Install `PARALITH Preview_<version>_x64-setup.exe` on each office machine (per-user, `AppData\Local\PARALITH Preview`, no elevation).
-3. From then on, every push to `main` is delivered automatically to that install through the internal channel — no further manual installs.
-
-Stable follows the same one-time bootstrap using a `stable` build; after that, `stable-vX.Y.Z` tags update it automatically.
-
-## Testing an internal update locally
-
-`npm run update-server` serves a local `.artifacts/update-site` over HTTP for end-to-end verification without touching production infrastructure:
-
-1. Build `v1`: bump `release/version.json`, `npm run build:preview`, install the resulting NSIS setup.
-2. Build `v2` at a higher internal version and `npm run release:assemble` against the local server's base URL.
-3. Point the install's endpoint at the local server, then use **Settings → About & Updates → Check for Updates → Update Now**.
-
-## Testing the push-to-main automatic flow
-
-1. Configure the `preview-release` environment with the signing key, public manifest endpoint, `PARALITH_UPDATES_REPOSITORY`, repository-scoped `PARALITH_UPDATES_DEPLOY_KEY`, `PARALITH_UPDATE_PUBLISH_PROVIDER=github-artifacts`, bridge endpoint, and Firebase WIF variables (or the service-account fallback) listed above.
-2. Push a trivial change to `main`.
-3. Watch **Actions → Release Internal**: validation runs before the signed build, public payload verification, optimistic manifest activation, and Firebase JSON bridge.
-4. On installed Preview `0.4.1-1023`, confirm the bridge discovers the release, **Update now** shows real progress, signature verification succeeds, the safe-restart gate is respected, and the restarted application confirms a healthy database and workspace state.
-
-## Publishing a stable release
-
-1. Land the release commit on `main` with `release/version.json` at the target `X.Y.Z` and a matching `stable` changelog entry (CI's `release:check` enforces consistency).
-2. Create and push the protected tag: `git tag stable-vX.Y.Z && git push origin stable-vX.Y.Z`.
-3. `release-stable.yml` runs full validation, verifies the tag matches the version on a clean tree, builds signed artifacts, publishes both the private archive and public immutable assets, anonymously verifies them, then activates only the Stable manifest after the `stable-release` environment approval gate.
-
-Ordinary pushes and Preview releases never update `channels/stable/latest.json`. This feature does not create a Stable tag or customer release.
+Do not overwrite `latest.json` by hand to roll back. Tauri rejects same-or-lower versions by default,
+and users may already have downloaded the new installer. Stop new publication, preserve the failed
+artifacts and logs, fix forward with a higher reviewed version, and use the recovery installer only
+for an explicitly diagnosed device. Database backup, post-update health, and restore behavior are in
+[UPDATE_RECOVERY.md](UPDATE_RECOVERY.md).

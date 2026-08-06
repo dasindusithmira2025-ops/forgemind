@@ -189,8 +189,12 @@ gh workflow run "Runner Diagnostics" --repo dasindusithmira2025-ops/forgemind
 # Validate — runs automatically on pull requests and on pushes to main.
 # To force it, push a commit to the branch.
 
-# Release Internal — manual only, must be a commit already on main
-gh workflow run "Release Internal" --repo dasindusithmira2025-ops/forgemind --ref main
+# Release Stable — manual only, builds an existing tag on main and targets the full Stable cohort
+gh workflow run "Release Stable" `
+  --repo dasindusithmira2025-ops/forgemind `
+  --ref main `
+  -f tag=stable-vX.Y.Z `
+  -f confirm_all_users="RELEASE TO ALL STABLE USERS"
 
 # Watch
 gh run list  --repo dasindusithmira2025-ops/forgemind --limit 5
@@ -312,16 +316,17 @@ The runner is a personal development PC, so the workflows constrain it deliberat
 - **No `pull_request_target`** anywhere. That trigger would give fork code access to secrets.
 - **Specific labels.** Every job requests `[self-hosted, Windows, X64, paralith]` — never a bare
   `self-hosted`, which any future runner would match.
-- **Least-privilege tokens.** `ci.yml` and the diagnostic use `contents: read`. Only the release
-  workflows take `contents: write`.
+- **Least-privilege tokens.** `ci.yml` and the diagnostic use `contents: read`. Only the Stable
+  release job takes `contents: write`.
 - **Pinned actions.** Third-party actions are pinned to immutable commit SHAs.
 - **No untrusted interpolation.** PR titles, branch names, and commit messages are never
   expanded into shell commands; values are quoted and passed through environment variables.
 - **Non-elevated.** Jobs run with a filtered, non-administrator token.
 - **Secrets stay off disk.** The release workflow sweeps `gha-creds-*.json` from `RUNNER_TEMP`
   in an `always()` step. Secrets are consumed as environment variables and never logged.
-- **Release gating.** Release Internal refuses to run unless the commit is an ancestor of
-  `origin/main`, and fails closed when the signing key is absent.
+- **Release gating.** Release Stable requires an explicit all-users confirmation, checks out the
+  requested tag, proves its commit is on `origin/main`, and fails closed when signing or publication
+  configuration is absent.
 
 Note: this GitHub plan does not offer branch protection or rulesets for private repositories
 (the API returns *"Upgrade to GitHub Pro"*), so there are no required status checks to preserve.
@@ -332,11 +337,11 @@ The pull-request Validate run is the gate by convention, not by enforcement.
 | Before | Now |
 |---|---|
 | Three jobs per validation, each with its own checkout and `npm ci`, passing `dist` through an uploaded artifact | One job, one checkout, one install, no artifact round-trip |
-| Release workflows called `ci.yml` with `full: true`, compiling the crate, then compiled it again to bundle | Checks run inline once; the real signed bundle build is the compile proof |
-| `release-windows.yml` in dispatch mode validated `github.sha` (the dispatched branch) rather than the tag it built | Checks run against the tagged checkout |
+| Multiple Preview/Internal/Windows release workflows shared a generic publisher | One Stable workflow owns validation, signing, publication, and verification end to end |
+| Dispatch mode validated `github.sha` (the dispatched branch) rather than the tag it built | Stable checks out the requested tag and proves that exact commit is on `origin/main` |
 | Toolchains re-downloaded every run via `setup-node` / `rust-toolchain` / cache actions | Machine toolchain, verified by preflight; nothing re-downloaded |
 | Superseded runs kept going | `cancel-in-progress` on validation |
-| Internal releases could queue concurrently | Single repository-wide `release-internal` concurrency group |
+| Releases for different versions could overlap | One non-cancelling `paralith-stable-release` concurrency group serializes all customer publication |
 
 Documentation-only changes still skip validation via `paths-ignore`.
 
@@ -352,13 +357,12 @@ HTTP Error: 400, Executable files are forbidden on the Spark billing plan
 https://firebase.google.com/support/faq#hosting-exe-restrictions
 ```
 
-Signed MSI/NSIS updater payloads now publish as anonymous GitHub Release assets in the public,
-artifact-only `dasindusithmira2025-ops/paralith-updates` repository. Channel manifests activate
-through an optimistic blob-SHA-checked commit only after anonymous payload verification. Firebase
-keeps only a JSON compatibility manifest for installed Preview `0.4.1-1023`; Spark therefore never
-sees an executable.
+Signed MSI/NSIS updater payloads publish as anonymous GitHub Release assets in the public,
+artifact-only `dasindusithmira2025-ops/paralith-updates` repository. The Stable manifest activates
+through an optimistic blob-SHA-checked commit only after anonymous payload verification. The Stable
+pipeline does not deploy Firebase Hosting or publish Preview artifacts.
 
-Provision `PARALITH_UPDATES_DEPLOY_KEY` in the Preview and Stable release environments from a
+Provision `PARALITH_UPDATES_DEPLOY_KEY` in the Stable release environment from a
 write-enabled deploy key attached only to `paralith-updates`. The private workflow can then stage a
 validated publication batch, while the public repository's own Actions token creates Releases and
 activates manifests. Do not reuse a broad personal token or expose the deploy key to application
