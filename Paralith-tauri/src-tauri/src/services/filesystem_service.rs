@@ -1140,7 +1140,11 @@ mod tests {
     fn media_size_guard_reports_the_preview_limit() {
         let error = media_too_large("huge.pdf", MAX_MEDIA_FILE_BYTES + 1);
         assert_eq!(error.code, "file_too_large");
-        assert!(MAX_MEDIA_FILE_BYTES > MAX_TEXT_FILE_BYTES);
+        assert!(error
+            .detail
+            .as_deref()
+            .unwrap_or_default()
+            .contains(&MAX_MEDIA_FILE_BYTES.to_string()));
     }
 
     #[test]
