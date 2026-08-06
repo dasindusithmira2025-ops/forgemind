@@ -12,7 +12,7 @@ self-hosted runner or depends on persistent workspace state.
 | `Validate website` | `ubuntu-latest` | Runs the independent Next.js lint and production build gates. |
 | `Validate product film` | `ubuntu-latest` | Runs the Remotion type, registry, and poster-render smoke gates. |
 
-Every job starts from a clean checkout, uses Node 24 through the pinned official setup action, and
+Every job starts from a clean checkout, uses Node 24.12.0 through the pinned official setup action, and
 installs exactly from its package lockfile. Node's download cache is keyed by that lockfile. The
 desktop workflows also cache Cargo registry and Git sources, but never cache Cargo target output:
 target metadata embeds workspace paths and the directory is too large for a shared Actions cache.
