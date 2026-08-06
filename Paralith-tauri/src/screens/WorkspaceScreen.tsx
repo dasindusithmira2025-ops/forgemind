@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react'
-import { confirm, open } from '@tauri-apps/plugin-dialog'
+import { open } from '@tauri-apps/plugin-dialog'
 import { openPath } from '@tauri-apps/plugin-opener'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { ChevronDown, CircleStop, FolderOpen, PanelRightClose, PanelRightOpen, RotateCcw, TerminalSquare } from 'lucide-react'
+import { TerminalSquare } from 'lucide-react'
 import { TerminalPane } from '../components/terminal/TerminalPane'
 import { PaneMenu } from '../components/terminal/PaneMenu'
 import { dispatchTerminalAction } from '../components/terminal/terminalActions'
@@ -10,6 +10,9 @@ import { Button } from '../components/ui/Button'
 import { ErrorNotice } from '../components/ui/ErrorNotice'
 import { Modal } from '../components/ui/Modal'
 import { TextPromptDialog } from '../components/ui/TextPromptDialog'
+import { WorkspaceTitleBar } from '../components/shell/WorkspaceTitleBar'
+import type { FleetPaneInput } from '../features/fleet/fleetSelectors'
+import { confirm } from '../components/ui/confirm'
 import { asNativeError, native } from '../native/commands'
 import type { AgentProvider, AgentStateEvent, MonitorInfo, PaneAssignment, PaneGitReview, Project, ShellProfile, SplitDirection, TerminalSession, Workspace, WorkspacePlacement } from '../native/types'
 import { handoffController } from '../features/workspace-windows/handoffController'
@@ -21,6 +24,8 @@ import { useAppStore } from '../stores/appStore'
 import { useSessionStore } from '../stores/sessionStore'
 import type { SidebarOpenProject } from '../features/sidebar/sidebarTypes'
 import { terminalRuntime, useWorkspaceSessions } from '../features/terminals/runtimeStore'
+import { applyPaneRename } from '../features/terminals/paneRename'
+import { onPaneRenamed } from '../native/events'
 import { AppShell } from '../components/shell/AppShell'
 import { AiUsageStatusBar } from '../features/usage/AiUsageStatusBar'
 import { openAgentResumeCenter, WORKSPACE_CONFIGURATION_CHANGED } from '../features/agent-resume/events'
@@ -72,7 +77,6 @@ export function WorkspaceScreen() {
   const [sidebarSaving, setSidebarSaving] = useState(false)
   const maximizedPaneId = useCanvasStore((state) => state.layout?.maximizedPaneId)
   const [reducedMotion] = useState(() => typeof window !== 'undefined' && Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches))
-  const [workspaceMenu, setWorkspaceMenu] = useState(false)
   const [paneMenu, setPaneMenu] = useState<{ paneId: string; x: number; y: number }>()
   const [pendingInsert, setPendingInsert] = useState<PendingInsert>()
   const [renameTarget, setRenameTarget] = useState<{ kind: 'workspace' | 'pane'; workspaceId?: string; paneId?: string; initialValue: string }>()
@@ -158,7 +162,13 @@ export function WorkspaceScreen() {
     terminalRuntime.clearWorkspace(currentWorkspace.id)
     const configuredBehavior = currentWorkspace.restoreBehavior === 'inherit' ? settings.restoreBehavior : currentWorkspace.restoreBehavior
     if (configuredBehavior === 'ask' && !fresh && allowRestorePrompt) {
-      const restore = await confirm('Restore the saved Pane assignments now? Choose Cancel to keep every Pane deferred until you resume it.', { title: 'Restore Workspace', kind: 'info' })
+      const restore = await confirm({
+        title: 'Restore this workspace?',
+        body: 'This workspace has saved pane assignments.',
+        details: ['Restore now launches every saved pane.', 'Restore later keeps them deferred until you resume each one.'],
+        confirmLabel: 'Restore now',
+        cancelLabel: 'Restore later',
+      })
       if (!restore) {
         setDeferredPaneIds(currentWorkspace.panes.map((pane) => pane.id))
         setActivePane(currentWorkspace.activePaneId ?? currentWorkspace.panes[0]?.id)
@@ -250,6 +260,24 @@ export function WorkspaceScreen() {
     try { sessionStorage.removeItem(key) } catch { /* ignore */ }
     void native.writeTerminalInput(session.id, Array.from(new TextEncoder().encode(`${command}\r`))).catch(() => undefined)
   }, [sessions, workspace])
+
+  // A task submitted to an agent Pane retitles that Pane. The backend derives and persists the
+  // title, then broadcasts it, so this listener only projects the new title onto local state —
+  // the pane header, the status bar, and the next save all read from the same Workspace record.
+  useEffect(() => {
+    let live = true
+    const pending = onPaneRenamed((event) => {
+      if (!live || event.workspaceId !== workspaceId) return
+      setLocalWorkspace((current) => applyPaneRename(current, event))
+      const stored = useAppStore.getState().workspace
+      const renamed = applyPaneRename(stored, event)
+      if (renamed !== stored) setWorkspace(renamed)
+    })
+    return () => {
+      live = false
+      void pending.then((unlisten) => unlisten()).catch(() => undefined)
+    }
+  }, [setWorkspace, workspaceId])
 
   const persistSidebar = useCallback(async (patch: Partial<Pick<typeof settings, 'sidebarOpen' | 'sidebarWidth'>>) => {
     if (sidebarSaving) return
@@ -464,7 +492,13 @@ export function WorkspaceScreen() {
     try {
       if (settings.inactiveWorkspaceProcesses !== 'keep_running') {
         const stop = settings.inactiveWorkspaceProcesses === 'stop'
-          || window.confirm('Stop this project\'s running terminals? Choose Cancel to leave them running in the background.')
+          || await confirm({
+            title: 'Stop this project\'s terminals?',
+            body: 'Closing the project does not have to stop what is running in it.',
+            details: ['Stop terminals ends every running process in this project.', 'Keep running leaves them working in the background.'],
+            confirmLabel: 'Stop terminals',
+            cancelLabel: 'Keep running',
+          })
         if (stop) {
           const projectWorkspaceList = await native.listWorkspacesForProject(projectId).catch(() => [] as Workspace[])
           await Promise.all(projectWorkspaceList.map((item) => native.terminateWorkspaceSessions(item.id).catch(() => undefined)))
@@ -676,7 +710,13 @@ export function WorkspaceScreen() {
   const closePane = async (paneId: string) => {
     if (!workspace || workspace.panes.length <= 1) { setPaneErrors((current) => ({ ...current, [paneId]: 'At least one terminal pane must remain.' })); return }
     const session = paneSession(paneId)
-    if (session?.status === 'running' && settings.confirmClosePane && !window.confirm('Stop the running process and close this pane?')) return
+    if (session?.status === 'running' && settings.confirmClosePane && !(await confirm({
+      title: 'Close this pane?',
+      body: 'A process is still running in it.',
+      details: ['The process stops immediately.', 'The pane leaves this workspace layout.'],
+      confirmLabel: 'Stop and close',
+      intent: 'danger',
+    }))) return
     if (session?.status === 'running') await native.terminateTerminalSession(session.id)
     if (session) terminalRuntime.remove(session.id)
     try {
@@ -730,7 +770,12 @@ export function WorkspaceScreen() {
   const isolatePaneWorktree = async (paneId: string) => {
     if (!workspace) return
     const session = paneSession(paneId)
-    if (session?.status === 'running' && !window.confirm('Create an isolated git worktree for this pane and restart its terminal there?')) return
+    if (session?.status === 'running' && !(await confirm({
+      title: 'Isolate this pane in its own worktree?',
+      body: 'The pane moves to a dedicated git worktree and branch.',
+      details: ['The running terminal restarts in the new worktree.', 'Uncommitted work in the current directory stays where it is.'],
+      confirmLabel: 'Isolate pane',
+    }))) return
     try {
       if (session?.status === 'running') await native.terminateTerminalSession(session.id)
       if (session) terminalRuntime.remove(session.id)
@@ -770,7 +815,13 @@ export function WorkspaceScreen() {
 
   const restoreReviewFile = async (path: string) => {
     if (!workspace || !gitReview) return
-    if (!window.confirm(`Discard staged, unstaged, conflicted, or untracked changes for ${path}? This only affects the selected repository path.`)) return
+    if (!(await confirm({
+      title: 'Discard changes to this file?',
+      body: path,
+      details: ['Staged, unstaged, conflicted and untracked changes are all discarded.', 'Only this path is affected.', 'This cannot be undone.'],
+      confirmLabel: 'Discard changes',
+      intent: 'danger',
+    }))) return
     setGitReviewBusy(true)
     try {
       const review = await native.restorePaneFile(workspace.id, gitReview.paneId, path, true)
@@ -793,7 +844,13 @@ export function WorkspaceScreen() {
     if (!target) return
     if (pendingInsert.replace) {
       const session = paneSession(target.id)
-      if (session?.status === 'running' && !window.confirm('Replace this terminal? The current process will stop.')) return
+      if (session?.status === 'running' && !(await confirm({
+        title: 'Replace this terminal?',
+        body: 'A process is still running in it.',
+        details: ['The current process stops.', 'The pane relaunches with the terminal you picked.'],
+        confirmLabel: 'Replace terminal',
+        intent: 'danger',
+      }))) return
       if (session?.status === 'running') await native.terminateTerminalSession(session.id)
       if (session) terminalRuntime.remove(session.id)
       const pane = { ...target, provider: choice.provider, title: choice.name, executablePath: choice.executablePath, args: choice.args, shellProfileId: choice.shellProfileId }
@@ -810,18 +867,23 @@ export function WorkspaceScreen() {
 
   const stopAll = useCallback(async () => { if (workspace) { await native.terminateWorkspaceSessions(workspace.id); terminalRuntime.clearWorkspace(workspace.id) } }, [workspace])
   const restartAll = useCallback(async () => { if (!workspace) return; await native.terminateWorkspaceSessions(workspace.id).catch(() => undefined); await launchAll(workspace, true) }, [launchAll, workspace])
-  const openLauncher = () => { navigate('/'); setWorkspaceMenu(false) }
+  const openLauncher = () => navigate('/')
   const closeWorkspace = async () => {
     await stopAll(); setWorkspace(undefined); setProject(undefined); navigate('/')
   }
 
   // Reconfigure edits THIS workspace in place (same id). If terminals are live, we stop
   // them first rather than silently mutating pane configuration under running processes.
-  const reconfigureWorkspace = () => {
+  const reconfigureWorkspace = async () => {
     if (!workspace || !project) return
     const anyRunning = sessions.some((session) => session.status === 'running')
-    if (anyRunning && !window.confirm('This workspace has running terminals. Stop them and reconfigure?')) return
-    setWorkspaceMenu(false)
+    if (anyRunning && !(await confirm({
+      title: 'Reconfigure this workspace?',
+      body: 'Terminals are running in it.',
+      details: ['Every running terminal in this workspace stops.', 'The saved layout opens for editing.'],
+      confirmLabel: 'Stop and reconfigure',
+      intent: 'danger',
+    }))) return
     if (anyRunning) void stopAll()
     navigate(`/workspace/${workspace.id}/configure`)
   }
@@ -830,14 +892,19 @@ export function WorkspaceScreen() {
     if (nextWorkspaceId === workspace?.id || switchingWorkspaceId) return
     const hasRunningProcesses = sessions.some((session) => session.status === 'running')
     if (hasRunningProcesses && settings.inactiveWorkspaceProcesses === 'ask') {
-      const keepRunning = window.confirm('Keep this Workspace\'s terminals running in the background? Choose Cancel to stop them before switching.')
+      const keepRunning = await confirm({
+        title: 'Keep these terminals running?',
+        body: 'You are switching away from a workspace with live processes.',
+        details: ['Keep running leaves them working in the background.', 'Stop them ends every process in this workspace now.'],
+        confirmLabel: 'Keep running',
+        cancelLabel: 'Stop them',
+      })
       if (!keepRunning) await stopAll()
     } else if (hasRunningProcesses && settings.inactiveWorkspaceProcesses === 'stop') {
       await stopAll()
     }
     setSwitchingWorkspaceId(nextWorkspaceId)
     setError('')
-    setWorkspaceMenu(false)
     navigate(`/workspace/${nextWorkspaceId}`)
   }, [navigate, sessions, settings.inactiveWorkspaceProcesses, stopAll, switchingWorkspaceId, workspace?.id])
 
@@ -861,7 +928,7 @@ export function WorkspaceScreen() {
   }, [projectWorkspaces, workspace])
 
   const reconfigureWorkspaceById = useCallback((id: string) => {
-    if (id === workspace?.id) { reconfigureWorkspace(); return }
+    if (id === workspace?.id) { void reconfigureWorkspace(); return }
     navigate(`/workspace/${id}/configure`)
     // reconfigureWorkspace closes over current workspace; safe to omit from deps.
     // oxlint-disable-next-line react-hooks/exhaustive-deps
@@ -911,7 +978,13 @@ export function WorkspaceScreen() {
 
   const deleteWorkspaceById = useCallback(async (id: string) => {
     const target = id === workspace?.id ? workspace : projectWorkspaces.find((item) => item.id === id)
-    if (!window.confirm(`Delete the workspace configuration "${target?.name ?? 'this workspace'}"? Its terminals will stop. Project files are never touched.`)) return
+    if (!(await confirm({
+      title: `Delete "${target?.name ?? 'this workspace'}"?`,
+      body: 'This deletes the saved workspace configuration.',
+      details: ['Its terminals stop.', 'Project files are never touched.', 'This cannot be undone.'],
+      confirmLabel: 'Delete workspace',
+      intent: 'danger',
+    }))) return
     try {
       await native.deleteWorkspaceConfiguration(id)
       if (id === workspace?.id) {
@@ -1125,12 +1198,42 @@ export function WorkspaceScreen() {
   if (!workspace || !project) return <main className="centered-error"><ErrorNotice message={error || 'The workspace could not be loaded.'} /><Button onClick={() => navigate('/')}>Return to launcher</Button></main>
   const running = sessions.filter((session) => session.status === 'running').length
   const activePane = workspace.panes.find((pane) => pane.id === activePaneId)
+  // The Fleet Bar's input: every configured pane, with whatever the runtime currently believes
+  // about the agent inside it. Ordering and wait arithmetic belong to `buildFleet`, not here.
+  const fleetPanes: FleetPaneInput[] = workspace.panes.map((pane) => {
+    const session = sessions.find((item) => item.paneId === pane.id)
+    return {
+      paneId: pane.id,
+      title: pane.title,
+      running: session?.status === 'running',
+      deferred: deferredPaneIds.includes(pane.id),
+      agentState: session ? terminalRuntime.agentStateForSession(session.id) : undefined,
+    }
+  })
 
   return <AppShell className={`workspace-shell ${switchingWorkspaceId ? 'workspace-switching' : ''}`} sidebarOpen={!maximizedPaneId}
-    titleBar={<><div className="workspace-heading"><strong title={workspace.name}>{workspace.name}</strong>{project.gitBranch && <span className="branch-label" title={`Branch: ${project.gitBranch}`}>{project.gitBranch}</span>}</div><div className="titlebar-spacer" />{attentionQueue.length > 0 && <button className="attention-chip" onClick={focusNextAttention} title="Ctrl+Shift+P focuses the oldest agent needing attention">{attentionQueue.length} agent{attentionQueue.length === 1 ? '' : 's'} waiting</button>}<span className="compact-count">{running}/{workspace.panes.length} running</span><button className={`workspace-tool-panel-toggle ${panelOpen ? 'is-active' : ''}`} aria-pressed={panelOpen} aria-label={panelOpen ? 'Close workspace panel' : 'Open workspace panel'} title={`${panelOpen ? 'Close' : 'Open'} workspace panel (Ctrl+Shift+E)`} onClick={() => togglePanel()}>{panelOpen ? <PanelRightClose size={15} /> : <PanelRightOpen size={15} />}</button><div className="workspace-menu-wrap"><Button variant="ghost" icon={<ChevronDown size={14} />} aria-expanded={workspaceMenu} aria-haspopup="menu" onClick={() => setWorkspaceMenu((value) => !value)}>Workspace</Button>{workspaceMenu && <><button className="context-scrim" aria-label="Close workspace menu" onClick={() => setWorkspaceMenu(false)} /><div className="context-popover workspace-popover" role="menu"><button role="menuitem" onClick={() => { setWorkspaceMenu(false); renameWorkspaceById(workspace.id) }}>Rename workspace</button><button role="menuitem" onClick={reconfigureWorkspace}>Reconfigure workspace</button><button role="menuitem" onClick={() => navigate(`/setup/${project.id}`)}>New workspace for this project</button><span className="menu-separator" /><button role="menuitem" onClick={() => { setWorkspaceMenu(false); openAgentResumeCenter() }}><RotateCcw size={14} />Agent Resume Center</button><button role="menuitem" onClick={() => void restartAll()}><RotateCcw size={14} />Restart all terminals</button><button role="menuitem" onClick={() => void stopAll()}><CircleStop size={14} />Stop all terminals</button><button role="menuitem" onClick={openLauncher}><FolderOpen size={14} />Project launcher</button><button role="menuitem" className="danger-item" onClick={() => void closeWorkspace()}>Close workspace</button></div></>}</div></>}
+    titleBar={<WorkspaceTitleBar
+      workspaceName={workspace.name}
+      gitBranch={project.gitBranch}
+      fleetPanes={fleetPanes}
+      activePaneId={activePaneId}
+      onFocusPane={(paneId) => { setActivePane(paneId); dispatchTerminalAction(paneId, 'focus') }}
+      runningCount={running}
+      paneCount={workspace.panes.length}
+      panelOpen={panelOpen}
+      onTogglePanel={() => togglePanel()}
+      onRenameWorkspace={() => renameWorkspaceById(workspace.id)}
+      onReconfigureWorkspace={() => void reconfigureWorkspace()}
+      onNewWorkspace={() => navigate(`/setup/${project.id}`)}
+      onOpenAgentResume={openAgentResumeCenter}
+      onRestartAll={() => void restartAll()}
+      onStopAll={() => void stopAll()}
+      onOpenLauncher={openLauncher}
+      onCloseWorkspace={() => void closeWorkspace()}
+    />}
     sidebar={<ForgeSpaceSidebar project={project} activeWorkspaceId={workspace.id} workspaces={sidebarWorkspaces} recents={recentWorkspaces} collapsed={collapsed} width={sidebarWidth} switchingWorkspaceId={switchingWorkspaceId} projectFolderMissing={projectFolderMissing} loadingWorkspaces={projectWorkspaces.length === 0 && loading} actions={sidebarActions} placements={placements} monitors={monitors} openProjects={sidebarOpenProjects} groups={sidebarGroups} />}
     canvas={<>{error && <div className="workspace-error"><ErrorNotice message={error} onRetry={() => void restartAll()} /></div>}<MonitorRecoveryWatcher monitors={monitors} onChanged={handleMonitorChanged} /><div className={`workspace-surface-host${panelOpen && !panelMaximized ? ' has-panel' : ''}${panelOpen && panelMaximized ? ' is-panel-max' : ''}${panelResizing ? ' is-resizing' : ''}`} style={{ '--tool-panel-width': `${panelWidth}px` } as CSSProperties}><section className="terminal-canvas"><WorkspaceCanvas reducedMotion={reducedMotion} persist={persistCanvas} onFocusPane={setActivePane} renderPane={renderPane} /></section>{panelOpen && !panelMaximized && <div className="tool-panel-resizer" role="separator" aria-orientation="vertical" aria-label="Resize workspace panel" onPointerDown={startPanelResize} />}{panelMounted && <WorkspaceToolPanel projectId={project.id} projectRootPath={project.rootPath} workspaceId={workspace.id} visible={panelOpen} maximized={panelMaximized} tool={panelTool} browserContext={{ workspaceId: workspace.id, workspaceName: workspace.name, projectId: project.id, projectName: project.name, worktree: project.gitBranch ?? undefined, agentLabel: activePane?.title }} onSendToAgent={sendContextToAgent} onToolChange={(tool) => useWorkspacePanelStore.getState().setTool(tool)} onToggleMaximize={() => useWorkspacePanelStore.getState().toggleMaximized()} onClose={() => useWorkspacePanelStore.getState().closePanel()} />}</div></>}
-    statusBar={<><span>{project.gitBranch || 'No branch'}</span><span className="status-path" title={project.rootPath}>{project.name}</span><span>{running}/{workspace.panes.length} running</span><span>{activePane?.title || 'No active pane'}</span><AiUsageStatusBar />{attentionQueue.length > 0 && <span className="status-alert">{attentionQueue.length} agent attention</span>}{Object.keys(paneErrors).some((id) => paneErrors[id]) && <span className="status-alert">Pane error</span>}</>}
+    statusBar={<><span>{project.gitBranch || 'No branch'}</span><span className="status-path" title={project.rootPath}>{project.name}</span><span><span className="measured">{running}/{workspace.panes.length}</span> running</span><span>{activePane?.title || 'No active pane'}</span><AiUsageStatusBar />{Object.keys(paneErrors).some((id) => paneErrors[id]) && <span className="status-alert">Pane error</span>}</>}
   >
     {projectClosePrompt && <Modal title={`Close ${projectClosePrompt.projectName}?`} onClose={() => { if (!projectCloseBusy) setProjectClosePrompt(undefined) }}><div className="restore-summary"><div><strong>{projectClosePrompt.activeSwarms} active Swarm{projectClosePrompt.activeSwarms === 1 ? '' : 's'}</strong><span>Swarm state remains bound to this Project.</span></div><p>Keep the Swarms running in the background, or pause them before closing the Project session.</p><div className="modal-actions"><Button variant="ghost" disabled={projectCloseBusy} onClick={() => setProjectClosePrompt(undefined)}>Cancel</Button><Button variant="secondary" data-autofocus disabled={projectCloseBusy} onClick={() => void completeProjectClose(projectClosePrompt.projectId, 'pause_and_close')}>Pause and close</Button><Button variant="primary" disabled={projectCloseBusy} onClick={() => void completeProjectClose(projectClosePrompt.projectId, 'keep_running')}>Keep running</Button></div></div></Modal>}
     {pendingInsert && <Modal title={pendingInsert.replace ? 'Replace terminal' : 'Choose terminal'} onClose={() => setPendingInsert(undefined)}><div className="provider-picker">{choices.length === 0 ? <ErrorNotice message="No available agents or shells were detected." onRetry={() => void scanProviders()} /> : choices.map((choice) => <button key={`${choice.provider}:${choice.name}`} onClick={() => void insertOrReplace(choice)}><TerminalSquare size={18} /><div><strong>{choice.name}</strong><span>Available · {providerLabel(choice.provider)}</span></div></button>)}</div></Modal>}

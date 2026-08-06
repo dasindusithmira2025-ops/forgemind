@@ -18,6 +18,7 @@ export const defaultSettings: AppSettings = {
   copyOnSelect: false,
   confirmMultilinePaste: true,
   confirmClosePane: true,
+  autoRenameAgentTerminals: true,
   reopenLastWorkspace: false,
   restoreBehavior: 'ask',
   outputLogRetention: 'tail_only',

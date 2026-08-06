@@ -25,6 +25,10 @@ pub struct AppSettings {
     pub copy_on_select: bool,
     pub confirm_multiline_paste: bool,
     pub confirm_close_pane: bool,
+    /// Retitle an agent Pane from the task its user just submitted. Settings persisted before
+    /// this field existed opt in, matching the behaviour a new installation gets.
+    #[serde(default = "default_auto_rename_agent_terminals")]
+    pub auto_rename_agent_terminals: bool,
     pub reopen_last_workspace: bool,
     pub restore_behavior: String,
     pub output_log_retention: String,
@@ -57,6 +61,7 @@ impl Default for AppSettings {
             copy_on_select: false,
             confirm_multiline_paste: true,
             confirm_close_pane: true,
+            auto_rename_agent_terminals: default_auto_rename_agent_terminals(),
             reopen_last_workspace: false,
             restore_behavior: "ask".into(),
             output_log_retention: "tail_only".into(),
@@ -81,6 +86,12 @@ fn default_sidebar_width() -> u16 {
 /// which matches the pre-density chrome metrics.
 fn default_ui_density() -> String {
     "standard".into()
+}
+
+/// Automatic Pane titles are on by default: a Workspace of agents that all read "Claude Code" is
+/// the problem the feature exists to solve, so it has to be true without configuration.
+fn default_auto_rename_agent_terminals() -> bool {
+    true
 }
 
 /// The built-in default theme. Any unknown/removed id is tolerated here and reconciled to the
@@ -121,5 +132,7 @@ mod tests {
         let legacy = r#"{"sidebarOpen":true,"uiScale":1.0,"terminalFontSize":13,"terminalFontFamily":"Cascadia Mono","terminalLineHeight":1.15,"cursorStyle":"block","scrollbackSize":10000,"copyOnSelect":false,"confirmMultilinePaste":true,"confirmClosePane":true,"reopenLastWorkspace":false,"restoreBehavior":"ask","outputLogRetention":"tail_only","restorationLaunchBudget":4,"defaultLayout":"auto","defaultPaneCount":4,"inactiveWorkspaceProcesses":"keep_running","inactiveWorkspaceRendering":"hibernate","automaticUpdateChecks":true,"settingsVersion":3}"#;
         let parsed: AppSettings = serde_json::from_str(legacy).expect("legacy settings load");
         assert_eq!(parsed.theme_id, "paralith-dark");
+        // Existing installations opt in to automatic Pane titles, same as a fresh one.
+        assert!(parsed.auto_rename_agent_terminals);
     }
 }

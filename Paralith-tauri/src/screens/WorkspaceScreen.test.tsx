@@ -4,10 +4,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { WorkspaceScreen } from './WorkspaceScreen'
 import { useAppStore } from '../stores/appStore'
 import { useSidebarStore } from '../features/sidebar/sidebarStore'
-import type { Project, TerminalSession, Workspace, WorkspaceSaveRequest } from '../native/types'
+import type { PaneRenamedEvent, Project, TerminalSession, Workspace, WorkspaceSaveRequest } from '../native/types'
 
 const runtime = vi.hoisted(() => ({ sessions: [] as TerminalSession[], hydrate: vi.fn(), upsert: vi.fn(), remove: vi.fn(), clearWorkspace: vi.fn(), agentStateForSession: vi.fn(() => undefined) }))
+// Captures the backend Pane-rename subscription so a broadcast can be replayed into the screen.
+const paneRenamed = vi.hoisted(() => ({ handlers: [] as Array<(event: PaneRenamedEvent) => void> }))
 const restoreWorkspace = vi.fn()
+const saveWorkspace = vi.fn()
 const saveSettings = vi.fn()
 const getWorkspace = vi.fn()
 const listRecentWorkspaces = vi.fn()
@@ -22,11 +25,22 @@ vi.mock('@tauri-apps/plugin-opener', () => ({ openPath: vi.fn() }))
 vi.mock('../features/terminals/runtimeStore', () => ({ terminalRuntime: runtime, useWorkspaceSessions: () => runtime.sessions }))
 vi.mock('../components/terminal/TerminalPane', () => ({ TerminalPane: ({ assignment, maximized, onMaximize }: { assignment: { title: string }; maximized: boolean; onMaximize: () => void }) => <div data-testid="terminal-pane" data-maximized={maximized}><span>{assignment.title}</span><button onClick={onMaximize}>Toggle maximize</button></div> }))
 vi.mock('../components/terminal/terminalActions', () => ({ dispatchTerminalAction: vi.fn() }))
+// Only the Pane-rename subscription is replaced; every other event helper keeps its real
+// implementation so the rest of the mounted tree behaves exactly as it does untested.
+vi.mock('../native/events', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../native/events')>()),
+  onPaneRenamed: (handler: (event: PaneRenamedEvent) => void) => {
+    paneRenamed.handlers.push(handler)
+    return Promise.resolve(() => {
+      paneRenamed.handlers = paneRenamed.handlers.filter((item) => item !== handler)
+    })
+  },
+}))
 vi.mock('../native/commands', () => ({
   asNativeError: (error: unknown) => ({ message: String(error) }),
   native: {
     getProject: vi.fn(async () => project), getWorkspace: (...args: unknown[]) => getWorkspace(...args),
-    saveWorkspace: vi.fn(async (request: WorkspaceSaveRequest) => ({ ...request, normalizedName: request.name.toLowerCase(), id: request.id ?? 'workspace', createdAt: '', updatedAt: '', lastOpenedAt: '' })),
+    saveWorkspace: (...args: unknown[]) => saveWorkspace(...args),
     listRecentWorkspaces: (...args: unknown[]) => listRecentWorkspaces(...args),
     listWorkspacesForProject: (...args: unknown[]) => listWorkspacesForProject(...args),
     setLastActiveWorkspace: vi.fn().mockResolvedValue(undefined),
@@ -61,12 +75,14 @@ describe('Workspace screen', () => {
     terminateWorkspace.mockResolvedValue(undefined)
     reorderWorkspaces.mockResolvedValue(undefined)
     saveSettings.mockImplementation(async (value) => value)
+    saveWorkspace.mockImplementation(async (request: WorkspaceSaveRequest) => ({ ...request, normalizedName: request.name.toLowerCase(), id: request.id ?? 'workspace', createdAt: '', updatedAt: '', lastOpenedAt: '' }))
     getWorkspace.mockImplementation(async (id: string) => id === secondWorkspace.id ? secondWorkspace : workspace)
     listRecentWorkspaces.mockResolvedValue([workspace, secondWorkspace].map((item) => ({ workspace: item, projectName: project.name, projectPath: project.rootPath, projectMissing: false })))
     listWorkspacesForProject.mockResolvedValue([workspace, secondWorkspace])
     listSwarms.mockResolvedValue([])
     closeProjectSession.mockResolvedValue([])
     useAppStore.setState({ project, workspace, recentWorkspaces: [], activePaneId: 'pane', settings: { ...useAppStore.getState().settings, sidebarOpen: true, sidebarWidth: 300, restoreBehavior: 'restart_agents' } })
+    paneRenamed.handlers = []
   })
 
   const renderWorkspace = () => render(<MemoryRouter initialEntries={['/workspace/workspace']}><Routes><Route path="/workspace/:workspaceId" element={<WorkspaceScreen />} /></Routes></MemoryRouter>)
@@ -244,5 +260,28 @@ describe('Workspace screen', () => {
     restoreWorkspace.mockResolvedValue({ workspaceId: 'workspace', sessions: [], deferredPaneIds: ['pane'], failures: [], budget: 1 })
     renderWorkspace()
     expect(await screen.findByTestId('terminal-pane')).toBeInTheDocument()
+  })
+
+  // A task sent to an agent renames its Pane in Rust, which persists the title and broadcasts it.
+  // The screen must adopt that title without issuing a save of its own.
+  it('adopts a Pane title derived from the task sent to its agent', async () => {
+    renderWorkspace()
+    await screen.findByTestId('terminal-pane')
+    await waitFor(() => expect(paneRenamed.handlers.length).toBeGreaterThan(0))
+
+    const broadcast = (patch: Partial<PaneRenamedEvent> = {}) => paneRenamed.handlers.forEach((handler) => handler({
+      workspaceId: 'workspace', paneId: 'pane', sessionId: 'session', title: 'Fix login bug', source: 'agent_task', ...patch,
+    }))
+
+    broadcast()
+    expect(await within(screen.getByTestId('terminal-pane')).findByText('Fix login bug')).toBeInTheDocument()
+    // The status bar names the active Pane from the same record.
+    expect(screen.getAllByText('Fix login bug').length).toBeGreaterThan(1)
+    // Rust already persisted the title; saving again here would race that write.
+    expect(saveWorkspace).not.toHaveBeenCalled()
+
+    // An event for a Workspace this screen does not show must be ignored.
+    broadcast({ workspaceId: 'workspace-two', title: 'Other task' })
+    await waitFor(() => expect(screen.queryByText('Other task')).not.toBeInTheDocument())
   })
 })

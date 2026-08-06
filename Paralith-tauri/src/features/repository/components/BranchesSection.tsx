@@ -3,6 +3,7 @@ import {
   Bot, GitBranch, Loader2, Plus, RefreshCw, Trash2, TriangleAlert,
 } from 'lucide-react'
 import { Button } from '../../../components/ui/Button'
+import { confirm } from '../../../components/ui/confirm'
 import { useRepositoryStore } from '../repositoryStore'
 import { deriveSyncState, relativeTime, syncStateLabel } from '../repositorySelectors'
 import { StatusBadge, type BadgeTone } from './StatusBadge'
@@ -48,8 +49,14 @@ export function BranchesSection({ onRequestAgentWorktree }: { onRequestAgentWork
       .catch(() => undefined)
   }
   const removeWorktree = (leaseId: string, branchName: string) => {
-    if (!window.confirm(`Request cleanup of the agent worktree for ${branchName}? The lease is released and the worktree removed.`)) return
-    void runOperation({ kind: 'remove_worktree', leaseId }, { key: `remove:${leaseId}` }).catch(() => undefined)
+    void confirm({
+      title: `Remove the agent worktree for ${branchName}?`,
+      details: ['The lease is released.', 'The worktree directory is removed.', 'The branch itself is kept.'],
+      confirmLabel: 'Remove worktree',
+      intent: 'danger',
+    }).then((confirmed) => {
+      if (confirmed) void runOperation({ kind: 'remove_worktree', leaseId }, { key: `remove:${leaseId}` }).catch(() => undefined)
+    })
   }
 
   const requestAgentWorktree = () => onRequestAgentWorktree({
@@ -80,7 +87,16 @@ export function BranchesSection({ onRequestAgentWorktree }: { onRequestAgentWork
           const pr = pullRequests.find((item) => item.headBranch === branch.name || branch.name.endsWith(`/${item.headBranch}`))
           const ci = pr ? runs.find((run) => run.commitSha === pr.headSha) : undefined
           const switchTo = () => void runOperation({ kind: 'switch_branch', name: branch.name }, { key: `switch:${branch.name}` }).catch(() => undefined)
-          const deleteBranch = () => { if (window.confirm(`Delete local branch ${branch.name}? Protected, active and unmerged branches are blocked by backend policy.`)) void runOperation({ kind: 'delete_branch', name: branch.name }, { key: `delete:${branch.name}` }).catch(() => undefined) }
+          const deleteBranch = () => {
+            void confirm({
+              title: `Delete local branch ${branch.name}?`,
+              details: ['Only the local branch is deleted.', 'Protected, active and unmerged branches are refused.'],
+              confirmLabel: 'Delete branch',
+              intent: 'danger',
+            }).then((confirmed) => {
+              if (confirmed) void runOperation({ kind: 'delete_branch', name: branch.name }, { key: `delete:${branch.name}` }).catch(() => undefined)
+            })
+          }
           return <li key={branch.fullRef} className="repo-branch-lane">
             <div className="repo-branch-lane-main"><GitBranch size={14} /><div><strong>{branch.name}</strong><span className="repo-muted">{branch.latestSubject || 'No commit subject'} · {relativeTime(branch.latestCommitAt)}</span></div></div>
             <div className="repo-branch-lane-status">{lease ? <StatusBadge tone="accent"><Bot size={11} /> {lease.agentId}</StatusBadge> : <StatusBadge tone="neutral">Human</StatusBadge>}{branch.upstream && <span className="repo-muted">{branch.ahead} ahead · {branch.behind} behind</span>}{pr && <StatusBadge tone="accent">PR #{pr.number}</StatusBadge>}{ci && <StatusBadge tone={ci.state === 'success' ? 'success' : ci.state === 'failure' ? 'danger' : 'pending'}>{ci.state}</StatusBadge>}{kind === 'local' && <Button variant="ghost" onClick={switchTo} disabled={dirty}>Switch</Button>}{kind === 'local' && !lease && <button className="repo-icon-btn danger" aria-label={`Delete ${branch.name}`} onClick={deleteBranch}><Trash2 size={13} /></button>}</div>

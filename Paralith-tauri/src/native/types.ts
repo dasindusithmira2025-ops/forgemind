@@ -169,6 +169,16 @@ export interface TerminalStatusEvent {
   lifecycleEvent: string
 }
 
+/** A Pane title changed in the backend — today only when an agent Pane is renamed after its user
+ *  submits a task. The title is already persisted, so receivers apply it without saving again. */
+export interface PaneRenamedEvent {
+  workspaceId: string
+  paneId: string
+  sessionId: string
+  title: string
+  source: 'agent_task'
+}
+
 export type UsageProvider = 'claude' | 'codex'
 export type UsageFreshness = 'live' | 'recent' | 'stale' | 'unavailable'
 export type UsageSnapshotStatus = 'ready' | 'loading' | 'unsupported' | 'unauthenticated' | 'stale' | 'error'
@@ -672,6 +682,8 @@ export interface AppSettings {
   copyOnSelect: boolean
   confirmMultilinePaste: boolean
   confirmClosePane: boolean
+  /** Retitle an agent Pane from the task its user just submitted. */
+  autoRenameAgentTerminals: boolean
   reopenLastWorkspace: boolean
   restoreBehavior: 'ask' | 'restart_agents' | 'fresh_shells'
   outputLogRetention: 'tail_only' | 'rotating_log'
@@ -1126,6 +1138,8 @@ export interface FileContents {
   encoding: FileEncoding
   lineEnding: LineEnding
   binary: boolean
+  /** MIME type when this file can be previewed (image or PDF), decided by extension. */
+  mediaType: string | null
   readonly: boolean
 }
 

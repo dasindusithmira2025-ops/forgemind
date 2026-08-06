@@ -1,5 +1,16 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import indexCss from '../index.css?raw'
+import codeSurfaceCss from '../features/code-surface/codeSurface.css?raw'
+import toolPanelCss from '../features/code-surface/workspaceToolPanel.css?raw'
+import browserCss from '../features/code-surface/browser/browser.css?raw'
+
+/** Every stylesheet that carries component rules, so genome checks cover the whole app. */
+const COMPONENT_STYLESHEETS = {
+  'index.css': indexCss,
+  'codeSurface.css': codeSurfaceCss,
+  'workspaceToolPanel.css': toolPanelCss,
+  'browser.css': browserCss,
+}
 import indexHtml from '../../index.html?raw'
 import {
   REQUIRED_CSS_VARS, monacoThemeName, toCssVars, toMonacoColors, toTerminalTheme,
@@ -171,6 +182,92 @@ describe('design genome', () => {
     for (const theme of CONCRETE_THEME_ORDER) {
       expect(chroma(theme.colors.control.ring), `${theme.id} ring`).toBeLessThanOrEqual(CONTROL_CHROMA_BUDGET)
       expect(theme.colors.effects.focusRing).toBe(theme.colors.control.ring)
+    }
+  })
+
+  it('never lets a component rule paint its own accent focus ring', () => {
+    // Rule 5 is about the palette, but it is broken in component CSS, not in a theme: a rule that
+    // writes `outline: 2px solid var(--accent)` replaces the neutral halo with an accent one, and
+    // an accented control then looks permanently focused. Component rules must reference
+    // `--focus-outline`/`--focus-shadow` instead of inventing a ring.
+    expect(indexCss).toContain('--focus-outline:')
+    for (const [name, sheet] of Object.entries(COMPONENT_STYLESHEETS)) {
+      for (const rule of sheet.split('}')) {
+        if (!/:focus(-visible|-within)?\b/.test(rule)) continue
+        const outline = /outline:\s*([^;]+)/.exec(rule)
+        if (!outline || /var\(--focus-outline\)/.test(outline[1])) continue
+        expect(outline[1], `${name}: focus ring borrows the accent — use var(--focus-outline)`)
+          .not.toMatch(/var\(--accent/)
+      }
+    }
+  })
+
+  it('gives a pane its focus mark and its agent state separate properties', () => {
+    // Both used to be written as `border-color` on `.terminal-pane` at equal specificity, so
+    // focusing a pane whose agent needed input silently erased one of the two signals.
+    const active = /\.terminal-pane\.active\s*\{([^}]*)\}/.exec(indexCss)?.[1] ?? ''
+    expect(active, 'the focus ring must go through --pane-border').toContain('--pane-border')
+    expect(active, 'agent state also writes the border; sharing border-color loses one signal')
+      .not.toMatch(/(^|[^-])border-color:/)
+
+    // The accent header edge has to be declared after every agent-state header rule, or an agent
+    // state overrides it and the user loses track of which pane the keyboard is in.
+    const focusEdge = indexCss.indexOf('.terminal-pane.active > .terminal-header')
+    const agentEdge = indexCss.lastIndexOf('.terminal-pane.agent-failed > .terminal-header')
+    expect(focusEdge).toBeGreaterThan(-1)
+    expect(focusEdge, 'focus edge must win over agent-state header edges').toBeGreaterThan(agentEdge)
+  })
+
+  // Every stylesheet that carries component rules, so genome checks cover the whole app and not
+  // just the token layer. Rules 1 and 3 are breakable in component CSS, not only in a palette.
+  const GENOME_STYLESHEETS = {
+    'index.css': indexCss,
+    'codeSurface.css': codeSurfaceCss,
+    'workspaceToolPanel.css': toolPanelCss,
+    'browser.css': browserCss,
+  }
+
+  it('never invents a fifth surface by mixing a component background toward black', () => {
+    // Rule 1 allows exactly four neutral steps, and says a fifth "always turns out to be one of
+    // these four plus a border". Reaching for `color-mix(..., #000)` instead is theme-fragile: on
+    // obsidian (`canvas: #000000`) the mix returns the canvas it started from and the recess it was
+    // drawing disappears, while on arctic-light it lands a heavy grey slab under white cards.
+    for (const [name, sheet] of Object.entries(GENOME_STYLESHEETS)) {
+      expect(sheet, `${name}: step the surface ladder or add a border, do not mix toward black`)
+        .not.toMatch(/#000\b|#000000\b/)
+    }
+  })
+
+  it('never lets a component rule repaint a solid control in the accent', () => {
+    // The token-level half of rule 3 is covered by `keeps solid controls achromatic`. It is still
+    // breakable in component CSS: a single `.button-primary { background: var(--accent) }` override
+    // puts the brand hue on the highest-emphasis control and undoes the rule for that surface.
+    for (const [name, sheet] of Object.entries(GENOME_STYLESHEETS)) {
+      for (const rule of sheet.split('}')) {
+        if (!/\.button-primary\b/.test(rule)) continue
+        const background = /background(-color)?:\s*([^;]+)/.exec(rule)
+        if (!background) continue
+        expect(background[2], `${name}: .button-primary must stay on --primary`)
+          .not.toMatch(/var\(--accent/)
+      }
+    }
+  })
+
+  it('never reads a custom property that no stylesheet defines', () => {
+    // `var(--undefined)` with no fallback is invalid at computed-value time, so the declaration is
+    // dropped silently rather than failing loudly. On an inherited property like `color` the
+    // element then takes its parent's value, which is how the update toast shipped a near-white
+    // label on the violet accent at 2.65:1. A var with no fallback has to resolve.
+    const defined = new Set<string>()
+    for (const sheet of Object.values(GENOME_STYLESHEETS)) {
+      for (const match of sheet.matchAll(/(--[a-zA-Z0-9-]+)\s*:/g)) defined.add(match[1])
+    }
+    for (const [name, sheet] of Object.entries(GENOME_STYLESHEETS)) {
+      for (const match of sheet.matchAll(/var\(\s*(--[a-zA-Z0-9-]+)\s*([,)])/g)) {
+        if (match[2] === ',') continue // a fallback makes the reference safe
+        expect(defined, `${name}: var(${match[1]}) has no definition and no fallback`)
+          .toContain(match[1])
+      }
     }
   })
 

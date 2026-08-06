@@ -6,6 +6,7 @@ import { AlertTriangle, Clock3, FolderGit2, FolderOpen, FolderSearch, MoreHorizo
 import { Brand } from '../components/ui/Brand'
 import { Button } from '../components/ui/Button'
 import { ErrorNotice } from '../components/ui/ErrorNotice'
+import { confirm } from '../components/ui/confirm'
 import { Modal } from '../components/ui/Modal'
 import { TextPromptDialog } from '../components/ui/TextPromptDialog'
 import { asNativeError, native } from '../native/commands'
@@ -83,7 +84,13 @@ export function ProjectLauncher() {
 
   const deleteWorkspace = async (workspace: Workspace) => {
     setWorkspaceMenu(undefined)
-    if (!window.confirm(`Delete the saved configuration for “${workspace.name}”? Project files are never deleted.`)) return
+    if (!(await confirm({
+      title: `Delete "${workspace.name}"?`,
+      body: 'This deletes the saved workspace configuration.',
+      details: ['Project files are never deleted.', 'This cannot be undone.'],
+      confirmLabel: 'Delete workspace',
+      intent: 'danger',
+    }))) return
     try { await native.deleteWorkspaceConfiguration(workspace.id); await refresh() }
     catch (caught) { setError(asNativeError(caught).message) }
   }

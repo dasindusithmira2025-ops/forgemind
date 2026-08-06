@@ -75,6 +75,10 @@ pub struct FileContents {
     pub encoding: FileEncoding,
     pub line_ending: LineEnding,
     pub binary: bool,
+    /// MIME type when this file is one the editor can preview (image or PDF), derived from the
+    /// extension only — never sniffed from the bytes. `None` for everything else. A binary file
+    /// with a media type is opened as a preview instead of the "cannot be shown" placeholder.
+    pub media_type: Option<String>,
     pub readonly: bool,
 }
 

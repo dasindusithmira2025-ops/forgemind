@@ -79,3 +79,17 @@ pub struct TerminalStatusEvent {
     pub session: TerminalSession,
     pub lifecycle_event: String,
 }
+
+/// Broadcast when a Pane's title changes outside the renderer that owns the Workspace — today
+/// only when an agent Pane is renamed after its user submits a task. The title is already
+/// persisted when this is emitted, so receivers apply it to local state without saving again.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PaneRenamedEvent {
+    pub workspace_id: String,
+    pub pane_id: String,
+    pub session_id: String,
+    pub title: String,
+    /// What produced the title. `agent_task` is the automatic rename described above.
+    pub source: String,
+}

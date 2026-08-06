@@ -5,6 +5,8 @@ import { SearchAddon } from '@xterm/addon-search'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { ChevronDown, Maximize2, Minimize2, MoreHorizontal, RotateCw, Search, X } from 'lucide-react'
 import { Button } from '../ui/Button'
+import { confirm } from '../ui/confirm'
+import { agentStateLabel, waitLabel } from '../../features/fleet/fleetSelectors'
 import { native } from '../../native/commands'
 import type { AgentActivityState, AppSettings, PaneAssignment, TerminalSession } from '../../native/types'
 import { providerLabel } from '../../shared/layout'
@@ -293,7 +295,7 @@ export function TerminalPane({ assignment, session, deferred = false, active, ma
       <span className={`terminal-status status-${agentState?.state ?? currentSession?.status ?? 'loading'}`} aria-label={agentState ? agentStateLabel(agentState.state) : currentSession?.status ?? 'starting'} title={agentState?.reason} />
       <div className="terminal-title"><strong>{assignment.title}</strong><span>{providerLabel(assignment.provider)}{agentState ? ` · ${agentStateLabel(agentState.state)}` : ''}</span></div>
       <span className="terminal-path" title={assignment.workingDirectory}>{assignment.workingDirectory}</span>
-      {agentState?.attentionSince && <span className="agent-attention-badge" title={`${agentState.source}: ${agentState.reason}`}>Needs review</span>}
+      {agentState?.attentionSince && <AgentWaitBadge state={agentState.state} since={agentState.attentionSince} source={agentState.source} reason={agentState.reason} />}
       <div className="terminal-controls">
         <Button variant="ghost" icon={<Search size={14} />} aria-label="Search terminal" onClick={() => setSearchOpen(true)} />
         <Button variant="ghost" icon={maximized ? <Minimize2 size={14} /> : <Maximize2 size={14} />} aria-label={maximized ? 'Restore pane' : 'Maximize pane'} onClick={onMaximize} />
@@ -309,10 +311,28 @@ export function TerminalPane({ assignment, session, deferred = false, active, ma
   </article>
 }
 
-function agentStateLabel(state: AgentActivityState) {
-  if (state === 'needs_input') return 'Needs input'
-  if (state === 'needs_permission') return 'Needs permission'
-  return state[0].toUpperCase() + state.slice(1)
+/**
+ * The pane's own copy of the Fleet Bar readout: one word for the state, and the live duration that
+ * word has been true. The duration is what makes the badge legible without colour — the 7px status
+ * dot alone was carrying the state on hue at a size where amber and green are not reliably
+ * distinguishable.
+ */
+function AgentWaitBadge({ state, since, source, reason }: {
+  state: AgentActivityState
+  since: string
+  source: string
+  reason: string
+}) {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(timer)
+  }, [])
+  const label = agentStateLabel(state)
+  const elapsed = waitLabel(Math.max(0, now - new Date(since).getTime()))
+  return <span className={`agent-attention-badge state-${label}`} title={`${source}: ${reason}`}>
+    {label} <span className="measured">{elapsed}</span>
+  </span>
 }
 
 /** Convert a resolved PARALITH theme into the xterm.js ITheme shape. */
@@ -322,7 +342,12 @@ function xtermTheme(theme: ThemeDefinition): ITheme {
 
 async function pasteIntoTerminal(terminal: Terminal, confirmMultiline: boolean) {
   const text = await navigator.clipboard.readText()
-  if (text.includes('\n') && confirmMultiline && !window.confirm(`Paste ${text.split(/\r?\n/).length} lines into this terminal?`)) return
+  const lines = text.split(/\r?\n/).length
+  if (text.includes('\n') && confirmMultiline && !(await confirm({
+    title: `Paste ${lines} lines?`,
+    body: 'Multi-line pastes run as separate commands in most shells.',
+    confirmLabel: 'Paste',
+  }))) return
   terminal.paste(text)
 }
 

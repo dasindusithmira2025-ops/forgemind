@@ -1,16 +1,20 @@
 import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react'
-import { AlertTriangle, FileX2, PanelLeft, Save, SaveAll } from 'lucide-react'
+import { AlertTriangle, Code2, FileX2, Image as ImageIcon, PanelLeft, Save, SaveAll } from 'lucide-react'
+import { openPath } from '@tauri-apps/plugin-opener'
 import './codeSurface.css'
-import { native } from '../../native/commands'
+import { asNativeError, native } from '../../native/commands'
 import { onProjectFileChanged } from '../../native/events'
 import { ErrorNotice } from '../../components/ui/ErrorNotice'
+import { confirm } from '../../components/ui/confirm'
 import { isDirty, useEditorStore } from './editorStore'
-import { parentDir, useExplorerStore } from './explorerStore'
+import { absoluteProjectPath, parentDir, useExplorerStore } from './explorerStore'
+import { formatBytes } from './media'
 import { FileExplorer } from './FileExplorer'
 import { EditorTabs } from './EditorTabs'
 import { QuickOpen } from './QuickOpen'
 
 const MonacoEditorPane = lazy(() => import('./MonacoEditorPane'))
+const MediaPreviewPane = lazy(() => import('./MediaPreviewPane'))
 const DiffOverlay = lazy(() => import('./MonacoEditorPane').then((module) => ({ default: module.DiffOverlay })))
 
 interface CodeSurfaceProps {
@@ -40,7 +44,9 @@ export function CodeSurface({ projectId, projectRootPath, workspaceId, active }:
   const setComparing = useEditorStore((state) => state.setComparing)
   const explorerWidth = useEditorStore((state) => state.explorerWidth)
   const setExplorerWidth = useEditorStore((state) => state.setExplorerWidth)
+  const toggleMediaView = useEditorStore((state) => state.toggleMediaView)
   const [cursor, setCursor] = useState({ line: 1, column: 1 })
+  const [openError, setOpenError] = useState('')
   // When the docked panel is dragged narrow, the explorer + editor cannot both stay usable, so the
   // explorer becomes an on-demand drawer over the editor. The active file/buffer is untouched.
   const [narrow, setNarrow] = useState(false)
@@ -96,9 +102,14 @@ export function CodeSurface({ projectId, projectRootPath, workspaceId, active }:
 
   const closeTab = useCallback(
     (path: string) => {
-      if (closeTabAction(path) === 'needs-confirm') {
-        if (window.confirm(`${path.split('/').pop()} has unsaved changes. Close without saving?`)) forceCloseTab(path)
-      }
+      if (closeTabAction(path) !== 'needs-confirm') return
+      void confirm({
+        title: `Close ${path.split('/').pop()} without saving?`,
+        body: 'This file has unsaved changes.',
+        details: ['Unsaved edits are discarded.', 'The file on disk is unchanged.'],
+        confirmLabel: 'Discard changes',
+        intent: 'danger',
+      }).then((confirmed) => { if (confirmed) forceCloseTab(path) })
     },
     [closeTabAction, forceCloseTab],
   )
@@ -139,8 +150,24 @@ export function CodeSurface({ projectId, projectRootPath, workspaceId, active }:
     [explorerWidth, setExplorerWidth],
   )
 
+  // Hand a file to the operating system's default application. Used as the escape hatch for media
+  // the embedded webview cannot render (and as the natural way to open a PDF in a full reader).
+  const openExternally = useCallback(
+    (relative: string) => {
+      setOpenError('')
+      void openPath(absoluteProjectPath(projectRootPath, relative)).catch((caught) =>
+        setOpenError(asNativeError(caught).message),
+      )
+    },
+    [projectRootPath],
+  )
+
   const activeTab = tabs.find((tab) => tab.path === activePath)
   const explorerVisible = !narrow || explorerOpen
+  // A picture-only file always previews; a text-based image (SVG) previews only when asked, so its
+  // source stays editable.
+  const showsMedia = Boolean(activeTab?.mediaType) && (activeTab?.binary || activeTab?.viewAsMedia === true)
+  const canToggleMediaView = Boolean(activeTab?.mediaType) && activeTab?.binary === false
 
   return (
     <div className={`code-surface ${narrow ? 'is-narrow' : ''}`} ref={surfaceRef}>
@@ -181,6 +208,16 @@ export function CodeSurface({ projectId, projectRootPath, workspaceId, active }:
           )}
           <EditorTabs onCloseTab={closeTab} />
           <div className="code-editor-actions">
+            {canToggleMediaView && activeTab && (
+              <button
+                title={showsMedia ? 'Show source' : 'Show preview'}
+                aria-label={showsMedia ? 'Show source' : 'Show preview'}
+                aria-pressed={showsMedia}
+                onClick={() => toggleMediaView(activeTab.path)}
+              >
+                {showsMedia ? <Code2 size={14} /> : <ImageIcon size={14} />}
+              </button>
+            )}
             <button title="Save (Ctrl+S)" aria-label="Save file" disabled={!activeTab || !isDirty(activeTab)} onClick={() => activeTab && void save(activeTab.path)}><Save size={14} /></button>
             <button title="Save all (Ctrl+Shift+S)" aria-label="Save all files" disabled={!tabs.some(isDirty)} onClick={() => void saveAll()}><SaveAll size={14} /></button>
           </div>
@@ -197,6 +234,20 @@ export function CodeSurface({ projectId, projectRootPath, workspaceId, active }:
             <div className="code-editor-message">
               <ErrorNotice message={activeTab.errorMessage ?? 'This file could not be opened.'} onRetry={() => void openFile(activeTab.path)} />
             </div>
+          ) : showsMedia ? (
+            <>
+              {openError && <div className="code-editor-message inline"><ErrorNotice message={openError} /></div>}
+              <Suspense fallback={<div className="code-editor-loading" aria-label="Loading preview" />}>
+                <MediaPreviewPane
+                  projectId={projectId}
+                  path={activeTab.path}
+                  mediaType={activeTab.mediaType ?? ''}
+                  sha256={activeTab.sha256}
+                  size={activeTab.size}
+                  onOpenExternally={() => openExternally(activeTab.path)}
+                />
+              </Suspense>
+            </>
           ) : activeTab.binary ? (
             <div className="code-editor-message"><FileX2 size={28} /><p>This is a binary file and cannot be shown in the text editor.</p></div>
           ) : (
@@ -233,7 +284,14 @@ export function CodeSurface({ projectId, projectRootPath, workspaceId, active }:
         </div>
 
         <div className="code-statusbar">
-          {activeTab && activeTab.status === 'ready' && !activeTab.binary && (
+          {activeTab && activeTab.status === 'ready' && showsMedia && (
+            <>
+              <span>{activeTab.mediaType}</span>
+              <span>{formatBytes(activeTab.size)}</span>
+              <span className="code-status-flag">Preview</span>
+            </>
+          )}
+          {activeTab && activeTab.status === 'ready' && !showsMedia && !activeTab.binary && (
             <>
               <span>Ln {cursor.line}, Col {cursor.column}</span>
               <span>{lineEndingLabel(activeTab.lineEnding)}</span>

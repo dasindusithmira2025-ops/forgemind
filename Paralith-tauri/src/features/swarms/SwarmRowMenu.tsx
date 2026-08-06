@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { confirm as confirmDialog, save } from '@tauri-apps/plugin-dialog'
+import { save } from '@tauri-apps/plugin-dialog'
+import { confirm } from '../../components/ui/confirm'
 import { Archive, Copy, Download, MoreHorizontal, Pause, Pencil, Play, RotateCcw, Square, Trash2 } from 'lucide-react'
 import type { Swarm, SwarmListItem } from '../../native/types'
 import { asNativeError, native } from '../../native/commands'
@@ -57,7 +58,7 @@ export function SwarmRowMenu({ item, onOpen, onCreated }: {
       <button role="menuitem" onClick={() => void run(() => exportReport(swarm))}><Download size={13} /> Export report</button>
       {canFollowUp ? <button role="menuitem" onClick={() => void run(async () => onCreated((await duplicateConfiguration(create, swarm, true)).id))}><RotateCcw size={13} /> Start follow-up Swarm</button> : null}
       {canArchive ? <button role="menuitem" onClick={() => void run(() => archive(swarm.id, true))}><Archive size={13} /> Archive</button> : null}
-      {canDelete ? <button role="menuitem" className="tone-red" onClick={() => void run(async () => { if (await confirmDialog(`Delete “${swarm.name}”? This removes its persisted Swarm history.`, { title: 'Delete Swarm', kind: 'warning' })) await remove(swarm.id) })}><Trash2 size={13} /> Delete</button> : null}
+      {canDelete ? <button role="menuitem" className="tone-red" onClick={() => void run(async () => { if (await confirm({ title: `Delete "${swarm.name}"?`, details: ['Its persisted swarm history is removed.', 'This cannot be undone.'], confirmLabel: 'Delete swarm', intent: 'danger' })) await remove(swarm.id) })}><Trash2 size={13} /> Delete</button> : null}
     </div> : null}
     {renameValue !== undefined ? <form className="swarm-rename-popover" aria-label="Rename Swarm" onSubmit={(event) => { event.preventDefault(); const name = renameValue.trim(); if (name) void run(() => rename(swarm.id, name)).then(() => setRenameValue(undefined)) }}>
       <label htmlFor={`swarm-rename-${swarm.id}`}>Swarm name</label>

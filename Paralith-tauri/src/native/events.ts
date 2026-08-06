@@ -1,5 +1,5 @@
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
-import type { AgentStateEvent, BrowserEvent, ProjectFileChangeBatch, ProviderUsageSnapshot, RemoteProjection, RepositoryApprovalRequest, RepositoryOperationEvent, RepositoryOperationRecord, RestorationProgress, SwarmChangedEvent, TerminalExitEvent, TerminalOutputEvent, TerminalStatusEvent } from './types'
+import type { AgentStateEvent, BrowserEvent, PaneRenamedEvent, ProjectFileChangeBatch, ProviderUsageSnapshot, RemoteProjection, RepositoryApprovalRequest, RepositoryOperationEvent, RepositoryOperationRecord, RestorationProgress, SwarmChangedEvent, TerminalExitEvent, TerminalOutputEvent, TerminalStatusEvent } from './types'
 
 type TerminalOutputWireEvent = Omit<TerminalOutputEvent, 'data'> & { data: string }
 
@@ -14,6 +14,11 @@ export const onTerminalStatus = (handler: (event: TerminalStatusEvent) => void):
 
 export const onAgentState = (handler: (event: AgentStateEvent) => void): Promise<UnlistenFn> =>
   listen<AgentStateEvent>('agent-state', (event) => handler(event.payload))
+
+/** A Pane was retitled by the backend. Reaches whichever window owns the Workspace, so a Pane
+ *  renamed by a task shows its new title in the main window and in a detached one alike. */
+export const onPaneRenamed = (handler: (event: PaneRenamedEvent) => void): Promise<UnlistenFn> =>
+  listen<PaneRenamedEvent>('pane-renamed', (event) => handler(event.payload))
 
 export const onRestorationProgress = (handler: (event: RestorationProgress) => void): Promise<UnlistenFn> =>
   listen<RestorationProgress>('restoration-progress', (event) => handler(event.payload))

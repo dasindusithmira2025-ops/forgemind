@@ -6,6 +6,7 @@ import { AlertTriangle, ArrowLeft, CheckCircle2, Copy, Download, FolderOpen, Ref
 import { Brand } from '../components/ui/Brand'
 import { Button } from '../components/ui/Button'
 import { ErrorNotice } from '../components/ui/ErrorNotice'
+import { confirm } from '../components/ui/confirm'
 import { TextPromptDialog } from '../components/ui/TextPromptDialog'
 import { asNativeError, native } from '../native/commands'
 import type { AgentProfile, AgentProvider, AppSettings, DiagnosticsSnapshot, SafeRestartClientState, ShellProfile } from '../native/types'
@@ -147,13 +148,23 @@ export function SettingsScreen() {
   }
   const installNow = async () => {
     const client = restartClientState()
-    await updateNow(client, (next) => window.confirm(`PARALITH must safely stop active work before updating.\n\n${next.blockers.join('\n')}\n\nAgents and Swarms will checkpoint, terminals will stop, and your workspace layout will be restored after restart.\n\nUpdate now?`))
+    await updateNow(client, (next) => confirm({
+      title: 'Update and restart now?',
+      body: 'PARALITH stops active work safely before updating.',
+      details: [...next.blockers, 'Agents and Swarms checkpoint first.', 'Terminals stop.', 'Your workspace layout is restored after restart.'],
+      confirmLabel: 'Update now',
+    }))
     const controller = useUpdateController.getState()
     if (controller.error) setError(controller.error)
   }
   const installOnExit = async () => {
     const client = restartClientState()
-    await scheduleUpdate(client, (next) => window.confirm(`PARALITH will install only after active work is safely stopped.\n\n${next.blockers.join('\n')}\n\nSchedule this update?`))
+    await scheduleUpdate(client, (next) => confirm({
+      title: 'Install this update on exit?',
+      body: 'PARALITH installs only after active work is safely stopped.',
+      details: next.blockers,
+      confirmLabel: 'Schedule update',
+    }))
     const controller = useUpdateController.getState()
     if (controller.error) setError(controller.error)
     else if (controller.status?.journal.installOnExit) setStatus('Verified update will install when PARALITH exits')
@@ -186,6 +197,7 @@ export function SettingsScreen() {
           <Toggle label="Copy on select" checked={settings.copyOnSelect} onChange={(value) => update('copyOnSelect', value)} />
           <Toggle label="Warn before multiline paste" checked={settings.confirmMultilinePaste} onChange={(value) => update('confirmMultilinePaste', value)} />
           <Toggle label="Confirm before closing a running Pane" checked={settings.confirmClosePane} onChange={(value) => update('confirmClosePane', value)} />
+          <Toggle label="Name agent Panes after the task sent to them" checked={settings.autoRenameAgentTerminals} onChange={(value) => update('autoRenameAgentTerminals', value)} />
           <SettingRow label="Output log retention"><select aria-label="Output log retention" value={settings.outputLogRetention} onChange={(event) => update('outputLogRetention', event.target.value as AppSettings['outputLogRetention'])}><option value="tail_only">Bounded tail only</option><option value="rotating_log">Rotating native log</option></select></SettingRow>
           <SettingRow label="Restoration launch budget" detail="Maximum Panes started in the initial restore batch."><input aria-label="Restoration launch budget" type="number" min="1" max="8" value={settings.restorationLaunchBudget} onChange={(event) => update('restorationLaunchBudget', clamp(Number(event.target.value), 1, 8))} /></SettingRow>
           <SettingRow label="Custom shell"><Button onClick={async () => { const selected = await open({ directory: false, multiple: false, title: 'Locate custom shell executable' }); if (selected && !Array.isArray(selected)) setCustomShellPath(selected) }}>Add custom shell</Button></SettingRow>

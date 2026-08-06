@@ -278,6 +278,10 @@ export const native = {
     invoke<DirectoryListing>('list_project_directory', { projectId, relativePath }),
   readProjectFile: (projectId: string, relativePath: string) =>
     invoke<FileContents>('read_project_file', { projectId, relativePath }),
+  /** Raw bytes of a previewable image/PDF. Returned as a binary IPC response, so the result is an
+   * ArrayBuffer (a number array on the postMessage IPC path) rather than JSON. */
+  readProjectMedia: (projectId: string, relativePath: string) =>
+    invoke<ArrayBuffer | Uint8Array | number[]>('read_project_media', { projectId, relativePath }),
   writeProjectFile: (projectId: string, relativePath: string, content: string, expectedSha256?: string) =>
     invoke<FileWriteResult>('write_project_file', { projectId, relativePath, content, expectedSha256 }),
   createProjectFile: (projectId: string, relativePath: string) =>

@@ -22,6 +22,13 @@ export interface EditorTab {
   encoding: FileEncoding
   lineEnding: LineEnding
   binary: boolean
+  /** Size on disk in bytes, as of the last read. Shown for previews, which have no line/column. */
+  size: number
+  /** MIME type when this file can be previewed as an image or PDF instead of decoded text. */
+  mediaType?: string
+  /** Text media (an SVG) rendered as a picture rather than as its source. Binary media has no
+   * source view, so this flag is only meaningful for a file that also has text content. */
+  viewAsMedia?: boolean
   readonly: boolean
   saving: boolean
   saveError?: { code: string; message: string }
@@ -69,6 +76,7 @@ export interface CodeSurfaceState {
   setExplorerWidth: (width: number) => void
   setQuickOpen: (open: boolean) => void
   setComparing: (path?: string) => void
+  toggleMediaView: (path: string) => void
   dirtyPaths: () => string[]
 }
 
@@ -202,6 +210,7 @@ export const useEditorStore = create<CodeSurfaceState>((set, get) => {
           encoding: 'utf8',
           lineEnding: 'lf',
           binary: false,
+          size: 0,
           readonly: false,
           saving: false,
           preview,
@@ -218,6 +227,10 @@ export const useEditorStore = create<CodeSurfaceState>((set, get) => {
           encoding: file.encoding,
           lineEnding: file.lineEnding,
           binary: file.binary,
+          size: file.size,
+          mediaType: file.mediaType ?? undefined,
+          // Text media opens as source; a picture-only file has nothing else to show.
+          viewAsMedia: file.binary && Boolean(file.mediaType),
           readonly: file.readonly,
         })
       } catch (caught) {
@@ -351,6 +364,7 @@ export const useEditorStore = create<CodeSurfaceState>((set, get) => {
           binary: file.binary,
           encoding: file.encoding,
           lineEnding: file.lineEnding,
+          mediaType: file.mediaType ?? undefined,
           incoming: undefined,
           reloadedAt: Date.now(),
         })
@@ -405,6 +419,14 @@ export const useEditorStore = create<CodeSurfaceState>((set, get) => {
 
     setQuickOpen: (open) => set({ quickOpen: open }),
     setComparing: (path) => set({ comparing: path }),
+
+    toggleMediaView: (path) => {
+      const tab = get().tabs.find((item) => item.path === path)
+      // Binary media has no source view to switch back to, so the toggle is a no-op there.
+      if (!tab?.mediaType || tab.binary) return
+      patchTab(path, { viewAsMedia: !tab.viewAsMedia })
+    },
+
     dirtyPaths: () => get().tabs.filter(isDirty).map((tab) => tab.path),
   }
 })

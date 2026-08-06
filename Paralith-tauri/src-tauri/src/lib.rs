@@ -542,6 +542,7 @@ pub fn run() {
             commands::create_isolated_pane_worktree,
             commands::list_project_directory,
             commands::read_project_file,
+            commands::read_project_media,
             commands::write_project_file,
             commands::create_project_file,
             commands::create_project_directory,

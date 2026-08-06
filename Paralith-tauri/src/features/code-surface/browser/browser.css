@@ -36,7 +36,7 @@
   transition: color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out);
 }
 .browser-navbar button:hover:not(:disabled) { color: var(--text); background: var(--surface-hover); }
-.browser-navbar button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.browser-navbar button:focus-visible { outline: var(--focus-outline); outline-offset: -2px; }
 .browser-navbar button:disabled { opacity: .4; cursor: default; }
 .browser-stop { color: var(--danger, var(--text)) !important; }
 
@@ -294,7 +294,7 @@
   border-radius: var(--radius-sm);
   font-size: var(--text-sm);
 }
-.browser-selection-send input:focus { outline: none; border-color: var(--accent); }
+.browser-selection-send input:focus { outline: none; border-color: var(--accent); box-shadow: var(--focus-shadow); }
 .browser-send {
   display: inline-flex;
   align-items: center;
