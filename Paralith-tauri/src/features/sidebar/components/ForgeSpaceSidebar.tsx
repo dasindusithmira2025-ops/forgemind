@@ -1,11 +1,11 @@
 import { useCallback, useMemo, useRef } from 'react'
 import { useSwarmStore } from '../../swarms/swarmStore'
-import { matchesSidebarFilter } from '../sidebarSelectors'
 import { useSidebarStore } from '../sidebarStore'
+import { useSidebarPresentation } from '../useSidebarPresentation'
 import type { ForgeSpaceSidebarProps, SidebarProjectGroup } from '../sidebarTypes'
 import { SidebarNav } from './SidebarNav'
 import { SidebarListHeader } from './SidebarListHeader'
-import { SidebarFilter, MIN_ROWS_FOR_FILTER } from './SidebarFilter'
+import { SidebarFilter } from './SidebarFilter'
 import { SwarmsSidebarSection } from '../../swarms/SwarmsSidebarSection'
 import { WorkspaceListSection } from './WorkspaceListSection'
 import { WorkspacesOtherMonitorsSection } from './WorkspacesOtherMonitorsSection'
@@ -49,7 +49,6 @@ export function ForgeSpaceSidebar(props: ForgeSpaceSidebarProps) {
   const draftWidth = useSidebarStore((state) => state.draftWidth)
   const diagnosticsOpen = useSidebarStore((state) => state.diagnosticsOpen)
   const setDiagnostics = useSidebarStore((state) => state.setDiagnosticsOpen)
-  const filterQuery = useSidebarStore((state) => state.filterQuery)
   const bodyRef = useRef<HTMLDivElement>(null)
   // Read purely for the filter's row threshold and match total; the Swarms section owns its own
   // loading, subscription, and rendering.
@@ -66,42 +65,21 @@ export function ForgeSpaceSidebar(props: ForgeSpaceSidebarProps) {
   const activeWorkspaceName =
     workspaces.find((entry) => entry.workspace.id === activeWorkspaceId)?.workspace.name ?? 'None'
 
-  // Split this window's Workspaces from those detached onto other monitors. Placements are
-  // authoritative (from the Rust registry); when absent (default) every Workspace is attached.
-  const detachedIds = new Set(placements.filter((item) => item.mode === 'detached').map((item) => item.workspaceId))
-
   // A caller that doesn't supply grouped data (the detached window, tests) still gets a working
   // list: one group holding the active Project's attached Workspaces.
-  const listGroups: SidebarProjectGroup[] = useMemo(() => {
-    const source: SidebarProjectGroup[] = groups?.length
-      ? groups
-      : [{ project, isActive: true, folderMissing: projectFolderMissing, workspaces }]
-    // Detached Workspaces have their own section; showing them in both would double-count.
-    return source
-      .map((group) => ({
-        ...group,
-        workspaces: group.workspaces.filter((entry) => !detachedIds.has(entry.workspace.id)),
-      }))
-      .filter((group) => group.workspaces.length > 0 || group.isActive)
-    // `detachedIds` is derived from `placements` each render; depend on the source instead.
-    // oxlint-disable-next-line react-hooks/exhaustive-deps
-  }, [groups, project, projectFolderMissing, workspaces, placements])
-
-  const detachedWorkspaces = workspaces.filter((entry) => detachedIds.has(entry.workspace.id))
-  const visibleDetached = detachedWorkspaces.filter((entry) =>
-    matchesSidebarFilter(filterQuery, entry.workspace.name, entry.providers.text),
+  const sourceGroups: SidebarProjectGroup[] = useMemo(
+    () =>
+      groups?.length
+        ? groups
+        : [{ project, isActive: true, folderMissing: projectFolderMissing, workspaces }],
+    [groups, project, projectFolderMissing, workspaces],
   )
 
-  // One filter over both primary lists, so the field can report a single honest match total.
-  const listWorkspaces = listGroups.flatMap((group) => group.workspaces)
-  const visibleListCount = listWorkspaces.filter((entry) =>
-    matchesSidebarFilter(filterQuery, entry.workspace.name, entry.providers.text),
-  ).length
-  const swarmList = swarms ?? []
-  const visibleSwarmCount = swarmList.filter((item) => matchesSidebarFilter(filterQuery, item.swarm.name)).length
-  const totalRows = listWorkspaces.length + detachedWorkspaces.length + swarmList.length
-  const showFilter = totalRows >= MIN_ROWS_FOR_FILTER
-  const matchCount = visibleListCount + visibleDetached.length + visibleSwarmCount
+  const swarmNames = useMemo(() => (swarms ?? []).map((item) => item.swarm.name), [swarms])
+
+  // Every question about what this sidebar shows — the detached split, the filter, the order, the
+  // counts — is answered once, here. Nothing below this line derives anything.
+  const presentation = useSidebarPresentation(sourceGroups, placements, swarmNames)
 
   const effectiveWidth = collapsed ? undefined : (draftWidth ?? width)
 
@@ -130,20 +108,20 @@ export function ForgeSpaceSidebar(props: ForgeSpaceSidebarProps) {
         <>
           <SidebarNav actions={actions} />
           <SidebarListHeader openProjects={currentProjects} recents={props.recents} actions={actions} />
-          {showFilter && <SidebarFilter resultCount={matchCount} />}
+          {presentation.showFilter && <SidebarFilter resultCount={presentation.matchCount} />}
           <div className="sidebar-body" ref={bodyRef}>
             <WorkspaceListSection
-              groups={listGroups}
+              presentation={presentation}
               activeWorkspaceId={activeWorkspaceId}
               switchingWorkspaceId={switchingWorkspaceId}
               loading={loadingWorkspaces}
               actions={actions}
             />
             <SwarmsSidebarSection projectId={project.id} />
-            {detachedWorkspaces.length > 0 && (
+            {presentation.detached.length > 0 && (
               <WorkspacesOtherMonitorsSection
-                workspaces={detachedWorkspaces}
-                visibleWorkspaces={visibleDetached}
+                workspaces={presentation.detached}
+                visibleWorkspaces={presentation.visibleDetached}
                 placements={placements}
                 monitors={monitors}
                 actions={actions}

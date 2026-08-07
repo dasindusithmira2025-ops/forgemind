@@ -14,6 +14,7 @@ import type {
   ProjectOverview,
   RecentWorkspace,
   ShellProfile,
+  SidebarPreferences,
   SplitDirection,
   TerminalSession,
   RestorationResult,
@@ -168,6 +169,11 @@ export const native = {
   getThemePreference: () => invoke<string>('get_theme_preference'),
   /** Persist the selected theme id and broadcast a `theme-changed` event to every window. Main window only. */
   setThemePreference: (themeId: string) => invoke<void>('set_theme_preference', { themeId }),
+  /** Read the sidebar's persisted view preferences. Callable from any window. */
+  getSidebarPreferences: () => invoke<SidebarPreferences>('get_sidebar_preferences'),
+  /** Persist sidebar view preferences and broadcast `sidebar-preferences-changed` to every window. */
+  setSidebarPreferences: (preferences: SidebarPreferences) =>
+    invoke<void>('set_sidebar_preferences', { preferences }),
   /**
    * Paint the OS-drawn window frame (caption fill, caption text, border) from the active theme.
    * CSS cannot reach the frame, so without this the caption keeps the system accent colour.

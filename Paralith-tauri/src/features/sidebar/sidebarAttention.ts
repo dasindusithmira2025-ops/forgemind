@@ -48,10 +48,24 @@ export function compareByAttention(
 ): number {
   const classDelta = attentionClass(a.runtime.status) - attentionClass(b.runtime.status)
   if (classDelta !== 0) return classDelta
+  // Oldest first among Workspaces that are actually blocked on a person: the one that has been
+  // waiting longest is the one that has been ignored longest. This is the opposite of the recency
+  // rule below, and deliberately so — recency answers "what was I just doing", which is the wrong
+  // question once something is stuck waiting for you.
+  const waitDelta = compareAttentionSince(a.runtime.attentionSince, b.runtime.attentionSince)
+  if (waitDelta !== 0) return waitDelta
   // Newest first: within one class, the Workspace touched most recently is the likelier target.
   const recency = b.workspace.lastOpenedAt.localeCompare(a.workspace.lastOpenedAt)
   if (recency !== 0) return recency
   return indexOf(a) - indexOf(b)
+}
+
+/** Order two optional wait timestamps: waiting sorts ahead of not waiting, oldest wait first. */
+function compareAttentionSince(a?: string, b?: string): number {
+  if (a && b) return a.localeCompare(b)
+  if (a) return -1
+  if (b) return 1
+  return 0
 }
 
 /**

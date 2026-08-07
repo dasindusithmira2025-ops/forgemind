@@ -6,6 +6,17 @@ pub struct AppSettings {
     pub sidebar_open: bool,
     #[serde(default = "default_sidebar_width")]
     pub sidebar_width: u16,
+    /// How the sidebar's primary list is grouped: "project" or "flat".
+    #[serde(default = "default_sidebar_group_by")]
+    pub sidebar_group_by: String,
+    /// How the sidebar's primary list is ordered: "manual" or "attention".
+    #[serde(default = "default_sidebar_sort_mode")]
+    pub sidebar_sort_mode: String,
+    /// Ids of the sidebar sections the user has collapsed. A list rather than a map of every
+    /// section's state: only the collapsed ones are worth persisting, and a section that no longer
+    /// exists then costs one stale string instead of surviving as a permanent `false`.
+    #[serde(default)]
+    pub sidebar_collapsed_groups: Vec<String>,
     pub ui_scale: f64,
     #[serde(default = "default_ui_density")]
     pub ui_density: String,
@@ -46,6 +57,9 @@ impl Default for AppSettings {
         Self {
             sidebar_open: true,
             sidebar_width: default_sidebar_width(),
+            sidebar_group_by: default_sidebar_group_by(),
+            sidebar_sort_mode: default_sidebar_sort_mode(),
+            sidebar_collapsed_groups: Vec::new(),
             ui_scale: 1.0,
             ui_density: default_ui_density(),
             theme_id: default_theme_id(),
@@ -86,6 +100,48 @@ fn default_sidebar_width() -> u16 {
 /// which matches the pre-density chrome metrics.
 fn default_ui_density() -> String {
     "standard".into()
+}
+
+/// One collapsible section per open Project — the grouping the sidebar was designed around.
+fn default_sidebar_group_by() -> String {
+    "project".into()
+}
+
+/// The persisted drag order. Never re-sort a list the user arranged by hand without being asked.
+fn default_sidebar_sort_mode() -> String {
+    "manual".into()
+}
+
+/// A hard ceiling on persisted collapsed-section ids, so a runaway writer cannot grow the settings
+/// blob without bound. Far above any plausible number of open Projects and sections.
+pub const MAX_SIDEBAR_COLLAPSED_GROUPS: usize = 256;
+
+/// The longest a section id may be. Section ids are `project:<uuid>`-shaped and app-generated.
+pub const MAX_SIDEBAR_GROUP_ID_LEN: usize = 128;
+
+/// The subset of settings the sidebar owns, readable and writable from any window.
+///
+/// Split out from `AppSettings` because that is main-window-only: it carries executable paths and
+/// restoration policy, which a detached workspace window has no business reading or writing. These
+/// three are pure view state, and every window that draws a sidebar needs them.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SidebarPreferences {
+    pub group_by: String,
+    pub sort_mode: String,
+    pub collapsed_groups: Vec<String>,
+}
+
+/// Whether a sidebar preference payload is within the supported shape. Same rules the full
+/// `save_settings` validation applies, so the two entry points cannot persist different things.
+pub fn sidebar_preferences_are_acceptable(preferences: &SidebarPreferences) -> bool {
+    matches!(preferences.group_by.as_str(), "project" | "flat")
+        && matches!(preferences.sort_mode.as_str(), "manual" | "attention")
+        && preferences.collapsed_groups.len() <= MAX_SIDEBAR_COLLAPSED_GROUPS
+        && preferences
+            .collapsed_groups
+            .iter()
+            .all(|id| !id.is_empty() && id.len() <= MAX_SIDEBAR_GROUP_ID_LEN)
 }
 
 /// Automatic Pane titles are on by default: a Workspace of agents that all read "Claude Code" is
@@ -134,5 +190,63 @@ mod tests {
         assert_eq!(parsed.theme_id, "paralith-dark");
         // Existing installations opt in to automatic Pane titles, same as a fresh one.
         assert!(parsed.auto_rename_agent_terminals);
+        // Sidebar view state moved here from renderer-local storage; an installation that predates
+        // the move must load with the same defaults a fresh one gets, not fail to deserialize.
+        assert_eq!(parsed.sidebar_group_by, "project");
+        assert_eq!(parsed.sidebar_sort_mode, "manual");
+        assert!(parsed.sidebar_collapsed_groups.is_empty());
+    }
+
+    fn preferences(group_by: &str, sort_mode: &str, collapsed: Vec<String>) -> SidebarPreferences {
+        SidebarPreferences {
+            group_by: group_by.into(),
+            sort_mode: sort_mode.into(),
+            collapsed_groups: collapsed,
+        }
+    }
+
+    #[test]
+    fn sidebar_preferences_accept_the_supported_modes() {
+        assert!(sidebar_preferences_are_acceptable(&preferences(
+            "project",
+            "manual",
+            vec![]
+        )));
+        assert!(sidebar_preferences_are_acceptable(&preferences(
+            "flat",
+            "attention",
+            vec!["project:abc".into(), "workspaces".into()]
+        )));
+    }
+
+    #[test]
+    fn sidebar_preferences_reject_unknown_modes() {
+        assert!(!sidebar_preferences_are_acceptable(&preferences(
+            "tree",
+            "manual",
+            vec![]
+        )));
+        assert!(!sidebar_preferences_are_acceptable(&preferences(
+            "project",
+            "smart",
+            vec![]
+        )));
+    }
+
+    #[test]
+    fn sidebar_preferences_reject_unbounded_collapsed_groups() {
+        let too_many = vec!["project:a".to_string(); MAX_SIDEBAR_COLLAPSED_GROUPS + 1];
+        assert!(!sidebar_preferences_are_acceptable(&preferences(
+            "project", "manual", too_many
+        )));
+        let too_long = vec!["x".repeat(MAX_SIDEBAR_GROUP_ID_LEN + 1)];
+        assert!(!sidebar_preferences_are_acceptable(&preferences(
+            "project", "manual", too_long
+        )));
+        assert!(!sidebar_preferences_are_acceptable(&preferences(
+            "project",
+            "manual",
+            vec![String::new()]
+        )));
     }
 }
