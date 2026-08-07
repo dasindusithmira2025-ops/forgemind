@@ -1,4 +1,5 @@
 import type { MonitorInfo, Project, RecentWorkspace, TerminalSession, Workspace, WorkspacePlacement } from '../../native/types'
+import type { PaneAgentState } from './sidebarAgentStatus'
 
 /**
  * The canonical runtime state of one Workspace, derived from real Terminal Sessions rather
@@ -18,6 +19,7 @@ export interface WorkspaceRuntimeSummary {
   workspaceId: string
   configuredPaneCount: number
   startingCount: number
+  /** Running Panes that are *not* blocked on a human; `waitingCount` holds those separately. */
   runningCount: number
   waitingCount: number
   exitedCount: number
@@ -27,6 +29,11 @@ export interface WorkspaceRuntimeSummary {
   activeProviders: string[]
   status: WorkspaceRuntimeStatus
   requiresAttention: boolean
+  /**
+   * When this Workspace's longest-waiting Pane started waiting, if any is. Orders Workspaces
+   * inside the same attention class so the one ignored longest sorts first.
+   */
+  attentionSince?: string
   updatedAt: string
 }
 
@@ -81,6 +88,12 @@ export interface RuntimeDerivationInput {
   deferredPaneIds?: string[]
   stopping?: boolean
   updatedAt?: string
+  /**
+   * This Workspace's resolved per-Pane agent states. Supplied already resolved (rather than as raw
+   * events plus a clock) so the derivation stays a pure function of its inputs. Omitting it yields
+   * the Session-only view — correct, just blind to Panes that are blocked on a human.
+   */
+  paneAgentStates?: PaneAgentState[]
 }
 
 /**

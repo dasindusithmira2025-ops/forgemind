@@ -1,9 +1,8 @@
 import { useCallback } from 'react'
 import { AlertTriangle, Plus } from 'lucide-react'
-import { sortByAttention } from '../sidebarAttention'
-import { matchesSidebarFilter } from '../sidebarSelectors'
+import type { PresentedGroup, SidebarPresentation } from '../sidebarModel'
 import { useSidebarStore } from '../sidebarStore'
-import type { SidebarActions, SidebarProjectGroup, SidebarWorkspace } from '../sidebarTypes'
+import type { SidebarActions, SidebarWorkspace } from '../sidebarTypes'
 import { SidebarGroup } from './SidebarGroup'
 import { WorkspaceContextMenu } from './WorkspaceContextMenu'
 import { WorkspaceRow } from './WorkspaceRow'
@@ -21,31 +20,29 @@ import { WorkspaceRow } from './WorkspaceRow'
  *   `project` — a collapsible section per Project, each with its own count and create action
  *   `flat`    — one list, each row naming its Project
  *
- * Reordering stays deliberately narrow. A drop index is only meaningful inside one Project's
- * persisted order, so dragging is offered only in the Project grouping, only in manual order,
- * only when no filter is hiding rows the drop would silently jump.
+ * This component holds no derivation. Which rows survive the filter, what order they are in, and
+ * which groups drop out entirely are decided by `buildSidebarPresentation` and arrive finished —
+ * so the list and the counts describing it can never disagree.
  */
 export function WorkspaceListSection({
-  groups,
+  presentation,
   activeWorkspaceId,
   switchingWorkspaceId,
   loading,
   actions,
 }: {
-  groups: SidebarProjectGroup[]
+  presentation: SidebarPresentation
   activeWorkspaceId: string
   switchingWorkspaceId?: string
   loading?: boolean
   actions: SidebarActions
 }) {
   const groupBy = useSidebarStore((state) => state.groupBy)
-  const filterQuery = useSidebarStore((state) => state.filterQuery)
   const menuWorkspaceId = useSidebarStore((state) => state.menuWorkspaceId)
   const menuAnchor = useSidebarStore((state) => state.menuAnchor)
   const setMenu = useSidebarStore((state) => state.setMenuWorkspace)
-  const filtering = filterQuery.trim().length > 0
 
-  const totalWorkspaces = groups.reduce((sum, group) => sum + group.workspaces.length, 0)
+  const totalWorkspaces = presentation.flat.totalCount
 
   if (loading && totalWorkspaces === 0) {
     return (
@@ -72,18 +69,23 @@ export function WorkspaceListSection({
   return (
     <>
       {groupBy === 'project' ? (
-        groups.map((group) => (
-          <ProjectGroup
-            key={group.project.id}
-            group={group}
-            activeWorkspaceId={activeWorkspaceId}
-            switchingWorkspaceId={switchingWorkspaceId}
-            actions={actions}
-          />
-        ))
+        presentation.groups
+          .filter((group) => !group.hidden)
+          .map((group) => (
+            <ProjectGroup
+              key={group.project.id}
+              group={group}
+              filtering={presentation.filtering}
+              activeWorkspaceId={activeWorkspaceId}
+              switchingWorkspaceId={switchingWorkspaceId}
+              actions={actions}
+            />
+          ))
       ) : (
         <FlatList
-          groups={groups}
+          group={presentation.flat}
+          filtering={presentation.filtering}
+          projectNameById={presentation.groups.length > 1 ? presentation.projectNameById : undefined}
           activeWorkspaceId={activeWorkspaceId}
           switchingWorkspaceId={switchingWorkspaceId}
           actions={actions}
@@ -102,7 +104,9 @@ export function WorkspaceListSection({
       {/* Only the Project grouping needs this: it drops non-matching groups entirely, so with no
           match anywhere the list would otherwise render nothing at all. The flat list already
           says so inside its own single group. */}
-      {groupBy === 'project' && filtering && <FilterFallback groups={groups} filterQuery={filterQuery} />}
+      {groupBy === 'project' && presentation.filtering && !presentation.anyMatch && (
+        <p className="sb-no-match">No Workspace matches the filter.</p>
+      )}
     </>
   )
 }
@@ -110,34 +114,25 @@ export function WorkspaceListSection({
 /** One open Project and its Workspaces. */
 function ProjectGroup({
   group,
+  filtering,
   activeWorkspaceId,
   switchingWorkspaceId,
   actions,
 }: {
-  group: SidebarProjectGroup
+  group: PresentedGroup
+  filtering: boolean
   activeWorkspaceId: string
   switchingWorkspaceId?: string
   actions: SidebarActions
 }) {
-  const sortMode = useSidebarStore((state) => state.sortMode)
-  const filterQuery = useSidebarStore((state) => state.filterQuery)
-  const filtering = filterQuery.trim().length > 0
-
-  const visible = presentWorkspaces(group.workspaces, filterQuery, sortMode)
-  // A Project whose every Workspace is filtered out drops off the list entirely rather than
-  // leaving an empty header — the header would read as "this Project has nothing", not "nothing
-  // here matched".
-  if (filtering && visible.length === 0) return null
-
-  const reorderable = !filtering && sortMode === 'manual' && group.isActive
   const branch = group.project.gitBranch
 
   return (
     <SidebarGroup
-      id={`project:${group.project.id}`}
+      id={group.groupId}
       label={group.project.name}
       active={group.isActive}
-      count={filtering ? visible.length : group.workspaces.length}
+      count={filtering ? group.visibleCount : group.totalCount}
       forceExpanded={filtering}
       className="sb-project-group"
       meta={
@@ -165,15 +160,15 @@ function ProjectGroup({
         </button>
       }
     >
-      {group.workspaces.length === 0 ? (
+      {group.totalCount === 0 ? (
         <p className="sb-no-match">No Workspaces in this Project yet.</p>
       ) : (
         <WorkspaceRows
-          entries={visible}
-          orderSource={group.workspaces}
+          entries={group.workspaces}
+          orderSource={group.orderSource}
           activeWorkspaceId={activeWorkspaceId}
           switchingWorkspaceId={switchingWorkspaceId}
-          reorderable={reorderable}
+          reorderable={group.reorderable}
           actions={actions}
         />
       )}
@@ -183,46 +178,40 @@ function ProjectGroup({
 
 /** Every Workspace of every open Project in one ungrouped list. */
 function FlatList({
-  groups,
+  group,
+  filtering,
+  projectNameById,
   activeWorkspaceId,
   switchingWorkspaceId,
   actions,
 }: {
-  groups: SidebarProjectGroup[]
+  group: PresentedGroup
+  filtering: boolean
+  /** Only name the Project on a row when more than one is open; otherwise it repeats and says nothing. */
+  projectNameById?: Map<string, string>
   activeWorkspaceId: string
   switchingWorkspaceId?: string
   actions: SidebarActions
 }) {
-  const sortMode = useSidebarStore((state) => state.sortMode)
-  const filterQuery = useSidebarStore((state) => state.filterQuery)
-  const filtering = filterQuery.trim().length > 0
-  // Only name the Project on a row when more than one is open; with a single Project the label
-  // would repeat on every row and say nothing.
-  const showProjectName = groups.length > 1
-  const projectNameById = new Map(groups.map((group) => [group.project.id, group.project.name]))
-
-  const all = groups.flatMap((group) => group.workspaces)
-  const visible = presentWorkspaces(all, filterQuery, sortMode)
-
   return (
     <SidebarGroup
-      id="workspaces"
+      id={group.groupId}
       label="Workspaces"
-      count={filtering ? visible.length : all.length}
+      count={filtering ? group.visibleCount : group.totalCount}
       forceExpanded={filtering}
     >
-      {visible.length === 0 ? (
+      {group.workspaces.length === 0 ? (
         <p className="sb-no-match">No Workspace matches the filter.</p>
       ) : (
         <WorkspaceRows
-          entries={visible}
-          orderSource={all}
+          entries={group.workspaces}
+          orderSource={group.orderSource}
           activeWorkspaceId={activeWorkspaceId}
           switchingWorkspaceId={switchingWorkspaceId}
-          // The flat list mixes Projects, so a drop index has no single persisted order to
-          // write back to. Reordering stays in the Project grouping.
-          reorderable={false}
-          projectNameFor={showProjectName ? (entry) => projectNameById.get(entry.workspace.projectId) : undefined}
+          reorderable={group.reorderable}
+          projectNameFor={
+            projectNameById ? (entry) => projectNameById.get(entry.workspace.projectId) : undefined
+          }
           actions={actions}
         />
       )}
@@ -303,15 +292,6 @@ function WorkspaceRows({
   )
 }
 
-/** Shown when a filter matched nothing anywhere, so the list isn't silently empty. */
-function FilterFallback({ groups, filterQuery }: { groups: SidebarProjectGroup[]; filterQuery: string }) {
-  const anyMatch = groups.some((group) =>
-    group.workspaces.some((entry) => matchesSidebarFilter(filterQuery, entry.workspace.name, entry.providers.text)),
-  )
-  if (anyMatch) return null
-  return <p className="sb-no-match">No Workspace matches the filter.</p>
-}
-
 function WorkspaceSkeletons() {
   return (
     <ul className="ws-list" aria-hidden>
@@ -326,16 +306,4 @@ function WorkspaceSkeletons() {
       ))}
     </ul>
   )
-}
-
-/** Filter then order one Project's rows for display. Pure so the list stays testable. */
-function presentWorkspaces(
-  entries: SidebarWorkspace[],
-  filterQuery: string,
-  sortMode: 'manual' | 'attention',
-): SidebarWorkspace[] {
-  const matched = entries.filter((entry) =>
-    matchesSidebarFilter(filterQuery, entry.workspace.name, entry.providers.text),
-  )
-  return sortMode === 'attention' ? sortByAttention(matched) : matched
 }

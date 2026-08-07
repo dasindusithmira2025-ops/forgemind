@@ -653,9 +653,37 @@ export interface StartupStatus {
   previousInstallerUrl?: string
 }
 
+/**
+ * How the sidebar's primary list is grouped.
+ *   `project` — one collapsible section per open Project (the default).
+ *   `flat`    — every Workspace from every open Project in one ungrouped list.
+ */
+export type SidebarGroupBy = 'project' | 'flat'
+
+/**
+ * How the sidebar's primary list is ordered.
+ *   `manual`    — the persisted per-Project order the user drags into place (the default).
+ *   `attention` — Workspaces that need a human first.
+ */
+export type SidebarSortMode = 'manual' | 'attention'
+
+/**
+ * The sidebar's persisted view state. Split from `AppSettings` because that is main-window-only;
+ * these carry nothing privileged and every window that draws a sidebar needs them.
+ */
+export interface SidebarPreferences {
+  groupBy: SidebarGroupBy
+  sortMode: SidebarSortMode
+  /** Ids of the sections the user has collapsed. Only collapsed sections are persisted. */
+  collapsedGroups: string[]
+}
+
 export interface AppSettings {
   sidebarOpen: boolean
   sidebarWidth: number
+  sidebarGroupBy: SidebarGroupBy
+  sidebarSortMode: SidebarSortMode
+  sidebarCollapsedGroups: string[]
   uiScale: number
   uiDensity: 'comfortable' | 'standard' | 'compact'
   /** Selected appearance theme id (e.g. 'paralith-dark', 'system'). See src/theme. */

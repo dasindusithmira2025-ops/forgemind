@@ -4,7 +4,6 @@ import {
   deriveProviderSummary,
   deriveWorkspaceRuntimeSummary,
   groupRecentsByProject,
-  groupSessionsByWorkspace,
   runtimeStatusText,
 } from './sidebarSelectors'
 import { clampSidebarWidth } from './sidebarPreferences'
@@ -58,6 +57,81 @@ describe('deriveWorkspaceRuntimeSummary', () => {
     expect(summary.status).toBe('failed')
   })
 
+  it('is waiting when every running Pane is blocked on a person', () => {
+    // Waiting used to be unreachable: the count was hardcoded to zero, so a Workspace sitting at
+    // a permission prompt reported itself as happily active and never reached the attention sort.
+    const sessions = [session('a', 'running'), session('b', 'running')]
+    const summary = deriveWorkspaceRuntimeSummary({
+      ...base,
+      configuredPaneCount: 2,
+      sessions,
+      paneAgentStates: [
+        { paneId: 'a', attention: 'needs_you', attentionSince: '2026-08-07T10:00:00Z' },
+        { paneId: 'b', attention: 'needs_you', attentionSince: '2026-08-07T11:00:00Z' },
+      ],
+    })
+    expect(summary.status).toBe('waiting')
+    expect(summary.waitingCount).toBe(2)
+    expect(summary.runningCount).toBe(0)
+    expect(summary.requiresAttention).toBe(true)
+    expect(summary.attentionSince).toBe('2026-08-07T10:00:00Z')
+    expect(runtimeStatusText(summary)).toBe('2 waiting for input')
+  })
+
+  it('stays active when only some Panes are waiting, and counts them separately', () => {
+    const sessions = [session('a', 'running'), session('b', 'running')]
+    const summary = deriveWorkspaceRuntimeSummary({
+      ...base,
+      configuredPaneCount: 2,
+      sessions,
+      paneAgentStates: [{ paneId: 'a', attention: 'needs_you' }],
+    })
+    // Both Panes are live, so the Workspace is fully covered — waiting is not a gap in coverage.
+    expect(summary.status).toBe('active')
+    expect(summary.waitingCount).toBe(1)
+    expect(summary.runningCount).toBe(1)
+    expect(runtimeStatusText(summary)).toBe('1 running · 1 waiting')
+  })
+
+  it('does not count a waiting Pane whose terminal is not actually running', () => {
+    const sessions = [session('a', 'exited')]
+    const summary = deriveWorkspaceRuntimeSummary({
+      ...base,
+      configuredPaneCount: 1,
+      sessions,
+      paneAgentStates: [{ paneId: 'a', attention: 'needs_you' }],
+    })
+    expect(summary.waitingCount).toBe(0)
+    expect(summary.status).toBe('closed')
+  })
+
+  it('treats a Pane still restoring as starting rather than waiting', () => {
+    // A stale restoration lands in `starting`, so subtracting it from `running` would move a count
+    // out of a bucket it was never in.
+    const sessions = [session('a', 'running', { restorationState: 'stale' })]
+    const summary = deriveWorkspaceRuntimeSummary({
+      ...base,
+      configuredPaneCount: 1,
+      sessions,
+      paneAgentStates: [{ paneId: 'a', attention: 'needs_you' }],
+    })
+    expect(summary.status).toBe('starting')
+    expect(summary.waitingCount).toBe(0)
+    expect(summary.startingCount).toBe(1)
+  })
+
+  it('ignores agent states that are not blocking on a person', () => {
+    const sessions = [session('a', 'running')]
+    const summary = deriveWorkspaceRuntimeSummary({
+      ...base,
+      configuredPaneCount: 1,
+      sessions,
+      paneAgentStates: [{ paneId: 'a', attention: 'working' }],
+    })
+    expect(summary.waitingCount).toBe(0)
+    expect(summary.status).toBe('active')
+  })
+
   it('is starting while a session is still restoring', () => {
     const sessions = [session('a', 'running', { restorationState: 'stale' })]
     const summary = deriveWorkspaceRuntimeSummary({ ...base, configuredPaneCount: 1, sessions })
@@ -108,17 +182,6 @@ describe('deriveProviderSummary', () => {
     expect(summary.visible).toEqual(['Claude', 'Codex', 'OpenCode'])
     expect(summary.overflow).toBe(2)
     expect(summary.text).toBe('Claude · Codex · OpenCode · +2')
-  })
-})
-
-describe('groupSessionsByWorkspace', () => {
-  it('buckets sessions by workspace id', () => {
-    const grouped = groupSessionsByWorkspace([
-      session('a', 'running'),
-      session('b', 'running', { workspaceId: 'other' }),
-    ])
-    expect(grouped.get('w')).toHaveLength(1)
-    expect(grouped.get('other')).toHaveLength(1)
   })
 })
 
