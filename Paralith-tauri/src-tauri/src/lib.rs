@@ -586,6 +586,8 @@ pub fn run() {
             commands::save_settings,
             commands::get_theme_preference,
             commands::set_theme_preference,
+            commands::get_sidebar_preferences,
+            commands::set_sidebar_preferences,
             commands::apply_window_chrome,
             commands::list_swarm_presets,
             commands::list_swarm_runtime_readiness,

@@ -21,11 +21,14 @@ import { useAppStore } from '../stores/appStore'
 import { useSessionStore } from '../stores/sessionStore'
 import type { SidebarOpenProject } from '../features/sidebar/sidebarTypes'
 import { terminalRuntime, useWorkspaceSessions } from '../features/terminals/runtimeStore'
+import { onSidebarPreferencesChanged } from '../native/events'
 import { AppShell } from '../components/shell/AppShell'
 import { AiUsageStatusBar } from '../features/usage/AiUsageStatusBar'
 import { openAgentResumeCenter, WORKSPACE_CONFIGURATION_CHANGED } from '../features/agent-resume/events'
 import { ForgeSpaceSidebar } from '../features/sidebar/components/ForgeSpaceSidebar'
-import { deriveProviderSummary, deriveWorkspaceRuntimeSummary, groupSessionsByWorkspace } from '../features/sidebar/sidebarSelectors'
+import { deriveSidebarWorkspace } from '../features/sidebar/sidebarModel'
+import { resyncSidebarRuntime, startSidebarRuntime, useSidebarRuntime } from '../features/sidebar/sidebarRuntimeStore'
+import { hydrateSidebarPreferences, useSidebarStore } from '../features/sidebar/sidebarStore'
 import type { SidebarActions, SidebarProjectGroup, SidebarWorkspace } from '../features/sidebar/sidebarTypes'
 import { clampSidebarWidth } from '../features/sidebar/sidebarPreferences'
 import { WorkspaceCanvas, type RenderPaneContext } from '../features/workspace-canvas/components/WorkspaceCanvas'
@@ -82,7 +85,10 @@ export function WorkspaceScreen() {
   // Workspaces of the *other* open Projects, keyed by Project id. The active Project keeps its
   // own `projectWorkspaces` state because reorder/move write through it optimistically.
   const [workspacesByProject, setWorkspacesByProject] = useState<Record<string, Workspace[]>>({})
-  const [liveSessionsSnapshot, setLiveSessionsSnapshot] = useState<TerminalSession[]>([])
+  // The cross-workspace runtime view. Live for *every* open Project, not just the one on screen:
+  // the sidebar's rows span them all, and a row that only updates when its Project happens to be
+  // focused is a row that lies most of the time.
+  const sidebarRuntime = useSidebarRuntime()
   const [switchingWorkspaceId, setSwitchingWorkspaceId] = useState<string>()
   const [deferredPaneIds, setDeferredPaneIds] = useState<string[]>([])
   const [placements, setPlacements] = useState<WorkspacePlacement[]>([])
@@ -343,15 +349,14 @@ export function WorkspaceScreen() {
   const refreshWorkspaces = useCallback(async (currentProjectId?: string) => {
     const projectId = currentProjectId ?? project?.id
     // The sidebar list spans every open Project, so fetch the background Projects' Workspaces
-    // too. Their runtime comes from the same global live-session snapshot the active Project
-    // uses, so this adds one cheap catalog read per open Project and no extra subscriptions.
+    // too. Their runtime no longer comes from here at all — it is carried by events through the
+    // cross-workspace runtime view — so this is a catalog read only.
     const backgroundIds = openProjectSessions
       .map((session) => session.projectId)
       .filter((id) => id !== projectId)
     try {
-      const [recent, live, list, background] = await Promise.all([
+      const [recent, list, background] = await Promise.all([
         native.listRecentWorkspaces(),
-        native.listLiveSessions(),
         projectId ? native.listWorkspacesForProject(projectId) : Promise.resolve([] as Workspace[]),
         Promise.all(
           backgroundIds.map(async (id) =>
@@ -361,9 +366,11 @@ export function WorkspaceScreen() {
         ),
       ])
       setRecentWorkspaces(recent)
-      setLiveSessionsSnapshot(live)
       setProjectWorkspaces(list)
       setWorkspacesByProject(Object.fromEntries(background))
+      // Repair anything the runtime view missed while nothing was listening — a Session that died
+      // during a reload, or one belonging to a Project that was just opened.
+      void resyncSidebarRuntime().catch(() => undefined)
     } catch (caught) {
       setError(asNativeError(caught).message)
     }
@@ -389,6 +396,20 @@ export function WorkspaceScreen() {
   }, [refreshPlacements])
 
   useEffect(() => { void refreshWorkspaces(); void refreshPlacements() }, [refreshWorkspaces, refreshPlacements, workspaceId])
+
+  // Seed the cross-workspace runtime view once, so Sessions that were already running before this
+  // window existed are known without waiting for an event that will never arrive for them.
+  useEffect(() => { void startSidebarRuntime().catch(() => undefined) }, [])
+
+  // Sidebar view preferences live in the settings database, not in this renderer. Read them back
+  // on mount and follow the broadcast, so no window drifts from the persisted choice.
+  useEffect(() => {
+    void hydrateSidebarPreferences().catch(() => undefined)
+    const pending = onSidebarPreferencesChanged((preferences) => {
+      useSidebarStore.getState().applyPreferences(preferences)
+    })
+    return () => { void pending.then((unlisten) => unlisten()).catch(() => undefined) }
+  }, [])
 
   // ---- Multi-Project session (several Projects open at once in the main window) ------------
   // Register the focused Project as open+active and cache the other open Projects' metadata so
@@ -980,26 +1001,18 @@ export function WorkspaceScreen() {
     onCloseWorkspaceWindow: (id) => void runHandoff(id, 'close-window'),
   }), [switchWorkspace, openFresh, newWorkspace, renameWorkspaceById, reconfigureWorkspaceById, duplicateWorkspace, restartWorkspaceById, stopWorkspaceById, moveWorkspace, reorderWorkspaces, removeFromRecents, deleteWorkspaceById, openProjectFolder, locateFolder, refreshProject, navigate, toggleCollapse, commitSidebarWidth, openInNewWindow, runHandoff, focusOrReopen, selectProject, closeProject, openProjectFromSelection, revealProjectById, refreshProjectById, project])
 
-  const sidebarWorkspaces: SidebarWorkspace[] = useMemo(() => {
-    const grouped = groupSessionsByWorkspace(liveSessionsSnapshot)
-    return projectWorkspaces.map((item) => {
-      const isActive = item.id === workspaceId
-      const workspaceSessions = isActive ? sessions : (grouped.get(item.id) ?? [])
-      const runtime = deriveWorkspaceRuntimeSummary({
-        workspaceId: item.id,
-        configuredPaneCount: item.panes.length,
-        sessions: workspaceSessions,
-        deferredPaneIds: isActive ? deferredPaneIds : [],
-      })
-      return { workspace: item, runtime, providers: deriveProviderSummary(item) }
-    })
-  }, [projectWorkspaces, liveSessionsSnapshot, sessions, workspaceId, deferredPaneIds])
+  const sidebarWorkspaces: SidebarWorkspace[] = useMemo(
+    () =>
+      projectWorkspaces.map((item) =>
+        deriveSidebarWorkspace(item, sidebarRuntime, item.id === workspaceId ? deferredPaneIds : []),
+      ),
+    [projectWorkspaces, sidebarRuntime, workspaceId, deferredPaneIds],
+  )
 
   // Every open Project with its Workspaces — the grouped primary list. The active Project reuses
   // `sidebarWorkspaces` (which already folds in this screen's live sessions and deferred Panes);
   // background Projects derive purely from the global snapshot.
   const sidebarGroups: SidebarProjectGroup[] = useMemo(() => {
-    const grouped = groupSessionsByWorkspace(liveSessionsSnapshot)
     return openProjectSessions
       .map((session): SidebarProjectGroup | undefined => {
         const isCurrent = session.projectId === project?.id
@@ -1007,15 +1020,9 @@ export function WorkspaceScreen() {
         if (!meta) return undefined
         const workspaces = isCurrent
           ? sidebarWorkspaces
-          : (workspacesByProject[session.projectId] ?? []).map((item) => ({
-              workspace: item,
-              runtime: deriveWorkspaceRuntimeSummary({
-                workspaceId: item.id,
-                configuredPaneCount: item.panes.length,
-                sessions: grouped.get(item.id) ?? [],
-              }),
-              providers: deriveProviderSummary(item),
-            }))
+          : (workspacesByProject[session.projectId] ?? []).map((item) =>
+              deriveSidebarWorkspace(item, sidebarRuntime, []),
+            )
         const folderMissing =
           recentWorkspaces.find((item) => item.workspace.projectId === session.projectId)?.projectMissing ?? false
         const running = workspaces.reduce((sum, item) => sum + item.runtime.runningCount, 0)
@@ -1038,7 +1045,7 @@ export function WorkspaceScreen() {
     projectCache,
     sidebarWorkspaces,
     workspacesByProject,
-    liveSessionsSnapshot,
+    sidebarRuntime,
     recentWorkspaces,
   ])
 
@@ -1131,7 +1138,7 @@ export function WorkspaceScreen() {
 
   return <AppShell className={`workspace-shell ${switchingWorkspaceId ? 'workspace-switching' : ''}`} sidebarOpen={!maximizedPaneId}
     titleBar={<><div className="workspace-heading"><strong title={workspace.name}>{workspace.name}</strong>{project.gitBranch && <span className="branch-label" title={`Branch: ${project.gitBranch}`}>{project.gitBranch}</span>}</div><div className="titlebar-spacer" />{attentionQueue.length > 0 && <button className="attention-chip" onClick={focusNextAttention} title="Ctrl+Shift+P focuses the oldest agent needing attention">{attentionQueue.length} agent{attentionQueue.length === 1 ? '' : 's'} waiting</button>}<span className="compact-count">{running}/{workspace.panes.length} running</span><button className={`workspace-tool-panel-toggle ${panelOpen ? 'is-active' : ''}`} aria-pressed={panelOpen} aria-label={panelOpen ? 'Close workspace panel' : 'Open workspace panel'} title={`${panelOpen ? 'Close' : 'Open'} workspace panel (Ctrl+Shift+E)`} onClick={() => togglePanel()}>{panelOpen ? <PanelRightClose size={15} /> : <PanelRightOpen size={15} />}</button><div className="workspace-menu-wrap"><Button variant="ghost" icon={<ChevronDown size={14} />} aria-expanded={workspaceMenu} aria-haspopup="menu" onClick={() => setWorkspaceMenu((value) => !value)}>Workspace</Button>{workspaceMenu && <><button className="context-scrim" aria-label="Close workspace menu" onClick={() => setWorkspaceMenu(false)} /><div className="context-popover workspace-popover" role="menu"><button role="menuitem" onClick={() => { setWorkspaceMenu(false); renameWorkspaceById(workspace.id) }}>Rename workspace</button><button role="menuitem" onClick={reconfigureWorkspace}>Reconfigure workspace</button><button role="menuitem" onClick={() => navigate(`/setup/${project.id}`)}>New workspace for this project</button><span className="menu-separator" /><button role="menuitem" onClick={() => { setWorkspaceMenu(false); openAgentResumeCenter() }}><RotateCcw size={14} />Agent Resume Center</button><button role="menuitem" onClick={() => void restartAll()}><RotateCcw size={14} />Restart all terminals</button><button role="menuitem" onClick={() => void stopAll()}><CircleStop size={14} />Stop all terminals</button><button role="menuitem" onClick={openLauncher}><FolderOpen size={14} />Project launcher</button><button role="menuitem" className="danger-item" onClick={() => void closeWorkspace()}>Close workspace</button></div></>}</div></>}
-    sidebar={<ForgeSpaceSidebar project={project} activeWorkspaceId={workspace.id} workspaces={sidebarWorkspaces} recents={recentWorkspaces} collapsed={collapsed} width={sidebarWidth} switchingWorkspaceId={switchingWorkspaceId} projectFolderMissing={projectFolderMissing} loadingWorkspaces={projectWorkspaces.length === 0 && loading} actions={sidebarActions} placements={placements} monitors={monitors} openProjects={sidebarOpenProjects} groups={sidebarGroups} />}
+    sidebar={<ForgeSpaceSidebar project={project} activeWorkspaceId={workspace.id} workspaces={sidebarWorkspaces} recents={recentWorkspaces} collapsed={collapsed} width={sidebarWidth} switchingWorkspaceId={switchingWorkspaceId} projectFolderMissing={projectFolderMissing} loadingWorkspaces={projectWorkspaces.length === 0 && loading} actions={sidebarActions} placements={placements} monitors={monitors} openProjects={sidebarOpenProjects} groups={sidebarGroups} runtimeSeeded={sidebarRuntime.seeded} />}
     canvas={<>{error && <div className="workspace-error"><ErrorNotice message={error} onRetry={() => void restartAll()} /></div>}<MonitorRecoveryWatcher monitors={monitors} onChanged={handleMonitorChanged} /><div className={`workspace-surface-host${panelOpen && !panelMaximized ? ' has-panel' : ''}${panelOpen && panelMaximized ? ' is-panel-max' : ''}${panelResizing ? ' is-resizing' : ''}`} style={{ '--tool-panel-width': `${panelWidth}px` } as CSSProperties}><section className="terminal-canvas"><WorkspaceCanvas reducedMotion={reducedMotion} persist={persistCanvas} onFocusPane={setActivePane} renderPane={renderPane} /></section>{panelOpen && !panelMaximized && <div className="tool-panel-resizer" role="separator" aria-orientation="vertical" aria-label="Resize workspace panel" onPointerDown={startPanelResize} />}{panelMounted && <WorkspaceToolPanel projectId={project.id} projectRootPath={project.rootPath} workspaceId={workspace.id} visible={panelOpen} maximized={panelMaximized} tool={panelTool} browserContext={{ workspaceId: workspace.id, workspaceName: workspace.name, projectId: project.id, projectName: project.name, worktree: project.gitBranch ?? undefined, agentLabel: activePane?.title }} onSendToAgent={sendContextToAgent} onToolChange={(tool) => useWorkspacePanelStore.getState().setTool(tool)} onToggleMaximize={() => useWorkspacePanelStore.getState().toggleMaximized()} onClose={() => useWorkspacePanelStore.getState().closePanel()} />}</div></>}
     statusBar={<><span>{project.gitBranch || 'No branch'}</span><span className="status-path" title={project.rootPath}>{project.name}</span><span>{running}/{workspace.panes.length} running</span><span>{activePane?.title || 'No active pane'}</span><AiUsageStatusBar />{attentionQueue.length > 0 && <span className="status-alert">{attentionQueue.length} agent attention</span>}{Object.keys(paneErrors).some((id) => paneErrors[id]) && <span className="status-alert">Pane error</span>}</>}
   >

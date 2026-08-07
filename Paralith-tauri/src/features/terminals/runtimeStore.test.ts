@@ -92,3 +92,130 @@ describe('terminal runtime external store', () => {
     expect(listener).toHaveBeenCalledOnce()
   })
 })
+
+describe('cross-workspace runtime view', () => {
+  const other = (id: string, paneId: string, workspaceId: string): TerminalSession => ({
+    ...session(id, paneId),
+    workspaceId,
+  })
+
+  it('spans every Workspace, so a Project that is not on screen is still observed', () => {
+    // Subscribing per Workspace is how a background Project's row came to keep claiming "running"
+    // long after its terminals exited: nothing was listening on its behalf.
+    const store = new TerminalRuntimeStore()
+    store.hydrate([other('one', 'p1', 'w1'), other('two', 'p2', 'w2')])
+    expect(store.getAllSessionsSnapshot().map((entry) => entry.workspaceId)).toEqual(['w1', 'w2'])
+  })
+
+  it('wakes global subscribers on a change in any Workspace', () => {
+    const store = new TerminalRuntimeStore()
+    const listener = vi.fn()
+    store.subscribeAll(listener)
+    store.upsert(other('one', 'p1', 'w1'))
+    store.upsert(other('two', 'p2', 'w2'))
+    expect(listener).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not wake global subscribers for terminal output', () => {
+    // A Session's byte stream changes nothing the sidebar renders, and output is the highest
+    // frequency event in the app.
+    vi.useFakeTimers()
+    const store = new TerminalRuntimeStore()
+    store.hydrate([other('one', 'p1', 'w1')])
+    const listener = vi.fn()
+    store.subscribeAll(listener)
+    store.ingestOutput({ sessionId: 'one', paneId: 'p1', sequence: 0, timestamp: '', data: new Uint8Array([65]) })
+    vi.advanceTimersByTime(100)
+    expect(listener).not.toHaveBeenCalled()
+  })
+
+  it('keeps the snapshot identity stable until something actually changes', () => {
+    const store = new TerminalRuntimeStore()
+    store.hydrate([other('one', 'p1', 'w1')])
+    const first = store.getAllSessionsSnapshot()
+    expect(store.getAllSessionsSnapshot()).toBe(first)
+    store.upsert(other('two', 'p2', 'w2'))
+    expect(store.getAllSessionsSnapshot()).not.toBe(first)
+  })
+
+  it('indexes agent state by Pane, so a restarted Pane replaces its predecessor', () => {
+    const store = new TerminalRuntimeStore()
+    store.hydrate([other('one', 'p1', 'w1')])
+    store.ingestAgentState({
+      terminalSessionId: 'one', projectId: 'project', workspaceId: 'w1', paneId: 'p1',
+      provider: 'codex', state: 'needs_input', source: 'provider_hook', reason: '',
+      updatedAt: '2026-08-07T10:00:00Z',
+    })
+    store.ingestAgentState({
+      // A new Session id for the same Pane: keying by Session would leave the sidebar reading the
+      // dead Session's last state for the Pane in front of it.
+      terminalSessionId: 'restarted', projectId: 'project', workspaceId: 'w1', paneId: 'p1',
+      provider: 'codex', state: 'working', source: 'provider_hook', reason: '',
+      updatedAt: '2026-08-07T11:00:00Z',
+    })
+    expect(store.getAgentStatesSnapshot()['w1:p1'].state).toBe('working')
+  })
+
+  it('ignores an agent state that is older than the one already indexed', () => {
+    const store = new TerminalRuntimeStore()
+    store.ingestAgentState({
+      terminalSessionId: 'one', projectId: 'project', workspaceId: 'w1', paneId: 'p1',
+      provider: 'codex', state: 'needs_input', source: 'provider_hook', reason: '',
+      updatedAt: '2026-08-07T11:00:00Z',
+    })
+    store.ingestAgentState({
+      terminalSessionId: 'one', projectId: 'project', workspaceId: 'w1', paneId: 'p1',
+      provider: 'codex', state: 'idle', source: 'heuristic', reason: '',
+      updatedAt: '2026-08-07T10:00:00Z',
+    })
+    expect(store.getAgentStatesSnapshot()['w1:p1'].state).toBe('needs_input')
+  })
+
+  it('clears a Workspace agent state along with its Sessions', () => {
+    // Otherwise a Workspace that was stopped mid-prompt keeps claiming it needs attention forever.
+    const store = new TerminalRuntimeStore()
+    store.hydrate([other('one', 'p1', 'w1')])
+    store.ingestAgentState({
+      terminalSessionId: 'one', projectId: 'project', workspaceId: 'w1', paneId: 'p1',
+      provider: 'codex', state: 'needs_input', source: 'provider_hook', reason: '',
+      updatedAt: '2026-08-07T11:00:00Z',
+    })
+    store.clearWorkspace('w1')
+    expect(store.getAgentStatesSnapshot()).toEqual({})
+    expect(store.getAllSessionsSnapshot()).toEqual([])
+  })
+})
+
+describe('reconcileLiveSessions', () => {
+  const at = (workspaceId: string, id: string, startedAt: string): TerminalSession => ({
+    ...session(id, 'p1'),
+    workspaceId,
+    startedAt,
+  })
+
+  it('marks a Session the backend no longer knows about as exited, rather than deleting it', () => {
+    // `hydrate` only ever adds, so a Session that died while nothing was listening stayed
+    // "running" forever. A Pane that ended is something the user should see ended.
+    const store = new TerminalRuntimeStore()
+    store.hydrate([at('w1', 'gone', '2026-08-07T10:00:00Z')])
+    store.reconcileLiveSessions([], '2026-08-07T12:00:00Z')
+    const [reconciled] = store.getAllSessionsSnapshot()
+    expect(reconciled.status).toBe('exited')
+    expect(reconciled.endedAt).toBe('2026-08-07T12:00:00Z')
+  })
+
+  it('leaves a Session that started after the list was taken alone', () => {
+    // It is legitimately missing from an in-flight answer; demoting it would kill a terminal that
+    // is starting up fine.
+    const store = new TerminalRuntimeStore()
+    store.hydrate([at('w1', 'newborn', '2026-08-07T12:00:05Z')])
+    store.reconcileLiveSessions([], '2026-08-07T12:00:00Z')
+    expect(store.getAllSessionsSnapshot()[0].status).toBe('running')
+  })
+
+  it('adopts Sessions the view had never seen', () => {
+    const store = new TerminalRuntimeStore()
+    store.reconcileLiveSessions([at('w2', 'discovered', '2026-08-07T10:00:00Z')], '2026-08-07T12:00:00Z')
+    expect(store.getAllSessionsSnapshot().map((entry) => entry.id)).toEqual(['discovered'])
+  })
+})

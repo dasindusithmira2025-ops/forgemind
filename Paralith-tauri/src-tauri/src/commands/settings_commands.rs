@@ -1,4 +1,5 @@
-use crate::errors::AppResult;
+use crate::errors::{AppError, AppResult};
+use crate::models::settings::{sidebar_preferences_are_acceptable, SidebarPreferences};
 use crate::models::AppSettings;
 use crate::services;
 use crate::AppState;
@@ -47,6 +48,52 @@ pub fn set_theme_preference(
     settings.theme_id = theme_id.clone();
     state.database.save_settings(&settings)?;
     let _ = app.emit("theme-changed", theme_id);
+    Ok(())
+}
+
+/// Read the sidebar's persisted view preferences. Callable from any window: every window that
+/// draws a sidebar needs them, and unlike full settings they carry nothing privileged.
+#[tauri::command]
+pub fn get_sidebar_preferences(state: State<'_, AppState>) -> AppResult<SidebarPreferences> {
+    let settings = state.database.get_settings()?;
+    Ok(SidebarPreferences {
+        group_by: settings.sidebar_group_by,
+        sort_mode: settings.sidebar_sort_mode,
+        collapsed_groups: settings.sidebar_collapsed_groups,
+    })
+}
+
+/// Persist the sidebar's view preferences and broadcast them to every window.
+///
+/// A dedicated command rather than a `save_settings` round trip: that one is main-window-only and
+/// rewrites the whole settings blob, so a detached window could not use it and a sidebar toggle
+/// would race any concurrent settings edit over unrelated fields. Receivers never re-emit, so
+/// there is no feedback loop.
+#[tauri::command]
+pub fn set_sidebar_preferences(
+    preferences: SidebarPreferences,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<()> {
+    if !sidebar_preferences_are_acceptable(&preferences) {
+        return Err(AppError::new(
+            "invalid_settings",
+            "The sidebar preferences are outside the supported range.",
+            true,
+        ));
+    }
+    let mut settings = state.database.get_settings()?;
+    if settings.sidebar_group_by == preferences.group_by
+        && settings.sidebar_sort_mode == preferences.sort_mode
+        && settings.sidebar_collapsed_groups == preferences.collapsed_groups
+    {
+        return Ok(());
+    }
+    settings.sidebar_group_by = preferences.group_by.clone();
+    settings.sidebar_sort_mode = preferences.sort_mode.clone();
+    settings.sidebar_collapsed_groups = preferences.collapsed_groups.clone();
+    state.database.save_settings(&settings)?;
+    let _ = app.emit("sidebar-preferences-changed", preferences);
     Ok(())
 }
 

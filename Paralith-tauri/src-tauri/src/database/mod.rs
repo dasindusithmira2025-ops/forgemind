@@ -935,6 +935,13 @@ impl DatabaseService {
             )
             || settings.inactive_workspace_rendering != "hibernate"
             || !crate::models::settings::theme_id_is_acceptable(&settings.theme_id)
+            || !crate::models::settings::sidebar_preferences_are_acceptable(
+                &crate::models::settings::SidebarPreferences {
+                    group_by: settings.sidebar_group_by.clone(),
+                    sort_mode: settings.sidebar_sort_mode.clone(),
+                    collapsed_groups: settings.sidebar_collapsed_groups.clone(),
+                },
+            )
         {
             return Err(AppError::new(
                 "invalid_settings",
