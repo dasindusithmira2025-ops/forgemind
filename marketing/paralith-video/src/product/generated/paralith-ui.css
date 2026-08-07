@@ -1,6 +1,6 @@
 /* GENERATED FILE — DO NOT EDIT.
  * Source:  ../../Paralith-tauri/src/index.css
- * SHA-256: 4a775d6eb8a30a5f5a5cd1d0ac1067cfffce8335e4c7ec69568a25f9ea721085
+ * SHA-256: 2ed1fe2cef7be46ae1effc70ba6902dd6a0c4b1530977489857d35af113eb835
  * Regenerate: npm run sync:product
  *
  * This is the PARALITH desktop stylesheet, verbatim except for two mechanical edits:
@@ -27,6 +27,8 @@
    - Dividers are an alpha wash of the foreground, never an opaque grey, so one
      border value stays correct on every surface in the ladder.
    ============================================================================ */
+
+
 
 :root {
   color-scheme: dark;
@@ -1357,7 +1359,7 @@ html[data-theme-swapping] *, html[data-theme-swapping] *::before, html[data-them
 .update-toast-progressive .update-toast-actions { grid-column: 1 / -1; flex-wrap: wrap; }
 /* Genome rule 3: the highest-emphasis button stays achromatic. This rule used to repaint it in
    `--accent` against an undefined `--accent-contrast`, so the colour was invalid at
-   computed-value time and the label fell back to inherited `--text` — near-white on violet, 2.65:1.
+   computed-value time and the label fell back to inherited `--text` - near-white on violet, 2.65:1.
    The inherited `.button-primary` pairing is `--primary`/`--on-primary` at 14.4:1. */
 .update-toast-progressive .update-toast-actions .button-primary { gap: 6px; }
 .update-toast-progressive .update-toast-actions button:disabled { cursor: default; opacity: .55; }
