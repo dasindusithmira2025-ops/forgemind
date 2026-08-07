@@ -6,6 +6,8 @@ import {
   buildSidebarPresentation,
   computeAttentionOrder,
   deriveSidebarWorkspace,
+  isLiveWorkspace,
+  isWorkingProject,
   MIN_ROWS_FOR_FILTER,
   presentWorkspaces,
 } from './sidebarModel'
@@ -145,13 +147,97 @@ describe('computeAttentionOrder', () => {
   })
 })
 
+describe('isLiveWorkspace', () => {
+  it('treats every status but closed as live', () => {
+    for (const status of ['starting', 'active', 'partially_active', 'waiting', 'attention', 'stopping'] as const) {
+      expect(isLiveWorkspace(row('w', status))).toBe(true)
+    }
+    expect(isLiveWorkspace(row('w', 'closed'))).toBe(false)
+  })
+
+  it('keeps a failed Workspace live even though nothing is running', () => {
+    // A Project whose Panes all failed to launch is the one a person most needs to see; hiding it
+    // would hide the problem.
+    expect(isLiveWorkspace(row('w', 'failed'))).toBe(true)
+  })
+})
+
+describe('isWorkingProject', () => {
+  it('keeps a Project with any live Workspace', () => {
+    expect(isWorkingProject({ isActive: false, workspaces: [row('a', 'closed'), row('b', 'active')] })).toBe(true)
+  })
+
+  it('drops an idle background Project', () => {
+    expect(isWorkingProject({ isActive: false, workspaces: [row('a', 'closed')] })).toBe(false)
+  })
+
+  it('always keeps the active Project, however idle', () => {
+    // It is the Project whose Workspace is on screen; dropping it would leave the user looking at
+    // a Workspace the sidebar claims does not exist.
+    expect(isWorkingProject({ isActive: true, workspaces: [row('a', 'closed')] })).toBe(true)
+    expect(isWorkingProject({ isActive: true, workspaces: [] })).toBe(true)
+  })
+})
+
 describe('buildSidebarPresentation', () => {
   const base = {
     groupBy: 'project' as const,
     sortMode: 'manual' as const,
     filterQuery: '',
     placements: NO_PLACEMENTS,
+    runtimeSeeded: true,
   }
+
+  it('lists only the Projects being worked in', () => {
+    // `open_project_sessions` is persisted and never pruned, so listing every open session turned
+    // the sidebar into a list of every Project ever touched.
+    const groups = [
+      group('active-idle', [row('a', 'closed', 'active-idle')]),
+      group('busy', [row('b', 'active', 'busy')], false),
+      group('stale', [row('c', 'closed', 'stale')], false),
+    ]
+    const presentation = buildSidebarPresentation({ ...base, groups })
+    expect(presentation.groups.map((entry) => entry.project.id)).toEqual(['active-idle', 'busy'])
+  })
+
+  it('keeps a Project whose only live Workspace is waiting on a person', () => {
+    const groups = [group('here', [row('a', 'closed', 'here')]), group('blocked', [row('b', 'waiting', 'blocked')], false)]
+    expect(buildSidebarPresentation({ ...base, groups }).groups.map((entry) => entry.project.id)).toEqual([
+      'here',
+      'blocked',
+    ])
+  })
+
+  it('lists every open Project until the runtime view has been seeded', () => {
+    // Before the authoritative read lands every Workspace looks closed. Hiding on that basis would
+    // collapse the list on first paint and then repopulate it, which reads as losing your Projects.
+    const groups = [group('here', [row('a', 'closed', 'here')]), group('other', [row('b', 'closed', 'other')], false)]
+    expect(
+      buildSidebarPresentation({ ...base, groups, runtimeSeeded: false }).groups.map((entry) => entry.project.id),
+    ).toEqual(['here', 'other'])
+  })
+
+  it('drops an idle Project out of the flat list too', () => {
+    const groups = [group('here', [row('a', 'active', 'here')]), group('stale', [row('b', 'closed', 'stale')], false)]
+    const presentation = buildSidebarPresentation({ ...base, groups, groupBy: 'flat' })
+    expect(presentation.flat.workspaces.map((entry) => entry.workspace.id)).toEqual(['a'])
+    expect(presentation.projectNameById.has('stale')).toBe(false)
+  })
+
+  it('still shows a detached Workspace belonging to an otherwise idle Project', () => {
+    // The window exists on another monitor whatever its Project's runtime says.
+    const groups = [
+      group('here', [row('a', 'active', 'here')]),
+      group('stale', [row('elsewhere', 'closed', 'stale')], false),
+    ]
+    const presentation = buildSidebarPresentation({
+      ...base,
+      groups,
+      placements: [detached('elsewhere')],
+    })
+    expect(presentation.groups.map((entry) => entry.project.id)).toEqual(['here'])
+    expect(presentation.detached.map((entry) => entry.workspace.id)).toEqual(['elsewhere'])
+  })
 
   it('splits detached Workspaces out of the primary list', () => {
     // Leaving them in both would double-count every header and offer a reorder that writes to the
@@ -203,7 +289,9 @@ describe('buildSidebarPresentation', () => {
   })
 
   it('allows reordering only in the active Project, in manual order, with no filter', () => {
-    const groups = [group('p1', [row('a', 'closed', 'p1')]), group('p2', [row('b', 'closed', 'p2')], false)]
+    // The background Project is live so it survives the working-Project filter and this test stays
+    // about reordering.
+    const groups = [group('p1', [row('a', 'closed', 'p1')]), group('p2', [row('b', 'active', 'p2')], false)]
     expect(buildSidebarPresentation({ ...base, groups }).groups.map((entry) => entry.reorderable)).toEqual([
       true,
       false,
@@ -217,7 +305,7 @@ describe('buildSidebarPresentation', () => {
   })
 
   it('gives the flat list every Project row and the names to label them with', () => {
-    const groups = [group('p1', [row('a', 'closed', 'p1')]), group('p2', [row('b', 'closed', 'p2')], false)]
+    const groups = [group('p1', [row('a', 'closed', 'p1')]), group('p2', [row('b', 'active', 'p2')], false)]
     const presentation = buildSidebarPresentation({ ...base, groups, groupBy: 'flat' })
     expect(presentation.flat.workspaces.map((entry) => entry.workspace.id)).toEqual(['a', 'b'])
     expect(presentation.projectNameById.get('p2')).toBe('p2')
