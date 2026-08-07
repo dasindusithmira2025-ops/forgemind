@@ -5,6 +5,8 @@ import { asNativeError, native } from '../native/commands'
 import type { PaneAssignment, Project, Workspace } from '../native/types'
 import { useAppStore } from '../stores/appStore'
 import { terminalRuntime, useWorkspaceSessions } from '../features/terminals/runtimeStore'
+import { applyPaneRename } from '../features/terminals/paneRename'
+import { onPaneRenamed } from '../native/events'
 import { AppShell } from '../components/shell/AppShell'
 import { AiUsageStatusBar } from '../features/usage/AiUsageStatusBar'
 import { Button } from '../components/ui/Button'
@@ -80,6 +82,21 @@ export function DetachedWorkspaceWindow({ workspaceId }: { workspaceId: string }
       live = false
     }
   }, [workspaceId, setActivePane])
+
+  // A task submitted to an agent Pane retitles that Pane. Rust persists the title and emits the
+  // rename to this window's label as well as the main one, so a detached Workspace shows the new
+  // header without owning the write.
+  useEffect(() => {
+    let live = true
+    const pending = onPaneRenamed((event) => {
+      if (!live || event.workspaceId !== workspaceId) return
+      setWorkspace((current) => applyPaneRename(current, event))
+    })
+    return () => {
+      live = false
+      void pending.then((unlisten) => unlisten()).catch(() => undefined)
+    }
+  }, [workspaceId])
 
   // Re-claim the lease whenever this window regains focus, so input ownership follows the
   // window the user is actually interacting with.

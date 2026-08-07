@@ -14,6 +14,7 @@ import type {
   ProjectOverview,
   RecentWorkspace,
   ShellProfile,
+  SidebarPreferences,
   SplitDirection,
   TerminalSession,
   RestorationResult,
@@ -168,6 +169,11 @@ export const native = {
   getThemePreference: () => invoke<string>('get_theme_preference'),
   /** Persist the selected theme id and broadcast a `theme-changed` event to every window. Main window only. */
   setThemePreference: (themeId: string) => invoke<void>('set_theme_preference', { themeId }),
+  /** Read the sidebar's persisted view preferences. Callable from any window. */
+  getSidebarPreferences: () => invoke<SidebarPreferences>('get_sidebar_preferences'),
+  /** Persist sidebar view preferences and broadcast `sidebar-preferences-changed` to every window. */
+  setSidebarPreferences: (preferences: SidebarPreferences) =>
+    invoke<void>('set_sidebar_preferences', { preferences }),
   /**
    * Paint the OS-drawn window frame (caption fill, caption text, border) from the active theme.
    * CSS cannot reach the frame, so without this the caption keeps the system accent colour.
@@ -278,6 +284,10 @@ export const native = {
     invoke<DirectoryListing>('list_project_directory', { projectId, relativePath }),
   readProjectFile: (projectId: string, relativePath: string) =>
     invoke<FileContents>('read_project_file', { projectId, relativePath }),
+  /** Raw bytes of a previewable image/PDF. Returned as a binary IPC response, so the result is an
+   * ArrayBuffer (a number array on the postMessage IPC path) rather than JSON. */
+  readProjectMedia: (projectId: string, relativePath: string) =>
+    invoke<ArrayBuffer | Uint8Array | number[]>('read_project_media', { projectId, relativePath }),
   writeProjectFile: (projectId: string, relativePath: string, content: string, expectedSha256?: string) =>
     invoke<FileWriteResult>('write_project_file', { projectId, relativePath, content, expectedSha256 }),
   createProjectFile: (projectId: string, relativePath: string) =>

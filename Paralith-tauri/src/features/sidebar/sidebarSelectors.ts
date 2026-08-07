@@ -1,4 +1,5 @@
 import type { AgentProvider, RecentWorkspace, TerminalSession, Workspace } from '../../native/types'
+import { earliestAttentionSince } from './sidebarAgentStatus'
 import type {
   ProviderSummary,
   RuntimeDerivationInput,
@@ -51,7 +52,14 @@ export function deriveProviderSummary(workspace: Workspace, maxVisible = 3): Pro
 export function deriveWorkspaceRuntimeSummary(
   input: RuntimeDerivationInput,
 ): WorkspaceRuntimeSummary {
-  const { workspaceId, configuredPaneCount, sessions, deferredPaneIds = [], stopping = false } = input
+  const {
+    workspaceId,
+    configuredPaneCount,
+    sessions,
+    deferredPaneIds = [],
+    stopping = false,
+    paneAgentStates = [],
+  } = input
   // Keep only the newest session per Pane so a restarted Pane is not double-counted.
   const latestByPane = new Map<string, TerminalSession>()
   for (const session of sessions) {
@@ -64,7 +72,7 @@ export function deriveWorkspaceRuntimeSummary(
 
   let startingCount = 0
   let runningCount = 0
-  const waitingCount = 0
+  let waitingCount = 0
   let exitedCount = 0
   let failedCount = 0
   let disconnectedCount = 0
@@ -95,7 +103,20 @@ export function deriveWorkspaceRuntimeSummary(
   // A Pane the user chose to defer counts only if it has no live session of its own.
   const deferredCount = deferredPaneIds.filter((paneId) => !latestByPane.has(paneId)).length
 
-  const requiresAttention = failedCount > 0 || disconnectedCount > 0
+  // Split the Panes blocked on a human out of `runningCount`. They are running processes, but the
+  // status ladder below treats "running" and "waiting" as disjoint — a Workspace where every Pane
+  // sits at a permission prompt is not *working*, and reporting it as such is what made the
+  // attention sort useless: its top class could never be reached.
+  const blockedPanes = paneAgentStates.filter((state) => {
+    const session = latestByPane.get(state.paneId)
+    // Must be a Pane that landed in `runningCount` above, or the subtraction below would move a
+    // count out of a bucket it was never in. A Pane still restoring is `starting`, not waiting.
+    return state.attention === 'needs_you' && session?.status === 'running' && session.restorationState !== 'stale'
+  })
+  waitingCount = blockedPanes.length
+  runningCount = Math.max(0, runningCount - waitingCount)
+
+  const requiresAttention = failedCount > 0 || disconnectedCount > 0 || waitingCount > 0
   const status = deriveStatus({
     configuredPaneCount,
     startingCount,
@@ -121,6 +142,7 @@ export function deriveWorkspaceRuntimeSummary(
     activeProviders,
     status,
     requiresAttention,
+    attentionSince: earliestAttentionSince(blockedPanes),
     updatedAt: input.updatedAt ?? new Date().toISOString(),
   }
 }
@@ -144,8 +166,9 @@ function deriveStatus(counts: {
   if (counts.waitingCount > 0 && counts.runningCount === 0) return 'waiting'
   if (counts.runningCount === 0 && counts.startingCount > 0) return 'starting'
   if (counts.runningCount > 0) {
-    // Some Panes live but others closed/exited/deferred/never-started → partially active.
-    const covered = counts.runningCount + counts.startingCount
+    // Some Panes live but others closed/exited/deferred/never-started → partially active. Waiting
+    // Panes count as covered: they are live processes, just blocked on a person.
+    const covered = counts.runningCount + counts.startingCount + counts.waitingCount
     if (covered < counts.configuredPaneCount) return 'partially_active'
     return 'active'
   }
@@ -248,18 +271,4 @@ export function groupRecentsByProject(recents: RecentWorkspace[]): ProjectSwitch
     }
   }
   return [...byProject.values()].sort((a, b) => b.lastOpenedAt.localeCompare(a.lastOpenedAt))
-}
-
-/**
- * Group a flat list of live sessions by Workspace id so per-row summaries can be derived
- * from a single `list_live_sessions` snapshot without one subscription per Workspace.
- */
-export function groupSessionsByWorkspace(sessions: TerminalSession[]): Map<string, TerminalSession[]> {
-  const grouped = new Map<string, TerminalSession[]>()
-  for (const session of sessions) {
-    const list = grouped.get(session.workspaceId)
-    if (list) list.push(session)
-    else grouped.set(session.workspaceId, [session])
-  }
-  return grouped
 }

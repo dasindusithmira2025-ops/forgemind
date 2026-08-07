@@ -3,11 +3,12 @@ use crate::database::DatabaseService;
 use crate::errors::{AppError, AppResult};
 use crate::models::{
     AgentActivityState, AgentSignal, AgentStateEvent, AgentStateSource, CreateTerminalRequest,
-    TerminalExitEvent, TerminalOutputEvent, TerminalSession, TerminalStatusEvent,
+    PaneRenamedEvent, TerminalExitEvent, TerminalOutputEvent, TerminalSession, TerminalStatusEvent,
 };
 #[cfg(windows)]
 use crate::services::process_util::background_command;
 use crate::services::project_service::display_path;
+use crate::services::task_title::{derive_task_title, AgentTaskCapture};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use chrono::Utc;
 #[cfg(test)]
@@ -114,6 +115,9 @@ struct TerminalHandle {
     agent_state: Mutex<Option<AgentStateEvent>>,
     last_agent_output: Mutex<Option<Instant>>,
     agent_signal_buffer: Mutex<String>,
+    /// Reconstructs the prompt the user is composing so a submitted task can retitle the Pane.
+    /// Only agent Panes carry one; a plain shell has no task to name.
+    task_capture: Mutex<AgentTaskCapture>,
     master: Mutex<Box<dyn MasterPty + Send>>,
     // One-shot machine-protocol providers must be able to observe EOF after their terminal
     // result event. Keeping the ConPTY writer alive makes recent Codex CLI versions wait for
@@ -315,6 +319,7 @@ impl TerminalManager {
                 is_coding_agent(&session.provider).then_some(Instant::now()),
             ),
             agent_signal_buffer: Mutex::new(String::new()),
+            task_capture: Mutex::new(AgentTaskCapture::new()),
             master: Mutex::new(pair.master),
             writer: Mutex::new(Some(writer)),
             child: Mutex::new(child),
@@ -769,6 +774,7 @@ impl TerminalManager {
         });
         if result.is_ok() && handle.agent_adapter.is_some() {
             handle.agent_signal_buffer.lock().clear();
+            self.capture_agent_task(&handle, data);
             transition_agent_state(
                 &self.app_handle,
                 &self.database,
@@ -781,6 +787,84 @@ impl TerminalManager {
             );
         }
         result
+    }
+
+    /// Retitle an agent Pane after its user submits a task.
+    ///
+    /// Runs on the input path for every agent Pane in every window, which is what makes the
+    /// behaviour global: whatever surface delivered the prompt — a typed keystroke, a paste, the
+    /// browser's "Send to Active Agent", a Workspace startup command — the bytes pass through
+    /// here. Machine-protocol Panes are excluded: their input is provider JSON written by the
+    /// Swarm scheduler, not a task a person phrased.
+    fn capture_agent_task(&self, handle: &Arc<TerminalHandle>, data: &[u8]) {
+        if handle.machine_protocol {
+            return;
+        }
+        let prompts = handle.task_capture.lock().feed(data);
+        let Some(title) = prompts.iter().rev().find_map(|prompt| {
+            let title = derive_task_title(prompt);
+            if title.is_none() {
+                log::debug!("agent task title skipped: prompt is not task-like");
+            }
+            title
+        }) else {
+            return;
+        };
+        let Some(database) = &self.database else {
+            return;
+        };
+        // Read the preference at submit time rather than caching it: a task is submitted a few
+        // times a minute at most, and this way toggling the setting takes effect immediately.
+        if !database
+            .get_settings()
+            .map(|settings| settings.auto_rename_agent_terminals)
+            .unwrap_or(true)
+        {
+            return;
+        }
+        let (session_id, workspace_id, pane_id) = {
+            let metadata = handle.metadata.read();
+            if metadata.title == title {
+                return;
+            }
+            (
+                metadata.id.clone(),
+                metadata.workspace_id.clone(),
+                metadata.pane_id.clone(),
+            )
+        };
+        match database.apply_agent_task_title(&workspace_id, &pane_id, &session_id, &title) {
+            Ok(pane_updated) => {
+                handle.metadata.write().title = title.clone();
+                if !pane_updated {
+                    return;
+                }
+                log::info!(
+                    "terminal auto-renamed workspace_id={workspace_id} pane_id={pane_id} session_id={session_id}"
+                );
+                if let Some(app) = &self.app_handle {
+                    let event = PaneRenamedEvent {
+                        workspace_id: workspace_id.clone(),
+                        pane_id,
+                        session_id,
+                        title,
+                        source: "agent_task".into(),
+                    };
+                    let _ = app.emit_to(
+                        crate::services::MAIN_WINDOW_LABEL,
+                        "pane-renamed",
+                        event.clone(),
+                    );
+                    let _ = app.emit_to(
+                        crate::services::detached_label(&workspace_id),
+                        "pane-renamed",
+                        event,
+                    );
+                }
+            }
+            // A Pane that keeps its old title is a cosmetic loss; the agent still has the task.
+            Err(error) => log::warn!("agent task title persistence failed: {}", error.code),
+        }
     }
 
     /// Close only the PTY input stream while leaving output and process monitoring active.

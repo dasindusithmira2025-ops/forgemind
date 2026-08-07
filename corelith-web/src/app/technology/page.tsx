@@ -58,7 +58,7 @@ export default function TechnologyPage() {
           deck="Select a step to see what it means for you. The whole path runs on your own machine."
         />
 
-        <div className="mt-14">
+        <div data-reveal="up" className="mt-14">
           <TechDiagram />
         </div>
       </Band>
@@ -76,13 +76,14 @@ export default function TechnologyPage() {
           {PILLARS.map((pillar, i) => (
             <article
               key={pillar.title}
-              className="grid grid-cols-12 gap-x-8 gap-y-6 border-b border-[var(--hair)] py-10"
+              data-reveal="up"
+              className="lit-row grid grid-cols-12 gap-x-8 gap-y-6 border-b border-[var(--hair)] py-10"
             >
               <div className="col-span-12 flex items-baseline gap-4 lg:col-span-3 lg:flex-col lg:gap-3">
                 <span aria-hidden="true" className="numeral text-ink text-xl lg:text-2xl">
                   {String(i + 1).padStart(2, '0')}
                 </span>
-                <p className="stamp text-ember-ink">{pillar.kicker}</p>
+                <p className="stamp text-core-ink">{pillar.kicker}</p>
               </div>
 
               <div className="col-span-12 lg:col-span-5">
@@ -90,7 +91,7 @@ export default function TechnologyPage() {
                 <p className="text-ink-soft mt-4 text-base">{pillar.body}</p>
               </div>
 
-              <p className="stamp text-ember-ink col-span-12 self-center border-t border-[var(--hair)] pt-5 lg:col-span-3 lg:col-start-10 lg:border-t-0 lg:pt-0">
+              <p className="stamp text-core-ink col-span-12 self-center border-t border-[var(--hair)] pt-5 lg:col-span-3 lg:col-start-10 lg:border-t-0 lg:pt-0">
                 {pillar.assurance}
               </p>
             </article>

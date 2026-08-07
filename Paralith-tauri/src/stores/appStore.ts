@@ -4,6 +4,9 @@ import type { AgentDetectionResult, AppSettings, Project, RecentWorkspace, Shell
 export const defaultSettings: AppSettings = {
   sidebarOpen: true,
   sidebarWidth: 300,
+  sidebarGroupBy: 'project',
+  sidebarSortMode: 'manual',
+  sidebarCollapsedGroups: [],
   uiScale: 1,
   uiDensity: 'standard',
   themeId: 'paralith-dark',
@@ -18,6 +21,7 @@ export const defaultSettings: AppSettings = {
   copyOnSelect: false,
   confirmMultilinePaste: true,
   confirmClosePane: true,
+  autoRenameAgentTerminals: true,
   reopenLastWorkspace: false,
   restoreBehavior: 'ask',
   outputLogRetention: 'tail_only',

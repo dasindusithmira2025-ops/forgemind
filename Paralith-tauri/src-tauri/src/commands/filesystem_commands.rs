@@ -75,6 +75,27 @@ pub async fn read_project_file(
         .map_err(worker_failed)?
 }
 
+/// Raw bytes of a previewable image or PDF, returned as a binary IPC response rather than JSON so
+/// a multi-megabyte file is not inflated into a string on the way to the preview. The MIME type is
+/// the one already reported by `read_project_file`; this command only ever serves paths whose
+/// extension is previewable.
+#[tauri::command]
+pub async fn read_project_media(
+    project_id: String,
+    relative_path: String,
+    window: Window,
+    state: State<'_, AppState>,
+) -> AppResult<tauri::ipc::Response> {
+    require_project_scope(&window, &state, &project_id)?;
+    let service = state.filesystem.clone();
+    let bytes = tauri::async_runtime::spawn_blocking(move || {
+        service.read_media(&project_id, &relative_path)
+    })
+    .await
+    .map_err(worker_failed)??;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
 #[tauri::command]
 pub async fn write_project_file(
     project_id: String,

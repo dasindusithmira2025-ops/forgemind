@@ -1,8 +1,24 @@
 import React from 'react';
 import { Composition } from 'remotion';
 import './fonts';
+import './brand-fonts';
 import { Film } from './compositions/Film';
 import { Poster } from './compositions/Poster';
+import { TwinProof } from './product/TwinProof';
+import { CampaignFilm } from './campaign/CampaignFilm';
+import { CampaignPoster } from './campaign/Poster';
+import { CUT_FRAMES } from './campaign/script';
+import {
+  ResumeProof,
+  SwarmCanvasProof,
+  SwarmEvidenceProof,
+  SwarmTasksProof,
+} from './product/SurfaceProof';
+import { BrandFilm } from './film/BrandFilm';
+import { GateFilm } from './gate/GateFilm';
+import { GatePoster } from './gate/Poster';
+import { CUT_FRAMES as GATE_FRAMES } from './gate/script';
+import { DURATION } from './film/script';
 import {
   FPS,
   HERO_FRAMES,
@@ -94,6 +110,271 @@ export const RemotionRoot: React.FC = () => (
       fps={FPS}
       width={3840}
       height={2160}
+    />
+
+    {/*
+      The brand film. `src/film` + `src/product`; see BrandFilm.tsx. The compositions above are
+      the earlier narrated explainer cut and are left registered so its delivered masters stay
+      reproducible from source.
+    */}
+    <Composition
+      id="ParalithBrandFilm4K"
+      component={BrandFilm}
+      durationInFrames={DURATION}
+      fps={FPS}
+      width={3840}
+      height={2160}
+    />
+    <Composition
+      id="ParalithBrandFilm1080p"
+      component={BrandFilm}
+      durationInFrames={DURATION}
+      fps={FPS}
+      width={1920}
+      height={1080}
+    />
+    <Composition
+      id="ParalithBrandFilmSilent"
+      component={BrandFilm}
+      durationInFrames={DURATION}
+      fps={FPS}
+      width={1920}
+      height={1080}
+      defaultProps={{ score: false }}
+    />
+
+    {/*
+      The campaign cut — the master brand film. `src/campaign`; see CampaignFilm.tsx. The brand
+      compositions above are the earlier eight-beat cut and the ones above those are the narrated
+      explainer; both are left registered so their delivered masters stay reproducible from source.
+    */}
+    <Composition
+      id="ParalithCampaign4K"
+      component={CampaignFilm}
+      durationInFrames={CUT_FRAMES.master}
+      fps={FPS}
+      width={3840}
+      height={2160}
+      defaultProps={{ cut: 'master' as const, copy: 'cinematic' as const }}
+    />
+    <Composition
+      id="ParalithCampaign1080p"
+      component={CampaignFilm}
+      durationInFrames={CUT_FRAMES.master}
+      fps={FPS}
+      width={1920}
+      height={1080}
+      defaultProps={{ cut: 'master' as const, copy: 'cinematic' as const }}
+    />
+    <Composition
+      id="ParalithCampaignCaptioned"
+      component={CampaignFilm}
+      durationInFrames={CUT_FRAMES.master}
+      fps={FPS}
+      width={1920}
+      height={1080}
+      defaultProps={{ cut: 'master' as const, copy: 'captioned' as const }}
+    />
+    <Composition
+      id="ParalithCampaign60"
+      component={CampaignFilm}
+      durationInFrames={CUT_FRAMES.sixty}
+      fps={FPS}
+      width={1920}
+      height={1080}
+      defaultProps={{ cut: 'sixty' as const, copy: 'cinematic' as const }}
+    />
+    <Composition
+      id="ParalithCampaign30"
+      component={CampaignFilm}
+      durationInFrames={CUT_FRAMES.thirty}
+      fps={FPS}
+      width={1920}
+      height={1080}
+      defaultProps={{ cut: 'thirty' as const, copy: 'cinematic' as const }}
+    />
+    <Composition
+      id="ParalithCampaign15"
+      component={CampaignFilm}
+      durationInFrames={CUT_FRAMES.teaser}
+      fps={FPS}
+      width={1920}
+      height={1080}
+      defaultProps={{ cut: 'teaser' as const, copy: 'cinematic' as const }}
+    />
+    <Composition
+      id="ParalithCampaignVertical30"
+      component={CampaignFilm}
+      durationInFrames={CUT_FRAMES.thirty}
+      fps={FPS}
+      width={1080}
+      height={1920}
+      defaultProps={{ cut: 'thirty' as const, copy: 'captioned' as const }}
+    />
+    {/*
+      The full-length 9:16 adaptation. Registered so it renders without a code change, but not in
+      the default delivery batch: a ninety-five second vertical is longer than any social surface
+      will autoplay, and the thirty-second vertical above is the asset that actually gets used.
+    */}
+    <Composition
+      id="ParalithCampaignVertical"
+      component={CampaignFilm}
+      durationInFrames={CUT_FRAMES.master}
+      fps={FPS}
+      width={1080}
+      height={1920}
+      defaultProps={{ cut: 'master' as const, copy: 'captioned' as const }}
+    />
+    {/* The website hero loop: silent, captionless, and cut to loop cleanly. */}
+    <Composition
+      id="ParalithCampaignLoop"
+      component={CampaignFilm}
+      durationInFrames={CUT_FRAMES.loop}
+      fps={FPS}
+      width={1920}
+      height={1080}
+      defaultProps={{ cut: 'loop' as const, copy: 'none' as const, score: false }}
+    />
+    <Composition
+      id="ParalithCampaignPoster"
+      component={CampaignPoster}
+      durationInFrames={1}
+      fps={FPS}
+      width={3840}
+      height={2160}
+    />
+
+    {/*
+      The gate film — "The only way through." `src/gate`; see GateFilm.tsx. A new film rather than a
+      re-cut: it follows one change through isolation, verification and consent, and shares no scene,
+      score, stem, copy line or delivered file name with any composition above. Those stay registered
+      so their delivered masters remain reproducible from source.
+    */}
+    <Composition
+      id="ParalithGate4K"
+      component={GateFilm}
+      durationInFrames={GATE_FRAMES.master}
+      fps={FPS}
+      width={3840}
+      height={2160}
+      defaultProps={{ cut: 'master' as const, copy: 'cinematic' as const }}
+    />
+    <Composition
+      id="ParalithGate1080p"
+      component={GateFilm}
+      durationInFrames={GATE_FRAMES.master}
+      fps={FPS}
+      width={1920}
+      height={1080}
+      defaultProps={{ cut: 'master' as const, copy: 'cinematic' as const }}
+    />
+    <Composition
+      id="ParalithGateCaptioned"
+      component={GateFilm}
+      durationInFrames={GATE_FRAMES.master}
+      fps={FPS}
+      width={1920}
+      height={1080}
+      defaultProps={{ cut: 'master' as const, copy: 'captioned' as const }}
+    />
+    <Composition
+      id="ParalithGate60"
+      component={GateFilm}
+      durationInFrames={GATE_FRAMES.sixty}
+      fps={FPS}
+      width={1920}
+      height={1080}
+      defaultProps={{ cut: 'sixty' as const, copy: 'cinematic' as const }}
+    />
+    <Composition
+      id="ParalithGate30"
+      component={GateFilm}
+      durationInFrames={GATE_FRAMES.thirty}
+      fps={FPS}
+      width={1920}
+      height={1080}
+      defaultProps={{ cut: 'thirty' as const, copy: 'cinematic' as const }}
+    />
+    <Composition
+      id="ParalithGate15"
+      component={GateFilm}
+      durationInFrames={GATE_FRAMES.teaser}
+      fps={FPS}
+      width={1920}
+      height={1080}
+      defaultProps={{ cut: 'teaser' as const, copy: 'cinematic' as const }}
+    />
+    {/*
+      There is no 9:16 or 1:1 gate composition, and that is a decision rather than an omission.
+      This film's subject is a horizontal transport line 1,900 design-pixels wide, and every one of
+      its sequences reads left to right across the full frame. Scaling that into a 1080-wide
+      portrait canvas puts the machine text — branch names, check names, paths, the ledger — at
+      seven physical pixels, which is not small, it is illegible; a vertical rendered at frame 900
+      was checked and the interface detail could not be read at all.
+      
+      A credible vertical needs its own layout, with the rail running down the frame instead of
+      across it, and that is a second design pass rather than a responsive rule. The captioned 16:9
+      cut is the sound-off delivery until it exists.
+    */}
+    {/* The website hero loop: silent, captionless, and cut to loop cleanly. */}
+    <Composition
+      id="ParalithGateLoop"
+      component={GateFilm}
+      durationInFrames={GATE_FRAMES.loop}
+      fps={FPS}
+      width={1920}
+      height={1080}
+      defaultProps={{ cut: 'loop' as const, copy: 'none' as const, score: false }}
+    />
+    <Composition
+      id="ParalithGatePoster"
+      component={GatePoster}
+      durationInFrames={1}
+      fps={FPS}
+      width={3840}
+      height={2160}
+    />
+
+    {/* Calibration surfaces for the product twin — not part of any cut. See TwinProof.tsx. */}
+    <Composition
+      id="ParalithTwinProof"
+      component={TwinProof}
+      durationInFrames={600}
+      fps={FPS}
+      width={1440}
+      height={900}
+    />
+    <Composition
+      id="ParalithSwarmCanvasProof"
+      component={SwarmCanvasProof}
+      durationInFrames={1}
+      fps={FPS}
+      width={1440}
+      height={900}
+    />
+    <Composition
+      id="ParalithSwarmTasksProof"
+      component={SwarmTasksProof}
+      durationInFrames={1}
+      fps={FPS}
+      width={1440}
+      height={900}
+    />
+    <Composition
+      id="ParalithSwarmEvidenceProof"
+      component={SwarmEvidenceProof}
+      durationInFrames={1}
+      fps={FPS}
+      width={1440}
+      height={900}
+    />
+    <Composition
+      id="ParalithResumeProof"
+      component={ResumeProof}
+      durationInFrames={1}
+      fps={FPS}
+      width={1440}
+      height={900}
     />
   </>
 );

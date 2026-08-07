@@ -24,6 +24,14 @@ export function parentDir(path: string): string {
   return index < 0 ? '' : path.slice(0, index)
 }
 
+/** Join a Project-relative editor path onto the Project root, using the root's own separator so
+ * the result is a real OS path the shell can act on (reveal, open externally). */
+export function absoluteProjectPath(projectRootPath: string, relative: string): string {
+  const root = projectRootPath.replace(/[\\/]+$/, '')
+  const separator = root.includes('\\') ? '\\' : '/'
+  return relative ? `${root}${separator}${relative.replace(/\//g, separator)}` : root
+}
+
 export const useExplorerStore = create<ExplorerState>((set, get) => ({
   projectId: '',
   listings: {},

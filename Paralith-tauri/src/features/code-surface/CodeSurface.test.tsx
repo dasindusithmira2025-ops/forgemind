@@ -30,13 +30,15 @@ vi.mock('../../native/events', () => ({
 vi.mock('@tauri-apps/plugin-opener', () => ({ openPath: vi.fn(), revealItemInDir: vi.fn() }))
 // Keep Monaco out of jsdom; the surface only needs a placeholder for the editor region.
 vi.mock('./MonacoEditorPane', () => ({ default: () => <div data-testid="monaco" />, DiffOverlay: () => <div data-testid="diff" /> }))
+// The preview's own rendering (object URLs, image decode) is covered by MediaPreviewPane.test.
+vi.mock('./MediaPreviewPane', () => ({ default: () => <div data-testid="media-preview" /> }))
 
 const { CodeSurface } = await import('./CodeSurface')
 const { useEditorStore } = await import('./editorStore')
 const { useExplorerStore } = await import('./explorerStore')
 
 function contents(path: string, content: string, sha: string): FileContents {
-  return { projectId: 'p1', relativePath: path, content, sha256: sha, size: content.length, encoding: 'utf8', lineEnding: 'lf', binary: false, readonly: false }
+  return { projectId: 'p1', relativePath: path, content, sha256: sha, size: content.length, encoding: 'utf8', lineEnding: 'lf', binary: false, mediaType: null, readonly: false }
 }
 
 beforeEach(() => {
@@ -93,6 +95,46 @@ describe('CodeSurface', () => {
     fireEvent.keyDown(window, { key: 'p', ctrlKey: true })
     expect(screen.queryByLabelText('Search files by name')).not.toBeInTheDocument()
     terminalLike.remove()
+  })
+
+  it('previews an image instead of showing the binary placeholder', async () => {
+    render(<CodeSurface projectId="p1" projectRootPath="/proj" workspaceId="w1" active />)
+    readProjectFile.mockResolvedValueOnce({
+      ...contents('assets/logo.png', '', 'shab'),
+      content: null,
+      binary: true,
+      mediaType: 'image/png',
+      size: 4096,
+    })
+    await act(async () => { await useEditorStore.getState().openFile('assets/logo.png') })
+
+    expect(await screen.findByTestId('media-preview')).toBeInTheDocument()
+    expect(screen.queryByText(/binary file and cannot be shown/i)).not.toBeInTheDocument()
+    // The status bar reports the preview rather than a cursor position it does not have.
+    expect(screen.getByText('Preview')).toBeInTheDocument()
+    expect(screen.getByText('4.0 KB')).toBeInTheDocument()
+  })
+
+  it('opens an SVG as editable source with a toggle into the preview', async () => {
+    render(<CodeSurface projectId="p1" projectRootPath="/proj" workspaceId="w1" active />)
+    readProjectFile.mockResolvedValueOnce({ ...contents('icon.svg', '<svg />', 'shas'), mediaType: 'image/svg+xml' })
+    await act(async () => { await useEditorStore.getState().openFile('icon.svg') })
+
+    expect(screen.getByTestId('monaco')).toBeInTheDocument()
+    await act(async () => { fireEvent.click(screen.getByLabelText('Show preview')) })
+    expect(await screen.findByTestId('media-preview')).toBeInTheDocument()
+
+    await act(async () => { fireEvent.click(screen.getByLabelText('Show source')) })
+    expect(screen.getByTestId('monaco')).toBeInTheDocument()
+    expect(useEditorStore.getState().tabs[0].content).toBe('<svg />')
+  })
+
+  it('still reports a non-previewable binary file as unviewable', async () => {
+    render(<CodeSurface projectId="p1" projectRootPath="/proj" workspaceId="w1" active />)
+    readProjectFile.mockResolvedValueOnce({ ...contents('app.exe', '', 'shae'), content: null, binary: true })
+    await act(async () => { await useEditorStore.getState().openFile('app.exe') })
+
+    expect(screen.getByText(/binary file and cannot be shown/i)).toBeInTheDocument()
   })
 
   it('collapses the explorer into a drawer at narrow widths, preserving the editor', async () => {

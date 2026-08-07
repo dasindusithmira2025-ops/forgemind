@@ -4,6 +4,7 @@ import { AlertTriangle, FolderOpen, RefreshCw, RotateCcw } from 'lucide-react'
 import { Brand } from '../components/ui/Brand'
 import { Button } from '../components/ui/Button'
 import { ErrorNotice } from '../components/ui/ErrorNotice'
+import { confirm } from '../components/ui/confirm'
 import { asNativeError, native } from '../native/commands'
 import type { StartupStatus, UpdateStatus } from '../native/types'
 
@@ -17,7 +18,12 @@ export function RecoveryScreen({ startup }: { startup: StartupStatus }) {
     try { await action() } catch (caught) { setError(asNativeError(caught).message) } finally { setBusy(false) }
   }
   const restore = async () => {
-    if (!startup.latestBackupPath || !window.confirm('Restore the validated pre-migration database backup and restart? The current failed database will be retained separately.')) return
+    if (!startup.latestBackupPath || !(await confirm({
+      title: 'Restore the backup and restart?',
+      body: 'PARALITH restores the validated pre-migration database.',
+      details: ['The current failed database is retained separately.', 'PARALITH restarts immediately.'],
+      confirmLabel: 'Restore and restart',
+    }))) return
     await native.stageDatabaseBackupRestore(startup.latestBackupPath)
     await native.restartAfterRecovery()
   }

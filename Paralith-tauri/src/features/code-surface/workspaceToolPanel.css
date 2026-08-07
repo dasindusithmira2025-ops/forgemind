@@ -85,7 +85,7 @@
 }
 .tool-switch-btn:hover { color: var(--text); background: var(--surface-hover); }
 .tool-switch-btn.is-active { color: var(--text-strong); border-bottom-color: var(--accent-edge); }
-.tool-switch-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.tool-switch-btn:focus-visible { outline: var(--focus-outline); outline-offset: -3px; }
 .tool-switch-btn:disabled { opacity: .5; cursor: default; }
 
 .tool-panel-spacer { flex: 0 0 auto; }
@@ -132,7 +132,7 @@
   cursor: pointer;
 }
 .tool-panel-actions button:hover { color: var(--text); background: var(--surface-hover); }
-.tool-panel-actions button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.tool-panel-actions button:focus-visible { outline: var(--focus-outline); outline-offset: -3px; }
 
 .tool-panel-body {
   flex: 1 1 auto;

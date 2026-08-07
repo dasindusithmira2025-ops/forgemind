@@ -41,7 +41,11 @@ export default function CareersPage() {
 
         <div className="mt-14 grid grid-cols-1 gap-5 lg:grid-cols-3">
           {careersData.values.map((value, i) => (
-            <article key={value.title} className="panel panel-hover flex flex-col gap-5 p-7">
+            <article
+              key={value.title}
+              data-reveal="up"
+              className="panel panel-hover lit flex flex-col gap-5 p-7"
+            >
               <div className="flex items-start justify-between gap-4">
                 <h3 className="max-w-[16ch] text-lg text-[var(--fg)] lg:text-xl">{value.title}</h3>
                 <span aria-hidden="true" className="numeral text-[var(--fg)] text-2xl">
@@ -64,7 +68,7 @@ export default function CareersPage() {
         />
 
         <div className="mt-14 grid grid-cols-12 gap-x-8 gap-y-10">
-          <div className="col-span-12 lg:col-span-7">
+          <div data-reveal="up" className="col-span-12 lg:col-span-7">
             <p className="text-base text-[var(--fg-soft)]">
               We still read every introduction. If you work on agentic systems, desktop developer
               tooling, low-latency performance, or interface engineering, write to us with something
@@ -88,7 +92,7 @@ export default function CareersPage() {
             </dl>
           </div>
 
-          <div className="col-span-12 flex items-end lg:col-span-4 lg:col-start-9">
+          <div data-reveal="up" className="col-span-12 flex items-end lg:col-span-4 lg:col-start-9">
             <Link href="/contact?category=careers" className="btn btn-primary btn-lg w-full">
               Introduce yourself
               <span aria-hidden="true">→</span>

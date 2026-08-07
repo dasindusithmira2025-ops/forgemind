@@ -23,6 +23,7 @@ export function iconForFile(name: string): LucideIcon {
   if (['html', 'xml', 'svg', 'vue', 'svelte'].includes(extension)) return Braces
   if (['md', 'mdx', 'txt', 'rst'].includes(extension)) return FileText
   if (['png', 'jpg', 'jpeg', 'gif', 'ico', 'webp', 'avif', 'bmp'].includes(extension)) return Image
+  if (extension === 'pdf') return FileText
   if (['sh', 'bash', 'zsh', 'ps1', 'bat', 'cmd'].includes(extension)) return FileTerminal
   if (['toml', 'yaml', 'yml', 'ini', 'env', 'config', 'lock'].includes(extension)) return FileCog
   return FileType

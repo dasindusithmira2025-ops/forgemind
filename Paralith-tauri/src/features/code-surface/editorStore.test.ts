@@ -28,6 +28,7 @@ function fileContents(overrides: Partial<FileContents>): FileContents {
     encoding: 'utf8',
     lineEnding: 'lf',
     binary: false,
+    mediaType: null,
     readonly: false,
     ...overrides,
   }
@@ -90,6 +91,39 @@ describe('editor tab lifecycle', () => {
     expect(tab.binary).toBe(true)
     useEditorStore.getState().setBuffer('logo.png', 'oops')
     expect(isDirty(useEditorStore.getState().tabs[0])).toBe(false)
+  })
+
+  it('opens a binary image straight into the preview and keeps its size', async () => {
+    await openReady('logo.png', '', 'shab', { binary: true, content: null, mediaType: 'image/png', size: 4096 })
+    const tab = useEditorStore.getState().tabs[0]
+    expect(tab.mediaType).toBe('image/png')
+    expect(tab.viewAsMedia).toBe(true)
+    expect(tab.size).toBe(4096)
+    // Picture-only files have no source view, so the toggle cannot strand the tab on a blank editor.
+    useEditorStore.getState().toggleMediaView('logo.png')
+    expect(useEditorStore.getState().tabs[0].viewAsMedia).toBe(true)
+  })
+
+  it('opens a text-based image as source and lets the user switch to the preview', async () => {
+    await openReady('icon.svg', '<svg />', 'shas', { mediaType: 'image/svg+xml' })
+    expect(useEditorStore.getState().tabs[0].viewAsMedia).toBe(false)
+    useEditorStore.getState().toggleMediaView('icon.svg')
+    expect(useEditorStore.getState().tabs[0].viewAsMedia).toBe(true)
+    useEditorStore.getState().toggleMediaView('icon.svg')
+    expect(useEditorStore.getState().tabs[0].viewAsMedia).toBe(false)
+    // Switching views never touches the buffer.
+    expect(useEditorStore.getState().tabs[0].content).toBe('<svg />')
+  })
+
+  it('keeps the media type current when the file is reloaded from disk', async () => {
+    await openReady('logo.png', '', 'shab', { binary: true, content: null, mediaType: 'image/png' })
+    readProjectFile.mockResolvedValueOnce(
+      fileContents({ relativePath: 'logo.png', content: null, sha256: 'shac', binary: true, mediaType: 'image/png' }),
+    )
+    await useEditorStore.getState().applyExternalChange('logo.png', 'modified')
+    const tab = useEditorStore.getState().tabs[0]
+    expect(tab.sha256).toBe('shac')
+    expect(tab.mediaType).toBe('image/png')
   })
 })
 

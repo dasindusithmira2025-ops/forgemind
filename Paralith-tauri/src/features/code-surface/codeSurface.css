@@ -26,7 +26,7 @@
 .code-explorer-tree { flex: 1 1 auto; overflow: auto; padding: var(--space-1) 0; }
 .code-explorer-row { display: flex; align-items: center; gap: 6px; width: 100%; height: var(--row-h-dense); padding-right: var(--space-2); border: 0; background: transparent; color: var(--text); font-size: var(--text-sm); text-align: left; cursor: pointer; }
 .code-explorer-row:hover { background: var(--surface-hover); }
-.code-explorer-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.code-explorer-row:focus-visible { outline: var(--focus-outline); outline-offset: -3px; }
 .code-explorer-row.is-active { background: var(--bg-selected); box-shadow: inset 2px 0 0 var(--accent-edge); }
 .code-explorer-row.is-hidden-file { color: var(--faint); }
 .code-chevron { flex: 0 0 auto; color: var(--faint); transition: transform var(--dur-fast) var(--ease-out); }
@@ -67,6 +67,35 @@
 .code-editor-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-1); flex: 1 1 auto; color: var(--faint); font-size: var(--text-xs); }
 .code-editor-empty h3 { color: var(--muted); font-size: var(--text-sm); font-weight: 600; }
 .code-editor-empty kbd { font-family: var(--font-mono); font-size: var(--text-xs); background: var(--surface-3); border: 1px solid var(--border); border-radius: var(--radius-xs); padding: 1px 5px; }
+
+/* Media preview (images + PDF). The canvas uses a checkerboard so transparent images read
+ * correctly in every theme; the pattern is built from tokens, never hardcoded colours. */
+.code-media { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; background: var(--canvas); }
+.code-media-toolbar { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; height: var(--pane-header-height); padding: 0 var(--space-2); border-bottom: 1px solid var(--border-subtle); background: var(--surface); color: var(--faint); font-size: var(--text-2xs); }
+.code-media-toolbar button { display: inline-flex; align-items: center; justify-content: center; width: var(--icon-btn); height: var(--icon-btn); border: 0; background: transparent; color: var(--muted); border-radius: var(--radius-sm); cursor: pointer; }
+.code-media-toolbar button:hover:not(:disabled) { color: var(--text); background: var(--surface-hover); }
+.code-media-toolbar button:disabled { color: var(--disabled); cursor: default; }
+.code-media-meta { display: inline-flex; align-items: center; gap: 5px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.code-media-dot { color: var(--disabled); }
+.code-media-spacer { flex: 1 1 auto; }
+.code-media-zoom { min-width: 42px; text-align: center; color: var(--muted); font-variant-numeric: tabular-nums; }
+.code-media-body { position: relative; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: auto; }
+.code-media-canvas {
+  flex: 1 1 auto; min-height: 0; display: flex; align-items: flex-start; justify-content: flex-start; padding: var(--space-3);
+  background-color: var(--surface-2);
+  background-image:
+    linear-gradient(45deg, var(--surface-3) 25%, transparent 25%, transparent 75%, var(--surface-3) 75%),
+    linear-gradient(45deg, var(--surface-3) 25%, transparent 25%, transparent 75%, var(--surface-3) 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 8px 8px;
+}
+.code-media-canvas.is-fit { align-items: center; justify-content: center; }
+.code-media-canvas img { display: block; image-rendering: auto; }
+.code-media-canvas.is-fit img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.code-media-pdf { flex: 1 1 auto; width: 100%; min-height: 0; border: 0; background: var(--surface-2); }
+.code-media-fallback { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-2); flex: 1 1 auto; padding: var(--space-5); color: var(--muted); font-size: var(--text-xs); text-align: center; }
+.code-media-fallback button { border: 1px solid var(--border-strong); background: var(--surface-3); color: var(--text); font-size: var(--text-xs); padding: 3px 10px; border-radius: var(--radius-sm); cursor: pointer; }
+.code-media-fallback button:hover { background: var(--surface-hover); }
 
 /* Conflict + notices */
 .code-conflict { display: flex; align-items: center; gap: var(--space-2); padding: 5px var(--space-2); background: var(--warning-soft); border-bottom: 1px solid var(--warning-border); color: var(--warning); font-size: var(--text-xs); }

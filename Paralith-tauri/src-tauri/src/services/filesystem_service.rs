@@ -20,7 +20,7 @@ use parking_lot::Mutex;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fs;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant, UNIX_EPOCH};
@@ -29,6 +29,27 @@ use uuid::Uuid;
 /// Largest file PARALITH will decode into the editor or accept for a text write. Larger files
 /// are reported with a typed `file_too_large` error; they remain visible in the Explorer.
 pub const MAX_TEXT_FILE_BYTES: u64 = 5_000_000;
+
+/// Largest previewable media file (image or PDF) PARALITH will hand to the editor's preview.
+/// Media bytes are never decoded — they cross the IPC boundary once and are rendered by the
+/// webview — so the cap is far more generous than the text limit but still bounded.
+pub const MAX_MEDIA_FILE_BYTES: u64 = 48 * 1024 * 1024;
+
+/// Extension → MIME type for the file kinds the editor can preview. The MIME type is decided by
+/// the extension alone and never by sniffing content, so a file cannot talk the webview into
+/// treating it as a more powerful type than its name claims.
+const PREVIEWABLE_MEDIA: &[(&str, &str)] = &[
+    ("png", "image/png"),
+    ("jpg", "image/jpeg"),
+    ("jpeg", "image/jpeg"),
+    ("gif", "image/gif"),
+    ("webp", "image/webp"),
+    ("avif", "image/avif"),
+    ("bmp", "image/bmp"),
+    ("ico", "image/x-icon"),
+    ("svg", "image/svg+xml"),
+    ("pdf", "application/pdf"),
+];
 
 /// Largest number of entries returned for a single directory listing. Beyond this the listing
 /// is flagged `truncated` so the UI can prompt for a filter rather than freezing on a
@@ -195,14 +216,28 @@ impl FileSystemService {
         let (normalized, path) = guard.resolve_existing(relative_path)?;
         let meta = fs::metadata(&path).map_err(|error| map_io("read", relative_path, error))?;
         if meta.is_dir() {
-            return Err(
-                AppError::new("not_a_file", "This path is a folder, not a file.", true)
-                    .entity(relative_path)
-                    .layer("filesystem"),
-            );
+            return Err(not_a_file(relative_path));
         }
         let readonly = meta.permissions().readonly();
+        let media_type = media_type_for(&normalized);
         if meta.len() > MAX_TEXT_FILE_BYTES {
+            // An image or PDF is previewed, not decoded, so being past the text limit is not a
+            // reason to refuse it. Return the metadata the preview needs and let the caller pull
+            // the bytes through `read_media` instead of loading them here.
+            if media_type.is_some() && meta.len() <= MAX_MEDIA_FILE_BYTES {
+                return Ok(FileContents {
+                    project_id: project_id.to_owned(),
+                    relative_path: normalized,
+                    content: None,
+                    sha256: hash_file(&path, relative_path)?,
+                    size: meta.len(),
+                    encoding: FileEncoding::Binary,
+                    line_ending: LineEnding::None,
+                    binary: true,
+                    media_type: media_type.map(str::to_owned),
+                    readonly,
+                });
+            }
             return Err(file_too_large(relative_path, meta.len()));
         }
         let bytes = fs::read(&path).map_err(|error| map_io("read", relative_path, error))?;
@@ -218,6 +253,7 @@ impl FileSystemService {
                 encoding: FileEncoding::Binary,
                 line_ending: LineEnding::None,
                 binary: true,
+                media_type: media_type.map(str::to_owned),
                 readonly,
             });
         }
@@ -232,8 +268,20 @@ impl FileSystemService {
             encoding,
             line_ending,
             binary: false,
+            // Text media (an SVG) keeps its editable content; the editor offers a preview of it
+            // alongside the source rather than instead of it.
+            media_type: media_type.map(str::to_owned),
             readonly,
         })
+    }
+
+    /// Raw bytes of a previewable media file, for the editor's image/PDF preview. Nothing is
+    /// decoded: the caller renders the bytes with the MIME type reported by [`Self::read_file`],
+    /// which is derived from the extension. Anything that is not a previewable media extension is
+    /// refused so this path cannot be used as a general "read any file as bytes" escape hatch.
+    pub fn read_media(&self, project_id: &str, relative_path: &str) -> AppResult<Vec<u8>> {
+        let guard = self.guard(project_id)?;
+        read_media_bytes(&guard, relative_path)
     }
 
     /// Atomically write `content` to `relative_path`, creating the file if its parent directory
@@ -669,12 +717,69 @@ fn modified_ms(meta: &fs::Metadata) -> Option<i64> {
 fn hex_sha256(bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
+    hex_digest(hasher)
+}
+
+/// Hash a file without holding it in memory. Used for media files, which are allowed to be far
+/// larger than the text limit and are streamed to the preview rather than decoded.
+fn hash_file(path: &Path, relative_path: &str) -> AppResult<String> {
+    let mut file = fs::File::open(path).map_err(|error| map_io("read", relative_path, error))?;
+    let mut hasher = Sha256::new();
+    let mut buffer = vec![0_u8; 64 * 1024];
+    loop {
+        let read = file
+            .read(&mut buffer)
+            .map_err(|error| map_io("read", relative_path, error))?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    Ok(hex_digest(hasher))
+}
+
+fn hex_digest(hasher: Sha256) -> String {
     let digest = hasher.finalize();
     let mut out = String::with_capacity(digest.len() * 2);
     for byte in digest {
         out.push_str(&format!("{byte:02x}"));
     }
     out
+}
+
+/// Guarded media read, split out from [`FileSystemService::read_media`] so the path, type, and
+/// size rules can be exercised without a database-backed Project.
+fn read_media_bytes(guard: &ProjectPathGuard, relative_path: &str) -> AppResult<Vec<u8>> {
+    let (normalized, path) = guard.resolve_existing(relative_path)?;
+    if media_type_for(&normalized).is_none() {
+        return Err(AppError::new(
+            "unsupported_media",
+            "This file type cannot be previewed.",
+            true,
+        )
+        .entity(relative_path)
+        .layer("filesystem"));
+    }
+    let meta = fs::metadata(&path).map_err(|error| map_io("read", relative_path, error))?;
+    if meta.is_dir() {
+        return Err(not_a_file(relative_path));
+    }
+    if meta.len() > MAX_MEDIA_FILE_BYTES {
+        return Err(media_too_large(relative_path, meta.len()));
+    }
+    fs::read(&path).map_err(|error| map_io("read", relative_path, error))
+}
+
+/// The MIME type the editor will preview `relative_path` as, or `None` when the file is not a
+/// previewable image or PDF. Matching is on the extension only.
+pub fn media_type_for(relative_path: &str) -> Option<&'static str> {
+    let name = relative_path.rsplit('/').next()?;
+    let (_, extension) = name.rsplit_once('.')?;
+    let extension = extension.to_ascii_lowercase();
+    PREVIEWABLE_MEDIA
+        .iter()
+        .find(|(candidate, _)| *candidate == extension)
+        .map(|(_, mime)| *mime)
 }
 
 /// A file is treated as binary if a NUL byte appears in its leading bytes. This matches how
@@ -694,6 +799,11 @@ const NON_SOURCE_EXTENSIONS: &[&str] = &[
 ];
 
 fn is_indexable_file(name: &str) -> bool {
+    // Images and PDFs are excluded as *source*, but the editor can now preview them, so Quick Open
+    // must be able to reach them the same way the Explorer can.
+    if media_type_for(name).is_some() {
+        return true;
+    }
     match name.rsplit_once('.') {
         Some((_, extension)) => {
             !NON_SOURCE_EXTENSIONS.contains(&extension.to_ascii_lowercase().as_str())
@@ -764,6 +874,25 @@ fn file_too_large(relative_path: &str, size: u64) -> AppError {
     ))
     .entity(relative_path)
     .layer("filesystem")
+}
+
+fn media_too_large(relative_path: &str, size: u64) -> AppError {
+    AppError::new(
+        "file_too_large",
+        "This file is too large to preview in the editor.",
+        true,
+    )
+    .detail(format!(
+        "{size} bytes exceeds the {MAX_MEDIA_FILE_BYTES} byte preview limit"
+    ))
+    .entity(relative_path)
+    .layer("filesystem")
+}
+
+fn not_a_file(relative_path: &str) -> AppError {
+    AppError::new("not_a_file", "This path is a folder, not a file.", true)
+        .entity(relative_path)
+        .layer("filesystem")
 }
 
 fn parent_missing(relative_path: &str) -> AppError {
@@ -954,6 +1083,71 @@ mod tests {
     }
 
     #[test]
+    fn media_type_is_resolved_from_the_extension_only() {
+        assert_eq!(media_type_for("assets/logo.PNG"), Some("image/png"));
+        assert_eq!(media_type_for("docs/manual.pdf"), Some("application/pdf"));
+        assert_eq!(media_type_for("icons/mark.svg"), Some("image/svg+xml"));
+        assert_eq!(media_type_for("photo.jpeg"), Some("image/jpeg"));
+        assert_eq!(media_type_for("src/main.rs"), None);
+        assert_eq!(media_type_for("README"), None);
+        // A name that merely contains a media extension is not media.
+        assert_eq!(media_type_for("notes/png-guide.md"), None);
+        assert_eq!(media_type_for("archive.pdf.zip"), None);
+    }
+
+    #[test]
+    fn hash_file_matches_the_in_memory_hash() {
+        let project = TempProject::new("hash");
+        project.write("image.png", b"\x89PNG\r\n\x1a\nbody");
+        let hashed = hash_file(&project.root.join("image.png"), "image.png").unwrap();
+        assert_eq!(hashed, hex_sha256(b"\x89PNG\r\n\x1a\nbody"));
+    }
+
+    #[test]
+    fn media_read_returns_bytes_only_for_previewable_files_inside_the_project() {
+        let project = TempProject::new("media");
+        project.write("assets/logo.png", b"\x89PNG\r\n\x1a\npixels");
+        project.write("secrets/keys.env", b"TOKEN=1");
+        fs::create_dir_all(project.root.join("assets/nested.png")).unwrap();
+        let guard = project.guard();
+
+        assert_eq!(
+            read_media_bytes(&guard, "assets/logo.png").unwrap(),
+            b"\x89PNG\r\n\x1a\npixels"
+        );
+        // Not a previewable extension: refused rather than streamed as opaque bytes.
+        assert_eq!(
+            read_media_bytes(&guard, "secrets/keys.env")
+                .unwrap_err()
+                .code,
+            "unsupported_media"
+        );
+        // A directory that happens to be named like an image is still not a file.
+        assert_eq!(
+            read_media_bytes(&guard, "assets/nested.png")
+                .unwrap_err()
+                .code,
+            "not_a_file"
+        );
+        // The Project boundary applies to media exactly as it does to text.
+        assert_eq!(
+            read_media_bytes(&guard, "../outside.png").unwrap_err().code,
+            "path_outside_project"
+        );
+    }
+
+    #[test]
+    fn media_size_guard_reports_the_preview_limit() {
+        let error = media_too_large("huge.pdf", MAX_MEDIA_FILE_BYTES + 1);
+        assert_eq!(error.code, "file_too_large");
+        assert!(error
+            .detail
+            .as_deref()
+            .unwrap_or_default()
+            .contains(&MAX_MEDIA_FILE_BYTES.to_string()));
+    }
+
+    #[test]
     fn size_guard_rejects_oversized_reads() {
         assert_eq!(
             file_too_large("big.bin", MAX_TEXT_FILE_BYTES + 1).code,
@@ -999,9 +1193,12 @@ mod tests {
         assert!(is_indexable_file("main.rs"));
         assert!(is_indexable_file("README"));
         assert!(is_indexable_file("component.tsx"));
-        assert!(!is_indexable_file("logo.PNG"));
         assert!(!is_indexable_file("bundle.wasm"));
         assert!(!is_indexable_file("yarn.lock"));
+        assert!(!is_indexable_file("track.mp3"));
+        // Previewable media is reachable from Quick Open because the editor can now open it.
+        assert!(is_indexable_file("logo.PNG"));
+        assert!(is_indexable_file("manual.pdf"));
     }
 
     #[test]

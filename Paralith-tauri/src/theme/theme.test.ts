@@ -177,6 +177,38 @@ describe('design genome', () => {
     }
   })
 
+  it('never lets a component rule paint its own accent focus ring', () => {
+    // Rule 5 is about the palette, but it is broken in component CSS, not in a theme: a rule that
+    // writes `outline: 2px solid var(--accent)` replaces the neutral halo with an accent one, and
+    // an accented control then looks permanently focused. Component rules must reference
+    // `--focus-outline`/`--focus-shadow` instead of inventing a ring.
+    expect(indexCss).toContain('--focus-outline:')
+    for (const [name, sheet] of Object.entries(GENOME_STYLESHEETS)) {
+      for (const rule of sheet.split('}')) {
+        if (!/:focus(-visible|-within)?\b/.test(rule)) continue
+        const outline = /outline:\s*([^;]+)/.exec(rule)
+        if (!outline || /var\(--focus-outline\)/.test(outline[1])) continue
+        expect(outline[1], `${name}: focus ring borrows the accent — use var(--focus-outline)`)
+          .not.toMatch(/var\(--accent/)
+      }
+    }
+  })
+
+  it('gives a pane its focus mark and its agent state separate properties', () => {
+    // Both used to be written as `border-color` on `.terminal-pane` at equal specificity, so
+    // focusing a pane whose agent needed input silently erased one of the two signals.
+    const active = /\.terminal-pane\.active\s*\{([^}]*)\}/.exec(indexCss)?.[1] ?? ''
+    expect(active, 'the focus ring must go through --pane-border').toContain('--pane-border')
+    expect(active, 'agent state also writes the border; sharing border-color loses one signal')
+      .not.toMatch(/(^|[^-])border-color:/)
+
+    // The accent header edge has to be declared after every agent-state header rule, or an agent
+    // state overrides it and the user loses track of which pane the keyboard is in.
+    const focusEdge = indexCss.indexOf('.terminal-pane.active > .terminal-header')
+    const agentEdge = indexCss.lastIndexOf('.terminal-pane.agent-failed > .terminal-header')
+    expect(focusEdge).toBeGreaterThan(-1)
+    expect(focusEdge, 'focus edge must win over agent-state header edges').toBeGreaterThan(agentEdge)
+  })
   // Every stylesheet that carries component rules, so genome checks cover the whole app and not
   // just the token layer. Rules 1 and 3 are breakable in component CSS, not only in a palette.
   const GENOME_STYLESHEETS = {

@@ -1,0 +1,68 @@
+/* The only stylesheet in `src/product/` written by hand.
+ *
+ * It contains no appearance. Everything visible — colour, type, spacing, radius, borders, state
+ * — comes from `generated/paralith-ui.css`, which is the product's own stylesheet. This file
+ * exists solely to re-root that stylesheet from "the browser viewport" onto "a 1440x900 window
+ * sitting inside a film frame", which is the one assumption the product makes that a film cannot
+ * satisfy.
+ *
+ * Every rule below is load-bearing for that translation and nothing else. If a rule here ever
+ * changes how PARALITH *looks*, it belongs in the product, not in the film.
+ */
+
+.paralith-window {
+  /* The product window's own width drives its breakpoints. `sync-product-ui.mjs` rewrites the
+     stylesheet's width media queries to `@container paralith-window`, and this is the element
+     they resolve against — so the twin reflows at exactly the widths the application does. */
+  container-type: inline-size;
+  container-name: paralith-window;
+
+  position: relative;
+  overflow: hidden;
+  transform-origin: top left;
+
+  /* `:root` in the product is <html>, which the film does not own. These four declarations are
+     the product's `:root` / `html, body, #root` base, re-declared on the window element. The
+     theme's own custom properties arrive as an inline style from `PARALITH_DARK_VARS`. */
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+  line-height: var(--lh-tight);
+  letter-spacing: var(--tracking-ui);
+  color: var(--text);
+  background: var(--bg);
+
+  color-scheme: dark;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* The app shell measures itself against the viewport (`100dvh`) because in the application it is
+   the whole window. Here the window is a box, so it fills the box instead. The grid rows, and
+   therefore every metric inside it, are untouched. */
+.paralith-window .app-shell {
+  height: 100%;
+}
+
+/* Remotion renders every frame from a cold DOM, so a CSS transition has nothing to interpolate
+   from: it would either not fire at all or, worse, fire identically on every frame and freeze
+   mid-transition. All motion in this film is authored frame-by-frame instead, so the product's
+   transitions and its two idle animations are stopped. `.ws-row.is-switching` and the status
+   pulse are re-created explicitly, on the timeline, where they can be timed to the cut. */
+.paralith-window *,
+.paralith-window *::before,
+.paralith-window *::after {
+  transition: none !important;
+  animation: none !important;
+}
+
+/* Scrollbars are chrome the OS composites, not something the product draws; a film frame that
+   renders them puts a browser artefact inside a native window. Scroll position is set explicitly
+   by the scenes that need it. */
+.paralith-window ::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+.paralith-window * {
+  scrollbar-width: none;
+}

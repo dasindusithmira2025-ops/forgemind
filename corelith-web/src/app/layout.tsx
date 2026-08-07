@@ -3,6 +3,8 @@ import { Chakra_Petch, JetBrains_Mono } from 'next/font/google';
 import './globals.css';
 import { Header } from '@/components/Header';
 import { Footer } from '@/components/Footer';
+import { MotionEngine } from '@/components/motion/MotionEngine';
+import { PressRails } from '@/components/vfx/PressRails';
 import { siteConfig } from '@/config/site';
 
 // The voice of the system: squared terminals and a slight condensation that
@@ -74,7 +76,7 @@ export const metadata: Metadata = {
 // band rather than banding against it.
 export const viewport: Viewport = {
   colorScheme: 'dark',
-  themeColor: '#171310',
+  themeColor: '#070707',
 };
 
 export default function RootLayout({
@@ -87,7 +89,7 @@ export default function RootLayout({
     '@type': 'Organization',
     name: siteConfig.name,
     url: siteConfig.domain,
-    logo: `${siteConfig.domain}/logo.png`,
+    logo: `${siteConfig.domain}/brand/corelith-lockup.png`,
     description: siteConfig.description,
     sameAs: [siteConfig.social.github, siteConfig.social.twitter, siteConfig.social.linkedin],
   };
@@ -98,6 +100,17 @@ export default function RootLayout({
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+        />
+        {/* Blocking, and deliberately so. Everything the page reveals on scroll
+            rests at `opacity: 0`, and that rule is scoped to this class — so if
+            scripting is unavailable the class is never set, nothing is ever
+            hidden, and the document renders as plain static markup. Setting it
+            from React instead would either blank the page for readers without
+            JS or flash the whole document in and back out on every load. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `document.documentElement.classList.add('motion-ready')`,
+          }}
         />
       </head>
       <body className="bg-paper text-ink flex min-h-screen flex-col antialiased">
@@ -112,6 +125,13 @@ export default function RootLayout({
           {children}
         </main>
         <Footer />
+
+        {/* Everything below is surface: it renders nothing the page needs and
+            carries nothing a reader has to reach. Mounted last so the document
+            order matches the paint order. */}
+        <MotionEngine />
+        <PressRails />
+        <div aria-hidden="true" className="grain" />
       </body>
     </html>
   );

@@ -10,6 +10,7 @@ pub mod repository_service;
 pub mod restoration_scheduler;
 pub mod startup_service;
 pub mod swarm_service;
+pub mod task_title;
 pub mod terminal_manager;
 pub mod update_service;
 pub mod usage_service;

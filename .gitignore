@@ -51,6 +51,16 @@ graphify-out
 .claude/settings.local.json
 tmp/
 media/exports/
+.worktrees/
+
+# Local video production and rendered brand-film assets
+Marketing_videos
+marketing/**/out/
+marketing/**/renders/
+marketing/**/*.mp4
+marketing/**/*.mov
+marketing/**/*.webm
+corelith-web/public/media/paralith-showcase*
 
 # Editor directories and files
 .vscode/*

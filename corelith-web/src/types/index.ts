@@ -50,6 +50,38 @@ export interface NavLink {
   description?: string;
 }
 
+/** One destination inside a navigation panel. */
+export interface NavPanelItem {
+  label: string;
+  href: string;
+  /** Shown in the mobile drawer, where a bare label has room to be explained. */
+  description: string;
+  badge?: string;
+}
+
+/** The right column of a navigation panel: a summary, checkable facts, one action. */
+export interface NavPanelAside {
+  heading: string;
+  body: string;
+  facts: string[];
+  cta: { label: string; href: string };
+}
+
+export type NavItem =
+  | { kind: 'link'; label: string; href: string; description: string }
+  | {
+      kind: 'menu';
+      /** Stable id, used to wire the trigger to its panel for assistive tech. */
+      id: string;
+      label: string;
+      /** Where the trigger points when the panel is bypassed (mobile, no JS). */
+      href: string;
+      /** Small tracked heading over the destination column. */
+      heading: string;
+      items: NavPanelItem[];
+      aside: NavPanelAside;
+    };
+
 export interface CareerRole {
   id: string;
   title: string;

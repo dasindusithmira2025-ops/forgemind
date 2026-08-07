@@ -1,12 +1,57 @@
-# PARALITH cinematic product film
+# PARALITH films
 
-Remotion source for the 82-second PARALITH launch film and its landscape, vertical, square,
-captioned, clean, trailer, teaser, and poster deliveries.
+Remotion source for four deliverables, newest first:
 
-The story, product-truth boundary, final copy, voice-over, audio plan, transition plan, capture
-list, and frame-accurate timing sheet are in
-[`docs/PRODUCTION_BIBLE.md`](docs/PRODUCTION_BIBLE.md). Asset provenance and license notes are in
-[`docs/ASSET_LICENSES.md`](docs/ASSET_LICENSES.md).
+- **The gate film** — "The only way through." A 78-second cut in seven sequences that follows one
+  change from the sentence that asks for it to the commit that lands it, through the three gates
+  the product will not let it skip: isolation, verification, consent. Not a re-cut — it shares no
+  scene, score, stem, copy line or delivered filename with anything below it. Ships a 4K master, a
+  1080p clean version, a captioned version, 60/30/15-second cuts, a silent hero loop, a poster and
+  caption sidecars. See [`docs/GATE_FILM.md`](docs/GATE_FILM.md).
+- **The campaign film** — "Build beyond the editor." A 95-second, score-and-type cut in eight
+  sequences, and the current master. Ships a 4K master, a 1080p clean version, a captioned version,
+  60/30/15-second cuts, a 9:16 social cut, a silent website hero loop, a poster, and caption
+  sidecars. See [`docs/CAMPAIGN_FILM.md`](docs/CAMPAIGN_FILM.md).
+- **The brand film** — "Many agents. One build." The earlier 82-second cut that introduced the
+  product twin. Superseded by the campaign film but still registered and reproducible. See
+  [`docs/BRAND_FILM.md`](docs/BRAND_FILM.md).
+- **The narrated product film** — the original 82-second launch explainer and its landscape,
+  vertical, square, captioned, clean, trailer, teaser, and poster deliveries. See
+  [`docs/PRODUCTION_BIBLE.md`](docs/PRODUCTION_BIBLE.md).
+
+All four are registered in `src/Root.tsx` and render from the same package. Asset provenance and
+license notes for all of them are in [`docs/ASSET_LICENSES.md`](docs/ASSET_LICENSES.md).
+
+The brand and campaign films' interface is not drawn by hand: `scripts/sync-product-ui.mjs`
+generates `src/product/generated/` from `Paralith-tauri`'s own stylesheet and theme engine, and
+`npm run sync:product:check` fails the build if the two have drifted apart.
+
+## The gate film, end to end
+
+```powershell
+Set-Location marketing/paralith-video
+npm ci
+npm run typecheck
+npm run score:gate          # five scores, one per cut length, fully synthesised
+npm run render:gate         # every delivery, plus poster and captions
+npm run verify:gate         # codec, duration, loudness and sidecar assertions
+```
+
+The gate film draws its own surfaces rather than using the product twin in `src/product/`, and its
+score is generated from oscillators rather than arranged from stems, so neither
+`sync:product:check` nor the ElevenLabs stem licence in `docs/ASSET_LICENSES.md` applies to it.
+
+## The campaign film, end to end
+
+```powershell
+Set-Location marketing/paralith-video
+npm ci
+npm run typecheck
+npm run score:campaign      # four scores, one per cut length
+npm run probe:campaign      # contact sheet across all eight sequences
+npm run render:campaign     # every delivery, plus poster and captions
+npm run verify:campaign     # codec, duration, loudness, and sidecar assertions
+```
 
 This is an independent npm package with its own lockfile. It is deliberately not an npm
 workspace, so video dependencies cannot rewrite the website or PARALITH desktop lockfiles.

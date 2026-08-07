@@ -16,12 +16,40 @@ const requireFile = (relative, minimumBytes = 1) => {
 [
   ['public/brand/mark-alpha.png', 1_000],
   ['public/brand/wordmark-alpha.png', 1_000],
+  // Transparent masters cut from the 4K logo pack for the brand film's reveal and endcard.
+  ['public/brand/mark.png', 100_000],
+  ['public/brand/wordmark.png', 100_000],
+  ['public/brand/lockup.png', 100_000],
   ['public/fonts/Geist-Variable.woff2', 50_000],
   ['public/fonts/OFL.txt', 4_000],
+  ['public/fonts/OFL-CascadiaMono.txt', 4_000],
   ['public/audio/paralith-score.mp3', 100_000],
   ['public/audio/paralith-trailer-score.mp3', 50_000],
   ['public/audio/paralith-teaser-score.mp3', 25_000],
+  // The gate film's score. Synthesised by scripts/build-gate-score.mjs; no stems, no samples.
+  ['public/audio/paralith-gate-score.mp3', 500_000],
+  ['public/audio/paralith-gate-score-60.mp3', 400_000],
+  ['public/audio/paralith-gate-score-30.mp3', 200_000],
+  ['public/audio/paralith-gate-score-15.mp3', 100_000],
+  ['public/audio/paralith-gate-score-loop.mp3', 50_000],
+  // The terminal face the product ships with, inlined; see scripts/embed-mono-font.mjs.
+  ['src/mono-font-data.ts', 400_000],
 ].forEach(([file, bytes]) => requireFile(file, bytes));
+
+/**
+ * The product twin is only worth anything if it is current. This re-derives the generated
+ * stylesheet and theme from `Paralith-tauri` and fails if what is checked in has drifted, so a
+ * change to the desktop app's design system cannot leave a stale film behind.
+ */
+const twin = spawnSync(process.execPath, [path.join(root, 'scripts/sync-product-ui.mjs'), '--check'], {
+  encoding: 'utf8',
+});
+const twinFresh = twin.status === 0;
+console.log(`${twinFresh ? 'ok' : 'FAIL'} product twin in sync with Paralith-tauri`);
+if (!twinFresh) {
+  console.log((twin.stderr || twin.stdout).trim());
+  failed = true;
+}
 
 const voiceLimits = {
   fragmentation: 6,
@@ -55,6 +83,9 @@ const sourceFiles = [
   'src/components/ProductWindow.tsx',
   'src/scenes/Record.tsx',
   'src/scenes/Direction.tsx',
+  // The gate film's copy, its endcard and every machine string it puts on screen live in one file,
+  // so the claim guard below covers that film by reading exactly one more path.
+  'src/gate/script.ts',
 ];
 const source = sourceFiles.map((file) => readFileSync(path.join(root, file), 'utf8')).join('\n');
 const forbidden = ['v0.9.4', '/products/paralith', 'memory index', 'knowledge graph'];

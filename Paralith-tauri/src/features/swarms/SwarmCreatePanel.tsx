@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { confirm, open } from '@tauri-apps/plugin-dialog'
+import { open } from '@tauri-apps/plugin-dialog'
+import { confirm } from '../../components/ui/confirm'
 import { AlertTriangle, ArrowDown, ArrowUp, ChevronDown, ChevronRight, Copy, FilePlus2, Plus, Rocket, Save, Trash2 } from 'lucide-react'
 import { native } from '../../native/commands'
 import type {
@@ -121,9 +122,11 @@ export function SwarmCreatePanel({ projectId, onCreated, onCancel }: {
 
   async function removePreset() {
     if (!customPresetId) return
-    const approved = await confirm(`Delete the custom preset “${presetName}”?`, {
-      title: 'Delete team preset',
-      kind: 'warning',
+    const approved = await confirm({
+      title: `Delete the preset "${presetName}"?`,
+      details: ['Swarms already created from it are unaffected.', 'This cannot be undone.'],
+      confirmLabel: 'Delete preset',
+      intent: 'danger',
     })
     if (!approved) return
     setBusy(true)

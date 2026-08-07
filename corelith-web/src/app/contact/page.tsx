@@ -57,7 +57,11 @@ export default function ContactPage() {
 
         <div className="mt-14 grid grid-cols-1 gap-5 lg:grid-cols-3">
           {ROUTES.map((route, i) => (
-            <article key={route.email} className="panel panel-hover flex flex-col gap-4 p-7">
+            <article
+              key={route.email}
+              data-reveal="up"
+              className="panel panel-hover lit flex flex-col gap-4 p-7"
+            >
               <div className="flex items-start justify-between gap-4">
                 <p className="stamp max-w-[16ch] text-[var(--kicker)]">{route.label}</p>
                 <span aria-hidden="true" className="numeral text-[var(--fg)] text-xl">
@@ -67,7 +71,7 @@ export default function ContactPage() {
 
               <a
                 href={`mailto:${route.email}`}
-                className="text-ink hover:text-ember-ink font-mono text-sm break-all underline decoration-1 underline-offset-4 transition-colors"
+                className="text-ink hover:text-core-ink font-mono text-sm break-all underline decoration-1 underline-offset-4 transition-colors"
               >
                 {route.email}
               </a>
@@ -90,7 +94,7 @@ export default function ContactPage() {
         />
 
         <div className="mt-14 grid grid-cols-12">
-          <div className="col-span-12 lg:col-span-8 lg:col-start-3">
+          <div data-reveal="up" className="col-span-12 lg:col-span-8 lg:col-start-3">
             <ContactForm />
           </div>
         </div>

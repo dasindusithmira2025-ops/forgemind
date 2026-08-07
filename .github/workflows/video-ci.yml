@@ -58,3 +58,9 @@ jobs:
 
       - name: Render poster smoke
         run: npm run still
+
+      # The gate film draws its own surfaces and carries its own score, so a poster still of the
+      # narrated explainer proves nothing about it. One frame is enough to catch a broken import,
+      # a missing brand asset or a font that stopped resolving.
+      - name: Render gate poster smoke
+        run: npx remotion still ParalithGatePoster out/ci/gate-poster.png --overwrite

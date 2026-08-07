@@ -1,5 +1,6 @@
 import { AlertTriangle, Download, RotateCcw, ShieldCheck } from 'lucide-react'
 import type { SafeRestartAssessment, UpdateDownloadProgress, UpdateStatus } from '../../native/types'
+import { confirm } from '../../components/ui/confirm'
 import { useUpdateController } from './updateController'
 
 interface UpdateNotificationViewProps {
@@ -105,7 +106,12 @@ export function UpdateNotification() {
     dismissed={dismissedVersion === status.journal.available?.version}
     onUpdateNow={() => void updateNow(
       { unsavedEditorState: false, unsavedSettings: false, unsavedBrowserState: false },
-      (next) => window.confirm(`PARALITH will checkpoint and stop active work before restarting.\n\n${next.blockers.join('\n')}\n\nUpdate now?`),
+      (next) => confirm({
+        title: 'Update and restart now?',
+        body: 'PARALITH checkpoints and stops active work before restarting.',
+        details: next.blockers,
+        confirmLabel: 'Update now',
+      }),
     )}
     onRetry={() => void retry()}
     onLater={dismiss}

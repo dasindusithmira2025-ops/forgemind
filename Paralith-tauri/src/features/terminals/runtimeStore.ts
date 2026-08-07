@@ -15,11 +15,26 @@ const EMPTY: SessionSnapshot = { session: undefined, chunks: [], outputVersion: 
 const EMPTY_SESSIONS: TerminalSession[] = []
 const MAX_PENDING_BYTES = 256 * 1024
 
+/** Index key for the newest agent state of one Pane, independent of which Session produced it. */
+export function agentStateKey(workspaceId: string, paneId: string): string {
+  return `${workspaceId}:${paneId}`
+}
+
 export class TerminalRuntimeStore {
   private snapshots = new Map<string, SessionSnapshot>()
   private sessionListeners = new Map<string, Set<() => void>>()
   private workspaceListeners = new Map<string, Set<() => void>>()
   private workspaceSnapshots = new Map<string, TerminalSession[]>()
+  /**
+   * Cross-workspace views, for surfaces that must stay true for Workspaces they are not
+   * displaying — chiefly the sidebar, whose rows span every open Project. Both are lazily
+   * rebuilt and identity-stable between changes, so `useSyncExternalStore` and the sidebar's
+   * identity-keyed caches can treat an unchanged reference as "nothing happened".
+   */
+  private allSessionsSnapshot: TerminalSession[] | null = null
+  private agentStates = new Map<string, AgentStateEvent>()
+  private agentStatesSnapshot: Record<string, AgentStateEvent> | null = null
+  private globalListeners = new Set<() => void>()
   private unlisten: Array<() => void> = []
   private notificationTimers = new Map<string, ReturnType<typeof setTimeout>>()
   private startPromise?: Promise<void>
@@ -73,8 +88,38 @@ export class TerminalRuntimeStore {
     }
   }
 
+  /**
+   * Reconcile against an authoritative list of everything the backend considers live.
+   *
+   * `hydrate` only ever adds, so a Session that died while no listener was attached — during a
+   * reload, or before this window existed — stays "running" forever. This corrects in both
+   * directions: absent Sessions are marked exited rather than deleted, because a Pane that ended
+   * is something the user should see ended, not something that silently vanishes.
+   *
+   * `observedAt` is the moment the list was taken. Sessions started after it are left alone: a
+   * Session created while the query was in flight is legitimately missing from the answer, and
+   * demoting it would kill a terminal that is starting up fine.
+   */
+  reconcileLiveSessions(sessions: TerminalSession[], observedAt: string) {
+    const liveIds = new Set(sessions.map((session) => session.id))
+    const touched = new Set<string>()
+    for (const session of sessions) {
+      this.upsert(session, false)
+      touched.add(session.workspaceId)
+    }
+    for (const snapshot of [...this.snapshots.values()]) {
+      const known = snapshot.session
+      if (!known || known.status !== 'running' || liveIds.has(known.id)) continue
+      if (known.startedAt.localeCompare(observedAt) > 0) continue
+      this.upsert({ ...known, status: 'exited', endedAt: observedAt, processId: undefined }, false)
+      touched.add(known.workspaceId)
+    }
+    for (const workspaceId of touched) this.publishWorkspace(workspaceId)
+  }
+
   upsert(session: TerminalSession, notify = true) {
     const current = this.snapshots.get(session.id)
+    this.allSessionsSnapshot = null
     this.snapshots.set(session.id, {
       session,
       chunks: current?.chunks ?? [],
@@ -92,6 +137,7 @@ export class TerminalRuntimeStore {
   remove(sessionId: string) {
     const workspaceId = this.snapshots.get(sessionId)?.session?.workspaceId
     this.cancelNotification(sessionId)
+    this.allSessionsSnapshot = null
     this.snapshots.delete(sessionId)
     this.sessionListeners.get(sessionId)?.forEach((listener) => listener())
     if (workspaceId) this.publishWorkspace(workspaceId)
@@ -104,6 +150,13 @@ export class TerminalRuntimeStore {
         this.snapshots.delete(id)
       }
     }
+    // A Workspace whose Sessions are gone has no agent state either. Leaving the entries would
+    // keep a stale "needs input" claim alive on a Workspace that is no longer running anything.
+    for (const key of [...this.agentStates.keys()]) {
+      if (key.startsWith(`${workspaceId}:`)) this.agentStates.delete(key)
+    }
+    this.allSessionsSnapshot = null
+    this.agentStatesSnapshot = null
     this.publishWorkspace(workspaceId)
   }
 
@@ -137,6 +190,39 @@ export class TerminalRuntimeStore {
 
   getWorkspaceSnapshot = (workspaceId: string) => this.workspaceSnapshots.get(workspaceId) ?? EMPTY_SESSIONS
 
+  /**
+   * Subscribe to *any* runtime change, in any Workspace. The sidebar needs this because it shows
+   * rows for Workspaces it is not displaying: subscribing per Workspace would mean the sidebar
+   * only learns about the one Workspace on screen, which is how a background Project's row comes
+   * to claim "3 running" long after its terminals exited.
+   */
+  subscribeAll = (listener: () => void) => {
+    this.globalListeners.add(listener)
+    return () => {
+      this.globalListeners.delete(listener)
+    }
+  }
+
+  /** Every live Session across every Workspace, in a stable order. Identity changes only on change. */
+  getAllSessionsSnapshot = (): TerminalSession[] => {
+    if (!this.allSessionsSnapshot) {
+      this.allSessionsSnapshot = [...this.snapshots.values()]
+        .flatMap((snapshot) => (snapshot.session ? [snapshot.session] : []))
+        .sort(
+          (a, b) => a.workspaceId.localeCompare(b.workspaceId) || a.paneId.localeCompare(b.paneId),
+        )
+    }
+    return this.allSessionsSnapshot
+  }
+
+  /** The newest agent state per Pane, keyed by `agentStateKey`. Identity changes only on change. */
+  getAgentStatesSnapshot = (): Record<string, AgentStateEvent> => {
+    if (!this.agentStatesSnapshot) {
+      this.agentStatesSnapshot = Object.fromEntries(this.agentStates)
+    }
+    return this.agentStatesSnapshot
+  }
+
   agentStateForSession(sessionId: string) {
     return this.snapshots.get(sessionId)?.agentState
   }
@@ -147,6 +233,14 @@ export class TerminalRuntimeStore {
       ...current,
       agentState: event,
     })
+    // Also index by Pane. A Pane that restarts gets a new Session id, so a Session-keyed lookup
+    // would leave the sidebar reading the dead Session's last state for the Pane in front of it.
+    const key = agentStateKey(event.workspaceId, event.paneId)
+    const known = this.agentStates.get(key)
+    if (!known || known.updatedAt.localeCompare(event.updatedAt) <= 0) {
+      this.agentStates.set(key, event)
+      this.agentStatesSnapshot = null
+    }
     this.sessionListeners.get(event.terminalSessionId)?.forEach((listener) => listener())
     this.publishWorkspace(event.workspaceId)
   }
@@ -222,12 +316,15 @@ export class TerminalRuntimeStore {
   }
 
   private publishWorkspace(workspaceId: string) {
-    const sessions = [...this.snapshots.values()]
-      .flatMap((snapshot) => snapshot.session ? [snapshot.session] : [])
-      .filter((session) => session.workspaceId === workspaceId)
-      .sort((a, b) => a.paneId.localeCompare(b.paneId))
+    // Derived from the global view, which is already ordered by Workspace then Pane, so the two
+    // snapshots can never disagree about a Session's presence or position.
+    const sessions = this.getAllSessionsSnapshot().filter((session) => session.workspaceId === workspaceId)
     this.workspaceSnapshots.set(workspaceId, sessions)
     this.workspaceListeners.get(workspaceId)?.forEach((listener) => listener())
+    // Every path that changes Session or agent state ends here, so this is the one place the
+    // cross-workspace subscribers need to be woken. Output events deliberately never reach it:
+    // a Session's byte stream changes nothing the sidebar renders.
+    this.globalListeners.forEach((listener) => listener())
   }
 }
 
@@ -246,5 +343,25 @@ export function useWorkspaceSessions(workspaceId: string): TerminalSession[] {
     (listener) => terminalRuntime.subscribeWorkspace(workspaceId, listener),
     () => terminalRuntime.getWorkspaceSnapshot(workspaceId),
     () => EMPTY_SESSIONS,
+  )
+}
+
+const EMPTY_AGENT_STATES: Record<string, AgentStateEvent> = {}
+
+/** Every live Session across every Workspace. For surfaces that span Projects — see `subscribeAll`. */
+export function useAllTerminalSessions(): TerminalSession[] {
+  return useSyncExternalStore(
+    terminalRuntime.subscribeAll,
+    terminalRuntime.getAllSessionsSnapshot,
+    () => EMPTY_SESSIONS,
+  )
+}
+
+/** The newest agent state per Pane across every Workspace, keyed by `agentStateKey`. */
+export function useAllAgentStates(): Record<string, AgentStateEvent> {
+  return useSyncExternalStore(
+    terminalRuntime.subscribeAll,
+    terminalRuntime.getAgentStatesSnapshot,
+    () => EMPTY_AGENT_STATES,
   )
 }

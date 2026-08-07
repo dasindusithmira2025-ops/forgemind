@@ -1,5 +1,5 @@
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
-import type { AgentStateEvent, BrowserEvent, ProjectFileChangeBatch, ProviderUsageSnapshot, RemoteProjection, RepositoryApprovalRequest, RepositoryOperationEvent, RepositoryOperationRecord, RestorationProgress, SwarmChangedEvent, TerminalExitEvent, TerminalOutputEvent, TerminalStatusEvent } from './types'
+import type { AgentStateEvent, BrowserEvent, PaneRenamedEvent, ProjectFileChangeBatch, ProviderUsageSnapshot, RemoteProjection, RepositoryApprovalRequest, RepositoryOperationEvent, RepositoryOperationRecord, RestorationProgress, SidebarPreferences, SwarmChangedEvent, TerminalExitEvent, TerminalOutputEvent, TerminalStatusEvent } from './types'
 
 type TerminalOutputWireEvent = Omit<TerminalOutputEvent, 'data'> & { data: string }
 
@@ -14,6 +14,11 @@ export const onTerminalStatus = (handler: (event: TerminalStatusEvent) => void):
 
 export const onAgentState = (handler: (event: AgentStateEvent) => void): Promise<UnlistenFn> =>
   listen<AgentStateEvent>('agent-state', (event) => handler(event.payload))
+
+/** A Pane was retitled by the backend. Reaches whichever window owns the Workspace, so a Pane
+ *  renamed by a task shows its new title in the main window and in a detached one alike. */
+export const onPaneRenamed = (handler: (event: PaneRenamedEvent) => void): Promise<UnlistenFn> =>
+  listen<PaneRenamedEvent>('pane-renamed', (event) => handler(event.payload))
 
 export const onRestorationProgress = (handler: (event: RestorationProgress) => void): Promise<UnlistenFn> =>
   listen<RestorationProgress>('restoration-progress', (event) => handler(event.payload))
@@ -49,6 +54,10 @@ export const onBrowserEvent = (handler: (event: BrowserEvent) => void): Promise<
 /** Fired to every window when the persisted theme changes, carrying the newly selected theme id. */
 export const onThemeChanged = (handler: (themeId: string) => void): Promise<UnlistenFn> =>
   listen<string>('theme-changed', (event) => handler(event.payload))
+
+/** Fired to every window when the sidebar's view preferences change, so no window drifts. */
+export const onSidebarPreferencesChanged = (handler: (preferences: SidebarPreferences) => void): Promise<UnlistenFn> =>
+  listen<SidebarPreferences>('sidebar-preferences-changed', (event) => handler(event.payload))
 
 /** Backend emits this only after a material snapshot change; countdown text remains local. */
 export const onAiUsageChanged = (handler: (snapshots: ProviderUsageSnapshot[]) => void): Promise<UnlistenFn> =>

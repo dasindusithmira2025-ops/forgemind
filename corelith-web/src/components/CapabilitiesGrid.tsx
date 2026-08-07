@@ -8,6 +8,11 @@ import { companyData } from '@/data/company';
  * Deliberately unnumbered. These four domains are a set, not a sequence, and an
  * index number would imply an order the reader is meant to follow. Numerals in
  * this system are reserved for content where the order is real information.
+ *
+ * Rows are lit rather than raised: a ruled index has no cut edge to catch a
+ * light, so the pointer drags a band of light along the row and marks its
+ * leading edge. That is the difference between a list that responds and a list
+ * that has been turned into four cards.
  */
 export function CapabilitiesGrid() {
   return (
@@ -15,7 +20,8 @@ export function CapabilitiesGrid() {
       {companyData.capabilities.map((cap) => (
         <li
           key={cap.category}
-          className="group grid grid-cols-12 items-baseline gap-x-8 gap-y-3 border-b border-[var(--hair)] py-8 transition-colors hover:bg-[rgba(245,237,224,0.03)]"
+          data-reveal="up"
+          className="group lit-row grid grid-cols-12 items-baseline gap-x-8 gap-y-3 border-b border-[var(--hair)] py-8 transition-colors hover:bg-[rgba(245,237,224,0.03)]"
         >
           <h3 className="col-span-12 text-lg text-[var(--fg)] transition-colors group-hover:text-[var(--kicker)] lg:col-span-4 lg:text-xl">
             {cap.category}

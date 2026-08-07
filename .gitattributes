@@ -1,1 +1,2 @@
 Paralith-tauri/src-tauri/tests/fixtures/updater-* text eol=lf
+*.pdf binary

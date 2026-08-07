@@ -169,6 +169,16 @@ export interface TerminalStatusEvent {
   lifecycleEvent: string
 }
 
+/** A Pane title changed in the backend — today only when an agent Pane is renamed after its user
+ *  submits a task. The title is already persisted, so receivers apply it without saving again. */
+export interface PaneRenamedEvent {
+  workspaceId: string
+  paneId: string
+  sessionId: string
+  title: string
+  source: 'agent_task'
+}
+
 export type UsageProvider = 'claude' | 'codex'
 export type UsageFreshness = 'live' | 'recent' | 'stale' | 'unavailable'
 export type UsageSnapshotStatus = 'ready' | 'loading' | 'unsupported' | 'unauthenticated' | 'stale' | 'error'
@@ -653,9 +663,37 @@ export interface StartupStatus {
   previousInstallerUrl?: string
 }
 
+/**
+ * How the sidebar's primary list is grouped.
+ *   `project` — one collapsible section per open Project (the default).
+ *   `flat`    — every Workspace from every open Project in one ungrouped list.
+ */
+export type SidebarGroupBy = 'project' | 'flat'
+
+/**
+ * How the sidebar's primary list is ordered.
+ *   `manual`    — the persisted per-Project order the user drags into place (the default).
+ *   `attention` — Workspaces that need a human first.
+ */
+export type SidebarSortMode = 'manual' | 'attention'
+
+/**
+ * The sidebar's persisted view state. Split from `AppSettings` because that is main-window-only;
+ * these carry nothing privileged and every window that draws a sidebar needs them.
+ */
+export interface SidebarPreferences {
+  groupBy: SidebarGroupBy
+  sortMode: SidebarSortMode
+  /** Ids of the sections the user has collapsed. Only collapsed sections are persisted. */
+  collapsedGroups: string[]
+}
+
 export interface AppSettings {
   sidebarOpen: boolean
   sidebarWidth: number
+  sidebarGroupBy: SidebarGroupBy
+  sidebarSortMode: SidebarSortMode
+  sidebarCollapsedGroups: string[]
   uiScale: number
   uiDensity: 'comfortable' | 'standard' | 'compact'
   /** Selected appearance theme id (e.g. 'paralith-dark', 'system'). See src/theme. */
@@ -672,6 +710,8 @@ export interface AppSettings {
   copyOnSelect: boolean
   confirmMultilinePaste: boolean
   confirmClosePane: boolean
+  /** Retitle an agent Pane from the task its user just submitted. */
+  autoRenameAgentTerminals: boolean
   reopenLastWorkspace: boolean
   restoreBehavior: 'ask' | 'restart_agents' | 'fresh_shells'
   outputLogRetention: 'tail_only' | 'rotating_log'
@@ -1126,6 +1166,8 @@ export interface FileContents {
   encoding: FileEncoding
   lineEnding: LineEnding
   binary: boolean
+  /** MIME type when this file can be previewed (image or PDF), decided by extension. */
+  mediaType: string | null
   readonly: boolean
 }
 

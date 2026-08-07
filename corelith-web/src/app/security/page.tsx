@@ -63,7 +63,8 @@ export default function SecurityPage() {
           {securityData.principles.map((p) => (
             <article
               key={p.title}
-              className="flex flex-col gap-4 border-r border-b border-[var(--hair)] p-7 transition-colors hover:bg-[rgba(245,237,224,0.03)]"
+              data-reveal="up"
+              className="lit flex flex-col gap-4 border-r border-b border-[var(--hair)] p-7 transition-colors hover:bg-[rgba(245,237,224,0.03)]"
             >
               <h3 className="max-w-[20ch] text-lg text-[var(--fg)]">{p.title}</h3>
               <p className="border-t border-[var(--hair)] pt-4 text-base text-[var(--fg-soft)]">
@@ -87,7 +88,8 @@ export default function SecurityPage() {
           {DATA_MATRIX.map((row) => (
             <div
               key={row.subject}
-              className="grid grid-cols-12 gap-x-8 gap-y-3 border-b border-[var(--hair)] py-8"
+              data-reveal="up"
+              className="lit-row grid grid-cols-12 gap-x-8 gap-y-3 border-b border-[var(--hair)] py-8"
             >
               <h3 className="col-span-12 text-lg text-[var(--fg)] lg:col-span-3">{row.subject}</h3>
               <p className="stamp col-span-12 self-center text-[var(--kicker)] lg:col-span-3">
@@ -115,7 +117,8 @@ export default function SecurityPage() {
             {securityData.reportingProcess.map((step, i) => (
               <li
                 key={step}
-                className="flex gap-6 border-b border-[var(--hair)] py-5 first:border-t"
+                data-reveal="up"
+                className="lit-row flex gap-6 border-b border-[var(--hair)] py-5 first:border-t"
               >
                 <span aria-hidden="true" className="numeral text-ink shrink-0 text-xl">
                   {String(i + 1).padStart(2, '0')}
@@ -125,12 +128,12 @@ export default function SecurityPage() {
             ))}
           </ol>
 
-          <div className="col-span-12 lg:col-span-4 lg:col-start-9">
-            <div className="panel p-7">
-              <p className="stamp text-ember-ink">Security contact</p>
+          <div data-reveal="up" className="col-span-12 lg:col-span-4 lg:col-start-9">
+            <div className="panel lit p-7">
+              <p className="stamp text-core-ink">Security contact</p>
               <a
                 href={`mailto:${siteConfig.securityEmail}`}
-                className="text-ink hover:text-ember-ink mt-4 block font-mono text-sm break-all underline decoration-1 underline-offset-4 transition-colors"
+                className="text-ink hover:text-core-ink mt-4 block font-mono text-sm break-all underline decoration-1 underline-offset-4 transition-colors"
               >
                 {siteConfig.securityEmail}
               </a>

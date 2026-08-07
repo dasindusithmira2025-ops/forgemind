@@ -4,10 +4,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { WorkspaceScreen } from './WorkspaceScreen'
 import { useAppStore } from '../stores/appStore'
 import { useSidebarStore } from '../features/sidebar/sidebarStore'
-import type { Project, TerminalSession, Workspace, WorkspaceSaveRequest } from '../native/types'
+import type { PaneRenamedEvent, Project, SidebarPreferences, TerminalSession, Workspace, WorkspaceSaveRequest } from '../native/types'
 
-const runtime = vi.hoisted(() => ({ sessions: [] as TerminalSession[], hydrate: vi.fn(), upsert: vi.fn(), remove: vi.fn(), clearWorkspace: vi.fn(), agentStateForSession: vi.fn(() => undefined) }))
+const runtime = vi.hoisted(() => ({ sessions: [] as TerminalSession[], agentStates: {} as Record<string, never>, hydrate: vi.fn(), upsert: vi.fn(), remove: vi.fn(), clearWorkspace: vi.fn(), reconcileLiveSessions: vi.fn(), agentStateForSession: vi.fn(() => undefined) }))
+// Captures the backend Pane-rename subscription so a broadcast can be replayed into the screen.
+const paneRenamed = vi.hoisted(() => ({ handlers: [] as Array<(event: PaneRenamedEvent) => void> }))
+// Captures the sidebar-preference broadcast so a change made in another window can be replayed.
+const sidebarPreferencesChanged = vi.hoisted(() => ({ handlers: [] as Array<(preferences: SidebarPreferences) => void> }))
 const restoreWorkspace = vi.fn()
+const saveWorkspace = vi.fn()
 const createTerminalSession = vi.fn()
 const saveSettings = vi.fn()
 const getWorkspace = vi.fn()
@@ -17,17 +22,44 @@ const terminateWorkspace = vi.fn()
 const reorderWorkspaces = vi.fn()
 const listSwarms = vi.fn()
 const closeProjectSession = vi.fn()
+const getSidebarPreferences = vi.fn()
+const setSidebarPreferences = vi.fn()
 
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn() }))
 vi.mock('@tauri-apps/plugin-opener', () => ({ openPath: vi.fn() }))
-vi.mock('../features/terminals/runtimeStore', () => ({ terminalRuntime: runtime, useWorkspaceSessions: () => runtime.sessions }))
+// The sidebar reads the cross-workspace view; the screen's own Panes read the per-Workspace one.
+// Both resolve to the same fixture list, exactly as they do against the real store.
+vi.mock('../features/terminals/runtimeStore', () => ({
+  terminalRuntime: runtime,
+  useWorkspaceSessions: () => runtime.sessions,
+  useAllTerminalSessions: () => runtime.sessions,
+  useAllAgentStates: () => runtime.agentStates,
+}))
 vi.mock('../components/terminal/TerminalPane', () => ({ TerminalPane: ({ assignment, deferred, maximized, onFocus, onMaximize, onRestart }: { assignment: { title: string }; deferred?: boolean; maximized: boolean; onFocus: () => void; onMaximize: () => void; onRestart: () => void }) => <div data-testid="terminal-pane" data-maximized={maximized} onMouseDown={onFocus}><span>{assignment.title}</span><button onClick={onMaximize}>Toggle maximize</button>{deferred && <button onMouseDown={(event) => event.stopPropagation()} onClick={onRestart}>Resume terminal</button>}</div> }))
 vi.mock('../components/terminal/terminalActions', () => ({ dispatchTerminalAction: vi.fn() }))
+// Only the subscriptions this screen actually opens are replaced; every other event helper keeps
+// its real implementation so the rest of the mounted tree behaves exactly as it does untested.
+vi.mock('../native/events', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../native/events')>()),
+  onPaneRenamed: (handler: (event: PaneRenamedEvent) => void) => {
+    paneRenamed.handlers.push(handler)
+    return Promise.resolve(() => {
+      paneRenamed.handlers = paneRenamed.handlers.filter((item) => item !== handler)
+    })
+  },
+  // Captures the sidebar-preference broadcast so a change from another window can be replayed.
+  onSidebarPreferencesChanged: (handler: (preferences: SidebarPreferences) => void) => {
+    sidebarPreferencesChanged.handlers.push(handler)
+    return Promise.resolve(() => {
+      sidebarPreferencesChanged.handlers = sidebarPreferencesChanged.handlers.filter((item) => item !== handler)
+    })
+  },
+}))
 vi.mock('../native/commands', () => ({
   asNativeError: (error: unknown) => ({ message: String(error) }),
   native: {
     getProject: vi.fn(async () => project), getWorkspace: (...args: unknown[]) => getWorkspace(...args),
-    saveWorkspace: vi.fn(async (request: WorkspaceSaveRequest) => ({ ...request, normalizedName: request.name.toLowerCase(), id: request.id ?? 'workspace', createdAt: '', updatedAt: '', lastOpenedAt: '' })),
+    saveWorkspace: (...args: unknown[]) => saveWorkspace(...args),
     listRecentWorkspaces: (...args: unknown[]) => listRecentWorkspaces(...args),
     listWorkspacesForProject: (...args: unknown[]) => listWorkspacesForProject(...args),
     setLastActiveWorkspace: vi.fn().mockResolvedValue(undefined),
@@ -46,6 +78,8 @@ vi.mock('../native/commands', () => ({
     listWorkspacePlacements: vi.fn(async () => []), listMonitors: vi.fn(async () => []),
     setProjectLastActive: vi.fn(async () => undefined),
     saveSettings: (...args: unknown[]) => saveSettings(...args),
+    getSidebarPreferences: (...args: unknown[]) => getSidebarPreferences(...args),
+    setSidebarPreferences: (...args: unknown[]) => setSidebarPreferences(...args),
   },
 }))
 
@@ -56,19 +90,26 @@ const secondWorkspace: Workspace = { ...workspace, id: 'workspace-two', name: 'S
 
 describe('Workspace screen', () => {
   beforeEach(() => {
-    vi.clearAllMocks(); runtime.sessions = [session]
-    useSidebarStore.setState({ projectSwitcherOpen: false, listOptionsOpen: false, diagnosticsOpen: false, menuWorkspaceId: undefined, draggingWorkspaceId: undefined, filterQuery: '', groupBy: 'project', sortMode: 'manual', collapsedGroups: {} })
+    vi.clearAllMocks(); runtime.sessions = [session]; runtime.agentStates = {}
+    // `preferencesHydrated` starts true so the store behaves as it does after startup: a setter
+    // that fired before hydration is deliberately not written back, which would otherwise make
+    // every preference assertion depend on the hydration race.
+    useSidebarStore.setState({ projectSwitcherOpen: false, listOptionsOpen: false, diagnosticsOpen: false, menuWorkspaceId: undefined, draggingWorkspaceId: undefined, filterQuery: '', groupBy: 'project', sortMode: 'manual', collapsedGroups: {}, frozenOrder: [], sortEpoch: 0, preferencesHydrated: true })
+    getSidebarPreferences.mockResolvedValue({ groupBy: 'project', sortMode: 'manual', collapsedGroups: [] })
+    setSidebarPreferences.mockResolvedValue(undefined)
     restoreWorkspace.mockResolvedValue({ workspaceId: 'workspace', sessions: [session], deferredPaneIds: [], failures: [], budget: 4 })
     createTerminalSession.mockResolvedValue(session)
     terminateWorkspace.mockResolvedValue(undefined)
     reorderWorkspaces.mockResolvedValue(undefined)
     saveSettings.mockImplementation(async (value) => value)
+    saveWorkspace.mockImplementation(async (request: WorkspaceSaveRequest) => ({ ...request, normalizedName: request.name.toLowerCase(), id: request.id ?? 'workspace', createdAt: '', updatedAt: '', lastOpenedAt: '' }))
     getWorkspace.mockImplementation(async (id: string) => id === secondWorkspace.id ? secondWorkspace : workspace)
     listRecentWorkspaces.mockResolvedValue([workspace, secondWorkspace].map((item) => ({ workspace: item, projectName: project.name, projectPath: project.rootPath, projectMissing: false })))
     listWorkspacesForProject.mockResolvedValue([workspace, secondWorkspace])
     listSwarms.mockResolvedValue([])
     closeProjectSession.mockResolvedValue([])
     useAppStore.setState({ project, workspace, recentWorkspaces: [], activePaneId: 'pane', settings: { ...useAppStore.getState().settings, sidebarOpen: true, sidebarWidth: 300, restoreBehavior: 'restart_agents' } })
+    paneRenamed.handlers = []
   })
 
   const renderWorkspace = () => render(<MemoryRouter initialEntries={['/workspace/workspace']}><Routes><Route path="/workspace/:workspaceId" element={<WorkspaceScreen />} /></Routes></MemoryRouter>)
@@ -262,5 +303,28 @@ describe('Workspace screen', () => {
     fireEvent.mouseDown(resume)
     fireEvent.click(resume)
     await waitFor(() => expect(createTerminalSession).toHaveBeenCalledTimes(1))
+  })
+
+  // A task sent to an agent renames its Pane in Rust, which persists the title and broadcasts it.
+  // The screen must adopt that title without issuing a save of its own.
+  it('adopts a Pane title derived from the task sent to its agent', async () => {
+    renderWorkspace()
+    await screen.findByTestId('terminal-pane')
+    await waitFor(() => expect(paneRenamed.handlers.length).toBeGreaterThan(0))
+
+    const broadcast = (patch: Partial<PaneRenamedEvent> = {}) => paneRenamed.handlers.forEach((handler) => handler({
+      workspaceId: 'workspace', paneId: 'pane', sessionId: 'session', title: 'Fix login bug', source: 'agent_task', ...patch,
+    }))
+
+    broadcast()
+    expect(await within(screen.getByTestId('terminal-pane')).findByText('Fix login bug')).toBeInTheDocument()
+    // The status bar names the active Pane from the same record.
+    expect(screen.getAllByText('Fix login bug').length).toBeGreaterThan(1)
+    // Rust already persisted the title; saving again here would race that write.
+    expect(saveWorkspace).not.toHaveBeenCalled()
+
+    // An event for a Workspace this screen does not show must be ignored.
+    broadcast({ workspaceId: 'workspace-two', title: 'Other task' })
+    await waitFor(() => expect(screen.queryByText('Other task')).not.toBeInTheDocument())
   })
 })

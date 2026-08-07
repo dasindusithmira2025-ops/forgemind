@@ -14,6 +14,33 @@ const expectedFilenames = [
   'paralith-teaser-15s.mp4',
   'paralith-hero-captioned.mp4',
   'paralith-hero-clean.mp4',
+  // Brand film masters; see docs/BRAND_FILM.md.
+  'paralith-brand-film-4k.mp4',
+  'paralith-brand-film-1080p.mp4',
+  'paralith-brand-film-silent.mp4',
+  // Campaign cut deliveries; see docs/CAMPAIGN_FILM.md. The website hero loop is absent on
+  // purpose — it is rendered muted, and a loudness pass over a file with no audio stream would
+  // fail on the measurement rather than skip.
+  'paralith-brand-film-master-4k.mp4',
+  'paralith-brand-film-master-1080p.mp4',
+  'paralith-brand-film-captioned.mp4',
+  'paralith-brand-film-60s.mp4',
+  'paralith-brand-film-30s.mp4',
+  'paralith-brand-film-15s-teaser.mp4',
+  'paralith-brand-film-vertical-30s.mp4',
+  // Gate film deliveries; see docs/GATE_FILM.md. The hero loop is absent on purpose — it is
+  // rendered muted, and a loudness pass over a file with no audio stream fails on the measurement
+  // rather than skipping it.
+  //
+  // `linear=true` above matters more for this film than for any before it: its arrangement drops
+  // roughly 14dB for the four seconds the gate holds, and a dynamic loudnorm pass would pull that
+  // silence back up to within a few dB of the rest. A single linear gain leaves the shape alone.
+  'paralith-gate-film-4k.mp4',
+  'paralith-gate-film-1080p.mp4',
+  'paralith-gate-film-captioned.mp4',
+  'paralith-gate-film-60s.mp4',
+  'paralith-gate-film-30s.mp4',
+  'paralith-gate-film-15s-teaser.mp4',
 ];
 const requestedFilenames = process.argv.slice(2);
 const filenames =

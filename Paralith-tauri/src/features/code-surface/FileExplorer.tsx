@@ -13,8 +13,9 @@ import {
 import { asNativeError, native } from '../../native/commands'
 import type { DirectoryEntry } from '../../native/types'
 import { ErrorNotice } from '../../components/ui/ErrorNotice'
+import { confirm } from '../../components/ui/confirm'
 import { TextPromptDialog } from '../../components/ui/TextPromptDialog'
-import { useExplorerStore, parentDir } from './explorerStore'
+import { useExplorerStore, absoluteProjectPath, parentDir } from './explorerStore'
 import { useEditorStore } from './editorStore'
 import { iconForFile } from './fileIcons'
 
@@ -61,11 +62,7 @@ export function FileExplorer({ projectId, projectRootPath, activePath, onOpenFil
   }, [expanded, listings, loading, load])
 
   const absolutePath = useCallback(
-    (relative: string) => {
-      const root = projectRootPath.replace(/[\\/]+$/, '')
-      const sep = root.includes('\\') ? '\\' : '/'
-      return relative ? `${root}${sep}${relative.replace(/\//g, sep)}` : root
-    },
+    (relative: string) => absoluteProjectPath(projectRootPath, relative),
     [projectRootPath],
   )
 
@@ -136,7 +133,14 @@ export function FileExplorer({ projectId, projectRootPath, activePath, onOpenFil
   const deleteEntry = useCallback(
     async (entry: DirectoryEntry) => {
       const isDir = entry.kind === 'directory'
-      if (!window.confirm(`Delete ${isDir ? 'folder' : 'file'} "${entry.name}"? This cannot be undone.`)) return
+      if (!(await confirm({
+        title: `Delete ${isDir ? 'folder' : 'file'} "${entry.name}"?`,
+        details: isDir
+          ? ['The folder and everything inside it is removed from disk.', 'This cannot be undone.']
+          : ['The file is removed from disk.', 'This cannot be undone.'],
+        confirmLabel: 'Delete',
+        intent: 'danger',
+      }))) return
       await runMutation(async () => {
         await native.deleteProjectEntry(projectId, entry.relativePath, isDir)
         onDeletedPath(entry.relativePath)

@@ -46,6 +46,3 @@ export function SidebarFilter({ resultCount }: { resultCount: number }) {
     </div>
   )
 }
-
-/** Below this many combined Workspace + Swarm rows, scrolling is faster than filtering. */
-export const MIN_ROWS_FOR_FILTER = 6

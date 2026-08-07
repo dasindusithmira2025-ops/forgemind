@@ -3,6 +3,7 @@ import {
   Bot, Check, FileCode2, GitCommitHorizontal, Loader2, Minus, Plus, Search, Trash2, Upload, User,
 } from 'lucide-react'
 import { Button } from '../../../components/ui/Button'
+import { confirm } from '../../../components/ui/confirm'
 import { useRepositoryStore } from '../repositoryStore'
 import { deriveSyncState, fileStatusGlyph, fileStatusLabel, filterFiles, groupFiles } from '../repositorySelectors'
 import type { RepositoryFileStatus, RepositoryWorktreeLease } from '../../../native/types'
@@ -39,8 +40,15 @@ export function ChangesSection({ onNavigate, onRequestAgentWorktree }: { onNavig
   const stage = (paths: string[], key: string) => void runOperation({ kind: 'stage_paths', paths }, { key }).catch(() => undefined)
   const unstage = (paths: string[], key: string) => void runOperation({ kind: 'unstage_paths', paths }, { key }).catch(() => undefined)
   const discard = (path: string) => {
-    if (!window.confirm(`Discard changes to ${path}? This overwrites the working-tree copy and cannot be undone.`)) return
-    void runOperation({ kind: 'restore_paths', paths: [path] }, { key: `discard:${path}` }).catch(() => undefined)
+    void confirm({
+      title: 'Discard changes to this file?',
+      body: path,
+      details: ['The working-tree copy is overwritten from the last commit.', 'This cannot be undone.'],
+      confirmLabel: 'Discard changes',
+      intent: 'danger',
+    }).then((confirmed) => {
+      if (confirmed) void runOperation({ kind: 'restore_paths', paths: [path] }, { key: `discard:${path}` }).catch(() => undefined)
+    })
   }
   const stageAll = () => {
     const paths = (snapshot?.files ?? []).filter((file) => !file.conflicted && (hasWorktreeChange(file) || file.untracked)).map((file) => file.path)

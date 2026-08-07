@@ -222,6 +222,10 @@
      it deliberately does not borrow the accent — an accented control would otherwise look
      permanently focused. */
   --focus-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 50%, transparent);
+  /* The same halo expressed as an outline, for controls whose ancestor clips overflow. Component
+     rules must reference this rather than writing their own `outline` — an accent focus ring makes
+     an accented control look permanently focused, which is why rule 5 keeps focus achromatic. */
+  --focus-outline: 3px solid color-mix(in srgb, var(--ring) 50%, transparent);
   --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.24);
   --shadow-md: 0 8px 20px rgb(0 0 0 / 0.28), 0 2px 6px rgb(0 0 0 / 0.2);
   --shadow-lg: 0 16px 40px rgb(0 0 0 / 0.45), 0 6px 16px rgb(0 0 0 / 0.3);
@@ -296,10 +300,29 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .path-text, .status-path, .branch-label, .mono { font-family: var(--font-mono); }
 
 /* Counts, timers, percentages and sizes must not jitter as digits change. */
-.tnum, .repo-count, .swarm-row-percent, .usage-value, .status-count, .count-badge {
+.tnum, .repo-count, .swarm-row-percent, .usage-value, .status-count, .count-badge, .measured {
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum" 1;
 }
+
+/* The measured-value register.
+   A workbench reads two kinds of text: words that name things, and values that were *measured* —
+   wait timers, running counts, ahead/behind, token usage. The Swarms overview had already invented
+   this treatment for itself in one corner; promoting it to a system rule gives the app a display
+   voice without adding a typeface, and it is drawn from the subject's own vernacular, since a
+   terminal workbench's native typography is monospace.
+   Labels stay in Geist and step down; values go mono, tabular and step up. */
+.measured,
+.repo-count,
+.swarm-row-percent,
+.ai-usage-compact-provider > strong,
+.ai-usage-window-copy b {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+}
+.measured-label { color: var(--faint); font-size: var(--text-2xs); font-weight: 600; letter-spacing: var(--tracking-label); text-transform: uppercase; }
 
 /* Micro label: 11px, restrained weight, neutral colour. Section headings identify a region —
    they are not the emphasis of the screen, so they no longer carry the brand accent. */
@@ -418,6 +441,18 @@ html[data-theme-swapping] *, html[data-theme-swapping] *::before, html[data-them
 .modal > header h2 { font-size: var(--text-md); font-weight: 650; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
 
+/* The one confirmation surface (components/ui/confirm.tsx). Sized narrower than the default modal:
+   a decision dialog that stretches to 620px invites the eye to scan rather than read the one
+   sentence that matters. */
+.modal:has(.confirm-dialog) { width: min(460px, calc(100% - 40px)); }
+.confirm-dialog { padding: var(--space-4); display: flex; flex-direction: column; gap: var(--space-4); }
+.confirm-body { color: var(--muted); font-size: var(--text-sm); line-height: var(--lh-body); }
+/* Consequences are a list because they are countable facts. Each row states one thing that will
+   happen — no warning voice, no apology; the danger treatment on the button carries the weight. */
+.confirm-details { margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; list-style: none; }
+.confirm-details li { padding-left: 15px; position: relative; color: var(--muted); font-size: var(--text-sm); line-height: var(--lh-body); }
+.confirm-details li::before { content: ""; position: absolute; left: 3px; top: calc(var(--lh-body) * .5em - 1.5px); width: 3px; height: 3px; border-radius: 50%; background: var(--faint); }
+
 /* ---- Agent Resume Center ----------------------------------------------------- */
 .modal:has(.agent-resume-center) { width: min(920px, calc(100vw - 32px)); max-height: min(84vh, 820px); }
 .agent-resume-center { min-height: 0; display: flex; flex-direction: column; }
@@ -491,6 +526,60 @@ html[data-theme-swapping] *, html[data-theme-swapping] *::before, html[data-them
 .app-titlebar { padding: 0 var(--space-2); display: flex; align-items: center; gap: 6px; border-bottom: 1px solid var(--border); background: var(--surface); }
 .titlebar-spacer { flex: 1; }
 .compact-count { color: var(--muted); font-size: var(--text-xs); white-space: nowrap; }
+
+/* ---- Fleet Bar ------------------------------------------------------------------
+   The one signature surface. It occupies the flex spacer the title bar was already spending on
+   nothing, so the most valuable readout in the product costs no vertical room, and it is ordered by
+   wait time rather than layout position because a fleet is a queue, not a grid. Chroma here is
+   spent strictly on meaning (rule 6): waiting is `--status-waiting`, blocked is `--status-blocked`,
+   everything else is neutral. */
+.fleet-bar, .fleet-bar-spacer { flex: 1; min-width: 0; }
+.fleet-bar { position: relative; display: flex; align-items: center; gap: 6px; padding-left: var(--space-2); }
+.fleet-cells { display: flex; align-items: center; gap: 2px; min-width: 0; overflow: hidden; }
+
+.fleet-cell { flex: 0 1 auto; min-width: 0; max-width: 168px; height: calc(26px * var(--ui-scale)); padding: 0 7px 0 5px; display: flex; align-items: center; gap: 6px; color: var(--muted); background: transparent; border: 1px solid transparent; border-radius: var(--radius-sm); cursor: pointer; transition: background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out); }
+.fleet-cell:hover { color: var(--text); background: var(--surface-hover); }
+.fleet-cell.is-active { border-color: var(--border-strong); }
+
+/* The pressure bar. Height — not colour — is what encodes how long this agent has been waiting, so
+   the signal survives at 7px and under deuteranopia, where amber-versus-green does not. */
+.fleet-cell-bar { flex: 0 0 auto; width: 3px; height: 6px; border-radius: 1px; background: var(--status-idle); transition: height var(--dur) var(--ease-out); }
+.fleet-cell[data-pressure="2"] .fleet-cell-bar { height: 9px; }
+.fleet-cell[data-pressure="3"] .fleet-cell-bar { height: 13px; }
+.fleet-cell[data-pressure="4"] .fleet-cell-bar { height: 17px; }
+.fleet-cell.state-waiting .fleet-cell-bar { background: var(--status-waiting); }
+.fleet-cell.state-blocked .fleet-cell-bar { background: var(--status-blocked); }
+
+.fleet-cell-title { min-width: 0; overflow: hidden; font-size: var(--text-xs); font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
+.fleet-cell-wait { flex: 0 0 auto; font-size: var(--text-2xs); }
+.fleet-cell.state-waiting .fleet-cell-wait { color: var(--warning-text); }
+.fleet-cell.state-blocked .fleet-cell-wait { color: var(--danger-text); }
+
+/* The one disclosure. Present whether or not anything is waiting, so the whole roster is always
+   one click away and the bar never grows a second control. */
+.fleet-summary { flex: 0 0 auto; height: calc(26px * var(--ui-scale)); padding: 0 8px; display: flex; align-items: center; gap: 5px; color: var(--faint); background: transparent; border: 1px solid transparent; border-radius: var(--radius-sm); cursor: pointer; transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out); }
+.fleet-summary:hover, .fleet-summary[aria-expanded="true"] { color: var(--text); background: var(--surface-hover); }
+.fleet-summary-count { font-size: var(--text-xs); }
+.fleet-summary-label { font-size: var(--text-2xs); }
+.fleet-summary-overflow { padding: 0 4px; color: var(--warning-text); background: var(--warning-soft); border-radius: var(--radius-pill); font-size: var(--text-2xs); }
+
+.fleet-queue { position: absolute; z-index: var(--z-menu); top: calc(100% + 4px); left: var(--space-2); width: max(268px, 60%); max-height: min(60vh, 420px); overflow-y: auto; padding: 5px; display: flex; flex-direction: column; gap: 1px; background: var(--popover); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-lg); animation: pl-pop-in .14s var(--ease-out) both; }
+.fleet-queue-row { min-height: var(--row-h); padding: 0 9px; display: grid; grid-template-columns: 8px minmax(0, 1fr) auto auto; align-items: center; gap: 9px; color: var(--muted); background: transparent; border: 0; border-radius: var(--radius); text-align: left; cursor: pointer; }
+.fleet-queue-row:hover { color: var(--text); background: var(--surface-hover); }
+.fleet-queue-row.is-active { background: var(--bg-selected); color: var(--text-strong); }
+.fleet-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--status-idle); }
+.fleet-queue-row.state-waiting .fleet-dot { background: var(--status-waiting); }
+.fleet-queue-row.state-blocked .fleet-dot { background: var(--status-blocked); }
+.fleet-queue-row.state-working .fleet-dot { background: var(--status-working); }
+.fleet-queue-row.state-paused .fleet-dot { background: var(--status-offline); }
+.fleet-queue-title { min-width: 0; overflow: hidden; font-size: var(--text-sm); text-overflow: ellipsis; white-space: nowrap; }
+.fleet-queue-state { color: var(--faint); font-size: var(--text-2xs); letter-spacing: var(--tracking-label); text-transform: uppercase; }
+.fleet-queue-wait { min-width: 34px; text-align: right; font-size: var(--text-2xs); }
+.fleet-queue-row.state-waiting .fleet-queue-wait { color: var(--warning-text); }
+.fleet-queue-row.state-blocked .fleet-queue-wait { color: var(--danger-text); }
+
+@media (prefers-reduced-motion: reduce) { .fleet-cell-bar { transition: none; } }
+
 .app-workarea { min-height: 0; display: flex; }
 .app-canvas { flex: 1; min-width: 0; min-height: 0; position: relative; overflow: hidden; }
 .app-statusbar { padding: 0 var(--space-2); display: flex; align-items: center; gap: 12px; overflow: hidden; color: var(--muted); background: var(--surface); border-top: 1px solid var(--border); font-size: var(--text-xs); }
@@ -563,7 +652,7 @@ html[data-theme-swapping] *, html[data-theme-swapping] *::before, html[data-them
 .workspace-surface-host > .terminal-canvas { grid-column: 1; grid-row: 1; }
 .workspace-tool-panel-toggle { display: inline-flex; align-items: center; justify-content: center; width: var(--icon-btn); height: var(--icon-btn); color: var(--muted); background: transparent; border: 1px solid transparent; border-radius: var(--radius); cursor: pointer; }
 .workspace-tool-panel-toggle:hover { color: var(--text); background: var(--surface-2); border-color: var(--border); }
-.workspace-tool-panel-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.workspace-tool-panel-toggle:focus-visible { outline: var(--focus-outline); outline-offset: 0; }
 .workspace-tool-panel-toggle.is-active { color: var(--text-strong); background: var(--surface-2); border-color: var(--border); }
 .workspace-heading { display: flex; align-items: center; gap: 7px; min-width: 0; }
 .workspace-heading strong { overflow: hidden; font-size: var(--text-sm); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
@@ -756,7 +845,7 @@ html[data-theme-swapping] *, html[data-theme-swapping] *::before, html[data-them
 
 .sidebar-resize-handle { position: absolute; top: 0; right: -3px; width: 6px; height: 100%; z-index: 6; cursor: col-resize; }
 .sidebar-resize-handle:hover { background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--accent) 25%, transparent)); }
-.sidebar-resize-handle:focus-visible { outline: none; box-shadow: inset -2px 0 0 var(--accent); }
+.sidebar-resize-handle:focus-visible { outline: none; box-shadow: inset -2px 0 0 var(--ring); }
 
 /* Collapsed rail — mirrors the expanded zones so collapsing hides nothing, only labels. */
 .sidebar-collapsed { flex: 1; min-height: 0; padding: var(--space-2) 0; display: flex; flex-direction: column; align-items: center; gap: var(--space-2); }
@@ -824,18 +913,21 @@ html[data-theme-swapping] *, html[data-theme-swapping] *::before, html[data-them
 .monitor-recovery-banner .recovery-offer button { color: var(--accent-strong); background: transparent; border: 0; cursor: pointer; font: inherit; text-decoration: underline; }
 
 /* ---- Terminal panes ------------------------------------------------------------ */
-.terminal-pane { width: 100%; height: 100%; min-width: 0; min-height: 0; display: grid; grid-template-rows: var(--pane-header-height) minmax(0, 1fr); position: relative; background: var(--canvas); border: 1px solid transparent; transition: border-color var(--dur) var(--ease-out); }
-.terminal-pane.bell { border-color: var(--warning); }
+/* A pane carries two independent facts and therefore uses two independent properties:
+     border      = what the AGENT needs (nothing / input / failed) — readable across the canvas
+     header edge = which pane YOU are in (the accent state edge, rule 4)
+   They used to share `border-color` at equal specificity, so focusing a pane that needed input
+   silently erased one of the two signals. Routing the border through `--pane-border` makes the
+   precedence explicit: an agent asking for something outranks "you are here" on the border, and
+   the accent header edge below is declared last so focus can never be erased. */
+.terminal-pane { --pane-border: transparent; width: 100%; height: 100%; min-width: 0; min-height: 0; display: grid; grid-template-rows: var(--pane-header-height) minmax(0, 1fr); position: relative; background: var(--canvas); border: 1px solid var(--pane-border); transition: border-color var(--dur) var(--ease-out); }
 .terminal-pane.maximized { position: fixed; inset: var(--header-height) 0 var(--status-height) 0; z-index: 40; }
-.terminal-pane.active { border-color: var(--border-strong); }
+.terminal-pane.active { --pane-border: var(--border-strong); }
 /* Image drag-over affordance: an accent outline invites the drop that types the file path in. */
 .terminal-pane.terminal-drag-target { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent), inset 0 0 0 100vmax var(--accent-soft); }
 
 .terminal-header { position: relative; min-width: 0; height: var(--pane-header-height); padding: 0 4px 0 9px; display: flex; align-items: center; gap: 7px; background: var(--surface); border-bottom: 1px solid var(--border-subtle); }
 .terminal-header.draggable { cursor: grab; }
-/* The state edge: the focused pane is marked by the accent bar + tinted header, not a dot. */
-.terminal-pane.active > .terminal-header { background: var(--surface-3); box-shadow: inset 2px 0 0 var(--accent-edge); }
-.terminal-pane.active > .terminal-header .terminal-title strong { color: var(--text-strong); }
 
 .terminal-status { width: 7px; height: 7px; flex: 0 0 auto; border-radius: 50%; background: var(--faint); }
 .status-running, .status-working { background: var(--success); }
@@ -850,14 +942,24 @@ html[data-theme-swapping] *, html[data-theme-swapping] *::before, html[data-them
 .terminal-controls { margin-left: auto; display: flex; gap: 2px; }
 .terminal-controls .button { min-width: var(--icon-btn); min-height: var(--icon-btn); padding: 0; }
 
-.agent-attention-badge, .attention-chip { border: 1px solid var(--warning-border); background: var(--warning-soft); color: var(--warning-text); }
-.agent-attention-badge { max-width: 110px; padding: 1px 6px; overflow: hidden; border-radius: var(--radius-xs); font-size: var(--text-2xs); white-space: nowrap; text-overflow: ellipsis; }
-.attention-chip { min-height: var(--control-h-xs); padding: 0 8px; border-radius: var(--radius-xs); font-size: var(--text-xs); cursor: pointer; }
-.attention-chip:hover { background: var(--warning-soft); border-color: var(--warning); }
-.terminal-pane.agent-needs_input, .terminal-pane.agent-needs_permission { border-color: var(--warning-border); }
+/* The pane's own attention readout. It names the state and shows how long that state has been
+   true, so the badge does not depend on hue the way the 7px status dot beside it does. */
+.agent-attention-badge { flex: 0 0 auto; display: inline-flex; align-items: baseline; gap: 5px; padding: 1px 6px; border: 1px solid var(--warning-border); border-radius: var(--radius-xs); background: var(--warning-soft); color: var(--warning-text); font-size: var(--text-2xs); white-space: nowrap; }
+.agent-attention-badge.state-blocked { border-color: var(--danger-border); background: var(--danger-soft); color: var(--danger-text); }
+/* Agent state owns the border. Declared after `.active` so an agent that needs something outranks
+   focus on the border — the whole point of the signal is that it reads from across the canvas. */
+.terminal-pane.bell { --pane-border: var(--warning); }
+.terminal-pane.agent-needs_input, .terminal-pane.agent-needs_permission { --pane-border: var(--warning-border); }
+.terminal-pane.agent-failed { --pane-border: var(--danger-border); }
+/* An unfocused pane with a waiting agent still marks its header, in the state colour rather than
+   the accent — the accent means "you are here" and belongs to exactly one pane. */
 .terminal-pane.agent-needs_input > .terminal-header, .terminal-pane.agent-needs_permission > .terminal-header { box-shadow: inset 2px 0 0 var(--warning); }
-.terminal-pane.agent-failed { border-color: var(--danger-border); }
 .terminal-pane.agent-failed > .terminal-header { box-shadow: inset 2px 0 0 var(--danger); }
+
+/* The state edge, declared last: the focused pane is always marked by the accent bar + tinted
+   header, whatever its agent is doing. */
+.terminal-pane.active > .terminal-header { background: var(--surface-3); box-shadow: inset 2px 0 0 var(--accent-edge); }
+.terminal-pane.active > .terminal-header .terminal-title strong { color: var(--text-strong); }
 
 .xterm-host { min-width: 0; min-height: 0; padding: 4px 3px 2px 6px; overflow: hidden; }
 .xterm-host .xterm { height: 100%; }
@@ -1792,7 +1894,7 @@ html[data-theme-swapping] *, html[data-theme-swapping] *::before, html[data-them
 .swarm-field-labelrow { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .swarm-linkbtn { display: inline-flex; align-items: center; gap: 5px; background: none; border: 0; color: var(--accent-strong); font: inherit; font-size: var(--text-sm); cursor: pointer; padding: 2px 0; }
 .swarm-linkbtn:hover { text-decoration: underline; }
-.swarm-linkbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-sm); }
+.swarm-linkbtn:focus-visible { outline: var(--focus-outline); outline-offset: 2px; border-radius: var(--radius-sm); }
 .swarm-role-toggle { display: flex; align-items: center; gap: 8px; font-size: var(--text-sm); cursor: pointer; }
 
 /* Role-pool editor: one clean card per role, each holding a list of agent allocations. */
@@ -1813,7 +1915,7 @@ html[data-theme-swapping] *, html[data-theme-swapping] *::before, html[data-them
 .swarm-alloc-step { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); color: var(--text); cursor: pointer; }
 .swarm-alloc-step:hover:not(:disabled) { border-color: var(--accent); }
 .swarm-alloc-step:disabled { opacity: .4; cursor: default; }
-.swarm-alloc-step:focus-visible, .swarm-alloc-remove:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.swarm-alloc-step:focus-visible, .swarm-alloc-remove:focus-visible { outline: var(--focus-outline); outline-offset: 0; }
 .swarm-alloc-count { width: 44px; text-align: center; padding: 4px 4px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); color: var(--text); font: inherit; font-size: var(--text-sm); font-variant-numeric: tabular-nums; }
 .swarm-alloc-count:focus-visible { outline: none; border-color: var(--accent); box-shadow: var(--focus-shadow); }
 .swarm-alloc-remove { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; background: none; border: 1px solid transparent; border-radius: var(--radius-sm); color: var(--faint); cursor: pointer; }
@@ -1825,7 +1927,7 @@ html[data-theme-swapping] *, html[data-theme-swapping] *::before, html[data-them
 .swarm-team-total strong { color: var(--text); font-variant-numeric: tabular-nums; }
 .swarm-save-preset { display: flex; gap: 8px; margin-top: 8px; }
 .swarm-preset-name-input { flex: 1; padding: 6px 10px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); color: var(--text); font: inherit; font-size: var(--text-sm); }
-.swarm-preset-name-input:focus-visible { outline: none; border-color: var(--accent); }
+.swarm-preset-name-input:focus-visible { outline: none; border-color: var(--accent); box-shadow: var(--focus-shadow); }
 .swarm-notice { color: var(--success); font-size: var(--text-sm); }
 .swarm-parallel { display: flex; align-items: center; gap: 12px; }
 .swarm-parallel input[type="range"] { flex: 1; accent-color: var(--accent); }
@@ -1877,7 +1979,7 @@ html[data-theme-swapping] *, html[data-theme-swapping] *::before, html[data-them
 .swarm-instruction-bar { display: flex; gap: 8px; padding: 10px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius-lg); position: sticky; bottom: 0; }
 .swarm-instruction-bar select, .swarm-instruction-bar input { min-height: var(--control-h); padding: 0 9px; background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--text); font: inherit; font-size: var(--text-sm); }
 .swarm-instruction-bar input { flex: 1; }
-.swarm-instruction-bar input:focus { outline: none; border-color: var(--accent); }
+.swarm-instruction-bar input:focus { outline: none; border-color: var(--accent); box-shadow: var(--focus-shadow); }
 
 /* Swarm V2 — dense workstream topology, using the existing Paralith surface/token system. */
 .swarm-create-v2 { max-width: 1080px; margin: 0 auto; padding: 24px 28px 44px; color: var(--text); }
@@ -1935,7 +2037,7 @@ html[data-theme-swapping] *, html[data-theme-swapping] *::before, html[data-them
 .swarm-team-footer > strong { margin-left: auto; font-size: var(--text-sm); }.swarm-team-footer > label { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: var(--text-xs); }.swarm-team-footer input { width: 54px; }
 .swarm-role-chips { display: flex; gap: 5px; flex-wrap: wrap; }.swarm-role-chips span { padding: 3px 7px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-pill); color: var(--muted); font-size: var(--text-2xs); }
 .swarm-mission-stage > textarea, .swarm-optional-field textarea { width: 100%; padding: 14px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--text); font: inherit; font-size: var(--text-md); line-height: 1.55; resize: vertical; }
-.swarm-mission-stage > textarea:focus, .swarm-optional-field textarea:focus { outline: 2px solid color-mix(in srgb, var(--accent) 35%, transparent); border-color: var(--accent); }
+.swarm-mission-stage > textarea:focus, .swarm-optional-field textarea:focus { outline: none; border-color: var(--accent); box-shadow: var(--focus-shadow); }
 .swarm-optional-field { display: flex; flex-direction: column; gap: 7px; }.swarm-optional-field > span { color: var(--muted); font-size: var(--text-sm); }
 .swarm-attachments { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }.swarm-attachments > span { display: inline-flex; align-items: center; gap: 5px; max-width: 180px; padding: 5px 7px; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--muted); font-size: var(--text-xs); overflow: hidden; }.swarm-attachments > span button { background: none; border: 0; color: var(--faint); cursor: pointer; }
 .swarm-safeguard-hint { color: var(--faint); font-size: var(--text-xs); }.swarm-create-v2 .swarm-create-actions { margin-top: 2px; }
@@ -2094,7 +2196,7 @@ html[data-theme-swapping] *, html[data-theme-swapping] *::before, html[data-them
 
 .orch-invocation { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-2); align-items: center; padding: var(--space-4); }
 .orch-objective { grid-column: 1; background: var(--surface); color: var(--text); border: 1px solid var(--border-strong); border-radius: var(--radius); padding: 10px 12px; font-size: var(--text-md); }
-.orch-objective:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.orch-objective:focus-visible { outline: var(--focus-outline); outline-offset: 0; }
 .orch-start { grid-column: 2; background: var(--accent); color: var(--on-accent); border: 0; border-radius: var(--radius); padding: 10px 16px; font-size: var(--text-sm); font-weight: 600; cursor: pointer; }
 .orch-start:disabled { opacity: .5; cursor: not-allowed; }
 .orch-hint { grid-column: 1 / -1; margin: 0; color: var(--muted); font-size: var(--text-xs); }

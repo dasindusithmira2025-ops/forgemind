@@ -935,6 +935,13 @@ impl DatabaseService {
             )
             || settings.inactive_workspace_rendering != "hibernate"
             || !crate::models::settings::theme_id_is_acceptable(&settings.theme_id)
+            || !crate::models::settings::sidebar_preferences_are_acceptable(
+                &crate::models::settings::SidebarPreferences {
+                    group_by: settings.sidebar_group_by.clone(),
+                    sort_mode: settings.sidebar_sort_mode.clone(),
+                    collapsed_groups: settings.sidebar_collapsed_groups.clone(),
+                },
+            )
         {
             return Err(AppError::new(
                 "invalid_settings",
@@ -1605,6 +1612,41 @@ impl DatabaseService {
         Ok(())
     }
 
+    /// Persist a title derived from the task a user sent to an agent Pane.
+    ///
+    /// Three rows describe the same Pane to the user and must agree: the saved Pane assignment
+    /// (what the Workspace reopens with), the live terminal session, and the agent session the
+    /// Agent Resume Center lists. Writing them in one transaction keeps a crash from leaving a
+    /// Pane whose header, saved layout, and resume entry disagree.
+    ///
+    /// Returns whether a saved Pane assignment was updated. Panes owned by a Swarm runtime have
+    /// no `workspace_panes` row, so there is no Workspace surface to notify for them.
+    pub fn apply_agent_task_title(
+        &self,
+        workspace_id: &str,
+        pane_id: &str,
+        session_id: &str,
+        title: &str,
+    ) -> AppResult<bool> {
+        let now = Utc::now().to_rfc3339();
+        let mut connection = self.connection.lock();
+        let transaction = connection.transaction()?;
+        let panes = transaction.execute(
+            "UPDATE workspace_panes SET title=?3,updated_at=?4 WHERE workspace_id=?1 AND id=?2",
+            params![workspace_id, pane_id, title, now],
+        )?;
+        transaction.execute(
+            "UPDATE terminal_sessions SET title=?2 WHERE id=?1",
+            params![session_id, title],
+        )?;
+        transaction.execute(
+            "UPDATE agent_sessions SET session_title=?2,updated_at=?3 WHERE terminal_session_id=?1",
+            params![session_id, title, now],
+        )?;
+        transaction.commit()?;
+        Ok(panes > 0)
+    }
+
     pub fn record_pane_worktree(&self, record: PaneWorktreeRecord<'_>) -> AppResult<()> {
         let now = Utc::now().to_rfc3339();
         self.connection.lock().execute(
@@ -2042,6 +2084,70 @@ mod tests {
         database
             .mark_session_ended(&session.id, "exited", Some(0), b"bye")
             .unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn an_agent_task_title_reaches_the_pane_the_session_and_the_resume_entry() {
+        let database = DatabaseService::in_memory().unwrap();
+        let root = std::env::temp_dir().join(format!("paralith-autotitle-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let saved_project = database.upsert_project(&project(&root)).unwrap();
+        let mut request = workspace_request(&saved_project.id, "Auto title", &root);
+        request.panes[0].provider = AgentProvider::Claude;
+        request.panes[0].title = "Claude Code".into();
+        let workspace = database.save_workspace(&request).unwrap();
+        let pane_id = workspace.panes[0].id.clone();
+        let session = crate::models::TerminalSession {
+            id: Uuid::new_v4().to_string(),
+            project_id: saved_project.id.clone(),
+            workspace_id: workspace.id.clone(),
+            pane_id: pane_id.clone(),
+            provider: AgentProvider::Claude,
+            executable: std::env::current_exe()
+                .unwrap()
+                .to_string_lossy()
+                .to_string(),
+            arguments: Vec::new(),
+            title: "Claude Code".into(),
+            working_directory: root.to_string_lossy().to_string(),
+            status: "running".into(),
+            process_id: Some(4321),
+            started_at: Utc::now().to_rfc3339(),
+            ended_at: None,
+            exit_code: None,
+            output_tail: Vec::new(),
+            next_sequence: 0,
+            log_path: None,
+            restoration_state: "not_requested".into(),
+            dropped_output_bytes: 0,
+        };
+        database.record_session(&session).unwrap();
+
+        let updated = database
+            .apply_agent_task_title(&workspace.id, &pane_id, &session.id, "Fix login bug")
+            .unwrap();
+        assert!(updated, "the saved Pane assignment must be retitled");
+
+        // The saved layout reopens with the task title.
+        let reloaded = database.get_workspace(&workspace.id).unwrap();
+        assert_eq!(reloaded.panes[0].title, "Fix login bug");
+        // The live session and its resume entry agree with it.
+        let stored = database
+            .get_terminal_session(&session.id)
+            .unwrap()
+            .expect("session");
+        assert_eq!(stored.title, "Fix login bug");
+        let resume = database.get_agent_resume_record(&session.id).unwrap();
+        assert_eq!(resume.session_title, "Fix login bug");
+
+        // A Pane with no saved assignment (a Swarm-owned runtime) reports nothing to update,
+        // so no Workspace surface is notified for it.
+        let orphan = database
+            .apply_agent_task_title(&workspace.id, "not-a-pane", &session.id, "Other task")
+            .unwrap();
+        assert!(!orphan);
+
         fs::remove_dir_all(root).unwrap();
     }
 
