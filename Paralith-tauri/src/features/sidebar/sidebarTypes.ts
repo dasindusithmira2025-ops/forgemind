@@ -169,4 +169,10 @@ export interface ForgeSpaceSidebarProps {
    * and `workspaces`, so the list degrades to the previous single-Project behaviour.
    */
   groups?: SidebarProjectGroup[]
+  /**
+   * Whether the cross-workspace runtime view has been read once. The list is scoped to Projects
+   * with live work, and before the first read "nothing is running" is an artefact of not having
+   * asked yet — so the scoping waits for this rather than hiding Projects on first paint.
+   */
+  runtimeSeeded?: boolean
 }

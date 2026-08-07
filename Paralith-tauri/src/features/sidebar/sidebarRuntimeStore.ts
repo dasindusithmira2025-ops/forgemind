@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import { create } from 'zustand'
 import { native } from '../../native/commands'
 import { terminalRuntime, useAllAgentStates, useAllTerminalSessions } from '../terminals/runtimeStore'
 import { getPaneAgentStatesByWorkspace, getSessionsByWorkspace } from './sidebarIndex'
@@ -20,6 +21,23 @@ import type { TerminalSession } from '../../native/types'
  * publish them through. This module seeds that view once from the authoritative list and then
  * lets the events carry it.
  */
+
+/**
+ * Whether the authoritative list has been read at least once.
+ *
+ * Anything that decides what to *show* from runtime state has to wait for this. Before the seed
+ * lands every Workspace looks closed, so a list scoped to live work would collapse to a single row
+ * on first paint and then pop back — which reads as the sidebar losing the user's Projects.
+ */
+interface SidebarRuntimeSeedState {
+  seeded: boolean
+  markSeeded: () => void
+}
+
+const useSeedState = create<SidebarRuntimeSeedState>((set) => ({
+  seeded: false,
+  markSeeded: () => set({ seeded: true }),
+}))
 
 let seeded = false
 let seedPromise: Promise<void> | undefined
@@ -54,12 +72,14 @@ export async function resyncSidebarRuntime(): Promise<void> {
   const observedAt = new Date().toISOString()
   const sessions = await native.listLiveSessions()
   terminalRuntime.reconcileLiveSessions(sessions, observedAt)
+  useSeedState.getState().markSeeded()
 }
 
 /** Reset the seed latch. Tests only. */
 export function resetSidebarRuntimeForTest(): void {
   seeded = false
   seedPromise = undefined
+  useSeedState.setState({ seeded: false })
 }
 
 export interface SidebarRuntimeView {
@@ -69,6 +89,11 @@ export interface SidebarRuntimeView {
   sessionsByWorkspace: Map<string, TerminalSession[]>
   /** Resolved per-Pane agent states by Workspace id; absent means no Pane is asserting anything. */
   paneAgentStatesByWorkspace: Map<string, PaneAgentState[]>
+  /**
+   * False until the authoritative list has been read once. Until then "nothing is running" is an
+   * artefact of not having asked yet, not a fact — so nothing may be hidden on the strength of it.
+   */
+  seeded: boolean
 }
 
 /**
@@ -80,6 +105,7 @@ export interface SidebarRuntimeView {
 export function useSidebarRuntime(): SidebarRuntimeView {
   const sessions = useAllTerminalSessions()
   const agentStates = useAllAgentStates()
+  const seeded = useSeedState((state) => state.seeded)
   return useMemo(() => {
     // One clock read for the whole derivation: sampling per Workspace could put two rows on
     // opposite sides of the same staleness boundary within a single paint.
@@ -88,6 +114,7 @@ export function useSidebarRuntime(): SidebarRuntimeView {
       sessions,
       sessionsByWorkspace: getSessionsByWorkspace(sessions),
       paneAgentStatesByWorkspace: getPaneAgentStatesByWorkspace(sessions, agentStates, now),
+      seeded,
     }
-  }, [sessions, agentStates])
+  }, [sessions, agentStates, seeded])
 }

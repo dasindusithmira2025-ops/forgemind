@@ -97,6 +97,12 @@ export interface SidebarPresentationInput {
   frozenOrder?: readonly string[]
   /** Swarm names, so the filter field can report one honest total across every list it filters. */
   swarmNames?: readonly string[]
+  /**
+   * Whether the runtime view has been seeded. While false the list is not scoped to live work:
+   * before the authoritative read lands every Workspace looks closed, and hiding on that basis
+   * would collapse the list on first paint and then repopulate it.
+   */
+  runtimeSeeded?: boolean
 }
 
 /** The cross-workspace runtime facts one row is derived from. */
@@ -132,6 +138,35 @@ export function deriveSidebarWorkspace(
     }),
     providers: deriveProviderSummary(workspace),
   }
+}
+
+/**
+ * Whether a Workspace has anything going on: running, starting, waiting on a person, stopping, or
+ * sitting in a state that needs a human. Only `closed` — nothing running at all — is not live.
+ *
+ * `failed` counts as live even though no terminal is running. A Project whose Panes all failed to
+ * launch is the one a person most needs to see; hiding it would hide the problem.
+ */
+export function isLiveWorkspace(entry: SidebarWorkspace): boolean {
+  return entry.runtime.status !== 'closed'
+}
+
+/**
+ * Whether a Project belongs in the sidebar's list right now.
+ *
+ * The list is scoped to what is actually being worked on. `open_project_sessions` is a persisted
+ * table that nothing prunes — a Project stays "open" until it is explicitly closed, across
+ * restarts — so listing every open session turned the sidebar into a list of every Project ever
+ * touched. That is a recents list wearing a different name, and it pushed the Projects with live
+ * work off the bottom of the sidebar.
+ *
+ * The active Project is always kept, however idle. It is the Project whose Workspace is on screen;
+ * dropping it would leave the user looking at a Workspace the sidebar claims does not exist.
+ * Everything filtered out is still one click away in the Project popover, which deliberately keeps
+ * listing every open session.
+ */
+export function isWorkingProject(group: Pick<SidebarProjectGroup, 'isActive' | 'workspaces'>): boolean {
+  return group.isActive || group.workspaces.some(isLiveWorkspace)
 }
 
 /** Does this Workspace match the live filter? One matcher, so every list agrees. */
@@ -191,7 +226,15 @@ export function computeAttentionOrder(groups: SidebarProjectGroup[]): string[] {
 
 /** Build the whole presentation in one pass. */
 export function buildSidebarPresentation(input: SidebarPresentationInput): SidebarPresentation {
-  const { groupBy, sortMode, filterQuery, placements, frozenOrder, swarmNames = [] } = input
+  const {
+    groupBy,
+    sortMode,
+    filterQuery,
+    placements,
+    frozenOrder,
+    swarmNames = [],
+    runtimeSeeded = true,
+  } = input
   const filtering = filterQuery.trim().length > 0
 
   // Placements are authoritative (from the Rust window registry); when absent every Workspace is
@@ -207,7 +250,8 @@ export function buildSidebarPresentation(input: SidebarPresentationInput): Sideb
       ...group,
       workspaces: group.workspaces.filter((entry) => !detachedIds.has(entry.workspace.id)),
     }))
-    .filter((group) => group.workspaces.length > 0 || group.isActive)
+    // Only Projects with live work, plus the one on screen. See `isWorkingProject`.
+    .filter((group) => (runtimeSeeded ? isWorkingProject(group) : group.workspaces.length > 0 || group.isActive))
 
   const groups = listGroups.map((group) =>
     presentGroup({
@@ -261,7 +305,9 @@ export function buildSidebarPresentation(input: SidebarPresentationInput): Sideb
     totalRows,
     matchCount: primaryVisibleCount + visibleDetached.length + visibleSwarmCount,
     showFilter: totalRows >= MIN_ROWS_FOR_FILTER,
-    projectNameById: new Map(input.groups.map((group) => [group.project.id, group.project.name])),
+    // Built from the listed groups, so a row can never be labelled with a Project the list is
+    // no longer showing.
+    projectNameById: new Map(listGroups.map((group) => [group.project.id, group.project.name])),
   }
 }
 

@@ -77,9 +77,9 @@ export function ForgeSpaceSidebar(props: ForgeSpaceSidebarProps) {
 
   const swarmNames = useMemo(() => (swarms ?? []).map((item) => item.swarm.name), [swarms])
 
-  // Every question about what this sidebar shows — the detached split, the filter, the order, the
-  // counts — is answered once, here. Nothing below this line derives anything.
-  const presentation = useSidebarPresentation(sourceGroups, placements, swarmNames)
+  // Every question about what this sidebar shows — which Projects are listed, the detached split,
+  // the filter, the order, the counts — is answered once, here. Nothing below derives anything.
+  const presentation = useSidebarPresentation(sourceGroups, placements, swarmNames, props.runtimeSeeded ?? false)
 
   const effectiveWidth = collapsed ? undefined : (draftWidth ?? width)
 
