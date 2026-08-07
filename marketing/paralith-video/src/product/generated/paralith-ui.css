@@ -28,8 +28,6 @@
      border value stays correct on every surface in the ladder.
    ============================================================================ */
 
-
-
 :root {
   color-scheme: dark;
   font-family: var(--font-ui);

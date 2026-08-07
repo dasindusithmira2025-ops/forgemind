@@ -88,7 +88,12 @@ function scopeBreakpointsToWindow(css) {
 }
 
 async function buildCss() {
-  const source = await readFile(SOURCE_CSS, 'utf8');
+  // Normalised before transforming, not just before hashing. `stripFontFace` collapses the blank
+  // run it leaves behind with /\n{3,}/, and in CRLF text those newlines are never consecutive — so
+  // on a Windows checkout the collapse silently did nothing and the generated body picked up two
+  // blank lines the Linux runner never produces. The twin then failed --check on CI no matter how
+  // faithfully it had just been regenerated, which is not a drift anyone can act on.
+  const source = normalize(await readFile(SOURCE_CSS, 'utf8'));
 
   const { css: withoutFace, stripped } = stripFontFace(source);
   if (!stripped) {
