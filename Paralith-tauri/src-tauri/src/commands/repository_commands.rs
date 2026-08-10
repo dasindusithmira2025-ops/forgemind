@@ -104,6 +104,46 @@ pub async fn get_repository_diff(
 }
 
 #[tauri::command]
+pub async fn get_repository_history(
+    request: RepositoryHistoryRequest,
+    window: Window,
+    state: State<'_, AppState>,
+) -> AppResult<RepositoryHistoryPage> {
+    require_project_scope(&window, &state, &request.project_id)?;
+    let service = state.repository.clone();
+    tauri::async_runtime::spawn_blocking(move || service.history(&request))
+        .await
+        .map_err(|error| {
+            AppError::new(
+                "repository_worker_failed",
+                "The repository worker stopped unexpectedly.",
+                true,
+            )
+            .detail(error.to_string())
+        })?
+}
+
+#[tauri::command]
+pub async fn get_repository_commit_detail(
+    request: RepositoryCommitDetailRequest,
+    window: Window,
+    state: State<'_, AppState>,
+) -> AppResult<RepositoryCommitDetail> {
+    require_project_scope(&window, &state, &request.project_id)?;
+    let service = state.repository.clone();
+    tauri::async_runtime::spawn_blocking(move || service.commit_detail(&request))
+        .await
+        .map_err(|error| {
+            AppError::new(
+                "repository_worker_failed",
+                "The repository worker stopped unexpectedly.",
+                true,
+            )
+            .detail(error.to_string())
+        })?
+}
+
+#[tauri::command]
 pub async fn execute_repository_operation(
     request: RepositoryOperationRequest,
     app: AppHandle,

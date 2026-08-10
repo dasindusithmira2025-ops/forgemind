@@ -109,7 +109,20 @@ export const useSwarmStore = create<SwarmState>((set, get) => ({
       return detail
     } catch (error) {
       if (detailRequestVersions.get(swarmId) !== requestVersion) return undefined
-      set({ error: asNativeError(error).message })
+      const native = asNativeError(error)
+      // A Swarm deleted in another window reaches us as a `swarm-changed` notification followed by
+      // a 404 on the detail it announced. That is the expected end of that Swarm, not a failure to
+      // report: drop the stale cache entry instead of parking an error banner over the workspace.
+      if (native.code === 'swarm_not_found') {
+        set((state) => {
+          if (!state.detailById[swarmId]) return state
+          const detailById = { ...state.detailById }
+          delete detailById[swarmId]
+          return { detailById }
+        })
+        return undefined
+      }
+      set({ error: native.message })
       return undefined
     }
   },

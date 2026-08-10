@@ -42,8 +42,12 @@ import type {
   RepositoryApprovalOutcome,
   RepositoryBranchSummary,
   RepositoryApprovalRequest,
+  RepositoryCommitDetail,
+  RepositoryCommitDetailRequest,
   RepositoryDiff,
   RepositoryDiffRequest,
+  RepositoryHistoryPage,
+  RepositoryHistoryRequest,
   RepositoryOperationRecord,
   RepositoryOperationRequest,
   RepositoryPolicyConfiguration,
@@ -124,6 +128,10 @@ export const native = {
   listRepositoryBranches: (projectId: string, repositoryPath?: string) =>
     invoke<RepositoryBranchSummary[]>('list_repository_branches', { projectId, repositoryPath }),
   getRepositoryDiff: (request: RepositoryDiffRequest) => invoke<RepositoryDiff>('get_repository_diff', { request }),
+  getRepositoryHistory: (request: RepositoryHistoryRequest) =>
+    invoke<RepositoryHistoryPage>('get_repository_history', { request }),
+  getRepositoryCommitDetail: (request: RepositoryCommitDetailRequest) =>
+    invoke<RepositoryCommitDetail>('get_repository_commit_detail', { request }),
   executeRepositoryOperation: (request: RepositoryOperationRequest) =>
     invoke<RepositoryOperationRecord>('execute_repository_operation', { request }),
   cancelRepositoryOperation: (projectId: string, operationId: string) =>

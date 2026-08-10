@@ -421,6 +421,33 @@ export interface RepositoryDiffRequest {
   contextLines?: number; offset?: number; limit?: number
 }
 export interface RepositoryDiff { text: string; totalBytes: number; offset: number; truncated: boolean; binary: boolean }
+export interface RepositoryCommitSummary {
+  sha: string; parents: string[]; authorName: string; authorEmail: string; authoredAt: string
+  committerName: string; committerEmail: string; committedAt: string; subject: string
+  /** Git decorations for this commit (branch tips, tags, HEAD), exactly as Git reports them. */
+  refs: string[]
+  /** Raw `%G?` status: G, B, U, X, Y, R, E or N. Never normalized into a verdict by the backend. */
+  signature: string
+}
+export interface RepositoryHistoryRequest {
+  projectId: string; repositoryPath?: string; worktreePath?: string; revision?: string; path?: string
+  author?: string; search?: string; skip?: number; limit?: number
+}
+export interface RepositoryHistoryPage {
+  commits: RepositoryCommitSummary[]; skip: number; hasMore: boolean; revision: string; path?: string
+}
+export interface RepositoryCommitFile {
+  path: string; previousPath?: string; status: string
+  /** `null` for binary files, where Git reports no line count. */
+  additions: number | null; deletions: number | null; binary: boolean
+}
+export interface RepositoryCommitDetail {
+  commit: RepositoryCommitSummary; body: string; files: RepositoryCommitFile[]
+  additions: number; deletions: number; filesTruncated: boolean; merge: boolean
+}
+export interface RepositoryCommitDetailRequest {
+  projectId: string; repositoryPath?: string; worktreePath?: string; revision: string
+}
 export interface RepositoryWorktreeLease {
   id: string; projectId: string; repositoryPath: string; worktreePath: string; branchName: string; baseCommit: string
   agentId: string; taskId: string; fileScope: string[]; status: string; createdAt: string; lastActivityAt: string

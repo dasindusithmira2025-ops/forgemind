@@ -124,7 +124,10 @@ export function SwarmOverview({ detail }: { detail: SwarmDetail }) {
         </main>
 
         {railOpen ? selectedAgent ? (
-          <AgentInspector agent={selectedAgent} task={selectedTask} onClose={() => setSelectedAgentId(undefined)} onMessage={() => setTarget(selectedAgent.id)} onTerminal={() => openTerminal(selectedAgent)} onRetry={() => retry(swarm.id, selectedAgent.id).catch(() => undefined)} onValidate={() => native.validateSwarmMemberModelConfig(swarm.projectId, swarm.id, selectedAgent.id).then(() => useSwarmStore.getState().loadDetail(swarm.projectId, swarm.id))} onUpdate={(config) => native.updateSwarmMemberModelConfig(swarm.projectId, swarm.id, selectedAgent.id, config).then(() => useSwarmStore.getState().loadDetail(swarm.projectId, swarm.id))} onWork={openWork} />
+          // Keyed by member: the inspector seeds its provider/model selects from the agent it was
+          // opened for, so reusing one instance across members showed the previous member's
+          // configuration and would have saved it onto the newly selected one.
+          <AgentInspector key={selectedAgent.id} agent={selectedAgent} task={selectedTask} onClose={() => setSelectedAgentId(undefined)} onMessage={() => setTarget(selectedAgent.id)} onTerminal={() => openTerminal(selectedAgent)} onRetry={() => retry(swarm.id, selectedAgent.id).catch(() => undefined)} onValidate={() => native.validateSwarmMemberModelConfig(swarm.projectId, swarm.id, selectedAgent.id).then(() => useSwarmStore.getState().loadDetail(swarm.projectId, swarm.id))} onUpdate={(config) => native.updateSwarmMemberModelConfig(swarm.projectId, swarm.id, selectedAgent.id, config).then(() => useSwarmStore.getState().loadDetail(swarm.projectId, swarm.id))} onWork={openWork} />
         ) : (
           <HealthRail detail={detail} onCollapse={() => setRailOpen(false)} onAgent={setSelectedAgentId} onWork={openWork} />
         ) : <button type="button" className="swarm-rail-restore" onClick={() => setRailOpen(true)} aria-label="Open context rail"><ChevronRight size={16} /></button>}

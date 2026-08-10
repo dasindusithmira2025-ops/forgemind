@@ -12,6 +12,8 @@ import type {
   RemoteProjection,
   RepositoryApprovalRequest,
   RepositoryBranchSummary,
+  RepositoryCommitDetail,
+  RepositoryCommitSummary,
   RepositoryDiff,
   RepositoryOperation,
   RepositoryOperationEvent,
@@ -38,6 +40,13 @@ function uuid(): string {
 }
 
 const MAX_LEDGER = 200
+const HISTORY_PAGE = 50
+
+/** The active History scope. `path` narrows the walk to one file; both filters come from the user. */
+export interface HistoryScope {
+  path?: string
+  search?: string
+}
 
 export interface RunOperationOptions {
   /** Pending-key so the UI can disable exactly the control that triggered the operation. */
@@ -76,6 +85,21 @@ interface RepositoryState {
   intelligenceLoading: boolean
   intelligenceError?: string
 
+  /** Commit history for the current scope. Empty until the History section is opened. */
+  historyCommits: RepositoryCommitSummary[]
+  historyScope: HistoryScope
+  /** The resolved SHA the current listing walked from, so a moving ref is never mislabelled. */
+  historyRevision?: string
+  historyHasMore: boolean
+  historyLoading: boolean
+  historyPaging: boolean
+  historyLoaded: boolean
+  historyError?: string
+  selectedCommit?: string
+  commitDetails: Record<string, RepositoryCommitDetail>
+  commitDetailLoading: Record<string, boolean>
+  commitDetailErrors: Record<string, string>
+
   reset: () => void
   loadProject: (projectId: string) => Promise<void>
   refreshSnapshot: () => Promise<void>
@@ -92,6 +116,10 @@ interface RepositoryState {
   reloadApprovals: () => Promise<void>
   loadIntelligence: () => Promise<void>
   refreshIntelligence: () => Promise<void>
+  loadHistory: (scope?: HistoryScope) => Promise<void>
+  loadMoreHistory: () => Promise<void>
+  selectCommit: (sha?: string) => void
+  loadCommitDetail: (sha: string) => Promise<void>
 }
 
 export const useRepositoryStore = create<RepositoryState>((set, get) => ({
@@ -113,6 +141,15 @@ export const useRepositoryStore = create<RepositoryState>((set, get) => ({
   progress: {},
   pending: {},
   intelligenceLoading: false,
+  historyCommits: [],
+  historyScope: {},
+  historyHasMore: false,
+  historyLoading: false,
+  historyPaging: false,
+  historyLoaded: false,
+  commitDetails: {},
+  commitDetailLoading: {},
+  commitDetailErrors: {},
 
   reset: () => set({
     projectId: undefined,
@@ -140,6 +177,18 @@ export const useRepositoryStore = create<RepositoryState>((set, get) => ({
     intelligence: undefined,
     intelligenceLoading: false,
     intelligenceError: undefined,
+    historyCommits: [],
+    historyScope: {},
+    historyRevision: undefined,
+    historyHasMore: false,
+    historyLoading: false,
+    historyPaging: false,
+    historyLoaded: false,
+    historyError: undefined,
+    selectedCommit: undefined,
+    commitDetails: {},
+    commitDetailLoading: {},
+    commitDetailErrors: {},
   }),
 
   loadProject: async (projectId) => {
@@ -252,6 +301,101 @@ export const useRepositoryStore = create<RepositoryState>((set, get) => ({
     }
   },
 
+  /**
+   * Load the first page of commit history for a scope. This walks Git, so it is only ever called
+   * when the History section is opened or the user changes the scope — never polled. Changing the
+   * scope discards the previous listing and selection rather than blending two different walks.
+   */
+  loadHistory: async (scope) => {
+    const projectId = get().projectId
+    if (!projectId) return
+    const next = scope ?? get().historyScope
+    const token = get().loadToken
+    // A scope change is a different walk, so its selection cannot carry over. A plain refresh of
+    // the same scope keeps the user where they were.
+    const previous = scope ? undefined : get().selectedCommit
+    set({
+      historyScope: next,
+      historyLoading: true,
+      historyError: undefined,
+      historyCommits: [],
+      historyHasMore: false,
+      selectedCommit: undefined,
+    })
+    try {
+      const page = await native.getRepositoryHistory({ projectId, path: next.path, search: next.search, limit: HISTORY_PAGE })
+      if (get().projectId !== projectId || get().loadToken !== token) return
+      set({
+        historyCommits: page.commits,
+        historyHasMore: page.hasMore,
+        historyRevision: page.revision || undefined,
+        historyLoading: false,
+        historyLoaded: true,
+        // Opening straight into the newest commit means the Inspector is never blank on arrival.
+        selectedCommit: previous && page.commits.some((commit) => commit.sha === previous)
+          ? previous
+          : page.commits[0]?.sha,
+      })
+    } catch (caught) {
+      if (get().projectId !== projectId || get().loadToken !== token) return
+      set({ historyLoading: false, historyLoaded: true, historyError: asNativeError(caught).message })
+    }
+  },
+
+  /**
+   * Append the next page. Paging is by commit count against the same resolved revision, so a
+   * commit landing mid-scroll cannot shift the walk and duplicate rows.
+   */
+  loadMoreHistory: async () => {
+    const state = get()
+    const projectId = state.projectId
+    if (!projectId || !state.historyHasMore || state.historyPaging || state.historyLoading) return
+    const token = state.loadToken
+    const skip = state.historyCommits.length
+    set({ historyPaging: true })
+    try {
+      const page = await native.getRepositoryHistory({
+        projectId,
+        revision: state.historyRevision,
+        path: state.historyScope.path,
+        search: state.historyScope.search,
+        skip,
+        limit: HISTORY_PAGE,
+      })
+      if (get().projectId !== projectId || get().loadToken !== token) return
+      const known = new Set(get().historyCommits.map((commit) => commit.sha))
+      set({
+        historyCommits: [...get().historyCommits, ...page.commits.filter((commit) => !known.has(commit.sha))],
+        historyHasMore: page.hasMore,
+        historyPaging: false,
+      })
+    } catch (caught) {
+      if (get().projectId !== projectId || get().loadToken !== token) return
+      set({ historyPaging: false, historyError: asNativeError(caught).message })
+    }
+  },
+
+  selectCommit: (sha) => set({ selectedCommit: sha }),
+
+  /** Commit contents are immutable, so a successful detail read is cached for the session. */
+  loadCommitDetail: async (sha) => {
+    const projectId = get().projectId
+    if (!projectId || get().commitDetails[sha] || get().commitDetailLoading[sha]) return
+    set({
+      commitDetailLoading: { ...get().commitDetailLoading, [sha]: true },
+      commitDetailErrors: { ...get().commitDetailErrors, [sha]: '' },
+    })
+    try {
+      const detail = await native.getRepositoryCommitDetail({ projectId, revision: sha })
+      if (get().projectId !== projectId) return
+      set({ commitDetails: { ...get().commitDetails, [sha]: detail } })
+    } catch (caught) {
+      if (get().projectId === projectId) set({ commitDetailErrors: { ...get().commitDetailErrors, [sha]: asNativeError(caught).message } })
+    } finally {
+      if (get().projectId === projectId) set({ commitDetailLoading: { ...get().commitDetailLoading, [sha]: false } })
+    }
+  },
+
   loadWorkflowRunDetail: async (runId) => {
     const projectId = get().projectId
     if (!projectId || get().workflowRunLoading[runId]) return
@@ -360,7 +504,13 @@ export const useRepositoryStore = create<RepositoryState>((set, get) => ({
 
   subscribe: () => {
     const unlisteners: Array<Promise<() => void>> = [
-      onRepositoryStateChanged((projectId) => { if (projectId === get().projectId) void get().refreshSnapshot() }),
+      onRepositoryStateChanged((projectId) => {
+        if (projectId !== get().projectId) return
+        void get().refreshSnapshot()
+        // A commit or branch change invalidates the listing, but only re-walk Git for a user who
+        // already has History open. Never run it behind the user's back.
+        if (get().historyLoaded) void get().loadHistory()
+      }),
       onRepositoryOperationProgress((event) => {
         if (event.projectId !== get().projectId) return
         set({ progress: { ...get().progress, [event.operationId]: event } })

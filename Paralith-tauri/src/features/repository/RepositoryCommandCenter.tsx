@@ -13,6 +13,7 @@ import { RepositoryStatStrip } from './components/RepositoryStatStrip'
 import { ContextRail } from './components/ContextRail'
 import { OverviewSection } from './components/OverviewSection'
 import { ChangesSection } from './components/ChangesSection'
+import { HistorySection } from './components/HistorySection'
 import { IntelligenceSection } from './components/IntelligenceSection'
 import { BranchesSection } from './components/BranchesSection'
 import { PullRequestsSection } from './components/PullRequestsSection'
@@ -51,6 +52,8 @@ export function RepositoryCommandCenter({ projectId, projectName }: { projectId:
   const refreshSnapshot = useRepositoryStore((state) => state.refreshSnapshot)
   const refreshRemote = useRepositoryStore((state) => state.refreshRemote)
   const loadIntelligence = useRepositoryStore((state) => state.loadIntelligence)
+  const loadHistory = useRepositoryStore((state) => state.loadHistory)
+  const historyLoaded = useRepositoryStore((state) => state.historyLoaded)
 
   const [nav, setNav] = useState<NavState>(() => loadNav(projectId))
   const [selectedRun, setSelectedRun] = useState<number>()
@@ -95,6 +98,14 @@ export function RepositoryCommandCenter({ projectId, projectName }: { projectId:
     if (nav.section !== 'intelligence' || load.status !== 'ready' || activeProjectId !== projectId) return
     void loadIntelligence()
   }, [nav.section, load.status, activeProjectId, projectId, loadIntelligence])
+
+  // Walk the commit log once, when History is first opened for this project. Afterwards the
+  // repository-state-changed subscription keeps the listing current, so re-entering the section
+  // costs nothing.
+  useEffect(() => {
+    if (nav.section !== 'history' || load.status !== 'ready' || activeProjectId !== projectId || historyLoaded) return
+    void loadHistory()
+  }, [nav.section, load.status, activeProjectId, projectId, historyLoaded, loadHistory])
 
   const navigate = (target: RepositoryNavTarget) => setNav((prev) => ({
     section: target.section,
@@ -186,6 +197,7 @@ export function RepositoryCommandCenter({ projectId, projectName }: { projectId:
           <div className="rcc-surface" role="region" aria-label={sectionLabel}>
             {nav.section === 'overview' && <OverviewSection onNavigate={goSection} />}
             {nav.section === 'changes' && <ChangesSection onNavigate={goSection} onRequestAgentWorktree={requestAgentWorktree} />}
+            {nav.section === 'history' && <HistorySection />}
             {nav.section === 'intelligence' && <IntelligenceSection />}
             {nav.section === 'branches' && <BranchesSection onRequestAgentWorktree={requestAgentWorktree} />}
             {nav.section === 'pull-requests' && (
