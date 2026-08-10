@@ -748,6 +748,7 @@ impl ProductionAgentRuntime {
                 task_id: task.id.clone(),
                 file_scope: task.files.clone(),
                 expires_at: None,
+                use_existing_branch: false,
             },
         };
         let record = self.repository.execute(request, |_| {})?;

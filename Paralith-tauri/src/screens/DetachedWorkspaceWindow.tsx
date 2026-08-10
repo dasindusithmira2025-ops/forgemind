@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { CircleStop, RotateCcw, PictureInPicture2 } from 'lucide-react'
 import { asNativeError, native } from '../native/commands'
-import type { PaneAssignment, Project, Workspace } from '../native/types'
+import type { PaneAssignment, PaneBranchInfo, Project, Workspace } from '../native/types'
 import { useAppStore } from '../stores/appStore'
 import { terminalRuntime, useWorkspaceSessions } from '../features/terminals/runtimeStore'
 import { AppShell } from '../components/shell/AppShell'
@@ -12,6 +12,7 @@ import { Modal } from '../components/ui/Modal'
 import { ErrorNotice } from '../components/ui/ErrorNotice'
 import { TerminalPane } from '../components/terminal/TerminalPane'
 import { PaneMenu, type PaneMenuState } from '../components/terminal/PaneMenu'
+import { PaneBranchDialog } from '../components/terminal/PaneBranchDialog'
 import { dispatchTerminalAction, type TerminalAction } from '../components/terminal/terminalActions'
 import { TextPromptDialog } from '../components/ui/TextPromptDialog'
 import { WorkspaceCanvas, type RenderPaneContext } from '../features/workspace-canvas/components/WorkspaceCanvas'
@@ -41,6 +42,8 @@ export function DetachedWorkspaceWindow({ workspaceId }: { workspaceId: string }
   const [error, setError] = useState('')
   const [paneErrors, setPaneErrors] = useState<Record<string, string>>({})
   const [paneMenu, setPaneMenu] = useState<PaneMenuState>()
+  const [branchTargetPaneId, setBranchTargetPaneId] = useState<string>()
+  const [paneBranches, setPaneBranches] = useState<Record<string, PaneBranchInfo>>({})
   const [renameTarget, setRenameTarget] = useState<{ paneId: string; initialValue: string }>()
   const [reducedMotion] = useState(() => typeof window !== 'undefined' && Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches))
   const canvasSaveChain = useRef<Promise<void>>(Promise.resolve())
@@ -113,6 +116,14 @@ export function DetachedWorkspaceWindow({ workspaceId }: { workspaceId: string }
 
   const paneSession = useCallback((paneId: string) => sessions.find((session) => session.paneId === paneId), [sessions])
 
+  useEffect(() => {
+    let current = true
+    void native.listWorkspacePaneBranches(workspaceId).then((items) => {
+      if (current) setPaneBranches(Object.fromEntries(items.map((item) => [item.paneId, item])))
+    }).catch(() => undefined)
+    return () => { current = false }
+  }, [workspaceId])
+
   const restartPane = useCallback(async (paneId: string, assignment: PaneAssignment) => {
     const session = paneSession(paneId)
     if (session?.status === 'running') await native.terminateTerminalSession(session.id).catch(() => undefined)
@@ -130,6 +141,29 @@ export function DetachedWorkspaceWindow({ workspaceId }: { workspaceId: string }
     const session = paneSession(paneId)
     if (session?.status === 'running') await native.terminateTerminalSession(session.id).catch(() => undefined)
   }, [paneSession])
+
+  const assignPaneBranch = useCallback(async (paneId: string, branchName: string) => {
+    if (!workspace) return
+    const previous = workspace
+    const session = paneSession(paneId)
+    let stopped = !session
+    try {
+      if (session?.status === 'running') {
+        await native.terminateTerminalSession(session.id)
+        stopped = true
+      }
+      if (session) terminalRuntime.remove(session.id)
+      const result = await native.createIsolatedPaneWorktree(workspace.id, paneId, branchName)
+      setWorkspace(result.workspace)
+      setPaneBranches((items) => ({ ...items, [paneId]: { paneId, branch: result.branchName, worktreePath: result.worktreePath, isolated: true } }))
+      const pane = result.workspace.panes.find((item) => item.id === paneId)
+      if (pane) await restartPane(paneId, pane)
+    } catch (caught) {
+      const oldPane = previous.panes.find((item) => item.id === paneId)
+      if (stopped && oldPane) await restartPane(paneId, oldPane)
+      throw caught
+    }
+  }, [paneSession, restartPane, workspace])
 
   // Rename persists only the pane title on the Workspace record; the canvas layout references
   // panes by id, so it needs no resync. Updating local state re-renders the pane header title.
@@ -214,7 +248,7 @@ export function DetachedWorkspaceWindow({ workspaceId }: { workspaceId: string }
     if (!assignment) return <div className="terminal-failure"><ErrorNotice message="This layout pane has no saved assignment." /></div>
     const session = sessions.find((item) => item.paneId === paneId)
     return <>
-      <TerminalPane assignment={assignment} session={session} active={ctx.active} maximized={ctx.maximized} settings={settings}
+      <TerminalPane assignment={assignment} session={session} branchName={paneBranches[paneId]?.branch} active={ctx.active} maximized={ctx.maximized} settings={settings}
         onFocus={() => setActivePane(paneId)}
         onMaximize={() => useCanvasStore.getState().toggleMaximize(paneId)}
         onClose={() => void stopPane(paneId)}
@@ -224,7 +258,7 @@ export function DetachedWorkspaceWindow({ workspaceId }: { workspaceId: string }
         onHeaderPointerDown={ctx.onHeaderPointerDown} />
       {paneErrors[paneId] && <div className="pane-native-error"><ErrorNotice message={paneErrors[paneId]} onRetry={() => void restartPane(paneId, assignment)} /></div>}
     </>
-  }, [workspace, sessions, settings, paneErrors, setActivePane, stopPane, restartPane])
+  }, [workspace, sessions, settings, paneErrors, paneBranches, setActivePane, stopPane, restartPane])
 
   if (loading) return <div className="workspace-loading"><div className="workspace-loading-header" /><div className="workspace-loading-grid" /></div>
   if (!workspace || !project) return <main className="centered-error"><ErrorNotice message={error || 'The workspace could not be loaded.'} /></main>
@@ -283,10 +317,12 @@ export function DetachedWorkspaceWindow({ workspaceId }: { workspaceId: string }
       const assignment = workspace.panes.find((pane) => pane.id === paneId)
       if (action === 'focus') { setActivePane(paneId); dispatchTerminalAction(paneId, 'focus'); return }
       if (action === 'rename') { if (assignment) setRenameTarget({ paneId, initialValue: assignment.title }); return }
+      if (action === 'change_branch') { setBranchTargetPaneId(paneId); return }
       if (action === 'restart') { if (assignment) void restartPane(paneId, assignment); return }
       if (action === 'stop') { void stopPane(paneId); return }
       if (['search', 'copy', 'paste', 'select_all', 'clear'].includes(action)) dispatchTerminalAction(paneId, action as TerminalAction)
     }} />}
+    {branchTargetPaneId && workspace.panes.find((pane) => pane.id === branchTargetPaneId) && <PaneBranchDialog projectId={project.id} projectRootPath={project.rootPath} currentBranch={paneBranches[branchTargetPaneId]?.branch} workingDirectory={workspace.panes.find((pane) => pane.id === branchTargetPaneId)!.workingDirectory} onAssign={(branch) => assignPaneBranch(branchTargetPaneId, branch)} onClose={() => setBranchTargetPaneId(undefined)} />}
     {renameTarget && <TextPromptDialog title="Rename terminal" label="Terminal title" initialValue={renameTarget.initialValue} confirmLabel="Rename" onClose={() => setRenameTarget(undefined)} onConfirm={(value) => void confirmRename(value)} />}
   </AppShell>
 }

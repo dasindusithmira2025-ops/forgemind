@@ -323,6 +323,13 @@ export interface IsolatedWorktreeResult {
   baseRef: string
 }
 
+export interface PaneBranchInfo {
+  paneId: string
+  branch?: string
+  worktreePath?: string
+  isolated: boolean
+}
+
 // ---- Repository Command Center -----------------------------------------------------------
 
 export type RepositoryActorKind = 'human' | 'agent' | 'system'
@@ -360,7 +367,7 @@ export type RepositoryOperation =
   | { kind: 'create_branch'; name: string; startPoint?: string }
   | { kind: 'switch_branch'; name: string }
   | { kind: 'delete_branch'; name: string }
-  | { kind: 'create_agent_worktree'; branch: string; baseCommit: string; agentId: string; taskId: string; fileScope: string[]; expiresAt?: string }
+  | { kind: 'create_agent_worktree'; branch: string; baseCommit: string; agentId: string; taskId: string; fileScope: string[]; expiresAt?: string; useExistingBranch?: boolean }
   | { kind: 'remove_worktree'; leaseId: string }
   | { kind: 'create_checkpoint'; message: string; paths: string[] }
   | { kind: 'commit_change_set'; message: string; paths: string[] }
@@ -414,7 +421,7 @@ export interface RepositorySnapshot {
 }
 export interface RepositoryBranchSummary {
   name: string; fullRef: string; kind: 'local' | 'remote'; current: boolean; headSha: string; upstream?: string
-  ahead: number; behind: number; latestSubject: string; latestCommitAt: string
+  ahead: number; behind: number; latestSubject: string; latestCommitAt: string; checkedOutPath?: string
 }
 export interface RepositoryDiffRequest {
   projectId: string; repositoryPath?: string; worktreePath?: string; path?: string; staged: boolean

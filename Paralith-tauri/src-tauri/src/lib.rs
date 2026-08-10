@@ -537,6 +537,7 @@ pub fn run() {
             commands::restore_workspace_sessions,
             commands::reset_restoration_circuit,
             commands::get_pane_git_review,
+            commands::list_workspace_pane_branches,
             commands::stage_pane_file,
             commands::restore_pane_file,
             commands::create_isolated_pane_worktree,

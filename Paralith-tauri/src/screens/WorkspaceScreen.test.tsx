@@ -61,6 +61,7 @@ vi.mock('../native/commands', () => ({
     listLiveSessions: vi.fn().mockResolvedValue([]), restoreWorkspaceSessions: (...args: unknown[]) => restoreWorkspace(...args),
     createTerminalSession: (...args: unknown[]) => createTerminalSession(...args), terminateTerminalSession: vi.fn(), terminateWorkspaceSessions: (...args: unknown[]) => terminateWorkspace(...args),
     getPaneGitReview: vi.fn(), stagePaneFile: vi.fn(), restorePaneFile: vi.fn(), createIsolatedPaneWorktree: vi.fn(),
+    listWorkspacePaneBranches: vi.fn().mockResolvedValue([]), listRepositoryBranches: vi.fn().mockResolvedValue([]),
     removeLayoutPane: vi.fn(), splitLayoutPane: vi.fn(), validateWorkingDirectory: vi.fn(),
     getDiagnostics: vi.fn(), runHealthCheck: vi.fn(),
     listSwarms: (...args: unknown[]) => listSwarms(...args),

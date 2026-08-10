@@ -5,13 +5,14 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { ChevronDown, CircleStop, FolderOpen, PanelRightClose, PanelRightOpen, RotateCcw, TerminalSquare } from 'lucide-react'
 import { TerminalPane } from '../components/terminal/TerminalPane'
 import { PaneMenu } from '../components/terminal/PaneMenu'
+import { PaneBranchDialog } from '../components/terminal/PaneBranchDialog'
 import { dispatchTerminalAction } from '../components/terminal/terminalActions'
 import { Button } from '../components/ui/Button'
 import { ErrorNotice } from '../components/ui/ErrorNotice'
 import { Modal } from '../components/ui/Modal'
 import { TextPromptDialog } from '../components/ui/TextPromptDialog'
 import { asNativeError, native } from '../native/commands'
-import type { AgentProvider, AgentStateEvent, MonitorInfo, PaneAssignment, PaneGitReview, Project, ShellProfile, SplitDirection, TerminalSession, Workspace, WorkspacePlacement } from '../native/types'
+import type { AgentProvider, AgentStateEvent, MonitorInfo, PaneAssignment, PaneBranchInfo, PaneGitReview, Project, ShellProfile, SplitDirection, TerminalSession, Workspace, WorkspacePlacement } from '../native/types'
 import { handoffController } from '../features/workspace-windows/handoffController'
 import { MonitorRecoveryWatcher } from '../features/workspace-windows/MonitorRecoveryWatcher'
 import { monitorLabel } from '../features/workspace-windows/placementSelectors'
@@ -78,6 +79,8 @@ export function WorkspaceScreen() {
   const [reducedMotion] = useState(() => typeof window !== 'undefined' && Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches))
   const [workspaceMenu, setWorkspaceMenu] = useState(false)
   const [paneMenu, setPaneMenu] = useState<{ paneId: string; x: number; y: number }>()
+  const [branchTargetPaneId, setBranchTargetPaneId] = useState<string>()
+  const [paneBranches, setPaneBranches] = useState<Record<string, PaneBranchInfo>>({})
   const [pendingInsert, setPendingInsert] = useState<PendingInsert>()
   const [renameTarget, setRenameTarget] = useState<{ kind: 'workspace' | 'pane'; workspaceId?: string; paneId?: string; initialValue: string }>()
   const [choices, setChoices] = useState<ProviderChoice[]>([])
@@ -116,6 +119,14 @@ export function WorkspaceScreen() {
   const openProjectSessions = useSessionStore((state) => state.openProjects)
   const projectCache = useSessionStore((state) => state.projects)
   const paneSession = useCallback((paneId: string) => sessions.find((session) => session.paneId === paneId), [sessions])
+  useEffect(() => {
+    if (!workspace?.id) return
+    let current = true
+    void native.listWorkspacePaneBranches(workspace.id).then((items) => {
+      if (current) setPaneBranches(Object.fromEntries(items.map((item) => [item.paneId, item])))
+    }).catch(() => undefined)
+    return () => { current = false }
+  }, [workspace?.id])
   const attentionQueue = useMemo(() => sessions
     .map((session): { session: TerminalSession; state: AgentStateEvent } | undefined => {
       const state = terminalRuntime.agentStateForSession(session.id)
@@ -756,10 +767,37 @@ export function WorkspaceScreen() {
       setLocalWorkspace(result.workspace)
       setWorkspace(result.workspace)
       setProjectWorkspaces((items) => items.map((item) => item.id === result.workspace.id ? result.workspace : item))
+      setPaneBranches((items) => ({ ...items, [paneId]: { paneId, branch: result.branchName, worktreePath: result.worktreePath, isolated: true } }))
       const pane = result.workspace.panes.find((item) => item.id === paneId)
       if (pane) await launchPane(pane, result.workspace)
     } catch (caught) {
       setPaneErrors((current) => ({ ...current, [paneId]: asNativeError(caught).message }))
+    }
+  }
+
+  const assignPaneBranch = async (paneId: string, branchName: string) => {
+    if (!workspace) return
+    const previous = workspace
+    const session = paneSession(paneId)
+    let stopped = !session
+    try {
+      if (session?.status === 'running') {
+        await native.terminateTerminalSession(session.id)
+        stopped = true
+      }
+      if (session) terminalRuntime.remove(session.id)
+      const result = await native.createIsolatedPaneWorktree(workspace.id, paneId, branchName)
+      setLocalWorkspace(result.workspace)
+      setWorkspace(result.workspace)
+      setProjectWorkspaces((items) => items.map((item) => item.id === result.workspace.id ? result.workspace : item))
+      setPaneBranches((items) => ({ ...items, [paneId]: { paneId, branch: result.branchName, worktreePath: result.worktreePath, isolated: true } }))
+      setPaneErrors((items) => ({ ...items, [paneId]: '' }))
+      const pane = result.workspace.panes.find((item) => item.id === paneId)
+      if (pane) await launchPane(pane, result.workspace)
+    } catch (caught) {
+      const oldPane = previous.panes.find((item) => item.id === paneId)
+      if (stopped && oldPane) await launchPane(oldPane, previous).catch(() => undefined)
+      throw caught
     }
   }
 
@@ -1115,7 +1153,7 @@ export function WorkspaceScreen() {
     if (!assignment) return <div className="terminal-failure"><ErrorNotice message="This layout pane has no saved assignment." /></div>
     const session = sessions.find((item) => item.paneId === paneId)
     return <>
-      <TerminalPane assignment={assignment} session={session} deferred={deferredPaneIds.includes(paneId)} active={ctx.active} maximized={ctx.maximized} settings={settings}
+      <TerminalPane assignment={assignment} session={session} branchName={paneBranches[paneId]?.branch} deferred={deferredPaneIds.includes(paneId)} active={ctx.active} maximized={ctx.maximized} settings={settings}
         onFocus={() => {
           setActivePane(paneId)
           // Only a real pointer focus resumes a budget-deferred Pane. Hydration changes the
@@ -1146,8 +1184,9 @@ export function WorkspaceScreen() {
     {pendingInsert && <Modal title={pendingInsert.replace ? 'Replace terminal' : 'Choose terminal'} onClose={() => setPendingInsert(undefined)}><div className="provider-picker">{choices.length === 0 ? <ErrorNotice message="No available agents or shells were detected." onRetry={() => void scanProviders()} /> : choices.map((choice) => <button key={`${choice.provider}:${choice.name}`} onClick={() => void insertOrReplace(choice)}><TerminalSquare size={18} /><div><strong>{choice.name}</strong><span>Available · {providerLabel(choice.provider)}</span></div></button>)}</div></Modal>}
     {renameTarget && <TextPromptDialog title={renameTarget.kind === 'workspace' ? 'Rename workspace' : 'Rename terminal'} label={renameTarget.kind === 'workspace' ? 'Workspace name' : 'Terminal title'} initialValue={renameTarget.initialValue} confirmLabel="Rename" onClose={() => setRenameTarget(undefined)} onConfirm={(value) => void confirmRename(value)} />}
     {monitorPicker && <Modal title="Move workspace to monitor" onClose={() => setMonitorPicker(undefined)}><div className="provider-picker">{monitors.length === 0 ? <ErrorNotice message="No additional monitors were detected." /> : monitors.map((monitor) => <button key={monitor.id} onClick={() => void chooseMonitor(monitor.id)}><TerminalSquare size={18} /><div><strong>{monitorLabel(monitor)}{monitor.isPrimary ? ' · Primary' : ''}</strong><span>{monitor.bounds.width}×{monitor.bounds.height} · {Math.round(monitor.scaleFactor * 100)}% · {monitor.windowCount} window{monitor.windowCount === 1 ? '' : 's'}</span></div></button>)}</div></Modal>}
+    {branchTargetPaneId && project && workspace.panes.find((pane) => pane.id === branchTargetPaneId) && <PaneBranchDialog projectId={project.id} projectRootPath={project.rootPath} currentBranch={paneBranches[branchTargetPaneId]?.branch} workingDirectory={workspace.panes.find((pane) => pane.id === branchTargetPaneId)!.workingDirectory} onAssign={(branch) => assignPaneBranch(branchTargetPaneId, branch)} onClose={() => setBranchTargetPaneId(undefined)} />}
     {gitReview && <Modal title="Pane review" onClose={() => setGitReview(undefined)}><div className="pane-review"><div className="pane-review-meta"><strong>{gitReview.review.branch || 'detached'}</strong><span title={gitReview.review.workingDirectory}>{gitReview.review.workingDirectory}</span>{gitReview.review.diffTruncated && <em>Diff truncated</em>}</div>{gitReview.review.conflicts.length > 0 && <ErrorNotice message={`${gitReview.review.conflicts.length} conflicted file(s): ${gitReview.review.conflicts.join(', ')}`} />}{gitReview.review.files.length === 0 ? <p className="empty-copy">No git changes for this pane.</p> : <div className="pane-review-files">{gitReview.review.files.map((file) => <div key={file.path} className={file.conflicted ? 'conflicted' : ''}><code>{file.indexStatus}{file.worktreeStatus}</code><span title={file.path}>{file.path}</span><button disabled={gitReviewBusy} onClick={() => void stageReviewFile(file.path)}>Stage</button><button disabled={gitReviewBusy} onClick={() => void restoreReviewFile(file.path)}>Discard</button></div>)}</div>}<pre className="pane-review-diff">{gitReview.review.diff || 'No unstaged or staged diff output.'}</pre></div></Modal>}
-    {paneMenu && <PaneMenu menu={paneMenu} onClose={() => setPaneMenu(undefined)} onAction={(action) => { const paneId = paneMenu.paneId; setPaneMenu(undefined); if (action === 'resume_agents') openAgentResumeCenter(); if (action === 'rename') void renamePane(paneId); if (action === 'split_right') setPendingInsert({ targetPaneId: paneId, direction: 'vertical' }); if (action === 'split_down') setPendingInsert({ targetPaneId: paneId, direction: 'horizontal' }); if (action === 'duplicate') { const pane = workspace.panes.find((item) => item.id === paneId); if (pane) setPendingInsert({ targetPaneId: paneId, direction: 'vertical', duplicate: pane }) } if (action === 'replace') setPendingInsert({ targetPaneId: paneId, direction: 'vertical', replace: true }); if (action === 'directory') void changeDirectory(paneId); if (action === 'isolate_worktree') void isolatePaneWorktree(paneId); if (action === 'review_changes') void openPaneReview(paneId); if (action === 'restart') void restartPane(paneId); if (action === 'stop') void stopPane(paneId); if (action === 'close') void closePane(paneId); if (['search','copy','paste','select_all','clear','focus'].includes(action)) dispatchTerminalAction(paneId, action as Parameters<typeof dispatchTerminalAction>[1]) }} />}
+    {paneMenu && <PaneMenu menu={paneMenu} onClose={() => setPaneMenu(undefined)} onAction={(action) => { const paneId = paneMenu.paneId; setPaneMenu(undefined); if (action === 'resume_agents') openAgentResumeCenter(); if (action === 'rename') void renamePane(paneId); if (action === 'change_branch') setBranchTargetPaneId(paneId); if (action === 'split_right') setPendingInsert({ targetPaneId: paneId, direction: 'vertical' }); if (action === 'split_down') setPendingInsert({ targetPaneId: paneId, direction: 'horizontal' }); if (action === 'duplicate') { const pane = workspace.panes.find((item) => item.id === paneId); if (pane) setPendingInsert({ targetPaneId: paneId, direction: 'vertical', duplicate: pane }) } if (action === 'replace') setPendingInsert({ targetPaneId: paneId, direction: 'vertical', replace: true }); if (action === 'directory') void changeDirectory(paneId); if (action === 'isolate_worktree') void isolatePaneWorktree(paneId); if (action === 'review_changes') void openPaneReview(paneId); if (action === 'restart') void restartPane(paneId); if (action === 'stop') void stopPane(paneId); if (action === 'close') void closePane(paneId); if (['search','copy','paste','select_all','clear','focus'].includes(action)) dispatchTerminalAction(paneId, action as Parameters<typeof dispatchTerminalAction>[1]) }} />}
   </AppShell>
 }
 

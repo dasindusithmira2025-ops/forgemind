@@ -30,3 +30,12 @@ pub struct IsolatedWorktreeResult {
     pub branch_name: String,
     pub base_ref: String,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PaneBranchInfo {
+    pub pane_id: String,
+    pub branch: Option<String>,
+    pub worktree_path: Option<String>,
+    pub isolated: bool,
+}
