@@ -2,6 +2,37 @@
 
 Contract version: 1.0. Serde rule: every public Rust struct below uses `#[serde(rename_all = "camelCase")]`; every public enum uses `#[serde(rename_all = "snake_case")]` unless an explicit wire value is shown. IDs and timestamps are UTF-8 strings; timestamps are RFC 3339 UTC. Critical architecture is represented by typed columns/fields, never opaque JSON.
 
+## 0. V1 scope authority
+
+This table is normative. Tier 2 work is **out of V1 and is not registered, dispatched, shown as a control, or shipped as a failing stub**.
+
+| Tier | Area | V1 decision |
+| --- | --- | --- |
+| KEEP (Tier 1) | Canonical semantic model and typed edges | Full §2/§2.1 model. |
+| KEEP (Tier 1) | Qualified identity | Full identity contract below, including synthetic name-independent Proposed IDs. |
+| KEEP (Tier 1) | Migration 28 | Sentinel-backed uniqueness, revision FKs, feature predicates, and preservation tests are mandatory. |
+| KEEP (Tier 1) | Declared extraction | Prisma, Drizzle, and raw SQL, by static file parsing only. |
+| KEEP (Tier 1) | Monorepo evidence resolution | Full §5 algorithm and fixtures. |
+| KEEP (Tier 1) | Immutable design revisions and CAS | Full §6 contract with the mandated conditional-update statement order. |
+| KEEP (Tier 1) | Semantic structural diff | Full §3 behavior, including formatting-only-empty. |
+| KEEP (Tier 1) | Deterministic health | Pure graph rules for missing PK, FK type mismatch, broken reference, duplicate index, and destructive proposed change. No LLM detection. |
+| KEEP (Tier 1) | Agent capability policy | Registered `database.*` descriptors, `CapabilityDomain::Database`, and `DESIGN_ONLY`/`IMPLEMENT_DESIGN` enforcement in `policy::evaluate`. |
+| KEEP (Tier 1) | Canvas awareness | WP4-owned publish command plus `database.get_canvas_state` and `database.get_selection`; WP3 is the caller. |
+| KEEP (Tier 1) | Bounded context packs | Full §11 limits and selection-aware packing. |
+| KEEP (Tier 1) | UI | Overview, Diagram, Explorer, Inspector, Design mode, Changes, and Health, with LOD and off-render-path layout. |
+| KEEP (Tier 1) | Tauri seam | Commands/events for every Tier 1 and Tier 1.5 behavior only. |
+| KEEP (Tier 1) | Security verification | No credential persistence and no auto-connect, asserted against persisted row contents. |
+| KEEP-REDUCED (Tier 1.5) | Observed layer | Read-only SQLite file introspection only, using existing `rusqlite`; no credential store, new crate, or network. |
+| KEEP-REDUCED (Tier 1.5) | Implementation pipeline | Stages 1-7 and 13-14 for Prisma and raw SQL. Stages 8-9 only through the explicit §9.1 allow-list after authorization. Drizzle generation is excluded. |
+| KEEP-REDUCED (Tier 1.5) | Code usage and impact | Import/definition evidence only, always with explicit `EvidenceCertainty`; no read/write query analysis. |
+| DEFER (Tier 2) | PostgreSQL/MySQL network introspection | No driver, pool, or credential store. Keep trait extension points; do not register adapters. |
+| DEFER (Tier 2) | OS credential store, `database_test_connection`, network `database_introspect` | Commands are absent, not failing stubs. `DatabaseCredentialLease` remains a future, non-dispatched contract. |
+| DEFER (Tier 2) | External Claude Code/Codex MCP bridge | No bridge exists. V1 agent operability is the in-app orchestrator only. `INTEGRATION-AUDIT.md` §3 is the accepted future direction, with no V1 implementation. |
+| DEFER (Tier 2) | Git-revision-to-Git-revision comparison | Requires a guarded non-checkout blob reader. The V1 wire/API does not expose this mode. |
+| DEFER (Tier 2) | Live/dev database mutation, migration application, production apply | Requires the deferred connection layer. Pipeline verification targets re-extracted Declared state only. |
+| DEFER (Tier 2) | `database.analyze_design`, `database.get_impact`, `database.compare_target_to_database` | Depend on deferred layers or non-deterministic analysis; descriptors are not registered. |
+| DEFER (Tier 2) | Drizzle native change generation | Safe TypeScript AST rewriting is outside V1. Drizzle still detects, extracts, reads migrations, validates, and diffs. |
+
 ## 1. Shared primitives, identity, provenance
 
 ```rust
@@ -14,8 +45,8 @@ pub type ProjectId = String;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SemanticIdentity {
-    pub id: SemanticId,                 // qualified deterministic id
-    pub logical_key: String,            // rename-tolerant key when adapter supplies one
+    pub id: SemanticId,                 // layer-specific stable identity
+    pub logical_key: String,            // never inferred from Proposed qualified_name
     pub qualified_name: String,          // display/address name in this snapshot
     pub previous_ids: Vec<SemanticId>,   // explicit rename lineage, never guessed above threshold
 }
@@ -55,13 +86,14 @@ pub enum EvidenceCertainty { Exact, Heuristic }
 
 ### 1.1 Qualified identity algorithm
 
-`id = "db:" + kind + ":" + base32_lower(sha256(repository_id + "\0" + source_logical_key + "\0" + object_logical_key))`.
+Declared and Observed identities use `id = "db:" + kind + ":" + base32_lower(sha256(repository_id + "\0" + source_logical_key + "\0" + object_logical_key))`. Proposed identity is intentionally different: on object creation allocate `id = "db:" + kind + ":p_" + ulid_lower()` (UUIDv7 is also acceptable if chosen once for the implementation). That synthetic ID is copied unchanged into every descendant revision. A Proposed object's name exists only in `qualified_name`; rename operations never recompute `id` or `logical_key`.
 
 - `repository_id` is the existing Project/repository stable id.
 - `source_logical_key` is selected in order: explicit connection-profile id; normalized database URL **without userinfo, password, query secrets, or host credentials** plus database name; compose service + database name; schema-owner package path + adapter; otherwise evidence-cluster hash.
 - `object_logical_key` is selected in order: adapter-native stable id; migration lineage id; ORM mapped name identity; `(namespace logical key, object kind, canonical name)`. Child keys append parent logical key and ordinal-independent native name.
 - Case folding follows engine rules: PostgreSQL unquoted names lower-case, MySQL comparison uses adapter-reported case mode, SQLite case-insensitive ASCII. Quoted identifiers preserve exact spelling.
-- Rename tolerance is evidence-based. A native stable id or explicit rename migration retains `id`, changes `qualified_name`, and appends the old qualified id to `previous_ids`. A heuristic structural match may emit a proposed rename with confidence but must not silently reuse identity below `0.90`.
+- Declared adapters in V1 are name-derived. When a migration or the approved design operation log proves a rename, the reconciler emits the new name-derived `id` and appends the old `id` to `previous_ids`; semantic diff then emits `Renamed` rather than unrelated drop/add. `RenameTable` itself preserves the Proposed synthetic `id` and records the pre-implementation Declared id as lineage for later reconciliation. A structural heuristic at confidence `>=0.90` may emit a rename issue/proposal but still requires confirmation before linking identity. Below `0.90`, it emits a `possible_rename` issue containing both object IDs and confidence, leaves identities distinct, and emits the ordinary add/drop diff; it never silently links or auto-proposes a design operation.
+- Selection, layout pins, issue references, usage references, and Proposed edges are keyed by the unchanged Proposed `id`, so a proposed rename cannot invalidate them.
 - Edge identity is `dbedge:` plus SHA-256 of `(source_id, target_id, edge_type, snapshot_or_revision_id)`.
 - Every object has exactly one `DatabaseObjectMeta`; every persisted object has at least one provenance row. Exact claims use confidence `1.0`. Heuristic claims require evidence text/reference and confidence `<1.0`, matching `repository_intelligence.rs` `Origin::exact`/`Origin::heuristic` discipline.
 
@@ -420,14 +452,29 @@ pub enum DatabaseComparisonMode {
     DeclaredObservedDrift { declared_snapshot_id: SnapshotId, observed_snapshot_id: SnapshotId },
     DeclaredProposedDelta { declared_snapshot_id: SnapshotId, proposed_revision_id: RevisionId },
     DesignRevisions { left_revision_id: RevisionId, right_revision_id: RevisionId },
-    GitRevisions { source_id: String, left_git_revision: String, right_git_revision: String },
 }
 pub struct DatabaseDiff { pub id: String, pub source_id: String, pub mode: DatabaseComparisonMode, pub changes: Vec<DatabaseChange>, pub fingerprint: String, pub created_at: String }
 pub struct DatabaseChange { pub kind: DatabaseChangeKind, pub object_id: Option<SemanticId>, pub before_fingerprint: Option<String>, pub after_fingerprint: Option<String>, pub breaking: bool, pub destructive: bool, pub summary: String }
 pub enum DatabaseChangeKind { Add, Drop, Rename, Alter, Move, Reorder, DataMigrationRequired }
 ```
 
+Git-revision comparison is not a V1 wire variant. Adding it later requires the Tier 2 guarded non-checkout blob reader and a contract-version change.
+
 Diff is semantic. Formatting, comments not represented in a semantic field, migration file whitespace, and declaration ordering outside order-sensitive constructs produce no change.
+
+### 3.1 Deterministic V1 health rules
+
+Health evaluation is a pure, ordered function of one canonical graph or one typed diff. It never calls an LLM. It emits stable issue ids from `(source_id, reference_id, issue_code, sorted_object_ids)` and these exact codes:
+
+| Code | Deterministic predicate |
+| --- | --- |
+| `MISSING_PRIMARY_KEY` | A persisted table has no `PRIMARY_KEY` edge/object. Views and explicitly adapter-marked keyless read models are excluded. |
+| `FK_TYPE_MISMATCH` | Referencing and referenced columns have unequal canonical scalar type, array shape, or signedness after adapter normalization. |
+| `BROKEN_REFERENCE` | An edge endpoint is absent from the same snapshot/revision, or an FK column/target-key cardinality differs. |
+| `DUPLICATE_INDEX` | Two indexes on one table have identical ordered column/expression ids, uniqueness, predicate fingerprint, and method. |
+| `DESTRUCTIVE_PROPOSED_CHANGE` | A Declared-to-Proposed diff contains `Drop`, a nullable-to-required alteration without a default/backfill, or a narrowing canonical type conversion. |
+
+Evaluation order is the table order above, then semantic id. Re-evaluation upserts matching open issues and resolves no-longer-matching issues; it does not duplicate them.
 
 ## 4. Adapter contract
 
@@ -469,8 +516,9 @@ pub enum DatabaseObject {
     Enum(Enum), View(View), Migration(DatabaseMigration), OrmModel(OrmModel),
 }
 pub struct DatabaseObjectProvenance { pub id: String, pub object_id: SemanticId, pub source_kind: String, pub certainty: EvidenceCertainty, pub confidence: f32, pub evidence_ref: Option<String>, pub extractor_version: String, pub observed_at: String }
+// Tier 2 extension contracts only: no V1 constructor, command, table, or dispatch path.
 pub struct DatabaseConnectionProfileSummary { pub id: String, pub source_id: Option<String>, pub project_id: String, pub display_name: String, pub engine: DatabaseEngine, pub credential_reference: String, pub read_only_default: bool }
-pub struct DatabaseSecret(String); // private field; no Debug/Serialize/Clone; zeroized on drop by implementation
+pub struct DatabaseSecret(String); // private field; no Debug/Serialize/Clone; zeroized on drop by future implementation
 pub trait DatabaseCredentialLease: Send + Sync { fn reference(&self) -> &str; fn expose_for_connection(&self) -> DatabaseSecret; }
 pub struct ExtractedDatabaseGraph { pub objects: Vec<DatabaseObject>, pub edges: Vec<DatabaseEdge>, pub provenance: Vec<DatabaseObjectProvenance> }
 pub struct GeneratedDatabaseChange { pub adapter_id: DatabaseAdapterId, pub file_edits: Vec<DatabaseFileEdit>, pub verification: DatabaseComparisonMode }
@@ -508,13 +556,11 @@ A registry calls only methods whose flag is true; otherwise it returns `DATABASE
 | adapter | detect | declared | migrations | observed | validate | diff | generate |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | `prisma` | yes | yes | yes | no | yes | yes | yes |
-| `drizzle` | yes | yes | yes | no | yes | yes | yes |
+| `drizzle` | yes | yes | yes | no | yes | yes | no |
 | `raw_sql` | yes | yes | yes | no | yes | yes | yes |
-| `sqlite` | yes | yes | no | yes | yes | yes | yes |
-| `postgres` | yes | no | no | yes | yes | yes | yes |
-| `mysql` | yes | no | no | yes | yes | yes | yes |
+| `sqlite` | yes | yes | no | yes | yes | yes | no |
 
-Detection/extraction reads files as data and must not execute repository code, package scripts, ORM CLIs, migrations, or generated clients.
+PostgreSQL and MySQL are absent from the V1 registered adapter table. Their enum variants and trait extension points remain so a later adapter needs no graph-engine redesign. `sqlite` Observed support means an explicit user-selected repository-local file opened with SQLite read-only URI flags. It does not use a connection profile or credential lease. Network introspection methods and credential types remain trait extension points but have no V1 command or dispatch path. Detection/extraction reads files as data and **never** executes repository code, package scripts, ORM CLIs, migrations, or generated clients. Authorized implementation execution is a separate boundary defined in §9.1.
 
 ## 5. Monorepo evidence resolution
 
@@ -534,14 +580,14 @@ Required fixture outcome: `apps/api` references `DATABASE_URL`; `apps/worker` im
 
 - `DatabaseDesign` is a movable branch pointer; `DatabaseDesignRevision` and `DatabaseDesignOperation` are immutable.
 - `create_draft` accepts exactly one base: snapshot or revision. Independent drafts from the same base share no mutable state.
-- Each operation materializes a complete graph revision and appends an operation row in one transaction.
+- Each operation materializes a complete graph revision and appends an operation row in one `BEGIN IMMEDIATE` transaction, using the mandatory order below.
 - Request token:
 
 ```rust
 pub struct DesignConcurrencyToken { pub expected_head_revision_id: RevisionId, pub expected_revision_number: i64 }
 ```
 
-- Compare token against the design row inside `BEGIN IMMEDIATE`. On mismatch return:
+- Statement order is normative: (1) allocate the result revision id/number in memory; (2) execute exactly one conditional head advance, `UPDATE database_designs SET head_revision_id=:result, revision_number=:next, updated_at=:now WHERE id=:design_id AND head_revision_id=:expected_head AND revision_number=:expected_number`; (3) if `rows_affected != 1`, read the actual head/number, roll back, and return the typed error below; (4) only after a successful update insert the immutable `database_design_revisions` row and then the `database_design_operations` row; (5) commit. The temporary head reference is valid inside the transaction because `head_revision_id` deliberately has no FK and rollback restores it on any later failure. A residual `UNIQUE(design_id, revision_number)` violation is caught and mapped to the same typed stale error after reading actual tokens, never exposed as a raw rusqlite error.
 
 ```json
 {
@@ -562,7 +608,7 @@ No automatic retry or rebase. Approve/reject/archive require the same token. App
 
 ## 7. Persistence: append-only migration 28
 
-`migrations.rs` must change `CURRENT_SCHEMA_VERSION` from `27` to `28`, add one `migrate_v28`, call it from `apply`, and add an installed-schema upgrade preservation test. Do not edit `migrate_v1..migrate_v27`.
+`migrations.rs` must change `CURRENT_SCHEMA_VERSION` from `27` to `28`, add one `migrate_v28`, call it from `apply` using `if current < 28 || !table_exists(connection, "database_sources")?`, add the same `!table_exists(connection, "database_sources")?` feature predicate to `requires_migration`, and add an installed-schema upgrade preservation test. Do not edit `migrate_v1..migrate_v27`.
 
 ```sql
 BEGIN IMMEDIATE;
@@ -597,32 +643,43 @@ CREATE INDEX idx_database_snapshots_source_layer ON database_snapshots(source_id
 
 CREATE TABLE database_objects (
   id TEXT NOT NULL, source_id TEXT NOT NULL REFERENCES database_sources(id) ON DELETE CASCADE,
-  snapshot_id TEXT REFERENCES database_snapshots(id) ON DELETE CASCADE,
-  design_revision_id TEXT, layer TEXT NOT NULL, object_kind TEXT NOT NULL,
+  snapshot_id TEXT NOT NULL DEFAULT '', design_revision_id TEXT NOT NULL DEFAULT '',
+  snapshot_ref TEXT GENERATED ALWAYS AS (NULLIF(snapshot_id, '')) STORED REFERENCES database_snapshots(id) ON DELETE CASCADE,
+  design_revision_ref TEXT GENERATED ALWAYS AS (NULLIF(design_revision_id, '')) STORED REFERENCES database_design_revisions(id) ON DELETE CASCADE,
+  layer TEXT NOT NULL, object_kind TEXT NOT NULL,
   logical_key TEXT NOT NULL, qualified_name TEXT NOT NULL, parent_object_id TEXT,
   namespace_id TEXT, native_type TEXT, ordinal INTEGER, nullable INTEGER,
-  typed_payload_json TEXT NOT NULL, content_fingerprint TEXT NOT NULL,
+  payload_version INTEGER NOT NULL, typed_payload_json TEXT NOT NULL, content_fingerprint TEXT NOT NULL,
   confidence REAL NOT NULL, discovered_at TEXT NOT NULL, observed_at TEXT NOT NULL, updated_at TEXT NOT NULL,
-  PRIMARY KEY(id, snapshot_id, design_revision_id)
+  CHECK ((snapshot_id <> '' AND design_revision_id = '') OR (snapshot_id = '' AND design_revision_id <> '')),
+  PRIMARY KEY(id, snapshot_id, design_revision_id),
+  UNIQUE(id, snapshot_id, design_revision_id)
 );
 CREATE INDEX idx_database_objects_snapshot_kind ON database_objects(snapshot_id, object_kind, qualified_name);
 CREATE INDEX idx_database_objects_revision_kind ON database_objects(design_revision_id, object_kind, qualified_name);
 
 CREATE TABLE database_edges (
   id TEXT PRIMARY KEY, source_id TEXT NOT NULL REFERENCES database_sources(id) ON DELETE CASCADE,
-  snapshot_id TEXT REFERENCES database_snapshots(id) ON DELETE CASCADE,
-  design_revision_id TEXT, source_object_id TEXT NOT NULL, target_object_id TEXT NOT NULL,
+  snapshot_id TEXT NOT NULL DEFAULT '', design_revision_id TEXT NOT NULL DEFAULT '',
+  snapshot_ref TEXT GENERATED ALWAYS AS (NULLIF(snapshot_id, '')) STORED REFERENCES database_snapshots(id) ON DELETE CASCADE,
+  design_revision_ref TEXT GENERATED ALWAYS AS (NULLIF(design_revision_id, '')) STORED REFERENCES database_design_revisions(id) ON DELETE CASCADE,
+  source_object_id TEXT NOT NULL, target_object_id TEXT NOT NULL,
   edge_type TEXT NOT NULL, confidence REAL NOT NULL, created_at TEXT NOT NULL,
+  CHECK ((snapshot_id <> '' AND design_revision_id = '') OR (snapshot_id = '' AND design_revision_id <> '')),
   UNIQUE(snapshot_id, design_revision_id, source_object_id, target_object_id, edge_type)
 );
 CREATE INDEX idx_database_edges_source_object ON database_edges(snapshot_id, design_revision_id, source_object_id);
 CREATE INDEX idx_database_edges_target_object ON database_edges(snapshot_id, design_revision_id, target_object_id);
 
 CREATE TABLE database_object_provenance (
-  id TEXT PRIMARY KEY, object_id TEXT NOT NULL, snapshot_id TEXT, design_revision_id TEXT,
+  id TEXT PRIMARY KEY, object_id TEXT NOT NULL,
+  snapshot_id TEXT NOT NULL DEFAULT '', design_revision_id TEXT NOT NULL DEFAULT '',
+  snapshot_ref TEXT GENERATED ALWAYS AS (NULLIF(snapshot_id, '')) STORED REFERENCES database_snapshots(id) ON DELETE CASCADE,
+  design_revision_ref TEXT GENERATED ALWAYS AS (NULLIF(design_revision_id, '')) STORED REFERENCES database_design_revisions(id) ON DELETE CASCADE,
   evidence_id TEXT REFERENCES database_source_evidence(id) ON DELETE SET NULL,
   source_kind TEXT NOT NULL, certainty TEXT NOT NULL, confidence REAL NOT NULL,
-  evidence_ref TEXT, extractor_version TEXT NOT NULL, observed_at TEXT NOT NULL
+  evidence_ref TEXT, extractor_version TEXT NOT NULL, observed_at TEXT NOT NULL,
+  CHECK ((snapshot_id <> '' AND design_revision_id = '') OR (snapshot_id = '' AND design_revision_id <> ''))
 );
 CREATE INDEX idx_database_provenance_object ON database_object_provenance(object_id, snapshot_id, design_revision_id);
 
@@ -649,16 +706,21 @@ CREATE TABLE database_design_operations (
   id TEXT PRIMARY KEY, design_id TEXT NOT NULL REFERENCES database_designs(id) ON DELETE CASCADE,
   base_revision_id TEXT NOT NULL REFERENCES database_design_revisions(id),
   result_revision_id TEXT NOT NULL REFERENCES database_design_revisions(id),
-  sequence INTEGER NOT NULL, operation_kind TEXT NOT NULL, operation_payload_json TEXT NOT NULL,
+  sequence INTEGER NOT NULL, operation_kind TEXT NOT NULL, payload_version INTEGER NOT NULL,
+  operation_payload_json TEXT NOT NULL,
   actor_kind TEXT NOT NULL, actor_id TEXT, created_at TEXT NOT NULL,
   UNIQUE(design_id, result_revision_id, sequence)
 );
 
 CREATE TABLE database_layouts (
   id TEXT PRIMARY KEY, source_id TEXT NOT NULL REFERENCES database_sources(id) ON DELETE CASCADE,
-  snapshot_id TEXT, design_revision_id TEXT, layout_kind TEXT NOT NULL,
+  snapshot_id TEXT NOT NULL DEFAULT '', design_revision_id TEXT NOT NULL DEFAULT '',
+  snapshot_ref TEXT GENERATED ALWAYS AS (NULLIF(snapshot_id, '')) STORED REFERENCES database_snapshots(id) ON DELETE CASCADE,
+  design_revision_ref TEXT GENERATED ALWAYS AS (NULLIF(design_revision_id, '')) STORED REFERENCES database_design_revisions(id) ON DELETE CASCADE,
+  layout_kind TEXT NOT NULL,
   semantic_lod INTEGER NOT NULL, layout_fingerprint TEXT NOT NULL,
   viewport_json TEXT NOT NULL, positions_json TEXT NOT NULL, updated_at TEXT NOT NULL,
+  CHECK ((snapshot_id <> '' AND design_revision_id = '') OR (snapshot_id = '' AND design_revision_id <> '')),
   UNIQUE(source_id, snapshot_id, design_revision_id, layout_kind, semantic_lod)
 );
 
@@ -671,9 +733,13 @@ CREATE TABLE database_diffs (
 
 CREATE TABLE database_issues (
   id TEXT PRIMARY KEY, source_id TEXT NOT NULL REFERENCES database_sources(id) ON DELETE CASCADE,
-  snapshot_id TEXT, design_revision_id TEXT, issue_code TEXT NOT NULL, severity TEXT NOT NULL,
+  snapshot_id TEXT NOT NULL DEFAULT '', design_revision_id TEXT NOT NULL DEFAULT '',
+  snapshot_ref TEXT GENERATED ALWAYS AS (NULLIF(snapshot_id, '')) STORED REFERENCES database_snapshots(id) ON DELETE CASCADE,
+  design_revision_ref TEXT GENERATED ALWAYS AS (NULLIF(design_revision_id, '')) STORED REFERENCES database_design_revisions(id) ON DELETE CASCADE,
+  issue_code TEXT NOT NULL, severity TEXT NOT NULL,
   title TEXT NOT NULL, explanation TEXT NOT NULL, status TEXT NOT NULL,
-  detected_at TEXT NOT NULL, resolved_at TEXT
+  detected_at TEXT NOT NULL, resolved_at TEXT,
+  CHECK ((snapshot_id <> '' AND design_revision_id = '') OR (snapshot_id = '' AND design_revision_id <> ''))
 );
 CREATE INDEX idx_database_issues_source_status ON database_issues(source_id, status, severity);
 
@@ -687,20 +753,12 @@ CREATE TABLE database_usage_refs (
 CREATE INDEX idx_database_usage_object ON database_usage_refs(source_id, semantic_object_id);
 CREATE INDEX idx_database_usage_path ON database_usage_refs(project_id, relative_path);
 
-CREATE TABLE database_connection_profiles (
-  id TEXT PRIMARY KEY, source_id TEXT REFERENCES database_sources(id) ON DELETE SET NULL,
-  project_id TEXT NOT NULL, display_name TEXT NOT NULL, engine TEXT NOT NULL,
-  host_label TEXT, port INTEGER, database_name TEXT, username_label TEXT,
-  credential_reference TEXT NOT NULL, tls_mode TEXT, read_only_default INTEGER NOT NULL DEFAULT 1,
-  created_at TEXT NOT NULL, updated_at TEXT NOT NULL
-);
-
 INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(28, datetime('now'));
 PRAGMA user_version=28;
 COMMIT;
 ```
 
-`typed_payload_json`, operation payload, diff changes, and layout JSON are serialized **typed versioned Rust values**, not arbitrary maps. They must deserialize through known enums/structs and reject unknown required variants. No table contains a password, raw URL, token, private key, certificate body, or environment value.
+`typed_payload_json`, operation payload, diff changes, and layout JSON are serialized typed values, not arbitrary maps. Object and operation payloads carry mandatory `payload_version`; readers dispatch by that version and reject unknown required variants. No table contains a password, raw URL, token, credential reference, private key, certificate body, or environment value. The generated `snapshot_ref`/`design_revision_ref` columns convert the required empty-string discriminator sentinel to SQL NULL only for FK enforcement, so both uniqueness and referential integrity are database-held invariants.
 
 ## 8. Tauri commands and events
 
@@ -717,9 +775,7 @@ Every request/response is camelCase and Project-scoped where applicable.
 | `database_list_migrations` | `ListDatabaseMigrationsRequest { project_id, source_id, snapshot_id }` | `Vec<DatabaseMigration>` |
 | `database_list_usage` | `ListDatabaseUsageRequest { project_id, source_id, object_id, limit, continuation }` | `DatabaseUsagePage` |
 | `database_list_issues` | `ListDatabaseIssuesRequest { project_id, source_id, status, severity }` | `Vec<DatabaseIssue>` |
-| `database_create_connection_profile` | `CreateDatabaseConnectionProfileRequest { project_id, source_id, metadata, credential_reference }` | `DatabaseConnectionProfileSummary` |
-| `database_test_connection` | `TestDatabaseConnectionRequest { project_id, profile_id }` | `DatabaseConnectionTestResult` |
-| `database_introspect` | `IntrospectDatabaseRequest { project_id, source_id, profile_id, explicit_user_consent: true }` | `DatabaseSnapshot` |
+| `database_introspect_sqlite_file` | `IntrospectSqliteFileRequest { project_id, source_id, project_relative_path, explicit_user_consent: true }` | `DatabaseSnapshot` |
 | `database_create_draft` | `CreateDatabaseDraftRequest { project_id, source_id, name, base }` | `DatabaseDesignBundle` |
 | `database_list_designs` | `ListDatabaseDesignsRequest { project_id, source_id }` | `Vec<DatabaseDesign>` |
 | `database_get_design` | `GetDatabaseDesignRequest { project_id, design_id, revision_id }` | `DatabaseDesignBundle` |
@@ -729,6 +785,7 @@ Every request/response is camelCase and Project-scoped where applicable.
 | `database_archive_design` | same | `DatabaseDesignMutationResult` |
 | `database_save_layout` | `SaveDatabaseLayoutRequest { project_id, source_id, snapshot_id, design_revision_id, layout, expected_layout_fingerprint }` | `DatabaseLayout` |
 | `database_build_context_pack` | `BuildDatabaseContextPackRequest { project_id, source_id, focus, budget }` | `DatabaseContextPack` |
+| `database_publish_canvas_state` | `PublishDatabaseCanvasStateRequest { project_id, context }` | `DatabaseCanvasStateReceipt { fingerprint, captured_at }` |
 | `database_implement_design` | `ImplementDatabaseDesignRequest { project_id, design_id, approved_revision_id, execution_mode }` | `DatabaseImplementationRun` |
 
 Events:
@@ -740,7 +797,7 @@ Events:
 - `database-issues-updated`: `{ projectId, sourceId, openCountsBySeverity }`
 - `database-implementation-progress`: `{ projectId, runId, targetRevisionId, phase, completed, total, message }`
 
-Events are emitted only to windows authorized for the Project, following `FileWatchService` subscription scoping. Incremental events carry IDs and bounded deltas, not a whole 400-table graph.
+Events are emitted only to windows authorized for the Project, following `FileWatchService` subscription scoping. Incremental events carry IDs and bounded deltas, not a whole 400-table graph. WP4 owns and registers `database_publish_canvas_state` and its bounded backend session cache; WP3 calls it after debounced semantic selection/viewport changes. The state is ephemeral, Project/window/session scoped, and never authoritative graph persistence.
 
 ## 9. Agent capabilities and execution modes
 
@@ -755,6 +812,8 @@ Add `Database` to existing `CapabilityDomain`. Entries are appended to `orchestr
 | `database.get_issues` | sourceId, filters | Low | false | NotApplicable |
 | `database.get_usage` | sourceId, objectId, limit | Low | false | NotApplicable |
 | `database.get_context_pack` | sourceId, focus, budget | Low | false | NotApplicable |
+| `database.get_canvas_state` | none; uses bound project/session | Low | false | NotApplicable |
+| `database.get_selection` | none; returns semantic selection from bound canvas state | Low | false | NotApplicable |
 | `database.create_draft` | sourceId, base, name | Medium | true | Paired |
 | `database.add_table` | designId, token, typed table | Medium | true | Paired |
 | `database.rename_table` | designId, token, tableId, name | Medium | true | Paired |
@@ -768,9 +827,55 @@ Add `Database` to existing `CapabilityDomain`. Entries are appended to `orchestr
 | `database.reject_design` | designId, token, reason | Medium | true | None |
 | `database.archive_design` | designId, token | Medium | true | Paired |
 | `database.implement_design` | designId, approvedRevisionId | High | true | ViaGit |
-| `database.introspect` | sourceId, profileId, explicitUserConsent | Medium | true | NotApplicable |
+| `database.introspect_sqlite_file` | sourceId, projectRelativePath, explicitUserConsent | Medium | true | NotApplicable |
 
-`mutates=true` includes app-state design writes, even when repository files are untouched. `database.introspect` is mutating because it persists an Observed snapshot.
+`mutates=true` includes app-state design writes, even when repository files are untouched. SQLite file introspection is mutating because it persists an Observed snapshot.
+
+### 9.0 Deliberately not registered in V1
+
+This table reconciles every additional mission/audit-suggested capability id. These IDs are absent from `all_descriptors`; equivalent behavior, where noted, uses the authoritative V1 id rather than duplicate aliases.
+
+| Suggested id not registered | Reason / V1 path |
+| --- | --- |
+| `database.inspect_project` | Discovery is explicit through `database.list_sources` plus the Tauri discovery command; no duplicate agent scan trigger. |
+| `database.get_table` | Alias omitted; `database.get_object` returns typed table detail. |
+| `database.search` | Deferred to avoid an unbounded query surface; V1 context packs and schema paging provide bounded access. |
+| `database.get_relationships` | Alias omitted; relationships are typed edges in `database.get_schema`/`database.get_object`. |
+| `database.get_provenance` | Alias omitted; provenance is included in object detail/context packs. |
+| `database.get_active_design` | Alias omitted; V1 uses design list/get commands and `database.create_draft`. |
+| `database.get_design_revision` | Alias omitted; V1 design retrieval is command-backed and context-pack accessible. |
+| `database.create_design` | V1 `database.create_draft` creates the design and first immutable revision atomically. |
+| `database.compare_designs` | Alias omitted; `database.compare` accepts typed Declared/Proposed/design refs. |
+| `database.remove_table` | Alias omitted; authoritative id is `database.drop_table`. |
+| `database.modify_column` | Alias omitted; authoritative id is `database.alter_column`. |
+| `database.remove_column` | Alias omitted; authoritative id is `database.drop_column`. |
+| `database.remove_relationship` | Deferred operation breadth; V1 relationship removal may be represented only by a complete approved native plan, not an exposed draft capability. |
+| `database.add_constraint` | V1 exposes typed PK/FK via table/column/relationship operations; general constraint mutation is deferred. |
+| `database.add_enum` | Deferred operation breadth; enum objects remain readable/diffable. |
+| `database.validate_design` | Deterministic validation runs automatically after each design mutation and before approval; no duplicate manual capability. |
+| `database.analyze_design` | Tier 2: non-deterministic analysis is outside V1. |
+| `database.get_impact` | Tier 2: full impact/read-write analysis is outside reduced usage scope. |
+| `database.compare_target_to_repository` | Alias omitted; implementation pipeline performs this mandatory comparison internally. |
+| `database.compare_target_to_database` | Tier 2: depends on deferred network Observed support. |
+| `database.create_implementation_plan` | Internal mandatory pipeline stage, not a separately invocable capability. |
+| `database_test_connection` | Tier 2 and command absent: no credential store or network driver. |
+| `database_introspect` | Tier 2 network command absent; only `database.introspect_sqlite_file` is registered. |
+
+### 9.1 Authorized implementation command boundary and independent validation
+
+Discovery and extraction never execute repository code. Only `database.implement_design`, in `IMPLEMENT_DESIGN`, after policy authorization of the exact approved revision and native change plan, may execute commands. Execution occurs through `RepositoryService` inside the agent's leased worktree, with canonical Project-relative paths, a scrubbed environment, no shell interpolation, no lifecycle hooks, no arbitrary package scripts, and an argv allow-list.
+
+The V1 argv allow-list is exhaustive:
+
+1. For a repository whose detected package manager is npm: `npm exec -- prisma validate --schema <project-relative-schema>` and `npm exec -- prisma migrate diff --from-schema-datamodel <current-schema> --to-schema-datamodel <target-schema> --script`.
+2. pnpm equivalents: `pnpm exec prisma validate --schema ...` and `pnpm exec prisma migrate diff ... --script`.
+3. Yarn equivalents: `yarn prisma validate --schema ...` and `yarn prisma migrate diff ... --script`.
+4. Bun equivalents: `bunx prisma validate --schema ...` and `bunx prisma migrate diff ... --script`.
+5. Raw SQL generation executes no repository command; it writes the authorized migration file directly.
+
+No `migrate dev`, `migrate deploy`, `db push`, arbitrary `run`, test script, generated client, or database connection command is allowed. The package-manager executable and local Prisma package must already be present in the repository lock/install state; the pipeline does not download packages.
+
+Zero delta is necessary but not self-certifying. Prisma success additionally requires the Prisma CLI `validate` command above, a generated migration whose SQL passes a parser-independent statement-boundary/destructive-operation classifier, and a canonical assertion that every target namespace/object/edge fingerprint is represented after static re-extraction. Raw SQL success requires the independent SQL classifier plus the same target fingerprint assertion. Adapter `validate`, native validation, independent classification/assertion, and re-extracted semantic zero delta must all pass; otherwise the run fails and leaves reviewable worktree changes without claiming success.
 
 ```rust
 pub enum DatabaseExecutionMode { DesignOnly, ImplementDesign }
@@ -780,7 +885,7 @@ Enforcement occurs in `OrchestrationKernel::execute_capability` before approval 
 
 - `DESIGN_ONLY` allows read capabilities and proposed-design mutations only. It rejects `database.implement_design` and any filesystem/Git/repository mutation with `DATABASE_EXECUTION_MODE_DENIED`.
 - `IMPLEMENT_DESIGN` requires `approved_revision_id`, verifies that it equals `DatabaseDesign.approved_revision_id`, freezes it as the target in the audit record, then allows `database.implement_design` through normal risk approval.
-- The pipeline generates adapter-native repository changes, never generic SQL when a native declared adapter owns the source; re-extracts Declared state; computes declared-to-target delta; success requires zero semantic delta. It does not auto-apply changes to a live database.
+- The V1 pipeline generates Prisma-native or raw-SQL repository changes only, follows §9.1, re-extracts Declared state, and computes declared-to-target delta. Success requires every independent validation plus zero semantic delta. It never applies changes to a live database.
 
 ## 10. Canvas awareness
 
@@ -814,7 +919,7 @@ pub struct DatabaseCanvasViewport {
 pub enum DatabaseZoomTier { Overview, Relationships, Keys, Detail }
 ```
 
-IDs are validated against the referenced snapshot/revision. Stale selections are dropped with a warning, not resolved by name.
+IDs are validated against the referenced snapshot/revision. Stale selections are dropped with a warning, not resolved by name. Proposed renames retain their synthetic IDs, so selection, pins, and issue references remain valid across the rename.
 
 ## 11. Bounded context packs
 
@@ -835,9 +940,9 @@ Algorithm:
 
 ## 12. Security boundaries
 
-- Discovery never connects. Only `database_introspect` with `explicit_user_consent=true` may resolve a credential reference.
-- Connection profile metadata is safe display metadata. Secrets live only in OS credential storage and are addressed by opaque `credential_reference`; deletion/update coordinates with that store but never returns the secret.
-- Default introspection is read-only. PostgreSQL uses a read-only transaction/session, MySQL requests read-only transaction/session where supported, SQLite opens read-only URI mode. If enforcement is unavailable, report it and require a separate explicit confirmation. V1 runs no DDL/DML against observed databases.
+- Discovery never connects. Only `database_introspect_sqlite_file` with explicit consent may open a user-selected repository-local SQLite file, using read-only URI mode.
+- V1 has no connection-profile command, credential resolution, credential persistence, network driver, or network introspection path. The credential structs in §4 are future trait contracts only.
+- V1 runs no DDL/DML against observed databases and never opens an Observed SQLite file writable.
 - Paths are Project-scoped and canonicalized through existing filesystem guards. Static extractors do not execute repository code.
 - Apply `orchestration::redaction::redact_json` and `redact_text` before audit persistence, event/error emission, context packing, and logs. Environment values and URLs are fingerprinted after in-memory parsing and then discarded.
 - Capability policy remains authoritative. Database Studio must not bypass `policy.rs`, audit recording, operating mode, or Project scope.
