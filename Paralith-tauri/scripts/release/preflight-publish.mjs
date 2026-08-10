@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url'
 const REQUIRED = [
   'TAURI_SIGNING_PRIVATE_KEY', // secret: updater signing key (mandatory; signatures are not optional)
   'PARALITH_PREVIEW_UPDATE_ENDPOINT', // variable: the manifest URL installed apps poll
-  'PARALITH_UPDATE_PUBLISH_PROVIDER', // variable: github-artifacts (preferred) or a legacy provider
+  'PARALITH_UPDATE_PUBLISH_PROVIDER', // variable: github-artifacts is the only supported provider
 ]
 
 /** Return the names of required keys that are absent/blank in `env`. */
@@ -21,7 +21,9 @@ export function missingPublishKeys(env) {
   const missing = REQUIRED.filter((key) => !env[key] || String(env[key]).trim() === '')
   const provider = String(env.PARALITH_UPDATE_PUBLISH_PROVIDER || '').trim()
   if (provider === 'github-artifacts') {
-    for (const key of ['PARALITH_UPDATES_REPOSITORY', 'PARALITH_PREVIEW_BRIDGE_ENDPOINT', 'FIREBASE_PROJECT_ID', 'FIREBASE_HOSTING_SITE', 'GITHUB_REPOSITORY', 'PARALITH_INTERNAL_BUILD_NUMBER']) {
+    // GitHub is the only publication substrate: the public artifact repository holds the immutable
+    // payloads and the manifest, so a repository plus one write credential is the whole contract.
+    for (const key of ['PARALITH_UPDATES_REPOSITORY', 'GITHUB_REPOSITORY']) {
       if (!env[key] || String(env[key]).trim() === '') missing.push(key)
     }
     if (
@@ -29,20 +31,6 @@ export function missingPublishKeys(env) {
       && !String(env.PARALITH_UPDATES_DEPLOY_KEY || '').trim()
     ) {
       missing.push('PARALITH_UPDATES_TOKEN or PARALITH_UPDATES_DEPLOY_KEY')
-    }
-    const hasWif = Boolean(String(env.GCP_WORKLOAD_IDENTITY_PROVIDER || '').trim() && String(env.GCP_SERVICE_ACCOUNT || '').trim())
-    const hasServiceAccount = Boolean(String(env.FIREBASE_SERVICE_ACCOUNT_JSON || '').trim())
-    if (!hasWif && !hasServiceAccount) {
-      missing.push('GCP_WORKLOAD_IDENTITY_PROVIDER + GCP_SERVICE_ACCOUNT or FIREBASE_SERVICE_ACCOUNT_JSON')
-    }
-  } else if (provider === 'firebase-hosting') {
-    for (const key of ['FIREBASE_PROJECT_ID', 'FIREBASE_HOSTING_SITE', 'GITHUB_REPOSITORY', 'PARALITH_INTERNAL_BUILD_NUMBER']) {
-      if (!env[key] || String(env[key]).trim() === '') missing.push(key)
-    }
-    const hasWif = Boolean(String(env.GCP_WORKLOAD_IDENTITY_PROVIDER || '').trim() && String(env.GCP_SERVICE_ACCOUNT || '').trim())
-    const hasServiceAccount = Boolean(String(env.FIREBASE_SERVICE_ACCOUNT_JSON || '').trim())
-    if (!hasWif && !hasServiceAccount) {
-      missing.push('GCP_WORKLOAD_IDENTITY_PROVIDER + GCP_SERVICE_ACCOUNT or FIREBASE_SERVICE_ACCOUNT_JSON')
     }
   } else if (!env.PARALITH_UPDATE_PUBLISH_TARGET || !String(env.PARALITH_UPDATE_PUBLISH_TARGET).trim()) {
     missing.push('PARALITH_UPDATE_PUBLISH_TARGET')
@@ -83,14 +71,6 @@ export function invalidPublishConfiguration(env, metadata) {
       if (new URL(env.PARALITH_UPDATE_ARTIFACT_BASE_URL).protocol !== 'https:') invalid.push('PARALITH_UPDATE_ARTIFACT_BASE_URL')
     } catch {
       invalid.push('PARALITH_UPDATE_ARTIFACT_BASE_URL')
-    }
-  }
-  if (String(env.PARALITH_UPDATE_PUBLISH_PROVIDER || '').trim() === 'github-artifacts') {
-    try {
-      const bridge = new URL(env.PARALITH_PREVIEW_BRIDGE_ENDPOINT)
-      if (bridge.protocol !== 'https:' || bridge.pathname !== '/preview/latest.json') invalid.push('PARALITH_PREVIEW_BRIDGE_ENDPOINT')
-    } catch {
-      invalid.push('PARALITH_PREVIEW_BRIDGE_ENDPOINT')
     }
   }
   if (!metadata || !String(metadata.version || '').trim()) invalid.push('release/version.json.version')

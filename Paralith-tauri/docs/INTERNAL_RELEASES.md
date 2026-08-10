@@ -132,3 +132,46 @@ and users may already have downloaded the new installer. Stop new publication, p
 artifacts and logs, fix forward with a higher reviewed version, and use the recovery installer only
 for an explicitly diagnosed device. Database backup, post-update health, and restore behavior are in
 [UPDATE_RECOVERY.md](UPDATE_RECOVERY.md).
+
+## Emergency procedures
+
+### A release failed before publication
+
+Nothing reached users: the workflow activates `channels/stable/latest.json` last, so a failure in
+validation, build, signing, asset upload, or pre-activation verification leaves the previous Stable
+manifest serving. Do not re-run the workflow against a mutated tag. Read the failed step, land the
+fix on `main` through the normal path, cut a new `stable-vX.Y.Z`, and dispatch again. The workflow
+reuses an existing private source release only when its checksums match the rebuilt artifacts
+exactly, so a partially completed run cannot silently blend into the next one.
+
+### A bad release is already published
+
+Fix forward. Publish a strictly higher version through the ordinary path.
+
+Never re-upload different bytes under an already-published version. Installed clients cache the
+manifest version they last saw and Tauri refuses same-or-lower versions, so a silent asset swap does
+not reach the users who already updated, does not reach users who already downloaded the installer,
+and permanently destroys the guarantee that a version string identifies one exact signed payload.
+Checksums recorded in workflow evidence would no longer match the published assets, making later
+incident analysis unreliable. If the release is actively harmful, stop further publication, keep the
+artifacts and logs for analysis, and direct explicitly diagnosed devices to
+`PARALITH_PREVIOUS_INSTALLER_URL` while the forward fix is prepared.
+
+### The updater signing key is compromised or lost
+
+Both cases are severe and neither is recoverable from inside the application.
+
+*Compromised* — an attacker holding the private key can sign a payload that every installed client
+accepts. Immediately revoke the `stable-release` environment secrets, disable the release workflow,
+and audit the public artifact repository for assets or manifest revisions the team did not publish.
+Recovery requires generating a new key pair, committing the new `release/updater.stable.pubkey`, and
+shipping a rebuilt installer through a **manually distributed** package: clients trust the key
+compiled into them, so the replacement key cannot be delivered by the updater it is replacing.
+
+*Lost* — installed clients keep trusting the old public key and will reject everything signed with
+any new key. There is no in-application remedy; every existing installation must be reinstalled
+manually from a new signed package. This is why the private key and its password belong on protected
+offline storage with an independent backup, and why the backup is verified before it is needed.
+
+Rotating the key is a full reinstall event for the entire Stable cohort. Treat key custody as the
+highest-severity operational risk in this pipeline.
