@@ -1,0 +1,75 @@
+{
+  "stamp": "2026-08-10T19:01:54.215Z",
+  "gateScore": 0,
+  "checkScore": 1,
+  "total": 14,
+  "gates": [
+    {
+      "id": "GATE 1",
+      "title": "Architecture + domain contracts",
+      "verdict": "PENDING",
+      "sha": "-"
+    },
+    {
+      "id": "GATE 2",
+      "title": "Persistence + discovery + adapters",
+      "verdict": "PENDING",
+      "sha": "-"
+    },
+    {
+      "id": "GATE 3",
+      "title": "Design graph / revisions / concurrency",
+      "verdict": "PENDING",
+      "sha": "-"
+    },
+    {
+      "id": "GATE 4",
+      "title": "Database Studio UI/UX",
+      "verdict": "PENDING",
+      "sha": "-"
+    },
+    {
+      "id": "GATE 5",
+      "title": "Agent protocol + canvas awareness",
+      "verdict": "PENDING",
+      "sha": "-"
+    },
+    {
+      "id": "GATE 6",
+      "title": "Approved design implementation pipeline",
+      "verdict": "PENDING",
+      "sha": "-"
+    },
+    {
+      "id": "GATE 7",
+      "title": "Security + credential handling",
+      "verdict": "PENDING",
+      "sha": "-"
+    },
+    {
+      "id": "GATE 8",
+      "title": "Performance + large schemas",
+      "verdict": "PENDING",
+      "sha": "-"
+    },
+    {
+      "id": "GATE 9",
+      "title": "Tests / regressions",
+      "verdict": "PENDING",
+      "sha": "-"
+    },
+    {
+      "id": "GATE 10",
+      "title": "Final integrated application",
+      "verdict": "PENDING",
+      "sha": "-"
+    }
+  ],
+  "results": [
+    {
+      "id": "B14",
+      "ok": true,
+      "detail": "no disabled tests introduced"
+    }
+  ]
+}
