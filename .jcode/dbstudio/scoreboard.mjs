@@ -97,15 +97,45 @@ function workingTreeDiff() {
   }
 }
 
+// A line that disables or skips a test. Deliberately strict: the fix for a B14 failure is to stop
+// disabling the test, never to soften this pattern.
+const DISABLED_TEST_PATTERN = /#\[ignore\]|\b(it|test|describe)\.skip\b|\bxit\(|\bxdescribe\(|--no-verify/;
+
+// Only files that can actually contain a test are scanned. The mission's own harness and prose
+// legitimately mention the forbidden tokens (this very file does), and scanning them produced a
+// false positive that would have trained the swarm to ignore a red check.
+function isScannableSource(path) {
+  if (!path) return false;
+  if (path.startsWith(".jcode/")) return false;
+  return /\.(rs|ts|tsx|js|jsx|mjs|cjs)$/.test(path) && !/\.md$/.test(path);
+}
+
+// Walk a unified diff and yield added lines together with the file they belong to, so the scan can
+// be scoped per-file instead of over flat text.
+function addedLinesByFile(diff) {
+  const out = [];
+  let current = null;
+  for (const line of diff.split(/\r?\n/)) {
+    const header = line.match(/^\+\+\+ b\/(.+)$/);
+    if (header) {
+      current = header[1] === "dev/null" ? null : header[1];
+      continue;
+    }
+    if (line.startsWith("--- ") || line.startsWith("diff --git ")) continue;
+    if (line.startsWith("+") && current) out.push({ file: current, text: line.slice(1) });
+  }
+  return out;
+}
+
 function checkNoDisabledTests() {
-  const diff = gitDiffAgainstBase() + workingTreeDiff();
-  const added = diff.split(/\r?\n/).filter((l) => l.startsWith("+") && !l.startsWith("+++"));
-  const offenders = added.filter((l) =>
-    /#\[ignore\]|\b(it|test|describe)\.skip\b|\bxit\(|\bxdescribe\(|--no-verify/.test(l),
-  );
+  const added = [...addedLinesByFile(gitDiffAgainstBase()), ...addedLinesByFile(workingTreeDiff())];
+  const scanned = added.filter((l) => isScannableSource(l.file));
+  const offenders = scanned.filter((l) => DISABLED_TEST_PATTERN.test(l.text));
   return {
     ok: offenders.length === 0,
-    detail: offenders.length ? `disabled tests added: ${offenders.slice(0, 3).join(" | ").slice(0, 300)}` : "no disabled tests introduced",
+    detail: offenders.length
+      ? `disabled tests added: ${offenders.slice(0, 3).map((o) => `${o.file}: ${o.text.trim()}`).join(" | ").slice(0, 300)}`
+      : `no disabled tests introduced (${scanned.length} added source lines scanned)`,
   };
 }
 

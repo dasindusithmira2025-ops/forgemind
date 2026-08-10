@@ -1,7 +1,7 @@
 # Database Studio mission scoreboard
 
-Generated: 2026-08-10T19:01:54.215Z
-Command: `node .jcode/dbstudio/scoreboard.mjs --fast`
+Generated: 2026-08-10T19:16:14.534Z
+Command: `node .jcode/dbstudio/scoreboard.mjs`
 
 ## Score: gates 0/10 · checks 1/14 (13 skipped this run)
 
@@ -39,4 +39,4 @@ Mission is DONE only at gates 10/10 and checks 14/14, followed by a launched dev
 | B11 | pipeline: approved target -> native change -> re-extract -> zero delta | SKIPPED | not run this iteration |
 | B12 | security: no credentials persisted, no auto-connect | SKIPPED | not run this iteration |
 | B13 | performance: large schema (400 tables) bounded render + off-path layout | SKIPPED | not run this iteration |
-| B14 | no tests disabled / no assertions deleted in mission diff | PASS | no disabled tests introduced |
+| B14 | no tests disabled / no assertions deleted in mission diff | PASS | no disabled tests introduced (32 added source lines scanned) |

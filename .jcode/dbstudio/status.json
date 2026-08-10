@@ -1,5 +1,5 @@
 {
-  "stamp": "2026-08-10T19:01:54.215Z",
+  "stamp": "2026-08-10T19:16:14.534Z",
   "gateScore": 0,
   "checkScore": 1,
   "total": 14,
@@ -69,7 +69,7 @@
     {
       "id": "B14",
       "ok": true,
-      "detail": "no disabled tests introduced"
+      "detail": "no disabled tests introduced (32 added source lines scanned)"
     }
   ]
 }
