@@ -427,6 +427,101 @@ pub struct RepositoryDiff {
     pub binary: bool,
 }
 
+/// A single commit as it appears in a history listing. Every field is read directly from
+/// `git log`'s machine format — nothing here is inferred, and an absent value stays absent rather
+/// than being filled with a plausible default.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryCommitSummary {
+    pub sha: String,
+    pub parents: Vec<String>,
+    pub author_name: String,
+    pub author_email: String,
+    pub authored_at: String,
+    pub committer_name: String,
+    pub committer_email: String,
+    pub committed_at: String,
+    pub subject: String,
+    /// Decorations (`refs/heads/...`, tags, HEAD) exactly as Git reports them for this commit.
+    pub refs: Vec<String>,
+    /// Raw `%G?` signature status: G, B, U, X, Y, R, E or N (none). Never normalized to "valid".
+    pub signature: String,
+}
+
+impl RepositoryCommitSummary {
+    pub fn is_merge(&self) -> bool {
+        self.parents.len() > 1
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryHistoryRequest {
+    pub project_id: String,
+    pub repository_path: Option<String>,
+    pub worktree_path: Option<String>,
+    /// Starting revision. Defaults to HEAD.
+    pub revision: Option<String>,
+    /// Restrict history to one repository-relative path (file history).
+    pub path: Option<String>,
+    /// `--author` substring filter.
+    pub author: Option<String>,
+    /// `--grep` message filter.
+    pub search: Option<String>,
+    pub skip: Option<usize>,
+    pub limit: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryHistoryPage {
+    pub commits: Vec<RepositoryCommitSummary>,
+    pub skip: usize,
+    /// True when Git returned more commits than the page limit, so the caller can page again.
+    pub has_more: bool,
+    /// The resolved SHA the listing started from, so the UI never mislabels a moving ref.
+    pub revision: String,
+    pub path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryCommitFile {
+    pub path: String,
+    /// Present only for renames and copies.
+    pub previous_path: Option<String>,
+    /// Raw Git status letter (A, M, D, R, C, T, U).
+    pub status: String,
+    /// `None` for binary files, where Git reports `-` rather than a line count.
+    pub additions: Option<u64>,
+    pub deletions: Option<u64>,
+    pub binary: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryCommitDetail {
+    pub commit: RepositoryCommitSummary,
+    /// Full message body below the subject line.
+    pub body: String,
+    pub files: Vec<RepositoryCommitFile>,
+    pub additions: u64,
+    pub deletions: u64,
+    /// True when the file list was capped, so the UI shows a bound instead of a wrong total.
+    pub files_truncated: bool,
+    /// Merge commits are diffed against their first parent; the flag lets the UI say so.
+    pub merge: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryCommitDetailRequest {
+    pub project_id: String,
+    pub repository_path: Option<String>,
+    pub worktree_path: Option<String>,
+    pub revision: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RepositoryWorktreeLease {

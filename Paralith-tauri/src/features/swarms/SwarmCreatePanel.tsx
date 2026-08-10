@@ -20,6 +20,8 @@ type Step = 'team' | 'mission' | 'review'
 interface RosterAgent { id: string; role: SwarmRole; runtime: Exclude<SwarmRuntimeKind, 'auto'>; modelConfig: SwarmMemberModelConfig }
 
 const ROLES: SwarmRole[] = ['coordinator', 'scout', 'builder', 'debugger', 'reviewer', 'integrator']
+/** Mirrors `model_registry::PLACEHOLDER_MODEL_ID`: a member with no real selection yet. */
+const UNCONFIGURED_MODEL_ID = 'unconfigured'
 const RESPONSIBILITY: Record<SwarmRole, string> = {
   coordinator: 'Plans the mission, delegates runnable work, and maintains shared context.',
   scout: 'Inspects the repository and submits read-only architecture findings.',
@@ -70,6 +72,26 @@ export function SwarmCreatePanel({ projectId, onCreated, onCancel }: {
   // Selecting the initial backend default exactly once is intentional.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [presetId, presets])
+
+  // Built-in presets store no per-member model (an `auto` allocation has no provider yet), so the
+  // roster is seeded with a placeholder. Resolve those to a real registered model as soon as the
+  // registry arrives: the review step must show the model that will actually run, not
+  // "Model not configured".
+  useEffect(() => {
+    if (models.length === 0) return
+    setRoster((current) => {
+      if (!current.some((agent) => agent.modelConfig.modelId === UNCONFIGURED_MODEL_ID)) return current
+      let changed = false
+      const next = current.map((agent) => {
+        if (agent.modelConfig.modelId !== UNCONFIGURED_MODEL_ID) return agent
+        const model = recommendedModel(models.filter((item) => item.providerId === agent.runtime), agent.role)
+        if (!model) return agent
+        changed = true
+        return { ...agent, modelConfig: preserveConfig(agent.modelConfig, model) }
+      })
+      return changed ? next : current
+    })
+  }, [models])
 
   const roles = useMemo(() => rosterToRoles(roster), [roster])
   const roleCounts = useMemo(() => ROLES.map((role) => ({ role, count: roster.filter((agent) => agent.role === role).length })).filter((item) => item.count > 0), [roster])
@@ -353,7 +375,7 @@ function rosterToRoles(roster: RosterAgent[]): SwarmRoleConfig[] {
 function configFromModel(model: SwarmModelCapability): SwarmMemberModelConfig { return { providerId: model.providerId, providerDisplayName: model.providerDisplayName, modelId: model.modelId, modelDisplayName: model.displayName, reasoningEffort: (model.supportedReasoningEfforts.includes('high') ? 'high' : model.supportedReasoningEfforts[0] ?? 'medium') as SwarmMemberModelConfig['reasoningEffort'], executionMode: 'autonomous', contextStrategy: 'balanced', permissionMode: 'ask', providerOptions: {}, configVersion: 1, lastValidationStatus: model.available ? 'valid' : 'provider_unavailable' } }
 function preserveConfig(previous: SwarmMemberModelConfig, model: SwarmModelCapability): SwarmMemberModelConfig { const next = configFromModel(model); return { ...next, reasoningEffort: model.supportedReasoningEfforts.includes(previous.reasoningEffort) ? previous.reasoningEffort : next.reasoningEffort, executionMode: model.supportedExecutionModes.includes(previous.executionMode) ? previous.executionMode : next.executionMode, contextStrategy: previous.contextStrategy, permissionMode: previous.permissionMode, fallback: previous.fallback, providerOptions: previous.providerOptions } }
 function recommendedModel(models: SwarmModelCapability[], role: SwarmRole): SwarmModelCapability | undefined { const recommended = models.find((model) => model.available && model.recommendedRoles.includes(role)); return recommended ?? models.find((model) => model.available) ?? models[0] }
-function unconfiguredModel(providerId: Exclude<SwarmRuntimeKind, 'auto'>): SwarmMemberModelConfig { return { providerId, providerDisplayName: providerId === 'claude' ? 'Claude' : 'Codex', modelId: 'unconfigured', modelDisplayName: 'Model not configured', reasoningEffort: 'medium', executionMode: 'autonomous', contextStrategy: 'balanced', permissionMode: 'ask', providerOptions: {}, configVersion: 1, lastValidationStatus: 'unvalidated' } }
+function unconfiguredModel(providerId: Exclude<SwarmRuntimeKind, 'auto'>): SwarmMemberModelConfig { return { providerId, providerDisplayName: providerId === 'claude' ? 'Claude' : 'Codex', modelId: UNCONFIGURED_MODEL_ID, modelDisplayName: 'Model not configured', reasoningEffort: 'medium', executionMode: 'autonomous', contextStrategy: 'balanced', permissionMode: 'ask', providerOptions: {}, configVersion: 1, lastValidationStatus: 'unvalidated' } }
 
 function displayName(agent: RosterAgent, roster: RosterAgent[]): string {
   const sameRole = roster.filter((item) => item.role === agent.role)

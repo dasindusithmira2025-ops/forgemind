@@ -24,6 +24,18 @@ const MAX_PATCH_BYTES: usize = 512_000;
 const MAX_COMMIT_MESSAGE_BYTES: usize = 32_000;
 const DEFAULT_TIMEOUT_SECONDS: u64 = 120;
 const MAX_TIMEOUT_SECONDS: u64 = 900;
+const DEFAULT_HISTORY_PAGE: usize = 50;
+const MAX_HISTORY_PAGE: usize = 200;
+const MAX_HISTORY_SKIP: usize = 100_000;
+const MAX_HISTORY_FILTER_CHARS: usize = 200;
+const MAX_COMMIT_FILES: usize = 1_000;
+
+/// One `git log` record per line, NUL-separated fields. Every field is single-line by
+/// construction (Git forbids newlines in ident fields, and `%s`/`%D` are single-line), so a
+/// newline is a safe record terminator and NUL is a safe field separator — commit messages
+/// cannot contain NUL.
+const HISTORY_FORMAT: &str =
+    "%H%x00%P%x00%an%x00%ae%x00%aI%x00%cn%x00%ce%x00%cI%x00%G?%x00%D%x00%s";
 
 #[derive(Clone)]
 pub struct RepositoryService {
@@ -205,6 +217,191 @@ impl RepositoryService {
             offset,
             truncated: output_truncated || end < total_bytes,
             binary: output.windows(17).any(|window| window == b"Binary files "),
+        })
+    }
+
+    /// One page of commit history for a revision, optionally narrowed to a single file. Paging is
+    /// done with `--skip`/`--max-count` so the walk stays bounded regardless of repository size;
+    /// one extra row is requested purely to learn whether a further page exists.
+    pub fn history(&self, request: &RepositoryHistoryRequest) -> AppResult<RepositoryHistoryPage> {
+        let project = self.database.get_project(&request.project_id)?;
+        let repository =
+            self.validate_repository_path(&project, request.repository_path.as_deref())?;
+        let worktree = self.validate_worktree_path(
+            &request.project_id,
+            &repository,
+            request.worktree_path.as_deref(),
+        )?;
+
+        let path = request
+            .path
+            .as_deref()
+            .map(validate_relative_path)
+            .transpose()?;
+        let skip = request.skip.unwrap_or(0).min(MAX_HISTORY_SKIP);
+        let limit = request
+            .limit
+            .unwrap_or(DEFAULT_HISTORY_PAGE)
+            .clamp(1, MAX_HISTORY_PAGE);
+        let author = validate_history_filter(request.author.as_deref(), "author")?;
+        let search = validate_history_filter(request.search.as_deref(), "search")?;
+
+        let requested = request.revision.as_deref().unwrap_or("HEAD");
+        let resolved = match self.resolve_revision(&worktree, requested) {
+            Ok(value) => value,
+            // A repository on an unborn branch has no HEAD. That is an empty history, not a
+            // failure — only an explicitly requested revision is allowed to error.
+            Err(error) if request.revision.is_none() => {
+                if error.code == "git_command_failed" {
+                    return Ok(RepositoryHistoryPage {
+                        commits: Vec::new(),
+                        skip: 0,
+                        has_more: false,
+                        revision: String::new(),
+                        path,
+                    });
+                }
+                return Err(error);
+            }
+            Err(error) => return Err(error),
+        };
+
+        let mut args: Vec<String> = vec![
+            "--literal-pathspecs".into(),
+            "log".into(),
+            "--no-color".into(),
+            format!("--format={HISTORY_FORMAT}"),
+            format!("--skip={skip}"),
+            format!("--max-count={}", limit.saturating_add(1)),
+        ];
+        // `--fixed-strings` keeps a user-supplied filter a literal substring match: a pasted
+        // message fragment can never become an expensive or surprising regular expression.
+        if author.is_some() || search.is_some() {
+            args.push("--fixed-strings".into());
+        }
+        if let Some(author) = author.as_deref() {
+            args.push(format!("--author={author}"));
+        }
+        if let Some(search) = search.as_deref() {
+            args.push(format!("--grep={search}"));
+        }
+        // Renames only need following when the walk is already narrowed to one file.
+        if path.is_some() {
+            args.push("--follow".into());
+        }
+        args.push(resolved.clone());
+        if let Some(path) = path.as_deref() {
+            args.push("--".into());
+            args.push(path.to_owned());
+        }
+
+        let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+        let output = self.git_bytes(&worktree, &refs, None, None)?;
+        let mut commits = parse_commit_log(&output);
+        let has_more = commits.len() > limit;
+        commits.truncate(limit);
+        Ok(RepositoryHistoryPage {
+            commits,
+            skip,
+            has_more,
+            revision: resolved,
+            path,
+        })
+    }
+
+    /// Everything the Commit Inspector shows for one commit: identity, full message body, and the
+    /// changed-file list with per-file line counts. Merge commits are diffed against their first
+    /// parent and flagged as such, so the file list is never silently empty.
+    pub fn commit_detail(
+        &self,
+        request: &RepositoryCommitDetailRequest,
+    ) -> AppResult<RepositoryCommitDetail> {
+        let project = self.database.get_project(&request.project_id)?;
+        let repository =
+            self.validate_repository_path(&project, request.repository_path.as_deref())?;
+        let worktree = self.validate_worktree_path(
+            &request.project_id,
+            &repository,
+            request.worktree_path.as_deref(),
+        )?;
+        let resolved = self.resolve_revision(&worktree, &request.revision)?;
+
+        let header = self.git_bytes(
+            &worktree,
+            &[
+                "log",
+                "--no-color",
+                &format!("--format={HISTORY_FORMAT}"),
+                "--max-count=1",
+                &resolved,
+            ],
+            None,
+            None,
+        )?;
+        let commit = parse_commit_log(&header)
+            .into_iter()
+            .next()
+            .ok_or_else(|| {
+                AppError::new(
+                    "git_commit_not_found",
+                    "The requested commit could not be read.",
+                    true,
+                )
+                .entity(resolved.clone())
+                .layer("repository")
+            })?;
+        let body = self
+            .git_text(
+                &worktree,
+                &[
+                    "log",
+                    "--no-color",
+                    "--format=%b",
+                    "--max-count=1",
+                    &resolved,
+                ],
+                None,
+                None,
+            )?
+            .trim_end()
+            .to_owned();
+
+        let merge = commit.is_merge();
+        let mut base: Vec<&str> = vec![
+            "--literal-pathspecs",
+            "show",
+            "--no-color",
+            "--no-ext-diff",
+            "--format=",
+        ];
+        if merge {
+            base.push("-m");
+            base.push("--first-parent");
+        }
+
+        let mut numstat = base.clone();
+        numstat.extend_from_slice(&["--numstat", "-z", &resolved]);
+        let numstat = self.git_bytes(&worktree, &numstat, None, None)?;
+
+        let mut name_status = base;
+        name_status.extend_from_slice(&["--name-status", "-z", &resolved]);
+        let name_status = self.git_bytes(&worktree, &name_status, None, None)?;
+
+        let mut files =
+            merge_commit_files(parse_numstat_z(&numstat), parse_name_status_z(&name_status));
+        let files_truncated = files.len() > MAX_COMMIT_FILES;
+        files.truncate(MAX_COMMIT_FILES);
+        let additions = files.iter().filter_map(|file| file.additions).sum();
+        let deletions = files.iter().filter_map(|file| file.deletions).sum();
+
+        Ok(RepositoryCommitDetail {
+            commit,
+            body,
+            files,
+            additions,
+            deletions,
+            files_truncated,
+            merge,
         })
     }
 
@@ -2846,6 +3043,156 @@ fn parse_tracking_counts(value: &str) -> (u64, u64) {
     (ahead, behind)
 }
 
+/// Accept a history filter only as a bounded, control-character-free literal. An empty or
+/// whitespace-only value means "no filter" rather than an error.
+fn validate_history_filter(value: Option<&str>, kind: &str) -> AppResult<Option<String>> {
+    let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(None);
+    };
+    if value.chars().count() > MAX_HISTORY_FILTER_CHARS
+        || value.chars().any(|ch| ch.is_control() || ch == '\0')
+    {
+        return Err(invalid(
+            &format!("invalid_history_{kind}"),
+            &format!("The repository history {kind} filter is invalid."),
+        ));
+    }
+    Ok(Some(value.to_owned()))
+}
+
+/// Parse the NUL-separated `HISTORY_FORMAT` records emitted by `git log`. A malformed line is
+/// skipped rather than guessed at, so a partial read can never invent a commit.
+fn parse_commit_log(output: &[u8]) -> Vec<RepositoryCommitSummary> {
+    let mut commits = Vec::new();
+    for line in output.split(|byte| *byte == b'\n') {
+        let fields: Vec<&[u8]> = line.split(|byte| *byte == 0).collect();
+        if fields.len() < 11 {
+            continue;
+        }
+        let sha = String::from_utf8_lossy(fields[0]).trim().to_owned();
+        if sha.is_empty() {
+            continue;
+        }
+        commits.push(RepositoryCommitSummary {
+            sha,
+            parents: String::from_utf8_lossy(fields[1])
+                .split_whitespace()
+                .map(str::to_owned)
+                .collect(),
+            author_name: field_text(fields[2]),
+            author_email: field_text(fields[3]),
+            authored_at: field_text(fields[4]),
+            committer_name: field_text(fields[5]),
+            committer_email: field_text(fields[6]),
+            committed_at: field_text(fields[7]),
+            signature: field_text(fields[8]),
+            refs: String::from_utf8_lossy(fields[9])
+                .split(", ")
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned)
+                .collect(),
+            subject: field_text(fields[10]),
+        });
+    }
+    commits
+}
+
+fn field_text(bytes: &[u8]) -> String {
+    String::from_utf8_lossy(bytes)
+        .trim_end_matches('\r')
+        .to_owned()
+}
+
+/// `git diff --numstat -z` emits `add\tdel\tpath\0`, and for a rename or copy the path field is
+/// empty and the old and new paths follow as two further NUL-terminated tokens. Binary files
+/// report `-` instead of a count, which stays `None` rather than becoming a fabricated zero.
+fn parse_numstat_z(output: &[u8]) -> Vec<RepositoryCommitFile> {
+    let tokens = split_nul(output);
+    let mut files = Vec::new();
+    let mut index = 0;
+    while index < tokens.len() {
+        let mut parts = tokens[index].splitn(3, '\t');
+        let (Some(additions), Some(deletions), Some(rest)) =
+            (parts.next(), parts.next(), parts.next())
+        else {
+            index += 1;
+            continue;
+        };
+        let binary = additions == "-" || deletions == "-";
+        let additions = additions.parse::<u64>().ok();
+        let deletions = deletions.parse::<u64>().ok();
+        let (path, previous_path) = if rest.is_empty() {
+            let Some(previous) = tokens.get(index + 1) else {
+                break;
+            };
+            let Some(current) = tokens.get(index + 2) else {
+                break;
+            };
+            index += 3;
+            (current.clone(), Some(previous.clone()))
+        } else {
+            index += 1;
+            (rest.to_owned(), None)
+        };
+        files.push(RepositoryCommitFile {
+            path,
+            previous_path,
+            status: String::new(),
+            additions,
+            deletions,
+            binary,
+        });
+    }
+    files
+}
+
+/// `git diff --name-status -z` emits a status token followed by one path, or by two paths when
+/// the status is a rename or copy.
+fn parse_name_status_z(output: &[u8]) -> Vec<(String, String)> {
+    let tokens = split_nul(output);
+    let mut entries = Vec::new();
+    let mut index = 0;
+    while index < tokens.len() {
+        let status = tokens[index].clone();
+        index += 1;
+        let renamed = status.starts_with('R') || status.starts_with('C');
+        let consumed = if renamed { 2 } else { 1 };
+        let Some(path) = tokens.get(index + consumed - 1) else {
+            break;
+        };
+        entries.push((status, path.clone()));
+        index += consumed;
+    }
+    entries
+}
+
+/// Join the two `git show` reads by destination path. Statuses are authoritative from
+/// `--name-status`; a file present in only one read keeps whatever that read established.
+fn merge_commit_files(
+    mut files: Vec<RepositoryCommitFile>,
+    statuses: Vec<(String, String)>,
+) -> Vec<RepositoryCommitFile> {
+    let lookup: HashMap<&str, &str> = statuses
+        .iter()
+        .map(|(status, path)| (path.as_str(), status.as_str()))
+        .collect();
+    for file in &mut files {
+        if let Some(status) = lookup.get(file.path.as_str()) {
+            file.status = (*status).to_owned();
+        }
+    }
+    files
+}
+
+fn split_nul(output: &[u8]) -> Vec<String> {
+    output
+        .split(|byte| *byte == 0)
+        .map(|value| String::from_utf8_lossy(value).into_owned())
+        .filter(|value| !value.is_empty())
+        .collect()
+}
+
 fn parse_porcelain_v2(output: &[u8]) -> AppResult<ParsedStatus> {
     let records: Vec<&[u8]> = output
         .split(|byte| *byte == 0)
@@ -3417,6 +3764,87 @@ mod tests {
     }
 
     #[test]
+    fn commit_log_parses_fields_parents_and_refs() {
+        let input = b"abc123\0p1 p2\0Dasindu\0d@example.com\x002026-08-08T00:45:46+05:30\0Committer\0c@example.com\x002026-08-09T10:00:00+05:30\0G\0HEAD -> main, tag: v0.4.7\0release: prepare Stable 0.4.7\n";
+        let commits = parse_commit_log(input);
+        assert_eq!(commits.len(), 1);
+        let commit = &commits[0];
+        assert_eq!(commit.sha, "abc123");
+        assert_eq!(commit.parents, vec!["p1", "p2"]);
+        assert!(commit.is_merge());
+        assert_eq!(commit.author_email, "d@example.com");
+        assert_eq!(commit.committed_at, "2026-08-09T10:00:00+05:30");
+        assert_eq!(commit.signature, "G");
+        assert_eq!(commit.refs, vec!["HEAD -> main", "tag: v0.4.7"]);
+        assert_eq!(commit.subject, "release: prepare Stable 0.4.7");
+    }
+
+    #[test]
+    fn commit_log_skips_malformed_records_without_inventing_commits() {
+        // A truncated record must be dropped, never padded out with defaults.
+        let input = b"abc\0\0only\0three\nabc123\0\0A\0a@b\0t1\0C\0c@b\0t2\0N\0\0subject\n";
+        let commits = parse_commit_log(input);
+        assert_eq!(commits.len(), 1);
+        assert_eq!(commits[0].sha, "abc123");
+        assert!(commits[0].parents.is_empty());
+        assert!(commits[0].refs.is_empty());
+        assert!(!commits[0].is_merge());
+    }
+
+    #[test]
+    fn numstat_z_parses_renames_and_binary_files() {
+        // Verified against real Git output: a rename leaves the path field empty and follows
+        // with the old and new paths as separate NUL-terminated tokens.
+        let input = b"1\t1\t\0old.txt\0new.txt\0-\t-\tlogo.png\x003\t0\tsrc/app.rs\0";
+        let files = parse_numstat_z(input);
+        assert_eq!(files.len(), 3);
+        assert_eq!(files[0].path, "new.txt");
+        assert_eq!(files[0].previous_path.as_deref(), Some("old.txt"));
+        assert_eq!(files[0].additions, Some(1));
+        assert!(!files[0].binary);
+        assert_eq!(files[1].path, "logo.png");
+        assert!(files[1].binary);
+        // A binary file has no line count, so it stays absent instead of becoming zero.
+        assert_eq!(files[1].additions, None);
+        assert_eq!(files[1].deletions, None);
+        assert_eq!(files[2].path, "src/app.rs");
+        assert_eq!(files[2].deletions, Some(0));
+    }
+
+    #[test]
+    fn name_status_z_pairs_renames_and_merges_onto_numstat() {
+        let statuses = parse_name_status_z(b"R080\0old.txt\0new.txt\0M\0src/app.rs\0A\0added.rs\0");
+        assert_eq!(
+            statuses,
+            vec![
+                ("R080".to_owned(), "new.txt".to_owned()),
+                ("M".to_owned(), "src/app.rs".to_owned()),
+                ("A".to_owned(), "added.rs".to_owned()),
+            ]
+        );
+        let merged = merge_commit_files(
+            parse_numstat_z(b"1\t1\t\0old.txt\0new.txt\x004\t2\tsrc/app.rs\0"),
+            statuses,
+        );
+        assert_eq!(merged[0].status, "R080");
+        assert_eq!(merged[0].previous_path.as_deref(), Some("old.txt"));
+        assert_eq!(merged[1].status, "M");
+    }
+
+    #[test]
+    fn history_filters_reject_control_characters_and_overlong_input() {
+        assert!(validate_history_filter(Some("  "), "author")
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            validate_history_filter(Some(" fix: leak "), "search").unwrap(),
+            Some("fix: leak".to_owned())
+        );
+        assert!(validate_history_filter(Some("a\nb"), "search").is_err());
+        assert!(validate_history_filter(Some(&"x".repeat(201)), "author").is_err());
+    }
+
+    #[test]
     fn porcelain_v2_parses_branch_ahead_and_untracked() {
         let input=b"# branch.oid abcdef\0# branch.head feature/test\0# branch.upstream origin/feature/test\0# branch.ab +2 -1\0? new file.txt\0";
         let parsed = parse_porcelain_v2(input).unwrap();
@@ -3496,6 +3924,139 @@ mod tests {
         assert_eq!(error.code, "repository_operation_cancelled");
         fs::remove_dir_all(root).ok();
     }
+    #[test]
+    fn history_and_commit_detail_read_a_real_repository() {
+        let root = repository("history");
+        let git = |args: &[&str]| {
+            let output = background_command("git")
+                .current_dir(&root)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        };
+        fs::write(root.join("second.txt"), "one\ntwo\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "-m", "feat: add second\n\nBody line."]);
+        fs::write(root.join("third.txt"), "x\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "-m", "feat: add third"]);
+
+        let database = Arc::new(DatabaseService::in_memory().unwrap());
+        let inspected = crate::services::ProjectService::inspect(&root.to_string_lossy()).unwrap();
+        let project = database.upsert_project(&inspected).unwrap();
+        let service = RepositoryService::new(database, &root.join("appdata"));
+
+        let page = service
+            .history(&RepositoryHistoryRequest {
+                project_id: project.id.clone(),
+                repository_path: None,
+                worktree_path: None,
+                revision: None,
+                path: None,
+                author: None,
+                search: None,
+                skip: None,
+                limit: Some(2),
+            })
+            .unwrap();
+        assert_eq!(page.commits.len(), 2);
+        assert_eq!(page.commits[0].subject, "feat: add third");
+        // Three commits exist but two were requested, so a further page must be advertised.
+        assert!(page.has_more);
+        assert_eq!(page.revision, page.commits[0].sha);
+
+        // Paging must continue the same walk rather than restarting it.
+        let next = service
+            .history(&RepositoryHistoryRequest {
+                project_id: project.id.clone(),
+                repository_path: None,
+                worktree_path: None,
+                revision: None,
+                path: None,
+                author: None,
+                search: None,
+                skip: Some(2),
+                limit: Some(2),
+            })
+            .unwrap();
+        assert_eq!(next.commits.len(), 1);
+        assert_eq!(next.commits[0].subject, "initial");
+        assert!(!next.has_more);
+
+        // A message filter is a literal substring match, not a regular expression.
+        let filtered = service
+            .history(&RepositoryHistoryRequest {
+                project_id: project.id.clone(),
+                repository_path: None,
+                worktree_path: None,
+                revision: None,
+                path: None,
+                author: None,
+                search: Some("add second".into()),
+                skip: None,
+                limit: None,
+            })
+            .unwrap();
+        assert_eq!(filtered.commits.len(), 1);
+
+        // File history is scoped to the requested path only.
+        let scoped = service
+            .history(&RepositoryHistoryRequest {
+                project_id: project.id.clone(),
+                repository_path: None,
+                worktree_path: None,
+                revision: None,
+                path: Some("second.txt".into()),
+                author: None,
+                search: None,
+                skip: None,
+                limit: None,
+            })
+            .unwrap();
+        assert_eq!(scoped.commits.len(), 1);
+        assert_eq!(scoped.commits[0].subject, "feat: add second");
+
+        let detail = service
+            .commit_detail(&RepositoryCommitDetailRequest {
+                project_id: project.id.clone(),
+                repository_path: None,
+                worktree_path: None,
+                revision: page.commits[1].sha.clone(),
+            })
+            .unwrap();
+        assert_eq!(detail.commit.subject, "feat: add second");
+        assert_eq!(detail.body.trim(), "Body line.");
+        assert_eq!(detail.files.len(), 1);
+        assert_eq!(detail.files[0].path, "second.txt");
+        assert_eq!(detail.files[0].status, "A");
+        assert_eq!(detail.additions, 2);
+        assert_eq!(detail.deletions, 0);
+        assert!(!detail.merge);
+        assert!(!detail.files_truncated);
+
+        // Path traversal must be refused at the service boundary, not by the caller.
+        assert!(service
+            .history(&RepositoryHistoryRequest {
+                project_id: project.id,
+                repository_path: None,
+                worktree_path: None,
+                revision: None,
+                path: Some("../escape.txt".into()),
+                author: None,
+                search: None,
+                skip: None,
+                limit: None,
+            })
+            .is_err());
+
+        fs::remove_dir_all(root).ok();
+    }
+
     #[test]
     fn git_cli_status_and_diff_use_real_repository() {
         let root = repository("status");

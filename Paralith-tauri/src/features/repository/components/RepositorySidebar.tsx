@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import {
-  Bot, CircleDot, FileDiff, GitBranch, GitPullRequest, LayoutDashboard, PanelLeftClose,
+  Bot, CircleDot, FileDiff, GitBranch, GitPullRequest, History, LayoutDashboard, PanelLeftClose,
   PanelLeftOpen, PlayCircle, Plus, Radar, ShieldAlert, Tag,
 } from 'lucide-react'
 import { Button } from '../../../components/ui/Button'
@@ -12,6 +12,7 @@ import { REPOSITORY_SECTIONS, type RepositorySectionId } from '../repositoryType
 const SECTION_ICONS: Record<RepositorySectionId, ReactNode> = {
   overview: <LayoutDashboard size={15} />,
   changes: <FileDiff size={15} />,
+  history: <History size={15} />,
   intelligence: <Radar size={15} />,
   branches: <GitBranch size={15} />,
   'pull-requests': <GitPullRequest size={15} />,

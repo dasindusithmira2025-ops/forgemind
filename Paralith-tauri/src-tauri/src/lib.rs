@@ -563,6 +563,8 @@ pub fn run() {
             commands::inspect_repository,
             commands::list_repository_branches,
             commands::get_repository_diff,
+            commands::get_repository_history,
+            commands::get_repository_commit_detail,
             commands::execute_repository_operation,
             commands::cancel_repository_operation,
             commands::get_repository_operation,
