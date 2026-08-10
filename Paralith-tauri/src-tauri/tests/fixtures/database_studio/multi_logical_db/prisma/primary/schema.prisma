@@ -1,0 +1,4 @@
+generator client { provider = "prisma-client-js" output = "../../generated/primary" }
+datasource primary { provider = "postgresql" url = env("PRIMARY_DATABASE_URL") }
+model Customer { id String @id @default(uuid()) email String @unique invoices Invoice[] }
+model Invoice { id String @id @default(uuid()) customerId String customer Customer @relation(fields: [customerId], references: [id]) totalCents Int }

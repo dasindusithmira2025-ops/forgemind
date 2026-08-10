@@ -1,0 +1,11 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: primary
+      POSTGRES_PASSWORD: example
+  analytics-postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: analytics
+      POSTGRES_PASSWORD: example
