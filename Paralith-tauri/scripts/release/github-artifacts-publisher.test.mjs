@@ -90,22 +90,43 @@ describe('public update repository contract', () => {
     const env = {
       TAURI_SIGNING_PRIVATE_KEY: 'signing-key',
       PARALITH_PREVIEW_UPDATE_ENDPOINT: channelManifestUrl(repository, 'preview'),
-      PARALITH_PREVIEW_BRIDGE_ENDPOINT: 'https://corelith-paralith-updates.web.app/preview/latest.json',
       PARALITH_UPDATE_PUBLISH_PROVIDER: 'github-artifacts',
       PARALITH_UPDATES_REPOSITORY: repository,
       PARALITH_UPDATES_TOKEN: 'fine-grained-token',
-      FIREBASE_PROJECT_ID: 'project',
-      FIREBASE_HOSTING_SITE: 'site',
       GITHUB_REPOSITORY: 'owner/private-source',
-      PARALITH_INTERNAL_BUILD_NUMBER: '1024',
-      GCP_WORKLOAD_IDENTITY_PROVIDER: 'provider',
-      GCP_SERVICE_ACCOUNT: 'account',
     }
     expect(missingPublishKeys(env)).toEqual([])
     expect(invalidPublishConfiguration(env, { version: '0.4.1-1001', schemaVersion: 22 })).toEqual([])
     expect(missingPublishKeys({ ...env, PARALITH_UPDATES_TOKEN: '', PARALITH_UPDATES_DEPLOY_KEY: 'key' })).toEqual([])
     expect(missingPublishKeys({ ...env, PARALITH_UPDATES_TOKEN: '', PARALITH_UPDATES_DEPLOY_KEY: '' }))
       .toContain('PARALITH_UPDATES_TOKEN or PARALITH_UPDATES_DEPLOY_KEY')
+  })
+
+  // GitHub is now the whole publication substrate. The retired Firebase Hosting bridge left its
+  // project/site/credential keys in the preflight contract; requiring them again would block a
+  // correctly configured release on credentials nothing consumes.
+  it('no longer demands retired Firebase Hosting configuration', () => {
+    const env = {
+      TAURI_SIGNING_PRIVATE_KEY: 'signing-key',
+      PARALITH_PREVIEW_UPDATE_ENDPOINT: channelManifestUrl(repository, 'preview'),
+      PARALITH_UPDATE_PUBLISH_PROVIDER: 'github-artifacts',
+      PARALITH_UPDATES_REPOSITORY: repository,
+      PARALITH_UPDATES_TOKEN: 'fine-grained-token',
+      GITHUB_REPOSITORY: 'owner/private-source',
+    }
+    expect(missingPublishKeys(env)).toEqual([])
+    for (const retired of [
+      'FIREBASE_PROJECT_ID',
+      'FIREBASE_HOSTING_SITE',
+      'FIREBASE_SERVICE_ACCOUNT_JSON',
+      'GCP_WORKLOAD_IDENTITY_PROVIDER',
+      'GCP_SERVICE_ACCOUNT',
+      'PARALITH_PREVIEW_BRIDGE_ENDPOINT',
+      'PARALITH_INTERNAL_BUILD_NUMBER',
+    ]) {
+      expect(missingPublishKeys(env).join(' ')).not.toContain(retired)
+      expect(invalidPublishConfiguration(env, { version: '0.4.1', schemaVersion: 22 }).join(' ')).not.toContain(retired)
+    }
   })
 
   it('builds public release and channel URLs without exposing the source repository', () => {

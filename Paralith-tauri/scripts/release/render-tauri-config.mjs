@@ -1,5 +1,6 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import process from 'node:process'
+import { fileURLToPath } from 'node:url'
 
 const [edition = 'stable', mode = 'local'] = process.argv.slice(2)
 if (!['stable', 'preview'].includes(edition)) throw new Error('Edition must be stable or preview')
@@ -40,4 +41,7 @@ const outDir = new URL('.artifacts/config/', root)
 await mkdir(outDir, { recursive: true })
 const out = new URL(`tauri.${edition}.${mode}.json`, outDir)
 await writeFile(out, `${JSON.stringify(base, null, 2)}\n`)
-console.log(out.pathname.replace(/^\/(.:)/, '$1'))
+// The caller passes this straight to `tauri build --config`, so it must be a real filesystem
+// path. `URL.pathname` is percent-encoded and would corrupt any checkout whose path contains a
+// space (or any other reserved character); fileURLToPath decodes and applies platform separators.
+console.log(fileURLToPath(out))

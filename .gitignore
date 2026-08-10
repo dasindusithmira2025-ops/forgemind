@@ -46,6 +46,14 @@ Paralith-tauri/release/private/
 Paralith-tauri/release/local/
 Paralith-tauri/release/test-keys/
 
+# Git worktrees checked out inside the repository. Each holds a full source tree and its own
+# Cargo target directory, so a stray `git add -A` would otherwise stage gigabytes of nested
+# checkouts. `git worktree` tracks these through .git/worktrees, not the index.
+.worktrees/
+
+# Firebase deploy cache for the marketing site (regenerated on every deploy)
+corelith-web/.firebase/
+
 # Local tooling output (not part of the app source)
 graphify-out
 .claude/settings.local.json
