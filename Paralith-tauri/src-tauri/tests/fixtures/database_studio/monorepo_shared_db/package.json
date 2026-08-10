@@ -1,1 +1,11 @@
-{"name":"dbstudio-fixture-monorepo","private":true,"workspaces":["apps/*","packages/*"],"devDependencies":{"pnpm":"^9.0.0"}}
+{
+  "name": "dbstudio-fixture-monorepo",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "devDependencies": {
+    "pnpm": "^9.0.0"
+  }
+}

@@ -1,1 +1,6 @@
-{"name":"@repo/worker","dependencies":{"@repo/db":"workspace:*"}}
+{
+  "name": "@repo/worker",
+  "dependencies": {
+    "@repo/db": "workspace:*"
+  }
+}

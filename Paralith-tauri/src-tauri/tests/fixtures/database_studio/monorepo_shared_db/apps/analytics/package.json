@@ -1,1 +1,6 @@
-{"name":"@repo/analytics","dependencies":{"drizzle-orm":"^0.33.0"}}
+{
+  "name": "@repo/analytics",
+  "dependencies": {
+    "drizzle-orm": "^0.33.0"
+  }
+}

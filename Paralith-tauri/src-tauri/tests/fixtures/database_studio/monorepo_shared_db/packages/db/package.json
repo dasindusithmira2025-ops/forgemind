@@ -1,1 +1,8 @@
-{"name":"@repo/db","main":"src/index.ts","dependencies":{"@prisma/client":"^5.20.0","prisma":"^5.20.0"}}
+{
+  "name": "@repo/db",
+  "main": "src/index.ts",
+  "dependencies": {
+    "@prisma/client": "^5.20.0",
+    "prisma": "^5.20.0"
+  }
+}
