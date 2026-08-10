@@ -4,9 +4,9 @@ use crate::models::{
     RepositoryActor, RepositoryActorKind, RepositoryApprovalRequest, RepositoryOperation,
     RepositoryOperationContext, RepositoryOperationRequest, RepositoryOperationStatus, Workspace,
 };
+use crate::services::process_util::background_command;
 use crate::AppState;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use tauri::{State, Window};
 use uuid::Uuid;
 
@@ -362,7 +362,7 @@ fn git_scope(directory: &Path) -> AppResult<String> {
 }
 
 fn git_stdout(directory: &Path, args: &[&str]) -> AppResult<String> {
-    let output = Command::new("git")
+    let output = background_command("git")
         .current_dir(directory)
         .args(args)
         .output()
@@ -383,7 +383,7 @@ fn git_stdout(directory: &Path, args: &[&str]) -> AppResult<String> {
 }
 
 fn git_success(directory: &Path, args: &[&str]) -> AppResult<bool> {
-    let output = Command::new("git")
+    let output = background_command("git")
         .current_dir(directory)
         .args(args)
         .output()
@@ -592,7 +592,7 @@ mod tests {
     }
 
     fn git_raw(directory: &Path, args: &[&str]) -> std::io::Result<()> {
-        let output = Command::new("git")
+        let output = std::process::Command::new("git")
             .current_dir(directory)
             .args(args)
             .output()?;

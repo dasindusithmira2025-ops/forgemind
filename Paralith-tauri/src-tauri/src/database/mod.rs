@@ -17,6 +17,7 @@ use crate::models::{
     LayoutNode, PaneAssignment, Project, ProjectOverview, RecentWorkspace, ShellProfile,
     SplitDirection, StartTerminalRequest, Workspace, WorkspaceSaveRequest,
 };
+use crate::services::process_util::background_command;
 use chrono::Utc;
 use parking_lot::Mutex;
 use rusqlite::{params, Connection, OptionalExtension, Row};
@@ -1856,7 +1857,9 @@ fn exact_resume_preview(provider: &AgentProvider, provider_session_id: Option<&s
 }
 
 fn git_common_directory(path: &str) -> Option<String> {
-    let output = std::process::Command::new("git")
+    // Agent-session persistence runs during terminal restoration. Keep this metadata probe hidden
+    // in Windows GUI builds just like every other background helper process.
+    let output = background_command("git")
         .args(["-C", path, "rev-parse", "--git-common-dir"])
         .output()
         .ok()?;

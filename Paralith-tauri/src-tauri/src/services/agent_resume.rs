@@ -3,7 +3,7 @@ use crate::errors::{AppError, AppResult};
 use crate::models::{
     AgentProvider, AgentResumeRecord, ResumeAgentSessionRequest, ResumeAgentSessionResult,
 };
-use crate::services::TerminalManager;
+use crate::services::{process_util::background_command, TerminalManager};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use uuid::Uuid;
@@ -460,7 +460,10 @@ fn provider_executable_matches(provider: &AgentProvider, executable: &str) -> bo
 }
 
 fn git_value(directory: &Path, arguments: &[&str]) -> Option<String> {
-    let output = std::process::Command::new("git")
+    // Reconciliation runs automatically at startup for every unfinished recovery record. A plain
+    // `Command` from the Windows GUI binary allocates a visible console for each Git probe, which
+    // turns a large recovery history into a storm of flashing terminal windows.
+    let output = background_command("git")
         .arg("-C")
         .arg(directory)
         .args(arguments)
@@ -586,5 +589,26 @@ mod tests {
             &AgentProvider::Codex,
             "C:/tools/powershell.exe"
         ));
+    }
+
+    #[test]
+    fn git_probe_reads_repository_metadata_through_background_command() {
+        let root = std::env::temp_dir().join(format!("paralith-resume-git-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let initialized = background_command("git")
+            .arg("init")
+            .arg(&root)
+            .output()
+            .unwrap();
+        assert!(
+            initialized.status.success(),
+            "git init failed: {}",
+            String::from_utf8_lossy(&initialized.stderr)
+        );
+
+        let common = git_value(&root, &["rev-parse", "--git-common-dir"]);
+        assert!(common.is_some());
+
+        std::fs::remove_dir_all(root).unwrap();
     }
 }
