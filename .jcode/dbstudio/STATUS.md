@@ -1,9 +1,9 @@
 # Database Studio mission scoreboard
 
-Generated: 2026-08-10T19:16:14.534Z
-Command: `node .jcode/dbstudio/scoreboard.mjs`
+Generated: 2026-08-11T01:42:21.793Z
+Command: `node .jcode/dbstudio/scoreboard.mjs --fast`
 
-## Score: gates 0/10 · checks 1/14 (13 skipped this run)
+## Score: gates 1/10 · checks 1/14 (13 skipped this run)
 
 Mission is DONE only at gates 10/10 and checks 14/14, followed by a launched dev app.
 
@@ -11,7 +11,7 @@ Mission is DONE only at gates 10/10 and checks 14/14, followed by a launched dev
 
 | Gate | Scope | Verdict | Commit |
 | --- | --- | --- | --- |
-| GATE 1 | Architecture + domain contracts | PENDING | - |
+| GATE 1 | Architecture + domain contracts | APPROVED | 863d5c9e8c5d1d36398423d8f225fb8822e379f9 |
 | GATE 2 | Persistence + discovery + adapters | PENDING | - |
 | GATE 3 | Design graph / revisions / concurrency | PENDING | - |
 | GATE 4 | Database Studio UI/UX | PENDING | - |
@@ -39,4 +39,4 @@ Mission is DONE only at gates 10/10 and checks 14/14, followed by a launched dev
 | B11 | pipeline: approved target -> native change -> re-extract -> zero delta | SKIPPED | not run this iteration |
 | B12 | security: no credentials persisted, no auto-connect | SKIPPED | not run this iteration |
 | B13 | performance: large schema (400 tables) bounded render + off-path layout | SKIPPED | not run this iteration |
-| B14 | no tests disabled / no assertions deleted in mission diff | PASS | no disabled tests introduced (32 added source lines scanned) |
+| B14 | no tests disabled / no assertions deleted in mission diff | PASS | no disabled tests introduced (40 added source lines scanned) |

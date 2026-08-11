@@ -27,7 +27,7 @@ and were not modified.
 | # | Command | Cwd | Exit | Result |
 | --- | --- | --- | --- | --- |
 | 1 | `cargo check --all-targets` | `Paralith-tauri/src-tauri` | 0 | Compiled `forgemind v0.4.8` in 31.98s. **Zero warnings, zero errors.** |
-| 2 | `cargo test` | `Paralith-tauri/src-tauri` | 0 | **269 passed / 0 failed / 0 ignored** across 4 test binaries (lib: 267, +2 in a second binary, 2 empty binaries). Wall 46s. |
+| 2 | `cargo test` | `Paralith-tauri/src-tauri` | 0 (4 of 5 runs) | **269 passed / 0 failed / 0 ignored** across 4 test binaries (lib: 267, +2 in a second binary, 2 empty binaries). Wall 39–46s. **One run in five failed** — see "Known pre-existing flake" below. |
 | 3 | `cargo fmt --check` | `Paralith-tauri/src-tauri` | 0 | Clean, no output. |
 | 4 | `cargo clippy --all-targets` | `Paralith-tauri/src-tauri` | 0 | **Zero warnings.** |
 | 5 | `npm run typecheck` (`tsc -b --pretty false`) | `Paralith-tauri` | 0 | Clean, no diagnostics. |
@@ -37,12 +37,47 @@ and were not modified.
 
 ### Pre-existing failures
 
-**None.** Backend, frontend, lint, format, clippy, tests, and production build are all clean at
-`569cb5a`. There is no pre-existing breakage to hide behind.
+**One known flake. Everything else is clean.**
+
+#### Known pre-existing flake (NOT mission-caused, NOT to be "fixed" by disabling)
+
+`services::terminal_manager::tests::closing_input_allows_a_one_shot_process_waiting_for_eof_to_exit`
+(`Paralith-tauri/src-tauri/src/services/terminal_manager.rs:1517`, panic at
+`terminal_manager.rs:1570` "the process did not exit after terminal input closed").
+
+Measured flake rate at `569cb5a`, with **zero mission code changes**:
+
+| Mode | Runs | Failures |
+| --- | --- | --- |
+| Full `cargo test` (parallel, 267 lib tests) | 5 | **1** |
+| Isolated `cargo test --lib <that test> -- --exact` | 6 | 0 (0.12–0.13s each) |
+
+So it is load/timing sensitive, not deterministically broken. The test spawns real
+`powershell.exe` on Windows, closes stdin, and waits up to 10s for the child to exit. Under full
+parallel suite load plus a cold PowerShell start on a contended machine, the 10s budget is
+occasionally missed.
+
+Rules this creates for the mission:
+
+- If a post-mission `cargo test` fails **only** on this test, it is pre-existing, not a regression.
+  Re-run once to confirm, and record both results.
+- Nobody may make this test pass by adding `#[ignore]`, deleting it, or raising the timeout to hide
+  it. That would be a blocker under mission "Do not disable tests to get green results". It is also
+  outside every mission ownership boundary, so no specialist should touch
+  `terminal_manager.rs` at all.
+- **Any other failing test is a regression** and belongs to the owning specialist.
+- Because Database Studio work will add tests to the same parallel lib binary, it can increase
+  machine contention and therefore this flake's frequency. That is a reason to prefer fast,
+  process-free unit tests for discovery/diff/design logic, not a licence to change the terminal
+  test.
+
+Backend compile, fmt, clippy, frontend typecheck, lint, vitest, and the production build are all
+clean with zero warnings at `569cb5a`. There is no other pre-existing breakage to hide behind.
 
 Consequence for the mission: the bar is exact. After mission work,
 `cargo check --all-targets`, `cargo test`, `cargo fmt --check`, `cargo clippy --all-targets`,
-`npm run typecheck`, `npm run lint`, `npm run test`, and `npm run build` must **all** still exit 0.
+`npm run typecheck`, `npm run lint`, `npm run test`, and `npm run build` must **all** still exit 0
+(with the single documented terminal flake above as the only tolerated, re-run-confirmed exception).
 `cargo test` must report **at least 269 passed with 0 failed and 0 ignored**; vitest must report
 **at least 544 passed with 0 failed and 0 skipped**. A drop in either count without a stated,
 reviewed reason is treated as a deleted or disabled test (a blocker under mission "Do not disable
