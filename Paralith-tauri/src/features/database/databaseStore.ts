@@ -5,6 +5,7 @@ import type {
   DatabaseCanvasFilters,
   DatabaseDesign,
   DatabaseDesignBundle,
+  DatabaseDesignOperationKind,
   DatabaseGraphPage,
   DatabaseIssue,
   DatabaseLayer,
@@ -16,7 +17,8 @@ import type {
   DesignConcurrencyToken,
   SemanticId,
 } from './databaseTypes'
-import { emptyDatabaseSelection } from './databaseTypes'
+import { emptyDatabaseSelection, isDatabaseStaleRevisionError } from './databaseTypes'
+import { applyDesignOperation, type ProposedGraph } from './databaseDesignOperations'
 
 interface DatabaseState {
   projectId?: string
@@ -48,6 +50,9 @@ interface DatabaseState {
   designError?: string
   /** Non-`undefined` while an operation is optimistically applied but not yet confirmed. */
   pendingOperationId?: string
+  /** The optimistic Proposed graph overlay (UI-SPEC.md §5.1-5.2) — confirmed state lives in `activeBundle`. */
+  proposedGraph: ProposedGraph
+  staleRevisionNotice?: { designId: string }
 
   /** Ephemeral session-only selection/filter/pin state — never backend-persisted (UI-SPEC.md §7). */
   selection: DatabaseSelection
@@ -64,6 +69,15 @@ interface DatabaseState {
   loadIssues: () => Promise<void>
   loadDesigns: () => Promise<void>
   createDraft: (name: string, base: CreateDatabaseDraftBase) => Promise<void>
+  /**
+   * Optimistic apply, authoritative confirm (UI-SPEC.md §5.2). The operation is applied to
+   * `proposedGraph` immediately, then sent to the backend with the current concurrency token. A
+   * `DATABASE_DESIGN_STALE_REVISION` response rolls the optimistic change back and surfaces
+   * `staleRevisionNotice` for the "design changed elsewhere / Reload design" UI; it never silently
+   * rebases or drops the edit.
+   */
+  applyOperation: (operation: DatabaseDesignOperationKind) => Promise<void>
+  dismissStaleRevisionNotice: () => void
   selectObjects: (ids: SemanticId[], options?: { additive?: boolean; focusedId?: SemanticId }) => void
   clearSelection: () => void
   setSearch: (search: string) => void
@@ -87,6 +101,7 @@ export const useDatabaseStore = create<DatabaseState>((set, get) => ({
   issues: [],
   designsLoad: EMPTY_LOAD,
   designs: [],
+  proposedGraph: { tables: {}, columns: {} },
   selection: emptyDatabaseSelection(),
   filters: { hideUnrelated: false },
   pinnedPositions: {},
@@ -112,6 +127,8 @@ export const useDatabaseStore = create<DatabaseState>((set, get) => ({
     activeToken: undefined,
     designError: undefined,
     pendingOperationId: undefined,
+    proposedGraph: { tables: {}, columns: {} },
+    staleRevisionNotice: undefined,
     selection: emptyDatabaseSelection(),
     filters: { hideUnrelated: false },
     pinnedPositions: {},
@@ -243,6 +260,33 @@ export const useDatabaseStore = create<DatabaseState>((set, get) => ({
       set({ designError: asDatabaseError(caught).message })
     }
   },
+
+  applyOperation: async (operation) => {
+    const { projectId, activeDesignId, activeToken, proposedGraph } = get()
+    if (!projectId || !activeDesignId || !activeToken) return
+    // Optimistic apply: the operation renders immediately, before the network round-trip.
+    const optimisticGraph = applyDesignOperation(proposedGraph, operation)
+    set({ proposedGraph: optimisticGraph, pendingOperationId: `${operation.kind}:${Date.now()}` })
+    try {
+      const result = await databaseApi.applyDesignOperation({ projectId, designId: activeDesignId, token: activeToken, operation })
+      if (get().activeDesignId !== activeDesignId) return
+      set({
+        activeToken: result.token,
+        designs: get().designs.map((design) => design.id === result.design.id ? result.design : design),
+        pendingOperationId: undefined,
+      })
+    } catch (caught) {
+      if (get().activeDesignId !== activeDesignId) return
+      if (isDatabaseStaleRevisionError(caught)) {
+        // Roll the optimistic change back rather than silently rebasing or dropping it.
+        set({ proposedGraph, pendingOperationId: undefined, staleRevisionNotice: { designId: activeDesignId } })
+        return
+      }
+      set({ proposedGraph, pendingOperationId: undefined, designError: asDatabaseError(caught).message })
+    }
+  },
+
+  dismissStaleRevisionNotice: () => set({ staleRevisionNotice: undefined }),
 
   selectObjects: (ids, options = {}) => {
     const current = get().selection

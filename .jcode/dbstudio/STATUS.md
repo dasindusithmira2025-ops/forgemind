@@ -1,9 +1,9 @@
 # Database Studio mission scoreboard
 
-Generated: 2026-08-11T01:42:21.793Z
-Command: `node .jcode/dbstudio/scoreboard.mjs --fast`
+Generated: 2026-08-11T02:11:23.736Z
+Command: `node .jcode/dbstudio/scoreboard.mjs`
 
-## Score: gates 1/10 · checks 1/14 (13 skipped this run)
+## Score: gates 1/10 · checks 12/14
 
 Mission is DONE only at gates 10/10 and checks 14/14, followed by a launched dev app.
 
@@ -26,17 +26,17 @@ Mission is DONE only at gates 10/10 and checks 14/14, followed by a launched dev
 
 | Check | What it proves | Result | Detail |
 | --- | --- | --- | --- |
-| B1 | cargo check (backend compiles) | SKIPPED | not run this iteration |
-| B2 | cargo test (full backend suite, no regressions) | SKIPPED | not run this iteration |
-| B3 | schema migration upgrade preserves installed data | SKIPPED | not run this iteration |
-| B4 | npm run typecheck | SKIPPED | not run this iteration |
-| B5 | npm run lint | SKIPPED | not run this iteration |
-| B6 | npm run test (vitest) | SKIPPED | not run this iteration |
-| B7 | discovery fixtures (prisma/drizzle/sql/sqlite/monorepo/multi-db/dup-names) | SKIPPED | not run this iteration |
-| B8 | design graph: immutable revisions, independent drafts, stale-write rejected | SKIPPED | not run this iteration |
-| B9 | semantic diff is structural (formatting-only change = empty diff) | SKIPPED | not run this iteration |
-| B10 | agent contract: DESIGN_ONLY cannot mutate, IMPLEMENT_DESIGN gets target revision | SKIPPED | not run this iteration |
-| B11 | pipeline: approved target -> native change -> re-extract -> zero delta | SKIPPED | not run this iteration |
-| B12 | security: no credentials persisted, no auto-connect | SKIPPED | not run this iteration |
-| B13 | performance: large schema (400 tables) bounded render + off-path layout | SKIPPED | not run this iteration |
-| B14 | no tests disabled / no assertions deleted in mission diff | PASS | no disabled tests introduced (40 added source lines scanned) |
+| B1 | cargo check (backend compiles) | PASS | ok in 0s |
+| B2 | cargo test (full backend suite, no regressions) | PASS | 4 suites green |
+| B3 | schema migration upgrade preserves installed data | PASS | schema v28 migration tests green |
+| B4 | npm run typecheck | PASS | clean |
+| B5 | npm run lint | FAIL |     :              `-- 'DatabaseScreen' is declared here /  28 / const SwarmsScreen = lazy(() => import('./screens/SwarmsScreen').then((module) => ({ default: module.SwarmsScreen }))) /     `---- /   help: Consider removing this declaration. / Found 1 warning and 0 errors. / Finished in 23ms on 239 files with 103 rules using 24 threads. |
+| B6 | npm run test (vitest) | PASS | green |
+| B7 | discovery fixtures (prisma/drizzle/sql/sqlite/monorepo/multi-db/dup-names) | PASS | 7/7 fixtures asserted |
+| B8 | design graph: immutable revisions, independent drafts, stale-write rejected | FAIL | missing: stale,draft,revision |
+| B9 | semantic diff is structural (formatting-only change = empty diff) | PASS | structural diff tests green |
+| B10 | agent contract: DESIGN_ONLY cannot mutate, IMPLEMENT_DESIGN gets target revision | PASS | mode + selection contracts covered |
+| B11 | pipeline: approved target -> native change -> re-extract -> zero delta | PASS | target/result verification green |
+| B12 | security: no credentials persisted, no auto-connect | PASS | credential boundary tests green |
+| B13 | performance: large schema (400 tables) bounded render + off-path layout | PASS | large-schema benchmark green |
+| B14 | no tests disabled / no assertions deleted in mission diff | PASS | no disabled tests introduced (4945 added source lines scanned) |

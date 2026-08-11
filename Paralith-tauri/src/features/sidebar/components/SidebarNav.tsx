@@ -1,4 +1,4 @@
-import { FolderGit2, Search } from 'lucide-react'
+import { Database, FolderGit2, Search } from 'lucide-react'
 import { useOrchestratorStore } from '../../orchestrator/store'
 import type { SidebarActions } from '../sidebarTypes'
 
@@ -38,6 +38,13 @@ export function SidebarNav({ actions }: { actions: SidebarActions }) {
         <button type="button" className="sb-nav-row" onClick={actions.onOpenRepository}>
           <FolderGit2 size={16} className="sb-nav-icon" aria-hidden />
           <span className="sb-nav-label">Repository</span>
+        </button>
+      )}
+
+      {actions.onOpenDatabase && (
+        <button type="button" className="sb-nav-row" onClick={actions.onOpenDatabase}>
+          <Database size={16} className="sb-nav-icon" aria-hidden />
+          <span className="sb-nav-label">Database</span>
         </button>
       )}
     </nav>

@@ -992,6 +992,7 @@ export function WorkspaceScreen() {
     onOpenLauncher: () => navigate('/'),
     onOpenSettings: () => navigate('/settings'),
     onOpenRepository: () => { if (project) navigate(`/repository/${project.id}`) },
+    onOpenDatabase: () => { if (project) navigate(`/database/${project.id}`) },
     onToggleCollapse: toggleCollapse,
     onResizeCommit: commitSidebarWidth,
     onOpenInNewWindow: (id) => void openInNewWindow(id),

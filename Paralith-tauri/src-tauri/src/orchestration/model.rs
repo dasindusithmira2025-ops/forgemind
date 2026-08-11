@@ -378,6 +378,36 @@ pub enum CapabilityDomain {
     Memory,
     Settings,
     App,
+    Database,
+}
+
+/// Machine-readable side-effect boundary used by policy. This is deliberately separate from
+/// `mutates`: design state, repository files, and a live database have materially different trust
+/// and authorization requirements.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CapabilityEffectClass {
+    Read,
+    DesignMutation,
+    RepositoryMutation,
+    DatabaseMutation,
+}
+
+/// Database Studio's execution envelope. The target revision and repository state are pinned by
+/// the session owner, not chosen again by an individual capability invocation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "mode")]
+pub enum DatabaseExecutionEnvelope {
+    DesignOnly {
+        design_id: String,
+        base_revision_id: Option<String>,
+    },
+    ImplementDesign {
+        approved_target_revision_id: String,
+        authorization_id: String,
+        expected_repository_head: String,
+        expected_branch: String,
+    },
 }
 
 /// Lifecycle of a single typed capability invocation recorded by the gateway.
@@ -524,6 +554,9 @@ pub struct ExecuteCapabilityRequest {
     /// Set when the user has explicitly approved a gated action this call.
     #[serde(default)]
     pub approved: bool,
+    /// Required by Database Studio mutation flows. Reads remain usable without an envelope.
+    #[serde(default)]
+    pub database_execution: Option<DatabaseExecutionEnvelope>,
 }
 
 /// The outcome of one capability invocation returned to the caller.

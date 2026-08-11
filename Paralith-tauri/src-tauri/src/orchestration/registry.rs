@@ -12,7 +12,7 @@
 //! and a guarded project file write that exercises the risk/approval gate end to end. Additional
 //! domains (browser, git mutations, agents, swarms, missions) extend this same table.
 
-use super::model::{CapabilityDomain, Reversibility, RiskLevel};
+use super::model::{CapabilityDomain, CapabilityEffectClass, Reversibility, RiskLevel};
 use serde::Serialize;
 use serde_json::{json, Value};
 
@@ -36,6 +36,8 @@ pub struct CapabilityDescriptor {
     pub reversibility: Reversibility,
     /// True when the capability changes application or filesystem state. Observe mode refuses these.
     pub mutates: bool,
+    /// Typed effect boundary enforced by policy for Database Studio execution envelopes.
+    pub effect_class: CapabilityEffectClass,
     pub timeout_ms: u64,
     /// Every capability execution is recorded; kept explicit so an audit-exempt capability would be
     /// a deliberate, reviewable choice rather than an omission.
@@ -49,7 +51,7 @@ pub struct CapabilityDescriptor {
 /// The complete set of capabilities the kernel can execute. Order is stable and UI-friendly
 /// (grouped by domain, read before write).
 pub fn all_descriptors() -> Vec<CapabilityDescriptor> {
-    vec![
+    let mut descriptors = vec![
         CapabilityDescriptor {
             id: "project.list",
             display_name: "List projects",
@@ -60,6 +62,7 @@ pub fn all_descriptors() -> Vec<CapabilityDescriptor> {
             risk: RiskLevel::Low,
             reversibility: Reversibility::NotApplicable,
             mutates: false,
+            effect_class: CapabilityEffectClass::Read,
             timeout_ms: 5_000,
             audited: true,
             available: true,
@@ -75,6 +78,7 @@ pub fn all_descriptors() -> Vec<CapabilityDescriptor> {
             risk: RiskLevel::Low,
             reversibility: Reversibility::NotApplicable,
             mutates: false,
+            effect_class: CapabilityEffectClass::Read,
             timeout_ms: 5_000,
             audited: true,
             available: true,
@@ -94,6 +98,7 @@ pub fn all_descriptors() -> Vec<CapabilityDescriptor> {
             risk: RiskLevel::Low,
             reversibility: Reversibility::NotApplicable,
             mutates: false,
+            effect_class: CapabilityEffectClass::Read,
             timeout_ms: 5_000,
             audited: true,
             available: true,
@@ -109,6 +114,7 @@ pub fn all_descriptors() -> Vec<CapabilityDescriptor> {
             risk: RiskLevel::Low,
             reversibility: Reversibility::NotApplicable,
             mutates: false,
+            effect_class: CapabilityEffectClass::Read,
             timeout_ms: 5_000,
             audited: true,
             available: true,
@@ -129,6 +135,7 @@ pub fn all_descriptors() -> Vec<CapabilityDescriptor> {
             risk: RiskLevel::Low,
             reversibility: Reversibility::NotApplicable,
             mutates: false,
+            effect_class: CapabilityEffectClass::Read,
             timeout_ms: 10_000,
             audited: true,
             available: true,
@@ -154,12 +161,226 @@ pub fn all_descriptors() -> Vec<CapabilityDescriptor> {
             risk: RiskLevel::Medium,
             reversibility: Reversibility::ViaGit,
             mutates: true,
+            effect_class: CapabilityEffectClass::RepositoryMutation,
             timeout_ms: 10_000,
             audited: true,
             available: true,
             unavailable_reason: None,
         },
+    ];
+
+    descriptors.extend(database_descriptors());
+    descriptors
+}
+
+fn database_descriptor(
+    id: &'static str,
+    display_name: &'static str,
+    arg_schema: Value,
+    risk: RiskLevel,
+    reversibility: Reversibility,
+    effect_class: CapabilityEffectClass,
+) -> CapabilityDescriptor {
+    CapabilityDescriptor {
+        id,
+        display_name,
+        domain: CapabilityDomain::Database,
+        description:
+            "Execute a typed Database Studio operation through the project-scoped backend.",
+        arg_schema,
+        requires_project_scope: true,
+        risk,
+        reversibility,
+        mutates: effect_class != CapabilityEffectClass::Read,
+        effect_class,
+        timeout_ms: 30_000,
+        audited: true,
+        available: true,
+        unavailable_reason: None,
+    }
+}
+
+fn database_descriptors() -> Vec<CapabilityDescriptor> {
+    let read = |id, name, schema| {
+        database_descriptor(
+            id,
+            name,
+            schema,
+            RiskLevel::Low,
+            Reversibility::NotApplicable,
+            CapabilityEffectClass::Read,
+        )
+    };
+    let design = |id, name, schema, risk, reversibility| {
+        database_descriptor(
+            id,
+            name,
+            schema,
+            risk,
+            reversibility,
+            CapabilityEffectClass::DesignMutation,
+        )
+    };
+
+    vec![
+        read(
+            "database.list_sources",
+            "List database sources",
+            json!({"type":"object","properties":{}}),
+        ),
+        read(
+            "database.get_schema",
+            "Get database schema",
+            json!({"type":"object","required":["sourceId","layer","lod"],"properties":{"sourceId":{"type":"string"},"layer":{"type":"string"},"snapshotId":{"type":"string"},"designRevisionId":{"type":"string"},"lod":{"type":"string"}}}),
+        ),
+        read(
+            "database.get_object",
+            "Get database object",
+            json!({"type":"object","required":["sourceId","objectId"],"properties":{"sourceId":{"type":"string"},"objectId":{"type":"string"},"snapshotId":{"type":"string"},"designRevisionId":{"type":"string"}}}),
+        ),
+        read(
+            "database.compare",
+            "Compare database schemas",
+            json!({"type":"object","required":["mode"],"properties":{"mode":{"type":"object"}}}),
+        ),
+        read(
+            "database.get_issues",
+            "Get database issues",
+            json!({"type":"object","required":["sourceId"],"properties":{"sourceId":{"type":"string"},"status":{"type":"string"},"severity":{"type":"string"}}}),
+        ),
+        read(
+            "database.get_usage",
+            "Get database usage",
+            json!({"type":"object","required":["sourceId","objectId"],"properties":{"sourceId":{"type":"string"},"objectId":{"type":"string"},"limit":{"type":"integer"},"continuation":{"type":"string"}}}),
+        ),
+        read(
+            "database.get_context_pack",
+            "Build database context pack",
+            json!({"type":"object","required":["sourceId","focus","budget"],"properties":{"sourceId":{"type":"string"},"focus":{"type":"object"},"budget":{"type":"object"}}}),
+        ),
+        read(
+            "database.get_canvas_state",
+            "Get database canvas state",
+            json!({"type":"object","properties":{}}),
+        ),
+        read(
+            "database.get_selection",
+            "Get database selection",
+            json!({"type":"object","properties":{}}),
+        ),
+        design(
+            "database.create_draft",
+            "Create database draft",
+            json!({"type":"object","required":["sourceId","base","name"],"properties":{"sourceId":{"type":"string"},"base":{"type":"object"},"name":{"type":"string"}}}),
+            RiskLevel::Medium,
+            Reversibility::Paired,
+        ),
+        design(
+            "database.add_table",
+            "Add database table",
+            operation_schema("table"),
+            RiskLevel::Medium,
+            Reversibility::Paired,
+        ),
+        design(
+            "database.rename_table",
+            "Rename database table",
+            operation_schema("tableId"),
+            RiskLevel::Medium,
+            Reversibility::Paired,
+        ),
+        design(
+            "database.drop_table",
+            "Drop database table",
+            operation_schema("tableId"),
+            RiskLevel::High,
+            Reversibility::Paired,
+        ),
+        design(
+            "database.add_column",
+            "Add database column",
+            operation_schema("column"),
+            RiskLevel::Medium,
+            Reversibility::Paired,
+        ),
+        design(
+            "database.alter_column",
+            "Alter database column",
+            operation_schema("patch"),
+            RiskLevel::High,
+            Reversibility::Paired,
+        ),
+        design(
+            "database.drop_column",
+            "Drop database column",
+            operation_schema("columnId"),
+            RiskLevel::High,
+            Reversibility::Paired,
+        ),
+        design(
+            "database.add_relationship",
+            "Add database relationship",
+            operation_schema("relationship"),
+            RiskLevel::Medium,
+            Reversibility::Paired,
+        ),
+        design(
+            "database.add_index",
+            "Add database index",
+            operation_schema("index"),
+            RiskLevel::Medium,
+            Reversibility::Paired,
+        ),
+        design(
+            "database.approve_design",
+            "Approve database design",
+            decision_schema(true),
+            RiskLevel::High,
+            Reversibility::None,
+        ),
+        design(
+            "database.reject_design",
+            "Reject database design",
+            decision_schema(true),
+            RiskLevel::Medium,
+            Reversibility::None,
+        ),
+        design(
+            "database.archive_design",
+            "Archive database design",
+            decision_schema(false),
+            RiskLevel::Medium,
+            Reversibility::Paired,
+        ),
+        database_descriptor(
+            "database.implement_design",
+            "Implement database design",
+            json!({"type":"object","required":["designId","approvedRevisionId"],"properties":{"designId":{"type":"string"},"approvedRevisionId":{"type":"string"}}}),
+            RiskLevel::High,
+            Reversibility::ViaGit,
+            CapabilityEffectClass::RepositoryMutation,
+        ),
+        database_descriptor(
+            "database.introspect_sqlite_file",
+            "Introspect SQLite file",
+            json!({"type":"object","required":["sourceId","projectRelativePath","explicitUserConsent"],"properties":{"sourceId":{"type":"string"},"projectRelativePath":{"type":"string"},"explicitUserConsent":{"type":"boolean","const":true}}}),
+            RiskLevel::Medium,
+            Reversibility::NotApplicable,
+            CapabilityEffectClass::DatabaseMutation,
+        ),
     ]
+}
+
+fn operation_schema(required_payload: &'static str) -> Value {
+    json!({"type":"object","required":["designId","token",required_payload],"properties":{"designId":{"type":"string"},"token":{"type":"object"}}})
+}
+
+fn decision_schema(with_reason: bool) -> Value {
+    let mut required = vec!["designId", "token"];
+    if with_reason {
+        required.push("reason");
+    }
+    json!({"type":"object","required":required,"properties":{"designId":{"type":"string"},"token":{"type":"object"},"reason":{"type":"string"}}})
 }
 
 /// Look up a capability by id.

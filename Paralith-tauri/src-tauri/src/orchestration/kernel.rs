@@ -356,7 +356,13 @@ impl OrchestrationKernel {
         };
 
         // Policy gate.
-        match policy::evaluate(session.operating_mode, &descriptor, request.approved) {
+        match policy::evaluate(
+            session.operating_mode,
+            &descriptor,
+            request.approved,
+            request.database_execution.as_ref(),
+            &validated,
+        ) {
             GateDecision::Deny { reason } => {
                 return self.record_refusal(
                     &session,
@@ -635,9 +641,83 @@ fn validate_arguments(descriptor: &CapabilityDescriptor, args: &Value) -> AppRes
             Some(workspace_id) => Ok(json!({ "workspaceId": workspace_id })),
             None => Ok(json!({})),
         },
+        id if id.starts_with("database.") => validate_database_arguments(descriptor, args),
         // Argument-free capabilities accept and canonicalize to an empty object.
         _ => Ok(json!({})),
     }
+}
+
+fn validate_database_arguments(
+    descriptor: &CapabilityDescriptor,
+    args: &Value,
+) -> AppResult<Value> {
+    let input = args.as_object().ok_or_else(|| {
+        AppError::new(
+            "validation_error",
+            "Database capability arguments must be an object.",
+            true,
+        )
+        .layer("orchestration")
+    })?;
+    let properties = descriptor
+        .arg_schema
+        .get("properties")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let required_keys: Vec<&str> = descriptor
+        .arg_schema
+        .get("required")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .collect();
+    for required in &required_keys {
+        let required = *required;
+        if !input.contains_key(required) || input[required].is_null() {
+            return Err(AppError::new(
+                "validation_error",
+                format!("Argument '{required}' is required."),
+                true,
+            )
+            .layer("orchestration"));
+        }
+    }
+
+    let mut canonical = serde_json::Map::new();
+    for (key, schema) in properties {
+        let Some(value) = input.get(&key) else {
+            continue;
+        };
+        let valid_type = match schema.get("type").and_then(Value::as_str) {
+            Some("string") => value.as_str().is_some_and(|item| !item.trim().is_empty()),
+            Some("boolean") => value.is_boolean(),
+            Some("integer") => value.is_i64() || value.is_u64(),
+            Some("object") => value.is_object(),
+            Some("array") => value.is_array(),
+            _ => true,
+        };
+        if !valid_type
+            || schema
+                .get("const")
+                .is_some_and(|expected| expected != value)
+        {
+            return Err(AppError::new(
+                "validation_error",
+                format!("Argument '{key}' has an invalid value."),
+                true,
+            )
+            .layer("orchestration"));
+        }
+        canonical.insert(key, value.clone());
+    }
+    for key in required_keys {
+        canonical
+            .entry(key.to_owned())
+            .or_insert_with(|| input[key].clone());
+    }
+    Ok(Value::Object(canonical))
 }
 
 fn required_str(args: &Value, key: &str) -> AppResult<String> {
@@ -786,6 +866,7 @@ mod tests {
                 capability_id: "project.list".to_owned(),
                 arguments: json!({}),
                 approved: false,
+                database_execution: None,
             })
             .unwrap();
         assert!(outcome.error.is_none());
@@ -813,6 +894,7 @@ mod tests {
                 capability_id: "file.read".to_owned(),
                 arguments: json!({ "relativePath": "notes.txt" }),
                 approved: false,
+                database_execution: None,
             })
             .unwrap();
         assert!(read.error.is_none());
@@ -825,6 +907,7 @@ mod tests {
                 capability_id: "file.write".to_owned(),
                 arguments: json!({ "relativePath": "notes.txt", "content": "updated" }),
                 approved: false,
+                database_execution: None,
             })
             .unwrap();
         assert!(write.error.is_none());
@@ -845,6 +928,7 @@ mod tests {
                 capability_id: "file.read".to_owned(),
                 arguments: json!({ "relativePath": "../../etc/hosts" }),
                 approved: false,
+                database_execution: None,
             })
             .unwrap();
         assert!(outcome.error.is_some(), "traversal must be refused");
@@ -865,6 +949,7 @@ mod tests {
                 capability_id: "file.write".to_owned(),
                 arguments: json!({ "relativePath": "f.txt", "content": "after" }),
                 approved: false,
+                database_execution: None,
             })
             .unwrap();
         assert_eq!(gated.execution.state, ExecutionState::ApprovalRequired);
@@ -880,6 +965,7 @@ mod tests {
                 capability_id: "file.write".to_owned(),
                 arguments: json!({ "relativePath": "f.txt", "content": "after" }),
                 approved: true,
+                database_execution: None,
             })
             .unwrap();
         assert!(approved.error.is_none());
@@ -901,6 +987,7 @@ mod tests {
                 capability_id: "file.write".to_owned(),
                 arguments: json!({ "relativePath": "f.txt", "content": "after" }),
                 approved: true,
+                database_execution: None,
             })
             .unwrap();
         assert_eq!(outcome.execution.state, ExecutionState::Failed);
@@ -924,5 +1011,112 @@ mod tests {
             .transition(&session_id, SessionState::Completed, None)
             .unwrap_err();
         assert_eq!(error.code, "invalid_transition");
+    }
+}
+
+#[cfg(test)]
+mod database_studio {
+    pub mod agent {
+        use crate::orchestration::model::{DatabaseExecutionEnvelope, OperatingMode};
+        use crate::orchestration::{policy, registry};
+        use rusqlite::Connection;
+        use serde_json::json;
+        use sha2::{Digest, Sha256};
+        use std::fs;
+
+        fn digest(bytes: &[u8]) -> Vec<u8> {
+            Sha256::digest(bytes).to_vec()
+        }
+
+        #[test]
+        fn design_only_mode_cannot_mutate_repository_or_database() {
+            let root =
+                std::env::temp_dir().join(format!("paralith-db-agent-{}", uuid::Uuid::new_v4()));
+            fs::create_dir_all(&root).unwrap();
+            let repository_file = root.join("schema.prisma");
+            fs::write(&repository_file, "model User { id Int @id }").unwrap();
+            let repository_before = digest(&fs::read(&repository_file).unwrap());
+
+            let connection = Connection::open_in_memory().unwrap();
+            connection
+                .execute("CREATE TABLE audit(value TEXT NOT NULL)", [])
+                .unwrap();
+            connection
+                .execute("INSERT INTO audit VALUES('before')", [])
+                .unwrap();
+            let database_before: String = connection
+                .query_row("SELECT group_concat(value, ',') FROM audit", [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+
+            let envelope = DatabaseExecutionEnvelope::DesignOnly {
+                design_id: "design-1".into(),
+                base_revision_id: Some("revision-1".into()),
+            };
+            for capability in [
+                "database.implement_design",
+                "database.introspect_sqlite_file",
+            ] {
+                let descriptor = registry::find(capability).unwrap();
+                let args = if capability == "database.implement_design" {
+                    json!({"designId":"design-1","approvedRevisionId":"revision-1"})
+                } else {
+                    json!({"sourceId":"source-1","projectRelativePath":"db.sqlite","explicitUserConsent":true})
+                };
+                assert!(matches!(
+                    policy::evaluate(
+                        OperatingMode::Autopilot,
+                        &descriptor,
+                        true,
+                        Some(&envelope),
+                        &args,
+                    ),
+                    policy::GateDecision::Deny { .. }
+                ));
+            }
+
+            let repository_after = digest(&fs::read(&repository_file).unwrap());
+            let database_after: String = connection
+                .query_row("SELECT group_concat(value, ',') FROM audit", [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert_eq!(repository_before, repository_after);
+            assert_eq!(database_before, database_after);
+            fs::remove_dir_all(root).unwrap();
+        }
+
+        #[test]
+        fn implement_design_rejects_target_not_pinned_by_session() {
+            let descriptor = registry::find("database.implement_design").unwrap();
+            let envelope = DatabaseExecutionEnvelope::ImplementDesign {
+                approved_target_revision_id: "approved-revision".into(),
+                authorization_id: "authorization-1".into(),
+                expected_repository_head: "abc123".into(),
+                expected_branch: "feat/database-studio".into(),
+            };
+            assert!(matches!(
+                policy::evaluate(
+                    OperatingMode::Autopilot,
+                    &descriptor,
+                    true,
+                    Some(&envelope),
+                    &json!({"designId":"design-1","approvedRevisionId":"other-revision"}),
+                ),
+                policy::GateDecision::Deny { .. }
+            ));
+        }
+
+        #[test]
+        fn selection_contains_semantic_ids_not_canvas_coordinates() {
+            let selection = json!({
+                "selectedObjectIds": ["db:table:p_01HZZ"],
+                "focusedObjectId": "db:table:p_01HZZ"
+            });
+            assert!(selection.get("selectedObjectIds").unwrap().is_array());
+            assert!(selection.get("x").is_none());
+            assert!(selection.get("y").is_none());
+        }
     }
 }

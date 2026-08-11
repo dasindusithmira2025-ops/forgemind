@@ -5,8 +5,9 @@
 //! it can be exhaustively tested and reasoned about. It is the single chokepoint the gateway calls
 //! before every capability execution.
 
-use super::model::{OperatingMode, RiskLevel};
+use super::model::{CapabilityEffectClass, DatabaseExecutionEnvelope, OperatingMode, RiskLevel};
 use super::registry::CapabilityDescriptor;
+use serde_json::Value;
 
 /// The gate's decision for one capability under one operating mode.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -24,7 +25,61 @@ pub fn evaluate(
     mode: OperatingMode,
     descriptor: &CapabilityDescriptor,
     approved: bool,
+    database_execution: Option<&DatabaseExecutionEnvelope>,
+    validated_arguments: &Value,
 ) -> GateDecision {
+    if descriptor.domain == super::model::CapabilityDomain::Database {
+        match database_execution {
+            Some(DatabaseExecutionEnvelope::DesignOnly { design_id, .. }) => {
+                if matches!(
+                    descriptor.effect_class,
+                    CapabilityEffectClass::RepositoryMutation
+                        | CapabilityEffectClass::DatabaseMutation
+                ) {
+                    return GateDecision::Deny {
+                        reason: "DESIGN_ONLY cannot mutate repository files or a database.",
+                    };
+                }
+                if descriptor.effect_class == CapabilityEffectClass::DesignMutation
+                    && validated_arguments
+                        .get("designId")
+                        .and_then(Value::as_str)
+                        .is_some_and(|target| target != design_id)
+                {
+                    return GateDecision::Deny {
+                        reason: "The requested design differs from the design pinned in the execution envelope.",
+                    };
+                }
+            }
+            Some(DatabaseExecutionEnvelope::ImplementDesign {
+                approved_target_revision_id,
+                ..
+            }) => {
+                if descriptor.effect_class == CapabilityEffectClass::RepositoryMutation
+                    && validated_arguments
+                        .get("approvedRevisionId")
+                        .and_then(Value::as_str)
+                        != Some(approved_target_revision_id.as_str())
+                {
+                    return GateDecision::Deny {
+                        reason: "The requested target differs from the approved revision pinned in the execution envelope.",
+                    };
+                }
+                if descriptor.effect_class == CapabilityEffectClass::DesignMutation {
+                    return GateDecision::Deny {
+                        reason: "IMPLEMENT_DESIGN is pinned to implementation and cannot change the approved design.",
+                    };
+                }
+            }
+            None if descriptor.effect_class != CapabilityEffectClass::Read => {
+                return GateDecision::Deny {
+                    reason: "Database mutations require a structured execution envelope.",
+                };
+            }
+            None => {}
+        }
+    }
+
     // Observe never mutates, regardless of risk or an approval flag: it is a read-only envelope.
     if matches!(mode, OperatingMode::Observe) && descriptor.mutates {
         return GateDecision::Deny {
@@ -76,11 +131,24 @@ mod tests {
             risk,
             reversibility: Reversibility::NotApplicable,
             mutates,
+            effect_class: if mutates {
+                CapabilityEffectClass::RepositoryMutation
+            } else {
+                CapabilityEffectClass::Read
+            },
             timeout_ms: 1000,
             audited: true,
             available: true,
             unavailable_reason: None,
         }
+    }
+
+    fn gate(
+        mode: OperatingMode,
+        descriptor: &CapabilityDescriptor,
+        approved: bool,
+    ) -> GateDecision {
+        evaluate(mode, descriptor, approved, None, &json!({}))
     }
 
     #[test]
@@ -89,7 +157,9 @@ mod tests {
             evaluate(
                 OperatingMode::Observe,
                 &descriptor(RiskLevel::Low, false),
-                false
+                false,
+                None,
+                &json!({})
             ),
             GateDecision::Allow
         );
@@ -97,7 +167,9 @@ mod tests {
             evaluate(
                 OperatingMode::Observe,
                 &descriptor(RiskLevel::Medium, true),
-                true
+                true,
+                None,
+                &json!({})
             ),
             GateDecision::Deny { .. }
         ));
@@ -106,7 +178,7 @@ mod tests {
     #[test]
     fn assist_requires_approval_for_any_mutation() {
         assert_eq!(
-            evaluate(
+            gate(
                 OperatingMode::Assist,
                 &descriptor(RiskLevel::Low, false),
                 false
@@ -114,7 +186,7 @@ mod tests {
             GateDecision::Allow
         );
         assert_eq!(
-            evaluate(
+            gate(
                 OperatingMode::Assist,
                 &descriptor(RiskLevel::Medium, true),
                 false
@@ -122,7 +194,7 @@ mod tests {
             GateDecision::NeedsApproval
         );
         assert_eq!(
-            evaluate(
+            gate(
                 OperatingMode::Assist,
                 &descriptor(RiskLevel::Medium, true),
                 true
@@ -134,7 +206,7 @@ mod tests {
     #[test]
     fn execute_auto_runs_medium_but_gates_high() {
         assert_eq!(
-            evaluate(
+            gate(
                 OperatingMode::Execute,
                 &descriptor(RiskLevel::Medium, true),
                 false
@@ -142,7 +214,7 @@ mod tests {
             GateDecision::Allow
         );
         assert_eq!(
-            evaluate(
+            gate(
                 OperatingMode::Execute,
                 &descriptor(RiskLevel::High, true),
                 false
@@ -154,7 +226,7 @@ mod tests {
     #[test]
     fn autopilot_auto_runs_high_but_never_critical() {
         assert_eq!(
-            evaluate(
+            gate(
                 OperatingMode::Autopilot,
                 &descriptor(RiskLevel::High, true),
                 false
@@ -162,7 +234,7 @@ mod tests {
             GateDecision::Allow
         );
         assert_eq!(
-            evaluate(
+            gate(
                 OperatingMode::Autopilot,
                 &descriptor(RiskLevel::Critical, true),
                 false
@@ -170,7 +242,7 @@ mod tests {
             GateDecision::NeedsApproval
         );
         assert_eq!(
-            evaluate(
+            gate(
                 OperatingMode::Autopilot,
                 &descriptor(RiskLevel::Critical, true),
                 true

@@ -1,7 +1,7 @@
 {
-  "stamp": "2026-08-11T01:42:21.793Z",
+  "stamp": "2026-08-11T02:11:23.736Z",
   "gateScore": 1,
-  "checkScore": 1,
+  "checkScore": 12,
   "total": 14,
   "gates": [
     {
@@ -67,9 +67,74 @@
   ],
   "results": [
     {
+      "id": "B1",
+      "ok": true,
+      "detail": "ok in 0s"
+    },
+    {
+      "id": "B2",
+      "ok": true,
+      "detail": "4 suites green"
+    },
+    {
+      "id": "B3",
+      "ok": true,
+      "detail": "schema v28 migration tests green"
+    },
+    {
+      "id": "B4",
+      "ok": true,
+      "detail": "clean"
+    },
+    {
+      "id": "B5",
+      "ok": false,
+      "detail": "    :              `-- 'DatabaseScreen' is declared here |  28 | const SwarmsScreen = lazy(() => import('./screens/SwarmsScreen').then((module) => ({ default: module.SwarmsScreen }))) |     `---- |   help: Consider removing this declaration. | Found 1 warning and 0 errors. | Finished in 23ms on 239 files with 103 rules using 24 threads."
+    },
+    {
+      "id": "B6",
+      "ok": true,
+      "detail": "green"
+    },
+    {
+      "id": "B7",
+      "ok": true,
+      "detail": "7/7 fixtures asserted"
+    },
+    {
+      "id": "B8",
+      "ok": false,
+      "detail": "missing: stale,draft,revision"
+    },
+    {
+      "id": "B9",
+      "ok": true,
+      "detail": "structural diff tests green"
+    },
+    {
+      "id": "B10",
+      "ok": true,
+      "detail": "mode + selection contracts covered"
+    },
+    {
+      "id": "B11",
+      "ok": true,
+      "detail": "target/result verification green"
+    },
+    {
+      "id": "B12",
+      "ok": true,
+      "detail": "credential boundary tests green"
+    },
+    {
+      "id": "B13",
+      "ok": true,
+      "detail": "large-schema benchmark green"
+    },
+    {
       "id": "B14",
       "ok": true,
-      "detail": "no disabled tests introduced (40 added source lines scanned)"
+      "detail": "no disabled tests introduced (4945 added source lines scanned)"
     }
   ]
 }
