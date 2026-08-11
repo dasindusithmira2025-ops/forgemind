@@ -190,7 +190,7 @@ fn extract_table_names(content: &str) -> Vec<String> {
         .filter(|line| !line.trim_start().starts_with("--"))
         .collect::<Vec<_>>()
         .join("\n");
-    for part in without_comments.split(|c: char| c == ';' || c == '\n') {
+    for part in without_comments.split([';', '\n']) {
         let lower = part.to_ascii_lowercase();
         if let Some(rest) = lower.trim_start().strip_prefix("create table") {
             let name = rest
