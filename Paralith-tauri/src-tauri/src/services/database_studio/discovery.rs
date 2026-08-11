@@ -25,6 +25,7 @@ pub struct DiscoveryReport {
 pub fn discover_repository(project_root: &Path) -> AppResult<DiscoveryReport> {
     let files = collect_files(project_root)?;
     let packages = discover_packages(project_root, &files)?;
+    let compose_database_names = discover_compose_database_names(&files)?;
     let mut sources = Vec::new();
 
     for path in &files {
@@ -38,7 +39,7 @@ pub fn discover_repository(project_root: &Path) -> AppResult<DiscoveryReport> {
             let owner = owner_for_path(project_root, path, &packages);
             let source_package_name = package_name_for_owner(&owner, &packages);
             sources.push(DiscoveredLogicalDatabase {
-                logical_name: prisma_logical_name(&content, &relative),
+                logical_name: prisma_logical_name(&content, &relative, &compose_database_names),
                 engine: prisma_engine(&content),
                 owner_project: owner.clone(),
                 consumer_projects: consumers_for_package(
@@ -302,13 +303,51 @@ fn logical_name_from_sqlite_path(relative: &str) -> String {
         .to_owned()
 }
 
-fn prisma_logical_name(content: &str, relative: &str) -> String {
+fn discover_compose_database_names(files: &[PathBuf]) -> AppResult<Vec<String>> {
+    let mut names = Vec::new();
+    for path in files {
+        let file_name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default();
+        if file_name != "docker-compose.yml"
+            && file_name != "docker-compose.yaml"
+            && file_name != "compose.yml"
+            && file_name != "compose.yaml"
+        {
+            continue;
+        }
+        let content = fs::read_to_string(path).map_err(AppError::database)?;
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if let Some((key, value)) = trimmed.split_once(':') {
+                if key.trim().ends_with("_DB") || key.trim().ends_with("_DATABASE") {
+                    let value = value.trim().trim_matches(['\"', '\'']);
+                    if !value.is_empty() {
+                        names.push(sanitize_logical_name(value));
+                    }
+                }
+            }
+        }
+    }
+    names.dedup();
+    Ok(names)
+}
+
+fn prisma_logical_name(content: &str, relative: &str, compose_database_names: &[String]) -> String {
     if let Some(env_name) = prisma_datasource_env(content) {
+        if env_name == "DATABASE_URL" {
+            if let Some(name) = compose_database_names.first() {
+                return name.clone();
+            }
+            return prisma_datasource_name(content)
+                .unwrap_or_else(|| logical_name_from_path(relative));
+        }
         if let Some(prefix) = env_name.strip_suffix("_DATABASE_URL") {
             return sanitize_logical_name(prefix);
         }
-        if env_name == "DATABASE_URL" {
-            return logical_name_from_path(relative);
+        if let Some(prefix) = env_name.strip_suffix("_DB_URL") {
+            return sanitize_logical_name(prefix);
         }
     }
     prisma_datasource_name(content).unwrap_or_else(|| logical_name_from_path(relative))
@@ -393,7 +432,15 @@ fn extract_prisma_models(content: &str) -> Vec<String> {
     for line in content.lines() {
         let trimmed = line.trim();
         if let Some(rest) = trimmed.strip_prefix("model ") {
-            current_model = rest.split_whitespace().next().map(str::to_owned);
+            let name = rest.split_whitespace().next().map(str::to_owned);
+            if rest.contains('{') {
+                if let Some(name) = name {
+                    tables.push(name);
+                }
+                current_model = None;
+            } else {
+                current_model = name;
+            }
         }
         if trimmed.ends_with('{') && current_model.is_some() {
             tables.push(current_model.take().unwrap());
