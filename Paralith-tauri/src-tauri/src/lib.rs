@@ -9,9 +9,9 @@ mod services;
 
 use database::DatabaseService;
 use services::{
-    AgentDetector, AgentResumeService, FileSystemService, FileWatchService, RepositoryService,
-    RestorationScheduler, SelfWriteLedger, TerminalManager, UpdateService, UsageService,
-    WindowRegistry,
+    AgentDetector, AgentResumeService, DatabaseStudioRuntime, FileSystemService, FileWatchService,
+    RepositoryService, RestorationScheduler, SelfWriteLedger, TerminalManager, UpdateService,
+    UsageService, WindowRegistry,
 };
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -26,6 +26,9 @@ pub struct AppState {
     agent_resume: AgentResumeService,
     restoration: RestorationScheduler,
     repository: Arc<RepositoryService>,
+    /// Application-scoped Database Studio service composition. This shares `database`; it never
+    /// opens or owns a second application database connection.
+    database_studio: DatabaseStudioRuntime,
     /// Project-scoped, path-guarded filesystem access for the Code surface.
     filesystem: FileSystemService,
     /// Centralized per-Project filesystem watcher feeding the Code surface's external-change and
@@ -346,6 +349,7 @@ pub fn run() {
             );
             let windows = WindowRegistry::new(database.clone());
             let repository = Arc::new(RepositoryService::new(database.clone(), &data_dir));
+            let database_studio = DatabaseStudioRuntime::new(database.clone());
             // The editor's writes and the watcher share one ledger so PARALITH's own saves are not
             // reported back to the editor as external changes.
             let self_write_ledger = SelfWriteLedger::default();
@@ -398,6 +402,7 @@ pub fn run() {
                 filesystem.clone(),
                 terminals.clone(),
                 app.handle().clone(),
+                database_studio.clone(),
             );
             let usage = UsageService::new(database.clone());
             app.manage(AppState {
@@ -407,6 +412,7 @@ pub fn run() {
                 agent_resume,
                 restoration,
                 repository,
+                database_studio,
                 filesystem,
                 file_watch,
                 browser,
@@ -497,6 +503,9 @@ pub fn run() {
             commands::remove_project_from_recent,
             commands::relocate_project,
             commands::validate_working_directory,
+            commands::database_discover_sources,
+            commands::database_list_sources,
+            commands::database_publish_canvas_state,
             commands::detect_agents,
             commands::detect_shells,
             commands::list_agent_profiles,

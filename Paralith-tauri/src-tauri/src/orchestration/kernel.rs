@@ -22,6 +22,7 @@ use uuid::Uuid;
 
 use crate::database::DatabaseService;
 use crate::errors::{AppError, AppResult};
+use crate::services::database_studio::DatabaseStudioRuntime;
 use crate::services::{FileSystemService, TerminalManager};
 
 use super::model::{
@@ -49,6 +50,7 @@ pub struct OrchestrationKernel {
     terminals: Option<TerminalManager>,
     /// Present in the running application; `None` in headless tests. Persistence never depends on it.
     app: Option<AppHandle>,
+    database_studio: DatabaseStudioRuntime,
 }
 
 impl OrchestrationKernel {
@@ -57,12 +59,14 @@ impl OrchestrationKernel {
         filesystem: FileSystemService,
         terminals: TerminalManager,
         app: AppHandle,
+        database_studio: DatabaseStudioRuntime,
     ) -> Self {
         Self {
             database,
             filesystem,
             terminals: Some(terminals),
             app: Some(app),
+            database_studio,
         }
     }
 
@@ -276,6 +280,13 @@ impl OrchestrationKernel {
                     descriptor.available = false;
                     descriptor.unavailable_reason =
                         Some("Bind a project to this session to use this capability.");
+                } else if descriptor.domain == super::model::CapabilityDomain::Database
+                    && !self.database_studio.supports_capability(descriptor.id)
+                {
+                    descriptor.available = false;
+                    descriptor.unavailable_reason = Some(
+                        "This Database Studio capability is not implemented in the current slice.",
+                    );
                 } else if descriptor.domain == super::model::CapabilityDomain::Terminals
                     && !has_terminals
                 {
@@ -315,6 +326,19 @@ impl OrchestrationKernel {
             )
             .layer("orchestration"));
         };
+
+        if descriptor.domain == super::model::CapabilityDomain::Database
+            && !self.database_studio.supports_capability(descriptor.id)
+        {
+            return self.record_refusal(
+                &session,
+                &descriptor,
+                &request.arguments,
+                ExecutionState::Unavailable,
+                "capability_unavailable",
+                "This Database Studio capability is not implemented in the current slice.",
+            );
+        }
 
         // Availability + project scope pre-flight.
         if !descriptor.available {
@@ -519,6 +543,19 @@ impl OrchestrationKernel {
                 )?;
                 Ok(serde_json::to_value(result).unwrap_or(Value::Null))
             }
+            "database.list_sources" => {
+                let project_id = session_project(session)?;
+                Ok(json!({ "sources": self.database_studio.list_sources(project_id)? }))
+            }
+            "database.get_canvas_state" => serde_json::to_value(
+                self.database_studio
+                    .canvas_state(session_project(session)?)?,
+            )
+            .map_err(AppError::database),
+            "database.get_selection" => {
+                serde_json::to_value(self.database_studio.selection(session_project(session)?)?)
+                    .map_err(AppError::database)
+            }
             other => Err(AppError::new(
                 "capability_unavailable",
                 format!("Capability '{other}' has no dispatch implementation."),
@@ -587,11 +624,13 @@ impl OrchestrationKernel {
 
     #[cfg(test)]
     fn for_tests(database: Arc<DatabaseService>, filesystem: FileSystemService) -> Self {
+        let database_studio = DatabaseStudioRuntime::new(database.clone());
         Self {
             database,
             filesystem,
             terminals: None,
             app: None,
+            database_studio,
         }
     }
 }
@@ -879,6 +918,50 @@ mod tests {
             .events
             .iter()
             .any(|event| event.event_type == "capability_completed"));
+    }
+
+    #[test]
+    fn database_list_sources_executes_static_discovery_and_marks_later_slices_unavailable() {
+        let dir = TempDir::new();
+        std::fs::write(
+            dir.path().join("schema.sql"),
+            "CREATE TABLE users (id INTEGER PRIMARY KEY);",
+        )
+        .unwrap();
+        let (kernel, _db, project) = kernel_with_project(dir.path());
+        let session_id = create(&kernel, OperatingMode::Observe, Some(project));
+
+        let outcome = kernel
+            .execute_capability(ExecuteCapabilityRequest {
+                session_id: session_id.clone(),
+                capability_id: "database.list_sources".to_owned(),
+                arguments: json!({}),
+                approved: false,
+                database_execution: None,
+            })
+            .unwrap();
+        assert!(outcome.error.is_none());
+        assert_eq!(outcome.execution.state, ExecutionState::Succeeded);
+        assert_eq!(
+            outcome.result.unwrap()["sources"].as_array().unwrap().len(),
+            1
+        );
+
+        let capabilities = kernel.list_capabilities(&session_id).unwrap();
+        assert!(
+            capabilities
+                .iter()
+                .find(|capability| capability.id == "database.list_sources")
+                .unwrap()
+                .available
+        );
+        assert!(
+            !capabilities
+                .iter()
+                .find(|capability| capability.id == "database.get_schema")
+                .unwrap()
+                .available
+        );
     }
 
     #[test]
