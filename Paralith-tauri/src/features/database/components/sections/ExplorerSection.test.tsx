@@ -26,7 +26,7 @@ describe('ExplorerSection empty/loading/error states', () => {
       schemaPage: {
         objects: [{
           kind: 'table',
-          table: {
+          value: {
             meta: { identity: { id: 't1', logicalKey: 'users', qualifiedName: 'users', previousIds: [] }, sourceId: 's1', layer: 'declared', confidence: 1, provenanceIds: [], discoveredAt: '', observedAt: '', updatedAt: '', contentFingerprint: 'f' },
             namespaceId: 'ns1', name: 'users', columnIds: [], foreignKeyIds: [], uniqueConstraintIds: [], checkConstraintIds: [], indexIds: [],
           },

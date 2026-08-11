@@ -45,7 +45,7 @@ describe('applyDesignOperation: RenameTable preserves synthetic Proposed identit
 
   it('a selection referencing the proposed id remains valid after the rename (selection is keyed by id, never by name)', () => {
     const graph: ProposedGraph = { tables: { [proposedId]: proposedTable(proposedId, 'orders') }, columns: {} }
-    const selectionBefore: DatabaseSelection = { tableIds: [proposedId], columnIds: [], relationshipIds: [], focusedId: proposedId }
+    const selectionBefore: DatabaseSelection = { tableIds: [proposedId], columnIds: [], relationshipIds: [], namespaceIds: [], focusedId: proposedId }
 
     const next = applyDesignOperation(graph, { kind: 'rename_table', tableId: proposedId, newName: 'orders_v2' })
 

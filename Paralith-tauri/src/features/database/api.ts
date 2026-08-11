@@ -1,17 +1,17 @@
 /**
- * Database Studio Tauri boundary (WP3-owned; command *implementations* are WP4-owned).
+ * Database Studio Tauri boundary.
  *
  * This is the one place `src/features/database/**` calls `invoke`. The store and components never
  * import `@tauri-apps/api/core` directly — mirrors the `native/commands.ts` precedent so the
- * feature has a single, mockable seam. Command names and payload shapes are copied verbatim from
- * `.jcode/dbstudio/CONTRACTS.md` §8; nothing here is speculative. Because WP2/WP4 backend commands
- * do not exist on this branch yet, every call will reject at runtime with a Tauri "command not
- * found" error until they land — the store's error handling already treats that as an ordinary
- * load failure, so the surface degrades to its Error state rather than crashing.
+ * feature has a single, mockable seam. Every command here is implemented in
+ * `src-tauri/src/commands/database_commands.rs`; request and response shapes are the same structs
+ * on both sides, so a contract change is a compile error rather than a runtime surprise.
  */
 import { invoke } from '@tauri-apps/api/core'
 import type {
   ApplyDatabaseDesignOperationRequest,
+  DatabaseAdapterSupport,
+  GetDatabaseLayoutRequest,
   BuildDatabaseContextPackRequest,
   CompareDatabaseRequest,
   CreateDatabaseDraftRequest,
@@ -86,6 +86,9 @@ export const databaseApi = {
     invoke<DatabaseDesignMutationResult>('database_archive_design', { request }),
   saveLayout: (request: SaveDatabaseLayoutRequest) =>
     invoke<DatabaseLayout>('database_save_layout', { request }),
+  getLayout: (request: GetDatabaseLayoutRequest) =>
+    invoke<DatabaseLayout | null>('database_get_layout', { request }),
+  adapterSupport: () => invoke<DatabaseAdapterSupport[]>('database_adapter_support'),
   buildContextPack: (request: BuildDatabaseContextPackRequest) =>
     invoke<DatabaseContextPack>('database_build_context_pack', { request }),
   /** WP4-owned command; WP3 is the caller only (gate-1.md finding 5, CONTRACTS.md §8). */

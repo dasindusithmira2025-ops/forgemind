@@ -50,6 +50,18 @@ pub struct MaterializeRevisionRequest {
     pub actor: DatabaseActor,
     pub graph_fingerprint: String,
     pub now: String,
+    pub source_id: String,
+    /// The revision this operation will produce. Minted by the caller so the proposed graph can be
+    /// stamped with it *before* the transaction that writes both.
+    pub revision_id: RevisionId,
+    /// The complete proposed graph this operation produces. Written in the same transaction that
+    /// advances the head, so head and graph can never disagree.
+    pub graph: crate::models::ExtractedDatabaseGraph,
+}
+
+/// Mint a revision identity ahead of the transaction that materializes it.
+pub fn next_revision_id() -> RevisionId {
+    revision_id()
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -143,7 +155,7 @@ pub fn apply_operation(
     connection: &Connection,
     request: MaterializeRevisionRequest,
 ) -> AppResult<MaterializedRevision> {
-    let result_revision_id = revision_id();
+    let result_revision_id = request.revision_id.clone();
     let operation_id = operation_id();
     let next_revision_number = request.expected_head.revision_number + 1;
 
@@ -181,6 +193,8 @@ pub fn apply_operation(
         request.now,
         &revision,
         &operation,
+        &request.source_id,
+        &request.graph,
     )?;
 
     let design = database_studio::get_design(connection, &request.design_id)?;
@@ -344,6 +358,29 @@ mod tests {
               operation_payload_json TEXT NOT NULL,
               actor_kind TEXT NOT NULL, actor_id TEXT, created_at TEXT NOT NULL,
               UNIQUE(design_id, result_revision_id, sequence)
+            );
+            CREATE TABLE database_objects (
+              id TEXT NOT NULL, source_id TEXT NOT NULL REFERENCES database_sources(id) ON DELETE CASCADE,
+              snapshot_id TEXT NOT NULL DEFAULT '', design_revision_id TEXT NOT NULL DEFAULT '',
+              layer TEXT NOT NULL, object_kind TEXT NOT NULL,
+              logical_key TEXT NOT NULL, qualified_name TEXT NOT NULL, parent_object_id TEXT,
+              namespace_id TEXT, native_type TEXT, ordinal INTEGER, nullable INTEGER,
+              payload_version INTEGER NOT NULL, typed_payload_json TEXT NOT NULL, content_fingerprint TEXT NOT NULL,
+              confidence REAL NOT NULL, discovered_at TEXT NOT NULL, observed_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+              PRIMARY KEY(id, snapshot_id, design_revision_id)
+            );
+            CREATE TABLE database_edges (
+              id TEXT PRIMARY KEY, source_id TEXT NOT NULL REFERENCES database_sources(id) ON DELETE CASCADE,
+              snapshot_id TEXT NOT NULL DEFAULT '', design_revision_id TEXT NOT NULL DEFAULT '',
+              source_object_id TEXT NOT NULL, target_object_id TEXT NOT NULL,
+              edge_type TEXT NOT NULL, confidence REAL NOT NULL, created_at TEXT NOT NULL,
+              UNIQUE(snapshot_id, design_revision_id, source_object_id, target_object_id, edge_type)
+            );
+            CREATE TABLE database_object_provenance (
+              id TEXT PRIMARY KEY, object_id TEXT NOT NULL,
+              snapshot_id TEXT NOT NULL DEFAULT '', design_revision_id TEXT NOT NULL DEFAULT '',
+              evidence_id TEXT, source_kind TEXT NOT NULL, certainty TEXT NOT NULL, confidence REAL NOT NULL,
+              evidence_ref TEXT, extractor_version TEXT NOT NULL, observed_at TEXT NOT NULL
             );",
         ).unwrap();
         connection.execute("INSERT INTO database_sources(id,repository_id,logical_key,display_name,engine,owner_project_id,confidence,discovered_at,updated_at) VALUES('source','repo','source','Source','sqlite',NULL,1.0,'now','now')", []).unwrap();
@@ -410,6 +447,31 @@ mod tests {
         }
     }
 
+    fn materialize(
+        design: &DatabaseDesign,
+        expected_head: ExpectedDesignHead,
+        operation: DatabaseDesignOperationKind,
+        actor: DatabaseActor,
+        graph_fingerprint: &str,
+        now: &str,
+    ) -> MaterializeRevisionRequest {
+        MaterializeRevisionRequest {
+            design_id: design.id.clone(),
+            expected_head,
+            operation,
+            actor,
+            graph_fingerprint: graph_fingerprint.into(),
+            now: now.into(),
+            source_id: design.source_id.clone(),
+            revision_id: next_revision_id(),
+            graph: crate::models::ExtractedDatabaseGraph {
+                objects: Vec::new(),
+                edges: Vec::new(),
+                provenance: Vec::new(),
+            },
+        }
+    }
+
     fn expected(design: &DatabaseDesign) -> ExpectedDesignHead {
         ExpectedDesignHead {
             revision_id: design.head_revision_id.clone(),
@@ -425,14 +487,14 @@ mod tests {
 
         let materialized = apply_operation(
             &connection,
-            MaterializeRevisionRequest {
-                design_id: design.id.clone(),
-                expected_head: expected(&design),
-                operation: add_table_operation("accounts"),
-                actor: actor("claude"),
-                graph_fingerprint: "g1".into(),
-                now: "2026-08-11T00:01:00Z".into(),
-            },
+            materialize(
+                &design,
+                expected(&design),
+                add_table_operation("accounts"),
+                actor("claude"),
+                "g1",
+                "2026-08-11T00:01:00Z",
+            ),
         )
         .unwrap();
 
@@ -480,14 +542,14 @@ mod tests {
 
         let claude_result = apply_operation(
             &connection,
-            MaterializeRevisionRequest {
-                design_id: claude.id.clone(),
-                expected_head: expected(&claude),
-                operation: add_table_operation("claude_table"),
-                actor: actor("claude"),
-                graph_fingerprint: "claude1".into(),
-                now: "2026-08-11T00:04:00Z".into(),
-            },
+            materialize(
+                &claude,
+                expected(&claude),
+                add_table_operation("claude_table"),
+                actor("claude"),
+                "claude1",
+                "2026-08-11T00:04:00Z",
+            ),
         )
         .unwrap();
 
@@ -507,27 +569,27 @@ mod tests {
 
         apply_operation(
             &connection,
-            MaterializeRevisionRequest {
-                design_id: design.id.clone(),
-                expected_head: stale.clone(),
-                operation: add_table_operation("winner"),
-                actor: actor("claude"),
-                graph_fingerprint: "winner".into(),
-                now: "2026-08-11T00:05:00Z".into(),
-            },
+            materialize(
+                &design,
+                stale.clone(),
+                add_table_operation("winner"),
+                actor("claude"),
+                "winner",
+                "2026-08-11T00:05:00Z",
+            ),
         )
         .unwrap();
 
         let error = apply_operation(
             &connection,
-            MaterializeRevisionRequest {
-                design_id: design.id.clone(),
-                expected_head: stale,
-                operation: add_table_operation("loser"),
-                actor: actor("codex"),
-                graph_fingerprint: "loser".into(),
-                now: "2026-08-11T00:06:00Z".into(),
-            },
+            materialize(
+                &design,
+                stale,
+                add_table_operation("loser"),
+                actor("codex"),
+                "loser",
+                "2026-08-11T00:06:00Z",
+            ),
         )
         .unwrap_err();
 

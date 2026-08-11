@@ -41,10 +41,12 @@ pub fn evaluate(
                     };
                 }
                 if descriptor.effect_class == CapabilityEffectClass::DesignMutation
-                    && validated_arguments
-                        .get("designId")
-                        .and_then(Value::as_str)
-                        .is_some_and(|target| target != design_id)
+                    && design_id.as_deref().is_some_and(|pinned| {
+                        validated_arguments
+                            .get("designId")
+                            .and_then(Value::as_str)
+                            .is_some_and(|target| target != pinned)
+                    })
                 {
                     return GateDecision::Deny {
                         reason: "The requested design differs from the design pinned in the execution envelope.",

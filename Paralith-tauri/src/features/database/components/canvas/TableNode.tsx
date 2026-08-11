@@ -1,9 +1,15 @@
-import { Key, Link2 } from 'lucide-react'
+import { ArrowUpRight, Key } from 'lucide-react'
 import type { DatabaseNamespaceGroupView, DatabaseSemanticLod, DatabaseTableNodeView } from '../../databaseTypes'
+import { MEDIUM_ROW_CAP, NEAR_ROW_CAP } from './nodeMetrics'
+
+/** `TableNode`'s own visual detail tiers. `compact` is a rendering-only tier (never a zoom-lod
+ * value from the store) used when the schema has a single namespace group, so far zoom shows one
+ * small card per table instead of collapsing the entire database into one aggregate box. */
+export type TableNodeVisualLod = DatabaseSemanticLod | 'compact'
 
 interface TableNodeProps {
   table: DatabaseTableNodeView
-  lod: DatabaseSemanticLod
+  lod: TableNodeVisualLod
   x: number
   y: number
   width: number
@@ -12,18 +18,50 @@ interface TableNodeProps {
   onPointerDownDrag?: (event: React.PointerEvent, id: string) => void
 }
 
-const COLLAPSE_THRESHOLD = 6
-
 /**
  * A single table card. LOD is a prop, never internally derived — the parent (`SchemaCanvas`)
- * computes it once per frame from world zoom (UI-SPEC.md §3.1). Medium LOD renders only
- * PK/FK-flagged columns plus a collapsed "N more columns" row; near LOD renders every column.
+ * computes it once per frame from world zoom (UI-SPEC.md §3.1). `compact` shows name + relation
+ * count only. `medium`/`far`-resolved-to-medium shows PK/FK columns plus enough bounded scalar
+ * fields to fill `MEDIUM_ROW_CAP` rows; `near` shows more fields, up to `NEAR_ROW_CAP` — never
+ * literally every column, so a wide table's card height stays within what `nodeMetrics`'s layout
+ * estimate reserves for it (mission §16: no unbounded canvas content). Never raw ORM/SQL syntax —
+ * constraint membership renders as icons/badges, not `@relation(...)`/`@@index(...)` strings. The
+ * right Inspector is always the exhaustive source (mission §2).
  */
 export function TableNode({ table, lod, x, y, width, selected, onSelect, onPointerDownDrag }: TableNodeProps) {
-  const visibleColumns = lod === 'near' ? table.columns : table.columns.filter((column) => column.isPrimaryKey || column.isForeignKey)
-  const hiddenCount = lod === 'near' ? 0 : table.columns.length - visibleColumns.length
-  const shown = lod === 'near' ? visibleColumns : visibleColumns.slice(0, COLLAPSE_THRESHOLD)
-  const collapsedCount = hiddenCount + Math.max(0, visibleColumns.length - shown.length)
+  if (lod === 'compact') {
+    return (
+      <div
+        className={`db-canvas-node db-table-node-compact ${selected ? 'is-selected' : ''}`}
+        style={{ left: x, top: y, width }}
+        data-node-id={table.id}
+        role="button"
+        tabIndex={0}
+        aria-pressed={selected}
+        onPointerDown={(event) => onPointerDownDrag?.(event, table.id)}
+        onClick={(event) => onSelect(table.id, event.shiftKey || event.ctrlKey || event.metaKey)}
+        onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelect(table.id, event.shiftKey) } }}
+      >
+        <span className="db-table-node-compact-name" title={table.qualifiedName}>{table.name}</span>
+        <span className="db-table-node-compact-count">{table.relationCount || table.columns.length}</span>
+        {table.issueCount > 0 && <span className="db-table-node-issue-dot" title={`${table.issueCount} health issue${table.issueCount === 1 ? '' : 's'}`} />}
+      </div>
+    )
+  }
+
+  const rowCap = lod === 'near' ? NEAR_ROW_CAP : MEDIUM_ROW_CAP
+  const keyColumns = table.columns.filter((column) => column.isPrimaryKey || column.isForeignKey)
+  const remainingSlots = Math.max(0, rowCap - keyColumns.length)
+  const scalarColumns = [...table.columns]
+    .filter((column) => !column.isPrimaryKey && !column.isForeignKey)
+    .sort((a, b) => (Number(b.isUnique) - Number(a.isUnique)) || (Number(b.isIndexed) - Number(a.isIndexed)))
+    .slice(0, remainingSlots)
+  // Key columns are never dropped for being past the cap (a PK/FK is always architecturally
+  // relevant), but the total row count — and therefore the card's height — is still bounded by
+  // `nodeMetrics.estimateTableNodeHeight`, which reserves for up to `NEAR_ROW_CAP` rows regardless
+  // of tier; a table with more keys than that is the one case a card can outgrow its reserved slot.
+  const shown = table.columns.filter((column) => keyColumns.includes(column) || scalarColumns.includes(column))
+  const hiddenCount = table.columns.length - shown.length
 
   return (
     <div
@@ -43,13 +81,19 @@ export function TableNode({ table, lod, x, y, width, selected, onSelect, onPoint
       </header>
       <div className="db-table-node-columns">
         {shown.map((column) => (
-          <div key={column.id} className="db-table-node-column">
-            {column.isPrimaryKey ? <Key size={12} className="db-col-icon is-pk" aria-label="Primary key" /> : column.isForeignKey ? <Link2 size={12} className="db-col-icon is-fk" aria-label="Foreign key" /> : <span className="db-col-icon-spacer" />}
-            <span className="db-table-node-column-name">{column.name}</span>
-            <span className="db-table-node-column-type">{column.typeLabel}</span>
+          <div key={column.id} className={`db-table-node-column ${column.nullable && !column.isPrimaryKey ? 'is-nullable' : ''}`}>
+            {column.isPrimaryKey
+              ? <Key size={11} className="db-col-icon is-pk" aria-label="Primary key" />
+              : column.isForeignKey
+                ? <ArrowUpRight size={11} className="db-col-icon is-fk" aria-label="Foreign key" />
+                : <span className="db-col-icon-spacer" />}
+            <span className="db-table-node-column-name" title={column.name}>{column.name}</span>
+            {column.isUnique && !column.isPrimaryKey && <span className="db-col-badge is-unique" title="Unique">UQ</span>}
+            {column.isIndexed && !column.isPrimaryKey && !column.isUnique && <span className="db-col-badge is-indexed" title="Indexed" aria-hidden />}
+            <span className="db-table-node-column-type" title={column.typeLabel}>{column.typeLabel}</span>
           </div>
         ))}
-        {collapsedCount > 0 && <div className="db-table-node-more">+{collapsedCount} more column{collapsedCount === 1 ? '' : 's'}</div>}
+        {hiddenCount > 0 && <div className="db-table-node-more">+{hiddenCount} more field{hiddenCount === 1 ? '' : 's'}</div>}
       </div>
     </div>
   )
@@ -64,7 +108,10 @@ interface DomainAggregateNodeProps {
   onSelect: (id: string, additive: boolean) => void
 }
 
-/** LOD0 (far) render unit — one node per namespace/domain group, never a per-table card. */
+/** LOD0 (far) render unit when a schema has more than one namespace — one node per domain/namespace
+ * group, never a per-table card. Single-namespace schemas render `TableNode` in `compact` mode
+ * instead (see `SchemaCanvas`), since collapsing an entire single-schema database into one box
+ * communicates nothing about its architecture. */
 export function DomainAggregateNode({ group, x, y, width, selected, onSelect }: DomainAggregateNodeProps) {
   return (
     <div

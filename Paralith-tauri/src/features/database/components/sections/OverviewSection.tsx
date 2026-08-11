@@ -49,6 +49,16 @@ export function OverviewSection({ onNavigate }: { onNavigate: (section: Database
           <article key={source.id} className="db-overview-source-card">
             <strong>{source.displayName}</strong>
             <span className="db-inspector-list-secondary">{source.engine} · {source.adapterIds.join(', ')}</span>
+            {/* Ownership is the answer to "who defines this database, and who merely uses it" — the
+                thing a monorepo makes ambiguous and that one logical source must resolve. */}
+            {source.ownerProjectId && (
+              <span className="db-inspector-list-secondary">owned by {source.ownerProjectId}</span>
+            )}
+            {source.consumerProjectIds.length > 0 && (
+              <span className="db-inspector-list-secondary">
+                used by {source.consumerProjectIds.join(', ')}
+              </span>
+            )}
           </article>
         ))}
       </div>

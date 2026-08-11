@@ -14,6 +14,10 @@ pub struct DiscoveredLogicalDatabase {
     pub consumer_projects: Vec<String>,
     pub adapter_ids: Vec<DatabaseAdapterId>,
     pub table_names: Vec<String>,
+    /// Project-relative paths of the files that produced this logical source. Extraction is scoped
+    /// to these paths (plus migration directories beside them) so a repository with several logical
+    /// databases never attributes one datasource's schema to another.
+    pub evidence_paths: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -49,6 +53,7 @@ pub fn discover_repository(project_root: &Path) -> AppResult<DiscoveryReport> {
                 ),
                 adapter_ids: vec![DatabaseAdapterId::Prisma],
                 table_names: tables,
+                evidence_paths: vec![relative.clone()],
             });
         } else if is_drizzle_schema_candidate(&relative) {
             let content = fs::read_to_string(path).map_err(AppError::database)?;
@@ -67,6 +72,7 @@ pub fn discover_repository(project_root: &Path) -> AppResult<DiscoveryReport> {
                 consumer_projects: Vec::new(),
                 adapter_ids: vec![DatabaseAdapterId::Drizzle],
                 table_names: tables,
+                evidence_paths: vec![relative.clone()],
             });
         } else if relative.ends_with(".sql") {
             if relative.contains("prisma/migrations/") {
@@ -85,6 +91,7 @@ pub fn discover_repository(project_root: &Path) -> AppResult<DiscoveryReport> {
                 consumer_projects: Vec::new(),
                 adapter_ids: vec![DatabaseAdapterId::RawSql],
                 table_names: tables,
+                evidence_paths: vec![relative.clone()],
             });
         } else if is_sqlite_file_evidence(&relative) {
             let owner = owner_for_path(project_root, path, &packages);
@@ -95,6 +102,7 @@ pub fn discover_repository(project_root: &Path) -> AppResult<DiscoveryReport> {
                 consumer_projects: Vec::new(),
                 adapter_ids: vec![DatabaseAdapterId::Sqlite],
                 table_names: Vec::new(),
+                evidence_paths: vec![relative.clone()],
             });
         }
     }
@@ -110,6 +118,7 @@ pub fn discover_repository(project_root: &Path) -> AppResult<DiscoveryReport> {
             merge_unique(&mut existing.adapter_ids, source.adapter_ids);
             merge_unique(&mut existing.table_names, source.table_names);
             merge_unique(&mut existing.consumer_projects, source.consumer_projects);
+            merge_unique(&mut existing.evidence_paths, source.evidence_paths);
         } else {
             merged.push(source);
         }
@@ -117,12 +126,15 @@ pub fn discover_repository(project_root: &Path) -> AppResult<DiscoveryReport> {
     for source in &mut merged {
         source.table_names.dedup();
         source.adapter_ids.dedup();
+        source.evidence_paths.sort();
+        source.evidence_paths.dedup();
         source.consumer_projects.sort();
         source.consumer_projects.dedup();
         if source.engine == DatabaseEngine::Sqlite {
-            if let Some(raw) = sqlite_tables.clone() {
+            if let Some((raw, raw_paths)) = sqlite_tables.clone() {
                 if source.table_names.is_empty() {
                     source.table_names = raw;
+                    merge_unique(&mut source.evidence_paths, raw_paths);
                 }
                 if !source.adapter_ids.contains(&DatabaseAdapterId::RawSql) {
                     source.adapter_ids.push(DatabaseAdapterId::RawSql);
@@ -131,7 +143,7 @@ pub fn discover_repository(project_root: &Path) -> AppResult<DiscoveryReport> {
         }
     }
     if merged.is_empty() {
-        if let Some(raw) = sqlite_tables {
+        if let Some((raw, raw_paths)) = sqlite_tables {
             merged.push(DiscoveredLogicalDatabase {
                 logical_name: "dev".into(),
                 engine: DatabaseEngine::Sqlite,
@@ -139,6 +151,7 @@ pub fn discover_repository(project_root: &Path) -> AppResult<DiscoveryReport> {
                 consumer_projects: Vec::new(),
                 adapter_ids: vec![DatabaseAdapterId::Sqlite, DatabaseAdapterId::RawSql],
                 table_names: raw,
+                evidence_paths: raw_paths,
             });
         }
     }
@@ -176,7 +189,8 @@ fn discover_packages(project_root: &Path, files: &[PathBuf]) -> AppResult<Vec<Pa
             dependencies: json_dependency_names(&content),
         });
     }
-    packages.sort_by(|left, right| right.root.len().cmp(&left.root.len()));
+    // Longest path first, so the most specific package wins when several enclose a file.
+    packages.sort_by_key(|package| std::cmp::Reverse(package.root.len()));
     Ok(packages)
 }
 
@@ -482,8 +496,14 @@ fn quoted_arg(input: &str) -> Option<String> {
     Some(after[..after.find(quote)?].to_owned())
 }
 
-fn merged_sqlite_tables(project_root: &Path, files: &[PathBuf]) -> AppResult<Option<Vec<String>>> {
+/// SQLite table names declared by repository `.sql` files, together with the project-relative paths
+/// they came from so a SQLite source keeps exact file-level provenance.
+fn merged_sqlite_tables(
+    project_root: &Path,
+    files: &[PathBuf],
+) -> AppResult<Option<(Vec<String>, Vec<String>)>> {
     let mut tables = Vec::new();
+    let mut paths = Vec::new();
     for path in files {
         let relative = relative_path(project_root, path);
         if relative.ends_with(".sql") && !relative.contains("prisma/migrations/") {
@@ -491,7 +511,11 @@ fn merged_sqlite_tables(project_root: &Path, files: &[PathBuf]) -> AppResult<Opt
             if sql_engine(&content, &relative) == DatabaseEngine::Sqlite
                 || relative.contains("sqlite")
             {
-                tables.extend(extract_table_names(&content));
+                let found = extract_table_names(&content);
+                if !found.is_empty() {
+                    paths.push(relative);
+                }
+                tables.extend(found);
             }
         }
     }
@@ -500,7 +524,9 @@ fn merged_sqlite_tables(project_root: &Path, files: &[PathBuf]) -> AppResult<Opt
     } else {
         tables.sort();
         tables.dedup();
-        Ok(Some(tables))
+        paths.sort();
+        paths.dedup();
+        Ok(Some((tables, paths)))
     }
 }
 
@@ -601,6 +627,36 @@ fn split_sql_statements(content: &str) -> Vec<String> {
     statements
 }
 
+/// Human-facing label for a logical datasource: the discovered logical key in title case, suffixed
+/// with the engine when it is known. `primary` + postgres becomes `Primary PostgreSQL`, which keeps
+/// the explorer readable without inventing information the evidence does not support.
+fn display_name_for(logical_name: &str, engine: &DatabaseEngine) -> String {
+    let mut label = String::new();
+    for (index, part) in logical_name.split(['-', '_', ' ']).enumerate() {
+        if part.is_empty() {
+            continue;
+        }
+        if index > 0 {
+            label.push(' ');
+        }
+        let mut characters = part.chars();
+        if let Some(first) = characters.next() {
+            label.extend(first.to_uppercase());
+            label.push_str(characters.as_str());
+        }
+    }
+    if label.is_empty() {
+        label.push_str("Database");
+    }
+    match engine {
+        DatabaseEngine::Postgres => format!("{label} PostgreSQL"),
+        DatabaseEngine::Mysql => format!("{label} MySQL"),
+        DatabaseEngine::Mariadb => format!("{label} MariaDB"),
+        DatabaseEngine::Sqlite => format!("{label} SQLite"),
+        DatabaseEngine::Unknown => label,
+    }
+}
+
 pub fn to_database_source(
     repository_id: &str,
     discovered: &DiscoveredLogicalDatabase,
@@ -615,14 +671,12 @@ pub fn to_database_source(
         id,
         repository_id: repository_id.to_owned(),
         logical_key: discovered.logical_name.clone(),
-        display_name: if discovered.logical_name == "primary" {
-            "Primary PostgreSQL".into()
-        } else {
-            discovered.logical_name.clone()
-        },
+        display_name: display_name_for(&discovered.logical_name, &discovered.engine),
         engine: discovered.engine.clone(),
         adapter_ids: discovered.adapter_ids.clone(),
         owner_project_id: Some(discovered.owner_project.clone()),
+        // Evidence rows are attached by the persistence layer once they are written; discovery only
+        // knows the files, not their stored evidence identities.
         consumer_project_ids: discovered.consumer_projects.clone(),
         environment_ids: Vec::new(),
         evidence_ids: Vec::new(),

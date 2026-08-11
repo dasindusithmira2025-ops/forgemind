@@ -485,21 +485,25 @@ export interface ListDatabaseSourcesRequest { projectId: DbProjectId }
 export interface GetDatabaseSourceRequest { projectId: DbProjectId; sourceId: string }
 export interface DatabaseSourceDetail { source: DatabaseSource; evidence: DatabaseSourceEvidence[]; environments: DatabaseEnvironment[] }
 
-/** Mirrors §4's `DatabaseObject` enum exactly, so a schema page can carry mixed-kind rows. */
+/**
+ * Mirrors the backend `DatabaseObject` enum, which serializes adjacently tagged as
+ * `{ kind, value }`. Keeping the same envelope on both sides means a mixed-kind schema page needs
+ * no translation layer and a new object kind is a compile error here rather than a silent drop.
+ */
 export type DatabaseGraphObject =
-  | { kind: 'environment'; environment: DatabaseEnvironment }
-  | { kind: 'namespace'; namespace: DatabaseNamespace }
-  | { kind: 'table'; table: DatabaseTable }
-  | { kind: 'column'; column: DatabaseColumn }
-  | { kind: 'primary_key'; primaryKey: PrimaryKey }
-  | { kind: 'foreign_key'; foreignKey: ForeignKey }
-  | { kind: 'unique_constraint'; constraint: UniqueConstraint }
-  | { kind: 'check_constraint'; constraint: CheckConstraint }
-  | { kind: 'index'; index: DatabaseIndex }
-  | { kind: 'enum'; enumObject: DatabaseEnum }
-  | { kind: 'view'; view: DatabaseView }
-  | { kind: 'migration'; migration: DatabaseMigration }
-  | { kind: 'orm_model'; ormModel: OrmModel }
+  | { kind: 'environment'; value: DatabaseEnvironment }
+  | { kind: 'namespace'; value: DatabaseNamespace }
+  | { kind: 'table'; value: DatabaseTable }
+  | { kind: 'column'; value: DatabaseColumn }
+  | { kind: 'primary_key'; value: PrimaryKey }
+  | { kind: 'foreign_key'; value: ForeignKey }
+  | { kind: 'unique_constraint'; value: UniqueConstraint }
+  | { kind: 'check_constraint'; value: CheckConstraint }
+  | { kind: 'index'; value: DatabaseIndex }
+  | { kind: 'enum'; value: DatabaseEnum }
+  | { kind: 'view'; value: DatabaseView }
+  | { kind: 'migration'; value: DatabaseMigration }
+  | { kind: 'orm_model'; value: OrmModel }
 
 export interface DatabaseViewportRequest { x: number; y: number; zoom: number }
 export interface GetDatabaseSchemaRequest {
@@ -533,6 +537,18 @@ export interface DatabaseObjectDetail {
   migrations: DatabaseMigration[]
   issues: DatabaseIssue[]
   sourceExcerpt?: { relativePath: string; text: string }
+  provenance: DatabaseObjectProvenance[]
+}
+
+export interface DatabaseObjectProvenance {
+  id: string
+  objectId: SemanticId
+  sourceKind: string
+  certainty: EvidenceCertainty
+  confidence: number
+  evidenceRef?: string
+  extractorVersion: string
+  observedAt: string
 }
 
 export interface CompareDatabaseRequest { projectId: DbProjectId; mode: DatabaseComparisonMode }
@@ -544,12 +560,24 @@ export interface IntrospectSqliteFileRequest { projectId: DbProjectId; sourceId:
 
 export type CreateDatabaseDraftBase = { kind: 'snapshot'; snapshotId: SnapshotId } | { kind: 'revision'; revisionId: RevisionId }
 export interface CreateDatabaseDraftRequest { projectId: DbProjectId; sourceId: string; name: string; base: CreateDatabaseDraftBase }
-export interface DatabaseDesignBundle { design: DatabaseDesign; revision: DatabaseDesignRevision; objects: DatabaseTable[]; edges: DatabaseEdge[]; issues: DatabaseIssue[] }
+export interface DatabaseDesignBundle {
+  design: DatabaseDesign
+  revision: DatabaseDesignRevision
+  objects: DatabaseGraphObject[]
+  edges: DatabaseEdge[]
+  issues: DatabaseIssue[]
+  concurrency: DesignConcurrencyToken
+}
 export interface ListDatabaseDesignsRequest { projectId: DbProjectId; sourceId: string }
 export interface GetDatabaseDesignRequest { projectId: DbProjectId; designId: DesignId; revisionId?: RevisionId }
-export interface ApplyDatabaseDesignOperationRequest { projectId: DbProjectId; designId: DesignId; token: DesignConcurrencyToken; operation: DatabaseDesignOperationKind }
-export interface DatabaseDesignMutationResult { design: DatabaseDesign; revision: DatabaseDesignRevision; token: DesignConcurrencyToken }
-export interface DecideDatabaseDesignRequest { projectId: DbProjectId; designId: DesignId; token: DesignConcurrencyToken; reason?: string }
+export interface ApplyDatabaseDesignOperationRequest { projectId: DbProjectId; designId: DesignId; concurrency: DesignConcurrencyToken; operation: DatabaseDesignOperationKind }
+export interface DatabaseDesignMutationResult {
+  design: DatabaseDesign
+  revision: DatabaseDesignRevision
+  concurrency: DesignConcurrencyToken
+  changedObjectIds: SemanticId[]
+}
+export interface DecideDatabaseDesignRequest { projectId: DbProjectId; designId: DesignId; concurrency: DesignConcurrencyToken; reason?: string }
 
 export interface DatabaseLayoutPosition { x: number; y: number }
 export interface DatabaseLayout {
@@ -620,8 +648,62 @@ export interface PublishDatabaseCanvasStateRequest { projectId: DbProjectId; con
 export interface DatabaseCanvasStateReceipt { fingerprint: string; capturedAt: string }
 
 export type DatabaseExecutionMode = 'design_only' | 'implement_design'
-export interface ImplementDatabaseDesignRequest { projectId: DbProjectId; designId: DesignId; approvedRevisionId: RevisionId; executionMode: DatabaseExecutionMode }
-export interface DatabaseImplementationRun { runId: string; designId: DesignId; targetRevisionId: RevisionId; phase: string; completed: number; total: number }
+export interface ImplementDatabaseDesignRequest {
+  projectId: DbProjectId
+  designId: DesignId
+  approvedRevisionId: RevisionId
+  executionMode: DatabaseExecutionMode
+  /** Destructive changes require a second, explicit confirmation before anything is written. */
+  acknowledgeDestructive?: boolean
+  /** Plan and report without touching the repository. */
+  dryRun?: boolean
+}
+
+export type DatabaseChangeRisk = 'safe' | 'review' | 'destructive' | 'unsupported'
+
+export interface DatabaseImplementationStep { phase: string; detail: string; ok: boolean }
+
+export interface DatabaseImplementationRun {
+  runId: string
+  designId: DesignId
+  targetRevisionId: RevisionId
+  phase: string
+  completed: number
+  total: number
+  risk: DatabaseChangeRisk
+  dryRun: boolean
+  changedFiles: string[]
+  migrationPath?: string
+  steps: DatabaseImplementationStep[]
+  /** True only when re-extracting the repository reproduces the approved target exactly. */
+  verified: boolean
+  residualChanges: DatabaseChange[]
+}
+
+export interface GetDatabaseLayoutRequest {
+  projectId: DbProjectId
+  sourceId: string
+  snapshotId?: SnapshotId
+  designRevisionId?: RevisionId
+  layoutKind: string
+  semanticLod: number
+}
+
+export interface DatabaseAdapterCapabilities {
+  detect: boolean
+  extractDeclaredSchema: boolean
+  extractMigrations: boolean
+  introspectObservedSchema: boolean
+  validate: boolean
+  diff: boolean
+  generateChange: boolean
+  supportsReadOnlyTransaction: boolean
+}
+
+export interface DatabaseAdapterSupport {
+  adapterId: DatabaseAdapterId
+  capabilities: DatabaseAdapterCapabilities
+}
 
 // ---------------------------------------------------------------------------------------------
 // Events (payload shapes only; subscription lives in `native/events.ts`-style helpers if wired)
@@ -689,14 +771,15 @@ export interface DatabaseSelection {
   tableIds: SemanticId[]
   columnIds: SemanticId[]
   relationshipIds: SemanticId[]
+  namespaceIds: SemanticId[]
   focusedId?: SemanticId
 }
 
 export function emptyDatabaseSelection(): DatabaseSelection {
-  return { tableIds: [], columnIds: [], relationshipIds: [] }
+  return { tableIds: [], columnIds: [], relationshipIds: [], namespaceIds: [] }
 }
 
-export type DatabaseGroupByOption = 'namespace' | 'domain' | 'source'
+export type DatabaseGroupByOption = 'namespace' | 'domain' | 'source' | 'none'
 
 export interface DatabaseCanvasFilters {
   search?: string
@@ -751,7 +834,9 @@ export interface DatabaseTableNodeView {
   name: string
   groupId: string
   groupLabel: string
-  columns: Array<{ id: SemanticId; name: string; typeLabel: string; isPrimaryKey: boolean; isForeignKey: boolean; nullable: boolean }>
+  columns: Array<{ id: SemanticId; name: string; typeLabel: string; isPrimaryKey: boolean; isForeignKey: boolean; isUnique: boolean; isIndexed: boolean; nullable: boolean }>
+  /** Total relationship count (outgoing FK + incoming FK) — used by the far-zoom compact node. */
+  relationCount: number
   issueCount: number
   pinned: boolean
 }

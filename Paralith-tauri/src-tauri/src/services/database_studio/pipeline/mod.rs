@@ -3,6 +3,9 @@
 //! Static discovery/extraction remains command-free. Only an already-authorized implementation
 //! plan may cross this module's exhaustive argv boundary. Raw SQL never launches a process.
 
+pub mod execute;
+pub mod native;
+
 use crate::errors::{AppError, AppResult};
 use crate::models::DatabaseAdapterId;
 use std::collections::BTreeSet;

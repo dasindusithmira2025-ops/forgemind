@@ -3,17 +3,22 @@ import { asDatabaseError, databaseApi } from './api'
 import type {
   CreateDatabaseDraftBase,
   DatabaseCanvasFilters,
+  DatabaseComparisonMode,
   DatabaseDesign,
   DatabaseDesignBundle,
   DatabaseDesignOperationKind,
+  DatabaseDiff,
   DatabaseGraphPage,
+  DatabaseImplementationRun,
   DatabaseIssue,
   DatabaseLayer,
   DatabaseLoadState,
   DatabaseMigration,
   DatabaseObjectDetail,
   DatabaseSelection,
+  DatabaseSnapshot,
   DatabaseSource,
+  DatabaseZoomTier,
   DesignConcurrencyToken,
   SemanticId,
 } from './databaseTypes'
@@ -58,11 +63,23 @@ interface DatabaseState {
   selection: DatabaseSelection
   filters: DatabaseCanvasFilters
   pinnedPositions: Record<SemanticId, { x: number; y: number }>
+  /** Backend-driven level of detail. 0 = tables only, 3 = every column and constraint. */
+  semanticLod: number
+
+  comparison?: DatabaseDiff
+  comparisonLoad: DatabaseLoadState
+  implementationRun?: DatabaseImplementationRun
+  implementationLoad: DatabaseLoadState
+  observedSnapshot?: DatabaseSnapshot
+  introspectionLoad: DatabaseLoadState
 
   reset: () => void
   loadProject: (projectId: string) => Promise<void>
   discoverSources: (force?: boolean) => Promise<void>
   selectSource: (sourceId: string, layer?: DatabaseLayer) => void
+  /** Switch which layer the surfaces project: what the repository declares, what a database
+   * actually contains, or what a design proposes. The three are never merged. */
+  setLayer: (layer: DatabaseLayer) => void
   loadSchema: () => Promise<void>
   loadObjectDetail: (objectId: SemanticId) => Promise<void>
   loadMigrations: () => Promise<void>
@@ -77,11 +94,25 @@ interface DatabaseState {
    * rebases or drops the edit.
    */
   applyOperation: (operation: DatabaseDesignOperationKind) => Promise<void>
+  selectDesign: (designId: string | undefined) => Promise<void>
+  decideDesign: (decision: 'approve' | 'reject' | 'archive', reason?: string) => Promise<void>
+  compare: (mode: DatabaseComparisonMode) => Promise<void>
+  clearComparison: () => void
+  implementActiveDesign: (options?: { acknowledgeDestructive?: boolean; dryRun?: boolean }) => Promise<void>
+  introspectSqliteFile: (projectRelativePath: string) => Promise<void>
+  setSemanticLod: (lod: number) => void
+  /**
+   * Publish the semantic canvas state so an agent asked to act on "these tables" receives the exact
+   * object IDs the user selected, never coordinates and never a screenshot.
+   */
+  publishCanvasState: (zoomTier: DatabaseZoomTier, visibleObjectIds: SemanticId[]) => Promise<void>
   dismissStaleRevisionNotice: () => void
   selectObjects: (ids: SemanticId[], options?: { additive?: boolean; focusedId?: SemanticId }) => void
   clearSelection: () => void
   setSearch: (search: string) => void
   setHideUnrelated: (value: boolean) => void
+  setNHop: (value: number) => void
+  setGroupBy: (value: DatabaseCanvasFilters['groupBy']) => void
   setPinnedPosition: (id: SemanticId, position: { x: number; y: number } | undefined) => void
 }
 
@@ -105,6 +136,10 @@ export const useDatabaseStore = create<DatabaseState>((set, get) => ({
   selection: emptyDatabaseSelection(),
   filters: { hideUnrelated: false },
   pinnedPositions: {},
+  semanticLod: 2,
+  comparisonLoad: EMPTY_LOAD,
+  implementationLoad: EMPTY_LOAD,
+  introspectionLoad: EMPTY_LOAD,
 
   reset: () => set({
     projectId: undefined,
@@ -132,6 +167,13 @@ export const useDatabaseStore = create<DatabaseState>((set, get) => ({
     selection: emptyDatabaseSelection(),
     filters: { hideUnrelated: false },
     pinnedPositions: {},
+    semanticLod: 2,
+    comparison: undefined,
+    comparisonLoad: EMPTY_LOAD,
+    implementationRun: undefined,
+    implementationLoad: EMPTY_LOAD,
+    observedSnapshot: undefined,
+    introspectionLoad: EMPTY_LOAD,
   }),
 
   loadProject: async (projectId) => {
@@ -162,7 +204,38 @@ export const useDatabaseStore = create<DatabaseState>((set, get) => ({
   },
 
   selectSource: (sourceId, layer) => {
-    set({ activeSourceId: sourceId, activeLayer: layer ?? get().activeLayer, schemaPage: undefined, schemaLoad: EMPTY_LOAD, selection: emptyDatabaseSelection() })
+    if (get().activeSourceId === sourceId && !layer) return
+    // Designs, comparisons, and observed snapshots belong to one source. Carrying them across a
+    // source switch would show one database's proposal on top of another's schema.
+    set({
+      activeSourceId: sourceId,
+      activeLayer: layer ?? 'declared',
+      schemaPage: undefined,
+      schemaLoad: EMPTY_LOAD,
+      selection: emptyDatabaseSelection(),
+      designsLoad: EMPTY_LOAD,
+      designs: [],
+      activeDesignId: undefined,
+      activeBundle: undefined,
+      activeToken: undefined,
+      proposedGraph: { tables: {}, columns: {} },
+      migrationsLoad: EMPTY_LOAD,
+      migrations: [],
+      issuesLoad: EMPTY_LOAD,
+      issues: [],
+      comparison: undefined,
+      comparisonLoad: EMPTY_LOAD,
+      implementationRun: undefined,
+      implementationLoad: EMPTY_LOAD,
+      observedSnapshot: undefined,
+      introspectionLoad: EMPTY_LOAD,
+    })
+  },
+
+  setLayer: (layer) => {
+    if (get().activeLayer === layer) return
+    set({ activeLayer: layer, schemaPage: undefined, schemaLoad: EMPTY_LOAD, selection: emptyDatabaseSelection() })
+    void get().loadSchema()
   },
 
   loadSchema: async () => {
@@ -170,7 +243,14 @@ export const useDatabaseStore = create<DatabaseState>((set, get) => ({
     if (!projectId || !activeSourceId) return
     set({ schemaLoad: { status: 'loading' } })
     try {
-      const page = await databaseApi.getSchema({ projectId, sourceId: activeSourceId, layer: activeLayer, lod: 0 })
+      const { semanticLod, activeBundle } = get()
+      const page = await databaseApi.getSchema({
+        projectId,
+        sourceId: activeSourceId,
+        layer: activeLayer,
+        lod: semanticLod,
+        designRevisionId: activeLayer === 'proposed' ? activeBundle?.revision.id : undefined,
+      })
       if (get().loadToken !== loadToken || get().activeSourceId !== activeSourceId) return
       set({ schemaLoad: { status: 'ready' }, schemaPage: page })
     } catch (caught) {
@@ -244,20 +324,192 @@ export const useDatabaseStore = create<DatabaseState>((set, get) => ({
   },
 
   createDraft: async (name, base) => {
-    const { projectId, activeSourceId } = get()
+    const { projectId, activeSourceId, schemaPage } = get()
     if (!projectId || !activeSourceId) return
+    // A draft is always rooted in a concrete snapshot or revision the user can point at, so two
+    // drafts created from the same screen provably share a base.
+    const resolvedBase: CreateDatabaseDraftBase | undefined =
+      base ?? (schemaPage?.snapshot ? { kind: 'snapshot', snapshotId: schemaPage.snapshot.id } : undefined)
+    if (!resolvedBase) {
+      set({ designError: 'Load a schema before creating a design draft.' })
+      return
+    }
     set({ designError: undefined })
     try {
-      const bundle = await databaseApi.createDraft({ projectId, sourceId: activeSourceId, name, base })
+      const bundle = await databaseApi.createDraft({ projectId, sourceId: activeSourceId, name, base: resolvedBase })
       if (get().activeSourceId !== activeSourceId) return
       set({
         activeDesignId: bundle.design.id,
         activeBundle: bundle,
-        activeToken: { expectedHeadRevisionId: bundle.revision.id, expectedRevisionNumber: bundle.revision.revisionNumber },
-        designs: [bundle.design, ...get().designs],
+        activeToken: bundle.concurrency,
+        proposedGraph: proposedGraphFromBundle(bundle),
+        designs: [bundle.design, ...get().designs.filter((design) => design.id !== bundle.design.id)],
+        activeLayer: 'proposed',
+        schemaPage: undefined,
+        schemaLoad: EMPTY_LOAD,
       })
+      void get().loadSchema()
     } catch (caught) {
       set({ designError: asDatabaseError(caught).message })
+    }
+  },
+
+  selectDesign: async (designId) => {
+    const { projectId } = get()
+    if (!designId) {
+      set({
+        activeDesignId: undefined,
+        activeBundle: undefined,
+        activeToken: undefined,
+        proposedGraph: { tables: {}, columns: {} },
+        activeLayer: 'declared',
+        schemaPage: undefined,
+        schemaLoad: EMPTY_LOAD,
+      })
+      return
+    }
+    if (!projectId) return
+    set({ designError: undefined })
+    try {
+      const bundle = await databaseApi.getDesign({ projectId, designId })
+      set({
+        activeDesignId: bundle.design.id,
+        activeBundle: bundle,
+        activeToken: bundle.concurrency,
+        proposedGraph: proposedGraphFromBundle(bundle),
+        staleRevisionNotice: undefined,
+        // Opening a design projects the Proposed layer, so the diagram shows what is being
+        // designed rather than silently continuing to render the declared schema.
+        activeLayer: 'proposed',
+        schemaPage: undefined,
+        schemaLoad: EMPTY_LOAD,
+      })
+      void get().loadSchema()
+    } catch (caught) {
+      set({ designError: asDatabaseError(caught).message })
+    }
+  },
+
+  decideDesign: async (decision, reason) => {
+    const { projectId, activeDesignId, activeToken, activeBundle } = get()
+    if (!projectId || !activeDesignId || !activeToken) return
+    const request = { projectId, designId: activeDesignId, concurrency: activeToken, reason }
+    set({ designError: undefined })
+    try {
+      const result = decision === 'approve'
+        ? await databaseApi.approveDesign(request)
+        : decision === 'reject'
+          ? await databaseApi.rejectDesign(request)
+          : await databaseApi.archiveDesign(request)
+      set({
+        activeToken: result.concurrency,
+        designs: get().designs.map((design) => (design.id === result.design.id ? result.design : design)),
+        activeBundle: activeBundle ? { ...activeBundle, design: result.design } : undefined,
+      })
+    } catch (caught) {
+      if (isDatabaseStaleRevisionError(caught)) {
+        set({ staleRevisionNotice: { designId: activeDesignId } })
+        return
+      }
+      set({ designError: asDatabaseError(caught).message })
+    }
+  },
+
+  compare: async (mode) => {
+    const { projectId } = get()
+    if (!projectId) return
+    set({ comparisonLoad: { status: 'loading' } })
+    try {
+      const comparison = await databaseApi.compare({ projectId, mode })
+      set({ comparison, comparisonLoad: { status: 'ready' } })
+    } catch (caught) {
+      const error = asDatabaseError(caught)
+      set({ comparisonLoad: { status: 'error', errorCode: error.code, errorMessage: error.message } })
+    }
+  },
+
+  clearComparison: () => set({ comparison: undefined, comparisonLoad: EMPTY_LOAD }),
+
+  implementActiveDesign: async (options = {}) => {
+    const { projectId, activeBundle } = get()
+    const approvedRevisionId = activeBundle?.design.approvedRevisionId
+    if (!projectId || !activeBundle || !approvedRevisionId) {
+      set({ designError: 'Approve a design revision before implementing it.' })
+      return
+    }
+    set({ implementationLoad: { status: 'loading' }, designError: undefined })
+    try {
+      const run = await databaseApi.implementDesign({
+        projectId,
+        designId: activeBundle.design.id,
+        approvedRevisionId,
+        executionMode: 'implement_design',
+        acknowledgeDestructive: options.acknowledgeDestructive ?? false,
+        dryRun: options.dryRun ?? false,
+      })
+      set({ implementationRun: run, implementationLoad: { status: 'ready' } })
+      if (!run.dryRun) await get().discoverSources(true)
+    } catch (caught) {
+      const error = asDatabaseError(caught)
+      set({ implementationLoad: { status: 'error', errorCode: error.code, errorMessage: error.message } })
+    }
+  },
+
+  introspectSqliteFile: async (projectRelativePath) => {
+    const { projectId, activeSourceId } = get()
+    if (!projectId || !activeSourceId) return
+    set({ introspectionLoad: { status: 'loading' } })
+    try {
+      const snapshot = await databaseApi.introspectSqliteFile({
+        projectId,
+        sourceId: activeSourceId,
+        projectRelativePath,
+        explicitUserConsent: true,
+      })
+      set({ observedSnapshot: snapshot, introspectionLoad: { status: 'ready' } })
+    } catch (caught) {
+      const error = asDatabaseError(caught)
+      set({ introspectionLoad: { status: 'error', errorCode: error.code, errorMessage: error.message } })
+    }
+  },
+
+  setSemanticLod: (lod) => {
+    const next = Math.max(0, Math.min(3, Math.round(lod)))
+    if (get().semanticLod === next) return
+    set({ semanticLod: next })
+    void get().loadSchema()
+  },
+
+  publishCanvasState: async (zoomTier, visibleObjectIds) => {
+    const { projectId, activeSourceId, activeLayer, schemaPage, activeBundle, selection, semanticLod } = get()
+    if (!projectId || !activeSourceId) return
+    try {
+      await databaseApi.publishCanvasState({
+        projectId,
+        context: {
+          projectId,
+          sourceId: activeSourceId,
+          layer: activeLayer,
+          snapshotId: activeLayer === 'proposed' ? undefined : schemaPage?.snapshot?.id,
+          designRevisionId: activeLayer === 'proposed' ? activeBundle?.revision.id : undefined,
+          selection: {
+            primaryObjectId: selection.focusedId,
+            objectIds: selection.tableIds,
+            edgeIds: selection.relationshipIds,
+            namespaceIds: selection.namespaceIds,
+          },
+          viewport: {
+            visibleObjectIds: visibleObjectIds.slice(0, 160),
+            visibleNamespaceIds: [],
+            centerObjectId: selection.focusedId,
+            zoomTier,
+          },
+          semanticLod,
+          capturedAt: new Date().toISOString(),
+        },
+      })
+    } catch {
+      // Canvas publication is best-effort context for agents; a failure must never block the UI.
     }
   },
 
@@ -268,10 +520,10 @@ export const useDatabaseStore = create<DatabaseState>((set, get) => ({
     const optimisticGraph = applyDesignOperation(proposedGraph, operation)
     set({ proposedGraph: optimisticGraph, pendingOperationId: `${operation.kind}:${Date.now()}` })
     try {
-      const result = await databaseApi.applyDesignOperation({ projectId, designId: activeDesignId, token: activeToken, operation })
+      const result = await databaseApi.applyDesignOperation({ projectId, designId: activeDesignId, concurrency: activeToken, operation })
       if (get().activeDesignId !== activeDesignId) return
       set({
-        activeToken: result.token,
+        activeToken: result.concurrency,
         designs: get().designs.map((design) => design.id === result.design.id ? result.design : design),
         pendingOperationId: undefined,
       })
@@ -286,7 +538,11 @@ export const useDatabaseStore = create<DatabaseState>((set, get) => ({
     }
   },
 
-  dismissStaleRevisionNotice: () => set({ staleRevisionNotice: undefined }),
+  dismissStaleRevisionNotice: () => {
+    const designId = get().staleRevisionNotice?.designId
+    set({ staleRevisionNotice: undefined })
+    if (designId) void get().selectDesign(designId)
+  },
 
   selectObjects: (ids, options = {}) => {
     const current = get().selection
@@ -301,6 +557,8 @@ export const useDatabaseStore = create<DatabaseState>((set, get) => ({
 
   setSearch: (search) => set({ filters: { ...get().filters, search } }),
   setHideUnrelated: (value) => set({ filters: { ...get().filters, hideUnrelated: value } }),
+  setNHop: (value) => set({ filters: { ...get().filters, nHop: Math.max(1, Math.min(2, Math.round(value))) } }),
+  setGroupBy: (value) => set({ filters: { ...get().filters, groupBy: value } }),
 
   setPinnedPosition: (id, position) => {
     const next = { ...get().pinnedPositions }
@@ -309,3 +567,16 @@ export const useDatabaseStore = create<DatabaseState>((set, get) => ({
     set({ pinnedPositions: next })
   },
 }))
+
+/**
+ * Seed the optimistic Proposed overlay from an authoritative bundle. The backend graph is the
+ * truth; this is only what lets an edit render before its round-trip completes.
+ */
+function proposedGraphFromBundle(bundle: DatabaseDesignBundle): ProposedGraph {
+  const graph: ProposedGraph = { tables: {}, columns: {} }
+  for (const object of bundle.objects) {
+    if (object.kind === 'table') graph.tables[object.value.meta.identity.id] = object.value
+    if (object.kind === 'column') graph.columns[object.value.meta.identity.id] = object.value
+  }
+  return graph
+}

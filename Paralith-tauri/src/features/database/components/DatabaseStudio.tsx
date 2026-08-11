@@ -10,7 +10,18 @@ import { MigrationsSection } from './sections/MigrationsSection'
 import { ChangesSection } from './sections/ChangesSection'
 import { HealthSection } from './sections/HealthSection'
 import { ConnectionsSection } from './sections/ConnectionsSection'
-import { DATABASE_SECTIONS } from '../databaseTypes'
+import { DATABASE_SECTIONS, type DatabaseLayer } from '../databaseTypes'
+
+/**
+ * Declared, Observed, and Proposed are distinct answers to distinct questions and are never merged.
+ * The switcher makes that separation explicit instead of leaving the user to guess which one the
+ * canvas is showing.
+ */
+const LAYERS: Array<{ id: DatabaseLayer; label: string; hint: string }> = [
+  { id: 'declared', label: 'Declared', hint: 'What the repository schema declares' },
+  { id: 'observed', label: 'Observed', hint: 'What an introspected database actually contains' },
+  { id: 'proposed', label: 'Proposed', hint: 'What the active design proposes' },
+]
 
 /**
  * The Database Studio surface — one persistent, Project-scoped workspace analogous to
@@ -26,6 +37,10 @@ export function DatabaseStudio({ projectId }: { projectId: string }) {
   const filters = useDatabaseStore((state) => state.filters)
   const setSearch = useDatabaseStore((state) => state.setSearch)
   const issues = useDatabaseStore((state) => state.issues)
+  const activeLayer = useDatabaseStore((state) => state.activeLayer)
+  const setLayer = useDatabaseStore((state) => state.setLayer)
+  const activeBundle = useDatabaseStore((state) => state.activeBundle)
+  const observedSnapshot = useDatabaseStore((state) => state.observedSnapshot)
 
   const [nav, setNav] = useState<DatabaseNavState>(() => loadDatabaseNav(projectId))
 
@@ -54,6 +69,31 @@ export function DatabaseStudio({ projectId }: { projectId: string }) {
         />
 
         <div className="db-studio-surface" role="region" aria-label={sectionLabel}>
+          {(nav.section === 'diagram' || nav.section === 'explorer') && (
+            <div className="db-layer-switch" role="radiogroup" aria-label="Schema layer">
+              {LAYERS.map((layer) => {
+                // A layer with nothing behind it is disabled with the reason stated, never offered
+                // as a control that would fail.
+                const unavailable =
+                  (layer.id === 'observed' && !observedSnapshot && 'Introspect a database file first') ||
+                  (layer.id === 'proposed' && !activeBundle && 'Open a design first')
+                return (
+                  <button
+                    key={layer.id}
+                    type="button"
+                    role="radio"
+                    aria-checked={activeLayer === layer.id}
+                    className={activeLayer === layer.id ? 'is-active' : undefined}
+                    title={unavailable || layer.hint}
+                    disabled={Boolean(unavailable)}
+                    onClick={() => setLayer(layer.id)}
+                  >
+                    {layer.label}
+                  </button>
+                )
+              })}
+            </div>
+          )}
           {nav.section === 'overview' && <OverviewSection onNavigate={(section) => setNav({ section })} />}
           {nav.section === 'diagram' && <DiagramSection />}
           {nav.section === 'explorer' && <ExplorerSection />}

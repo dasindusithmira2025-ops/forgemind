@@ -1,7 +1,7 @@
 {
-  "stamp": "2026-08-11T02:11:23.736Z",
+  "stamp": "2026-08-11T02:19:31.882Z",
   "gateScore": 1,
-  "checkScore": 12,
+  "checkScore": 14,
   "total": 14,
   "gates": [
     {
@@ -88,8 +88,8 @@
     },
     {
       "id": "B5",
-      "ok": false,
-      "detail": "    :              `-- 'DatabaseScreen' is declared here |  28 | const SwarmsScreen = lazy(() => import('./screens/SwarmsScreen').then((module) => ({ default: module.SwarmsScreen }))) |     `---- |   help: Consider removing this declaration. | Found 1 warning and 0 errors. | Finished in 23ms on 239 files with 103 rules using 24 threads."
+      "ok": true,
+      "detail": "clean"
     },
     {
       "id": "B6",
@@ -103,8 +103,8 @@
     },
     {
       "id": "B8",
-      "ok": false,
-      "detail": "missing: stale,draft,revision"
+      "ok": true,
+      "detail": "revision/draft/stale covered"
     },
     {
       "id": "B9",
@@ -134,7 +134,7 @@
     {
       "id": "B14",
       "ok": true,
-      "detail": "no disabled tests introduced (4945 added source lines scanned)"
+      "detail": "no disabled tests introduced (7020 added source lines scanned)"
     }
   ]
 }

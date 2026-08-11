@@ -399,7 +399,11 @@ pub enum CapabilityEffectClass {
 #[serde(rename_all = "snake_case", tag = "mode")]
 pub enum DatabaseExecutionEnvelope {
     DesignOnly {
-        design_id: String,
+        /// The design this session may edit. `None` while the session is still creating its first
+        /// draft — the design does not exist yet, so there is nothing to pin. It never widens what
+        /// `DESIGN_ONLY` may do: repository and database mutation stay denied either way.
+        #[serde(default)]
+        design_id: Option<String>,
         base_revision_id: Option<String>,
     },
     ImplementDesign {

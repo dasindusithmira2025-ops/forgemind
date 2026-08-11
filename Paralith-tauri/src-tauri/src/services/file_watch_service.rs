@@ -47,6 +47,9 @@ pub struct FileWatchService {
     app: AppHandle,
     ledger: SelfWriteLedger,
     watchers: Arc<Mutex<HashMap<PathBuf, ProjectWatch>>>,
+    /// Present in the running application. Database Studio re-extracts only when a batch actually
+    /// contains a database artifact, so editing a component never triggers schema work.
+    database_studio: Option<crate::services::database_studio::DatabaseStudioRuntime>,
 }
 
 impl FileWatchService {
@@ -56,7 +59,16 @@ impl FileWatchService {
             app,
             ledger,
             watchers: Arc::new(Mutex::new(HashMap::new())),
+            database_studio: None,
         }
+    }
+
+    pub fn with_database_studio(
+        mut self,
+        database_studio: crate::services::database_studio::DatabaseStudioRuntime,
+    ) -> Self {
+        self.database_studio = Some(database_studio);
+        self
     }
 
     /// Ensure a watcher exists for the Project and register `window_label` as a subscriber. The
@@ -177,6 +189,7 @@ impl FileWatchService {
     ) {
         let app = self.app.clone();
         let ledger = self.ledger.clone();
+        let database_studio = self.database_studio.clone();
         std::thread::Builder::new()
             .name(format!("paralith-fswatch-{project_id}"))
             .spawn(move || {
@@ -191,17 +204,35 @@ impl FileWatchService {
                                 pending.insert(relative, merged);
                             }
                             if pending.len() >= MAX_PENDING {
-                                flush(&app, &project_id, &subscribers, &mut pending);
+                                flush(
+                                    &app,
+                                    &project_id,
+                                    &subscribers,
+                                    &mut pending,
+                                    database_studio.as_ref(),
+                                );
                             }
                         }
                         Err(RecvTimeoutError::Timeout) => {
                             if !pending.is_empty() {
-                                flush(&app, &project_id, &subscribers, &mut pending);
+                                flush(
+                                    &app,
+                                    &project_id,
+                                    &subscribers,
+                                    &mut pending,
+                                    database_studio.as_ref(),
+                                );
                             }
                         }
                         Err(RecvTimeoutError::Disconnected) => {
                             if !pending.is_empty() {
-                                flush(&app, &project_id, &subscribers, &mut pending);
+                                flush(
+                                    &app,
+                                    &project_id,
+                                    &subscribers,
+                                    &mut pending,
+                                    database_studio.as_ref(),
+                                );
                             }
                             break;
                         }
@@ -217,6 +248,7 @@ fn flush(
     project_id: &str,
     subscribers: &Arc<Mutex<HashSet<String>>>,
     pending: &mut HashMap<String, FileChangeKind>,
+    database_studio: Option<&crate::services::database_studio::DatabaseStudioRuntime>,
 ) {
     let changes: Vec<ProjectFileChange> = pending
         .drain()
@@ -227,6 +259,20 @@ fn flush(
         .collect();
     if changes.is_empty() {
         return;
+    }
+    if let Some(database_studio) = database_studio {
+        let paths: Vec<String> = changes
+            .iter()
+            .map(|change| change.relative_path.clone())
+            .collect();
+        // Relevance is decided inside the runtime, which owns the definition of a database
+        // artifact; an unrelated batch returns immediately without touching the graph.
+        if let Err(error) = database_studio.handle_changed_paths(project_id, &paths) {
+            log::warn!(
+                "database studio incremental refresh skipped: {}",
+                error.message
+            );
+        }
     }
     let batch = ProjectFileChangeBatch {
         project_id: project_id.to_owned(),

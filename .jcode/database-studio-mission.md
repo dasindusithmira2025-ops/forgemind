@@ -1576,7 +1576,7 @@ credential/connection safeguards
 Testing:
 exact tests/builds and results
 
-Review:
+Review: 
 Opus 5 Reviewer findings and resolution
 
 Known Limitations:

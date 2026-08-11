@@ -25,3 +25,33 @@ describe('OverviewSection empty/loading/error states', () => {
     expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument()
   })
 })
+
+describe('OverviewSection monorepo ownership', () => {
+  it('resolves one logical source and names its owner and consumers separately', () => {
+    useDatabaseStore.setState({
+      sourcesLoad: { status: 'ready' },
+      sources: [
+        {
+          id: 's1',
+          repositoryId: 'p1',
+          logicalKey: 'primary',
+          displayName: 'Primary PostgreSQL',
+          engine: 'postgres',
+          adapterIds: ['prisma'],
+          ownerProjectId: 'packages/db',
+          consumerProjectIds: ['apps/api', 'apps/worker'],
+          environmentIds: [],
+          evidenceIds: [],
+          confidence: 1,
+          discoveredAt: '',
+          updatedAt: '',
+        },
+      ],
+    })
+    render(<OverviewSection onNavigate={() => {}} />)
+    // One card, not three, even though three packages reference the datasource.
+    expect(screen.getAllByRole('article')).toHaveLength(1)
+    expect(screen.getByText('owned by packages/db')).toBeInTheDocument()
+    expect(screen.getByText('used by apps/api, apps/worker')).toBeInTheDocument()
+  })
+})

@@ -668,6 +668,38 @@ pub struct DatabaseDiff {
     pub fingerprint: String,
     pub created_at: String,
 }
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct DatabaseLayoutPosition {
+    pub x: f64,
+    pub y: f64,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct DatabaseViewport {
+    pub x: f64,
+    pub y: f64,
+    pub zoom: f64,
+}
+
+/// A user-arranged canvas layout. Positions are keyed by semantic object ID, never by display name
+/// or array index, so a schema change reorders nothing the developer placed by hand.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct DatabaseLayout {
+    pub id: String,
+    pub source_id: String,
+    pub snapshot_id: Option<SnapshotId>,
+    pub design_revision_id: Option<RevisionId>,
+    pub layout_kind: String,
+    pub semantic_lod: u8,
+    pub layout_fingerprint: String,
+    pub viewport: DatabaseViewport,
+    pub positions: std::collections::BTreeMap<SemanticId, DatabaseLayoutPosition>,
+    pub updated_at: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct DatabaseObjectProvenance {

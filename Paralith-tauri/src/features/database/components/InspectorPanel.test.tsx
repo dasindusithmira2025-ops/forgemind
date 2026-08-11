@@ -31,12 +31,13 @@ function emptyDetail(table: DatabaseTable): DatabaseObjectDetail {
     usage: [],
     migrations: [],
     issues: [],
+    provenance: [],
   }
 }
 
 function openInspector(table: DatabaseTable, detail: DatabaseObjectDetail) {
   useDatabaseStore.setState({
-    selection: { tableIds: [table.meta.identity.id], columnIds: [], relationshipIds: [], focusedId: table.meta.identity.id },
+    selection: { tableIds: [table.meta.identity.id], columnIds: [], relationshipIds: [], namespaceIds: [], focusedId: table.meta.identity.id },
     objectDetails: { [table.meta.identity.id]: detail },
     objectDetailLoad: { [table.meta.identity.id]: { status: 'ready' } },
   })
@@ -54,7 +55,7 @@ describe('InspectorPanel selection states', () => {
   })
 
   it('collapses to a summary card when multiple objects are selected', () => {
-    useDatabaseStore.setState({ selection: { tableIds: ['a', 'b'], columnIds: [], relationshipIds: [] } })
+    useDatabaseStore.setState({ selection: { tableIds: ['a', 'b'], columnIds: [], relationshipIds: [], namespaceIds: [] } })
     render(<InspectorPanel />)
     expect(screen.getByText('2 objects selected')).toBeInTheDocument()
   })

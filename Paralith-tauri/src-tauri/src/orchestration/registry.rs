@@ -372,15 +372,15 @@ fn database_descriptors() -> Vec<CapabilityDescriptor> {
 }
 
 fn operation_schema(required_payload: &'static str) -> Value {
-    json!({"type":"object","required":["designId","token",required_payload],"properties":{"designId":{"type":"string"},"token":{"type":"object"}}})
+    json!({"type":"object","required":["designId","concurrency",required_payload],"properties":{"designId":{"type":"string"},"concurrency":{"type":"object"}}})
 }
 
 fn decision_schema(with_reason: bool) -> Value {
-    let mut required = vec!["designId", "token"];
+    let mut required = vec!["designId", "concurrency"];
     if with_reason {
         required.push("reason");
     }
-    json!({"type":"object","required":required,"properties":{"designId":{"type":"string"},"token":{"type":"object"},"reason":{"type":"string"}}})
+    json!({"type":"object","required":required,"properties":{"designId":{"type":"string"},"concurrency":{"type":"object"},"reason":{"type":"string"}}})
 }
 
 /// Look up a capability by id.
