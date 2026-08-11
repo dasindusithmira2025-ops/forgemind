@@ -196,7 +196,6 @@ fn extract_table_names(content: &str) -> Vec<String> {
             let name = rest
                 .trim_start()
                 .trim_start_matches("if not exists")
-                .trim_start()
                 .split_whitespace()
                 .next()
                 .unwrap_or("")
