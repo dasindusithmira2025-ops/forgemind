@@ -1,0 +1,140 @@
+{
+  "stamp": "2026-08-11T02:19:31.882Z",
+  "gateScore": 1,
+  "checkScore": 14,
+  "total": 14,
+  "gates": [
+    {
+      "id": "GATE 1",
+      "title": "Architecture + domain contracts",
+      "verdict": "APPROVED",
+      "sha": "863d5c9e8c5d1d36398423d8f225fb8822e379f9"
+    },
+    {
+      "id": "GATE 2",
+      "title": "Persistence + discovery + adapters",
+      "verdict": "PENDING",
+      "sha": "-"
+    },
+    {
+      "id": "GATE 3",
+      "title": "Design graph / revisions / concurrency",
+      "verdict": "PENDING",
+      "sha": "-"
+    },
+    {
+      "id": "GATE 4",
+      "title": "Database Studio UI/UX",
+      "verdict": "PENDING",
+      "sha": "-"
+    },
+    {
+      "id": "GATE 5",
+      "title": "Agent protocol + canvas awareness",
+      "verdict": "PENDING",
+      "sha": "-"
+    },
+    {
+      "id": "GATE 6",
+      "title": "Approved design implementation pipeline",
+      "verdict": "PENDING",
+      "sha": "-"
+    },
+    {
+      "id": "GATE 7",
+      "title": "Security + credential handling",
+      "verdict": "PENDING",
+      "sha": "-"
+    },
+    {
+      "id": "GATE 8",
+      "title": "Performance + large schemas",
+      "verdict": "PENDING",
+      "sha": "-"
+    },
+    {
+      "id": "GATE 9",
+      "title": "Tests / regressions",
+      "verdict": "PENDING",
+      "sha": "-"
+    },
+    {
+      "id": "GATE 10",
+      "title": "Final integrated application",
+      "verdict": "PENDING",
+      "sha": "-"
+    }
+  ],
+  "results": [
+    {
+      "id": "B1",
+      "ok": true,
+      "detail": "ok in 0s"
+    },
+    {
+      "id": "B2",
+      "ok": true,
+      "detail": "4 suites green"
+    },
+    {
+      "id": "B3",
+      "ok": true,
+      "detail": "schema v28 migration tests green"
+    },
+    {
+      "id": "B4",
+      "ok": true,
+      "detail": "clean"
+    },
+    {
+      "id": "B5",
+      "ok": true,
+      "detail": "clean"
+    },
+    {
+      "id": "B6",
+      "ok": true,
+      "detail": "green"
+    },
+    {
+      "id": "B7",
+      "ok": true,
+      "detail": "7/7 fixtures asserted"
+    },
+    {
+      "id": "B8",
+      "ok": true,
+      "detail": "revision/draft/stale covered"
+    },
+    {
+      "id": "B9",
+      "ok": true,
+      "detail": "structural diff tests green"
+    },
+    {
+      "id": "B10",
+      "ok": true,
+      "detail": "mode + selection contracts covered"
+    },
+    {
+      "id": "B11",
+      "ok": true,
+      "detail": "target/result verification green"
+    },
+    {
+      "id": "B12",
+      "ok": true,
+      "detail": "credential boundary tests green"
+    },
+    {
+      "id": "B13",
+      "ok": true,
+      "detail": "large-schema benchmark green"
+    },
+    {
+      "id": "B14",
+      "ok": true,
+      "detail": "no disabled tests introduced (7020 added source lines scanned)"
+    }
+  ]
+}

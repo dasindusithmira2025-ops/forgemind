@@ -1,6 +1,7 @@
 pub mod agent_detector;
 pub mod agent_resume;
 pub mod browser_service;
+pub mod database_studio;
 pub mod file_watch_service;
 pub mod filesystem_service;
 pub mod process_util;
@@ -19,6 +20,7 @@ pub mod window_registry;
 pub use agent_detector::AgentDetector;
 pub use agent_resume::AgentResumeService;
 pub use browser_service::BrowserService;
+pub use database_studio::DatabaseStudioRuntime;
 pub use file_watch_service::FileWatchService;
 pub use filesystem_service::{FileSystemService, SelfWriteLedger};
 pub use project_service::ProjectService;

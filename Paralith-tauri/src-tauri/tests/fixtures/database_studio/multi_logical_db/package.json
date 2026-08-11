@@ -1,0 +1,8 @@
+{
+  "name": "dbstudio-fixture-multi-logical-db",
+  "private": true,
+  "dependencies": {
+    "@prisma/client": "^5.20.0",
+    "mysql2": "^3.11.0"
+  }
+}

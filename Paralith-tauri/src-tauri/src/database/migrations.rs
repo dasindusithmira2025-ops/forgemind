@@ -1,7 +1,7 @@
 use crate::errors::{AppError, AppResult};
 use rusqlite::{params, Connection};
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 27;
+pub const CURRENT_SCHEMA_VERSION: i64 = 28;
 
 const MIGRATION_1: &str = r#"
 CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
@@ -907,6 +907,9 @@ pub fn apply(connection: &Connection) -> AppResult<()> {
     {
         migrate_v27(connection)?;
     }
+    if current < 28 || !table_exists(connection, "database_sources")? {
+        migrate_v28(connection)?;
+    }
     Ok(())
 }
 
@@ -956,6 +959,7 @@ pub fn requires_migration(connection: &Connection) -> AppResult<bool> {
         )?
         || !table_exists(connection, "swarm_execution_defaults")?
         || !table_exists(connection, "repository_graph_nodes")?
+        || !table_exists(connection, "database_sources")?
         || !column_exists(connection, "agent_sessions", "recovery_status")?
         || !column_exists(connection, "agent_sessions", "worktree_path")?)
 }
@@ -999,6 +1003,172 @@ fn migrate_v25(connection: &Connection) -> AppResult<()> {
         record_migration(connection, 25)
     })();
     finish_migration_transaction(connection, result, 25)
+}
+
+fn migrate_v28(connection: &Connection) -> AppResult<()> {
+    if table_exists(connection, "database_sources")? {
+        connection
+            .execute(
+                "INSERT OR IGNORE INTO schema_migrations(version,applied_at) VALUES(28,datetime('now'))",
+                [],
+            )
+            .map_err(AppError::database)?;
+        connection
+            .pragma_update(None, "user_version", 28)
+            .map_err(AppError::database)?;
+        return Ok(());
+    }
+    connection
+        .execute_batch(
+            r#"
+BEGIN IMMEDIATE;
+
+CREATE TABLE database_sources (
+  id TEXT PRIMARY KEY, repository_id TEXT NOT NULL, logical_key TEXT NOT NULL,
+  display_name TEXT NOT NULL, engine TEXT NOT NULL, owner_project_id TEXT,
+  confidence REAL NOT NULL CHECK(confidence BETWEEN 0 AND 1),
+  discovered_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  UNIQUE(repository_id, logical_key)
+);
+CREATE INDEX idx_database_sources_repository ON database_sources(repository_id, updated_at DESC);
+
+CREATE TABLE database_source_evidence (
+  id TEXT PRIMARY KEY, source_id TEXT NOT NULL REFERENCES database_sources(id) ON DELETE CASCADE,
+  repository_id TEXT NOT NULL, project_id TEXT, adapter_id TEXT NOT NULL,
+  evidence_kind TEXT NOT NULL, relative_path TEXT NOT NULL, symbol_or_key TEXT,
+  safe_value_fingerprint TEXT, source_hint TEXT, owner_signal REAL NOT NULL,
+  consumer_signal REAL NOT NULL, certainty TEXT NOT NULL, confidence REAL NOT NULL,
+  content_sha256 TEXT NOT NULL, extractor_version TEXT NOT NULL, discovered_at TEXT NOT NULL
+);
+CREATE INDEX idx_database_evidence_source ON database_source_evidence(source_id, relative_path);
+
+CREATE TABLE database_snapshots (
+  id TEXT PRIMARY KEY, source_id TEXT NOT NULL REFERENCES database_sources(id) ON DELETE CASCADE,
+  layer TEXT NOT NULL CHECK(layer IN ('declared','observed','proposed')),
+  adapter_id TEXT NOT NULL, git_revision TEXT, parent_snapshot_id TEXT REFERENCES database_snapshots(id),
+  fingerprint TEXT NOT NULL, object_count INTEGER NOT NULL, edge_count INTEGER NOT NULL,
+  extractor_version TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL, completed_at TEXT
+);
+CREATE INDEX idx_database_snapshots_source_layer ON database_snapshots(source_id, layer, created_at DESC);
+
+CREATE TABLE database_objects (
+  id TEXT NOT NULL, source_id TEXT NOT NULL REFERENCES database_sources(id) ON DELETE CASCADE,
+  snapshot_id TEXT NOT NULL DEFAULT '', design_revision_id TEXT NOT NULL DEFAULT '',
+  snapshot_ref TEXT GENERATED ALWAYS AS (NULLIF(snapshot_id, '')) STORED REFERENCES database_snapshots(id) ON DELETE CASCADE,
+  design_revision_ref TEXT GENERATED ALWAYS AS (NULLIF(design_revision_id, '')) STORED REFERENCES database_design_revisions(id) ON DELETE CASCADE,
+  layer TEXT NOT NULL, object_kind TEXT NOT NULL,
+  logical_key TEXT NOT NULL, qualified_name TEXT NOT NULL, parent_object_id TEXT,
+  namespace_id TEXT, native_type TEXT, ordinal INTEGER, nullable INTEGER,
+  payload_version INTEGER NOT NULL, typed_payload_json TEXT NOT NULL, content_fingerprint TEXT NOT NULL,
+  confidence REAL NOT NULL, discovered_at TEXT NOT NULL, observed_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  CHECK ((snapshot_id <> '' AND design_revision_id = '') OR (snapshot_id = '' AND design_revision_id <> '')),
+  PRIMARY KEY(id, snapshot_id, design_revision_id),
+  UNIQUE(id, snapshot_id, design_revision_id)
+);
+CREATE INDEX idx_database_objects_snapshot_kind ON database_objects(snapshot_id, object_kind, qualified_name);
+CREATE INDEX idx_database_objects_revision_kind ON database_objects(design_revision_id, object_kind, qualified_name);
+
+CREATE TABLE database_edges (
+  id TEXT PRIMARY KEY, source_id TEXT NOT NULL REFERENCES database_sources(id) ON DELETE CASCADE,
+  snapshot_id TEXT NOT NULL DEFAULT '', design_revision_id TEXT NOT NULL DEFAULT '',
+  snapshot_ref TEXT GENERATED ALWAYS AS (NULLIF(snapshot_id, '')) STORED REFERENCES database_snapshots(id) ON DELETE CASCADE,
+  design_revision_ref TEXT GENERATED ALWAYS AS (NULLIF(design_revision_id, '')) STORED REFERENCES database_design_revisions(id) ON DELETE CASCADE,
+  source_object_id TEXT NOT NULL, target_object_id TEXT NOT NULL,
+  edge_type TEXT NOT NULL, confidence REAL NOT NULL, created_at TEXT NOT NULL,
+  CHECK ((snapshot_id <> '' AND design_revision_id = '') OR (snapshot_id = '' AND design_revision_id <> '')),
+  UNIQUE(snapshot_id, design_revision_id, source_object_id, target_object_id, edge_type)
+);
+CREATE INDEX idx_database_edges_source_object ON database_edges(snapshot_id, design_revision_id, source_object_id);
+CREATE INDEX idx_database_edges_target_object ON database_edges(snapshot_id, design_revision_id, target_object_id);
+
+CREATE TABLE database_object_provenance (
+  id TEXT PRIMARY KEY, object_id TEXT NOT NULL,
+  snapshot_id TEXT NOT NULL DEFAULT '', design_revision_id TEXT NOT NULL DEFAULT '',
+  snapshot_ref TEXT GENERATED ALWAYS AS (NULLIF(snapshot_id, '')) STORED REFERENCES database_snapshots(id) ON DELETE CASCADE,
+  design_revision_ref TEXT GENERATED ALWAYS AS (NULLIF(design_revision_id, '')) STORED REFERENCES database_design_revisions(id) ON DELETE CASCADE,
+  evidence_id TEXT REFERENCES database_source_evidence(id) ON DELETE SET NULL,
+  source_kind TEXT NOT NULL, certainty TEXT NOT NULL, confidence REAL NOT NULL,
+  evidence_ref TEXT, extractor_version TEXT NOT NULL, observed_at TEXT NOT NULL,
+  CHECK ((snapshot_id <> '' AND design_revision_id = '') OR (snapshot_id = '' AND design_revision_id <> ''))
+);
+CREATE INDEX idx_database_provenance_object ON database_object_provenance(object_id, snapshot_id, design_revision_id);
+
+CREATE TABLE database_designs (
+  id TEXT PRIMARY KEY, source_id TEXT NOT NULL REFERENCES database_sources(id) ON DELETE CASCADE,
+  name TEXT NOT NULL, status TEXT NOT NULL, base_snapshot_id TEXT REFERENCES database_snapshots(id),
+  base_revision_id TEXT, head_revision_id TEXT NOT NULL, revision_number INTEGER NOT NULL,
+  created_by_kind TEXT NOT NULL, created_by_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  approved_revision_id TEXT
+);
+CREATE INDEX idx_database_designs_source ON database_designs(source_id, updated_at DESC);
+
+CREATE TABLE database_design_revisions (
+  id TEXT PRIMARY KEY, design_id TEXT NOT NULL REFERENCES database_designs(id) ON DELETE CASCADE,
+  parent_revision_id TEXT REFERENCES database_design_revisions(id),
+  merge_parent_revision_id TEXT REFERENCES database_design_revisions(id),
+  revision_number INTEGER NOT NULL, state TEXT NOT NULL, graph_fingerprint TEXT NOT NULL,
+  created_by_kind TEXT NOT NULL, created_by_id TEXT, created_at TEXT NOT NULL,
+  decision_by_kind TEXT, decision_by_id TEXT, decision_at TEXT, decision_reason TEXT,
+  UNIQUE(design_id, revision_number)
+);
+
+CREATE TABLE database_design_operations (
+  id TEXT PRIMARY KEY, design_id TEXT NOT NULL REFERENCES database_designs(id) ON DELETE CASCADE,
+  base_revision_id TEXT NOT NULL REFERENCES database_design_revisions(id),
+  result_revision_id TEXT NOT NULL REFERENCES database_design_revisions(id),
+  sequence INTEGER NOT NULL, operation_kind TEXT NOT NULL, payload_version INTEGER NOT NULL,
+  operation_payload_json TEXT NOT NULL,
+  actor_kind TEXT NOT NULL, actor_id TEXT, created_at TEXT NOT NULL,
+  UNIQUE(design_id, result_revision_id, sequence)
+);
+
+CREATE TABLE database_layouts (
+  id TEXT PRIMARY KEY, source_id TEXT NOT NULL REFERENCES database_sources(id) ON DELETE CASCADE,
+  snapshot_id TEXT NOT NULL DEFAULT '', design_revision_id TEXT NOT NULL DEFAULT '',
+  snapshot_ref TEXT GENERATED ALWAYS AS (NULLIF(snapshot_id, '')) STORED REFERENCES database_snapshots(id) ON DELETE CASCADE,
+  design_revision_ref TEXT GENERATED ALWAYS AS (NULLIF(design_revision_id, '')) STORED REFERENCES database_design_revisions(id) ON DELETE CASCADE,
+  layout_kind TEXT NOT NULL,
+  semantic_lod INTEGER NOT NULL, layout_fingerprint TEXT NOT NULL,
+  viewport_json TEXT NOT NULL, positions_json TEXT NOT NULL, updated_at TEXT NOT NULL,
+  CHECK ((snapshot_id <> '' AND design_revision_id = '') OR (snapshot_id = '' AND design_revision_id <> '')),
+  UNIQUE(source_id, snapshot_id, design_revision_id, layout_kind, semantic_lod)
+);
+
+CREATE TABLE database_diffs (
+  id TEXT PRIMARY KEY, source_id TEXT NOT NULL REFERENCES database_sources(id) ON DELETE CASCADE,
+  comparison_mode TEXT NOT NULL, left_ref TEXT NOT NULL, right_ref TEXT NOT NULL,
+  fingerprint TEXT NOT NULL, changes_json TEXT NOT NULL, created_at TEXT NOT NULL,
+  UNIQUE(source_id, comparison_mode, left_ref, right_ref, fingerprint)
+);
+
+CREATE TABLE database_issues (
+  id TEXT PRIMARY KEY, source_id TEXT NOT NULL REFERENCES database_sources(id) ON DELETE CASCADE,
+  snapshot_id TEXT NOT NULL DEFAULT '', design_revision_id TEXT NOT NULL DEFAULT '',
+  snapshot_ref TEXT GENERATED ALWAYS AS (NULLIF(snapshot_id, '')) STORED REFERENCES database_snapshots(id) ON DELETE CASCADE,
+  design_revision_ref TEXT GENERATED ALWAYS AS (NULLIF(design_revision_id, '')) STORED REFERENCES database_design_revisions(id) ON DELETE CASCADE,
+  issue_code TEXT NOT NULL, severity TEXT NOT NULL,
+  title TEXT NOT NULL, explanation TEXT NOT NULL, status TEXT NOT NULL,
+  detected_at TEXT NOT NULL, resolved_at TEXT,
+  CHECK ((snapshot_id <> '' AND design_revision_id = '') OR (snapshot_id = '' AND design_revision_id <> ''))
+);
+CREATE INDEX idx_database_issues_source_status ON database_issues(source_id, status, severity);
+
+CREATE TABLE database_usage_refs (
+  id TEXT PRIMARY KEY, source_id TEXT NOT NULL REFERENCES database_sources(id) ON DELETE CASCADE,
+  project_id TEXT NOT NULL, semantic_object_id TEXT, relative_path TEXT NOT NULL, symbol TEXT,
+  start_line INTEGER, start_column INTEGER, end_line INTEGER, end_column INTEGER,
+  access_kind TEXT NOT NULL, certainty TEXT NOT NULL, confidence REAL NOT NULL,
+  content_sha256 TEXT NOT NULL, observed_at TEXT NOT NULL
+);
+CREATE INDEX idx_database_usage_object ON database_usage_refs(source_id, semantic_object_id);
+CREATE INDEX idx_database_usage_path ON database_usage_refs(project_id, relative_path);
+
+INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(28, datetime('now'));
+PRAGMA user_version=28;
+COMMIT;
+"#,
+        )
+        .map_err(AppError::database)
 }
 
 fn table_exists(connection: &Connection, table: &str) -> AppResult<bool> {
@@ -3896,5 +4066,62 @@ PRAGMA user_version=26;
                 .unwrap(),
             CURRENT_SCHEMA_VERSION
         );
+    }
+
+    #[test]
+    fn database_studio_v28_contract_constraints_match_gate1_probe() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", true)
+            .unwrap();
+        apply(&connection).unwrap();
+
+        let object_sql: String = connection
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='database_objects'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(object_sql.contains("snapshot_id TEXT NOT NULL DEFAULT ''"));
+        assert!(object_sql.contains("design_revision_id TEXT NOT NULL DEFAULT ''"));
+        assert!(object_sql.contains("snapshot_ref TEXT GENERATED ALWAYS AS (NULLIF(snapshot_id, '')) STORED REFERENCES database_snapshots(id) ON DELETE CASCADE"));
+        assert!(object_sql.contains("design_revision_ref TEXT GENERATED ALWAYS AS (NULLIF(design_revision_id, '')) STORED REFERENCES database_design_revisions(id) ON DELETE CASCADE"));
+        assert!(object_sql.contains("CHECK ((snapshot_id <> '' AND design_revision_id = '') OR (snapshot_id = '' AND design_revision_id <> ''))"));
+        assert!(object_sql.contains("PRIMARY KEY(id, snapshot_id, design_revision_id)"));
+
+        connection.execute("INSERT INTO database_sources(id,repository_id,logical_key,display_name,engine,owner_project_id,confidence,discovered_at,updated_at) VALUES('src','repo','primary','Primary PostgreSQL','postgres',NULL,1,'t','t')", []).unwrap();
+        connection.execute("INSERT INTO database_snapshots(id,source_id,layer,adapter_id,fingerprint,object_count,edge_count,extractor_version,status,created_at) VALUES('snap','src','declared','prisma','fp',0,0,'v','ready','t')", []).unwrap();
+        connection.execute("INSERT INTO database_objects(id,source_id,snapshot_id,layer,object_kind,logical_key,qualified_name,payload_version,typed_payload_json,content_fingerprint,confidence,discovered_at,observed_at,updated_at) VALUES('obj','src','snap','declared','table','k','public.users',1,'{}','fp',1,'t','t','t')", []).unwrap();
+        assert!(connection.execute("INSERT INTO database_objects(id,source_id,snapshot_id,layer,object_kind,logical_key,qualified_name,payload_version,typed_payload_json,content_fingerprint,confidence,discovered_at,observed_at,updated_at) VALUES('obj','src','snap','declared','table','k','public.users',1,'{}','fp',1,'t','t','t')", []).is_err());
+        assert!(connection.execute("INSERT INTO database_objects(id,source_id,layer,object_kind,logical_key,qualified_name,payload_version,typed_payload_json,content_fingerprint,confidence,discovered_at,observed_at,updated_at) VALUES('bad','src','declared','table','k','public.bad',1,'{}','fp',1,'t','t','t')", []).is_err());
+        assert!(connection.execute("INSERT INTO database_objects(id,source_id,snapshot_id,design_revision_id,layer,object_kind,logical_key,qualified_name,payload_version,typed_payload_json,content_fingerprint,confidence,discovered_at,observed_at,updated_at) VALUES('bad2','src','snap','rev','declared','table','k','public.bad',1,'{}','fp',1,'t','t','t')", []).is_err());
+        assert!(connection.execute("INSERT INTO database_objects(id,source_id,snapshot_id,layer,object_kind,logical_key,qualified_name,payload_version,typed_payload_json,content_fingerprint,confidence,discovered_at,observed_at,updated_at) VALUES('missing','src','missing-snapshot','declared','table','k','public.missing',1,'{}','fp',1,'t','t','t')", []).is_err());
+        connection.execute("INSERT INTO database_edges(id,source_id,snapshot_id,source_object_id,target_object_id,edge_type,confidence,created_at) VALUES('edge','src','snap','obj','obj','CONTAINS',1,'t')", []).unwrap();
+        assert!(connection.execute("INSERT INTO database_edges(id,source_id,snapshot_id,source_object_id,target_object_id,edge_type,confidence,created_at) VALUES('edge2','src','snap','obj','obj','CONTAINS',1,'t')", []).is_err());
+    }
+
+    #[test]
+    fn database_studio_upgrades_installed_schema_27_to_current_preserving_data() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", true)
+            .unwrap();
+        apply(&connection).unwrap();
+        connection.execute("INSERT INTO projects(id,name,root_path,canonical_root_path,major_languages_json,is_git_repository,has_package_json,has_lockfile,created_at,updated_at,last_opened_at) VALUES('p27','Schema 27 Project','/p27','/p27','[]',1,1,1,'t','t','t')", []).unwrap();
+        connection.execute_batch("DROP TABLE database_usage_refs; DROP TABLE database_issues; DROP TABLE database_diffs; DROP TABLE database_layouts; DROP TABLE database_design_operations; DROP TABLE database_design_revisions; DROP TABLE database_designs; DROP TABLE database_object_provenance; DROP TABLE database_edges; DROP TABLE database_objects; DROP TABLE database_snapshots; DROP TABLE database_source_evidence; DROP TABLE database_sources; DELETE FROM schema_migrations WHERE version > 27; PRAGMA user_version=27;").unwrap();
+        assert!(requires_migration(&connection).unwrap());
+        apply(&connection).unwrap();
+        assert_eq!(
+            connection
+                .query_row("SELECT name FROM projects WHERE id='p27'", [], |row| row
+                    .get::<_, String>(
+                    0
+                ))
+                .unwrap(),
+            "Schema 27 Project"
+        );
+        assert!(table_exists(&connection, "database_sources").unwrap());
+        assert!(!requires_migration(&connection).unwrap());
     }
 }

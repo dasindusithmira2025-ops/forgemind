@@ -1,0 +1,38 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// Application users for the shared primary database.
+model User {
+  id    String @id @default(uuid())
+  email String @unique
+
+  jobs      Job[]
+  apiTokens ApiToken[]
+}
+
+model Job {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+    status String
+
+  @@index([userId, status])
+}
+
+/* API tokens are owned by the same primary logical database.
+   This block comment is intentional parser fixture coverage. */
+model ApiToken {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+  name   String
+
+  @@unique([userId, name])
+}

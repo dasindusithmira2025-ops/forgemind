@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom'
-import { Activity, Boxes, Folder, FolderGit2, MoreHorizontal, Settings } from 'lucide-react'
+import { Activity, Boxes, Database, Folder, FolderGit2, MoreHorizontal, Settings } from 'lucide-react'
 import { Brand } from '../../../components/ui/Brand'
 import { useSwarmStore } from '../../swarms/swarmStore'
 import { isActiveLifecycle, lifecycleLabel, lifecycleTone } from '../../swarms/swarmPresentation'
@@ -122,6 +122,11 @@ export function CollapsedSidebar({
         {actions.onOpenRepository && (
           <button type="button" aria-label="Repository" title="Repository" onClick={actions.onOpenRepository}>
             <FolderGit2 size={16} />
+          </button>
+        )}
+        {actions.onOpenDatabase && (
+          <button type="button" aria-label="Database" title="Database" onClick={actions.onOpenDatabase}>
+            <Database size={16} />
           </button>
         )}
         <button type="button" aria-label="Settings" title="Settings" onClick={actions.onOpenSettings}>

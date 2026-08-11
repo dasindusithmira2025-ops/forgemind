@@ -1,0 +1,8 @@
+{
+  "name": "dbstudio-fixture-prisma",
+  "private": true,
+  "dependencies": {
+    "@prisma/client": "^5.20.0",
+    "prisma": "^5.20.0"
+  }
+}

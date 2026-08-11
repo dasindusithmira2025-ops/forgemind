@@ -129,6 +129,8 @@ export interface SidebarActions {
   onOpenSettings: () => void
   /** Open the Repository Command Center for the active project. */
   onOpenRepository?: () => void
+  /** Open the Database Studio surface for the active project. */
+  onOpenDatabase?: () => void
   onToggleCollapse: () => void
   onResizeCommit: (width: number) => void
   // ---- Multi-monitor Workspace placement (optional; present only in the main window) ------
