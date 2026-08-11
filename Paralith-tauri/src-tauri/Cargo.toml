@@ -1,6 +1,6 @@
 [package]
 name = "forgemind"
-version = "0.4.9"
+version = "0.4.10"
 description = "PARALITH native multi-agent terminal workspace"
 authors = ["Corelith Technologies"]
 license = "MIT"
