@@ -547,13 +547,19 @@ impl OrchestrationKernel {
                 let project_id = session_project(session)?;
                 Ok(json!({ "sources": self.database_studio.list_sources(project_id)? }))
             }
-            "database.get_canvas_state" => serde_json::to_value(
-                self.database_studio
-                    .canvas_state(session_project(session)?)?,
-            )
-            .map_err(AppError::database),
+            "database.get_canvas_state" => {
+                let project_id = session_project(session)?;
+                let window_label = session_canvas_window(session);
+                serde_json::to_value(
+                    self.database_studio
+                        .canvas_state(project_id, &window_label)?,
+                )
+                .map_err(AppError::database)
+            }
             "database.get_selection" => {
-                serde_json::to_value(self.database_studio.selection(session_project(session)?)?)
+                let project_id = session_project(session)?;
+                let window_label = session_canvas_window(session);
+                serde_json::to_value(self.database_studio.selection(project_id, &window_label)?)
                     .map_err(AppError::database)
             }
             other => Err(AppError::new(
@@ -644,6 +650,14 @@ fn session_project(session: &OrchestrationSession) -> AppResult<&str> {
         )
         .layer("orchestration")
     })
+}
+
+fn session_canvas_window(session: &OrchestrationSession) -> String {
+    session
+        .workspace_id
+        .as_deref()
+        .map(|workspace_id| format!("ws-{workspace_id}"))
+        .unwrap_or_else(|| crate::services::MAIN_WINDOW_LABEL.to_owned())
 }
 
 fn derive_title(objective: &str) -> String {

@@ -16,7 +16,7 @@ use crate::models::{
 
 use super::discovery;
 
-const MAX_CANVAS_PROJECTS: usize = 32;
+const MAX_CANVAS_SCOPES: usize = 64;
 const MAX_SELECTED_OBJECTS: usize = 160;
 const MAX_SELECTED_EDGES: usize = 320;
 const MAX_SELECTED_NAMESPACES: usize = 160;
@@ -90,6 +90,12 @@ pub struct DatabaseCanvasSnapshot {
     pub captured_at: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct CanvasScope {
+    project_id: String,
+    publisher_window: String,
+}
+
 /// Application-lifetime Database Studio integration boundary.
 ///
 /// Canonical graph and design state remains owned by `DatabaseService`. Source reads are rebuilt
@@ -99,7 +105,7 @@ pub struct DatabaseCanvasSnapshot {
 #[derive(Clone)]
 pub struct DatabaseStudioRuntime {
     database: Arc<DatabaseService>,
-    canvases: Arc<RwLock<HashMap<String, DatabaseCanvasSnapshot>>>,
+    canvases: Arc<RwLock<HashMap<CanvasScope, DatabaseCanvasSnapshot>>>,
 }
 
 impl DatabaseStudioRuntime {
@@ -150,39 +156,54 @@ impl DatabaseStudioRuntime {
             fingerprint,
         };
 
+        let scope = CanvasScope {
+            project_id: project_id.to_owned(),
+            publisher_window: publisher_window.to_owned(),
+        };
         let mut canvases = self.canvases.write();
-        if !canvases.contains_key(project_id) && canvases.len() >= MAX_CANVAS_PROJECTS {
-            if let Some(oldest_project) = canvases
+        if !canvases.contains_key(&scope) && canvases.len() >= MAX_CANVAS_SCOPES {
+            if let Some(oldest_scope) = canvases
                 .iter()
                 .min_by(|left, right| left.1.captured_at.cmp(&right.1.captured_at))
-                .map(|(project_id, _)| project_id.clone())
+                .map(|(scope, _)| scope.clone())
             {
-                canvases.remove(&oldest_project);
+                canvases.remove(&oldest_scope);
             }
         }
-        canvases.insert(project_id.to_owned(), snapshot.clone());
+        canvases.insert(scope, snapshot.clone());
         Ok(snapshot)
     }
 
-    pub fn canvas_state(&self, project_id: &str) -> AppResult<DatabaseCanvasSnapshot> {
+    pub fn canvas_state(
+        &self,
+        project_id: &str,
+        publisher_window: &str,
+    ) -> AppResult<DatabaseCanvasSnapshot> {
         self.database.get_project(project_id)?;
-        self.canvases
-            .read()
-            .get(project_id)
-            .cloned()
-            .ok_or_else(|| {
-                AppError::new(
-                    "database_canvas_state_unavailable",
-                    "Database Studio has not published canvas state for this Project.",
-                    true,
-                )
-                .entity(project_id)
-                .layer("database_studio")
-            })
+        let scope = CanvasScope {
+            project_id: project_id.to_owned(),
+            publisher_window: publisher_window.to_owned(),
+        };
+        self.canvases.read().get(&scope).cloned().ok_or_else(|| {
+            AppError::new(
+                "database_canvas_state_unavailable",
+                "Database Studio has not published canvas state for this Project window.",
+                true,
+            )
+            .entity(project_id)
+            .layer("database_studio")
+        })
     }
 
-    pub fn selection(&self, project_id: &str) -> AppResult<DatabaseCanvasSelection> {
-        Ok(self.canvas_state(project_id)?.context.selection)
+    pub fn selection(
+        &self,
+        project_id: &str,
+        publisher_window: &str,
+    ) -> AppResult<DatabaseCanvasSelection> {
+        Ok(self
+            .canvas_state(project_id, publisher_window)?
+            .context
+            .selection)
     }
 
     pub fn supports_capability(&self, capability_id: &str) -> bool {
@@ -385,13 +406,17 @@ mod tests {
             .publish_canvas("project-1", "main", canvas_context("project-1"))
             .unwrap();
 
-        let selection = runtime.selection("project-1").unwrap();
+        let selection = runtime.selection("project-1", "main").unwrap();
         assert_eq!(selection.primary_object_id.as_deref(), Some("table:user"));
         assert_eq!(selection.object_ids, vec!["table:user"]);
         assert_eq!(
-            runtime.canvas_state("project-1").unwrap().publisher_window,
+            runtime
+                .canvas_state("project-1", "main")
+                .unwrap()
+                .publisher_window,
             "main"
         );
+        assert!(runtime.canvas_state("project-1", "ws-other").is_err());
     }
 
     #[test]
