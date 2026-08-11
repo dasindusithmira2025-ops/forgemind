@@ -1,4 +1,5 @@
 pub mod backup;
+pub(crate) mod database_studio;
 pub mod legacy_migration;
 pub mod migrations;
 pub(crate) mod orchestration;

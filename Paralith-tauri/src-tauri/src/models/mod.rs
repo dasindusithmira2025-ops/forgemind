@@ -1,5 +1,6 @@
 pub mod agent;
 pub mod browser;
+pub mod database_studio;
 pub mod diagnostics;
 pub mod filesystem;
 pub mod git;
@@ -15,6 +16,7 @@ pub mod usage;
 pub mod workspace;
 
 pub use agent::*;
+pub use database_studio::*;
 pub use diagnostics::*;
 pub use filesystem::*;
 pub use git::*;
