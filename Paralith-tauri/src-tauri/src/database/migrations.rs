@@ -1,7 +1,7 @@
 use crate::errors::{AppError, AppResult};
 use rusqlite::{params, Connection};
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 28;
+pub const CURRENT_SCHEMA_VERSION: i64 = 29;
 
 const MIGRATION_1: &str = r#"
 CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
@@ -910,6 +910,9 @@ pub fn apply(connection: &Connection) -> AppResult<()> {
     if current < 28 || !table_exists(connection, "database_sources")? {
         migrate_v28(connection)?;
     }
+    if current < 29 || !column_exists(connection, "database_sources", "relevance")? {
+        migrate_v29(connection)?;
+    }
     Ok(())
 }
 
@@ -961,7 +964,8 @@ pub fn requires_migration(connection: &Connection) -> AppResult<bool> {
         || !table_exists(connection, "repository_graph_nodes")?
         || !table_exists(connection, "database_sources")?
         || !column_exists(connection, "agent_sessions", "recovery_status")?
-        || !column_exists(connection, "agent_sessions", "worktree_path")?)
+        || !column_exists(connection, "agent_sessions", "worktree_path")?
+        || !column_exists(connection, "database_sources", "relevance")?)
 }
 
 fn migrate_v24(connection: &Connection) -> AppResult<()> {
@@ -1169,6 +1173,26 @@ COMMIT;
 "#,
         )
         .map_err(AppError::database)
+}
+
+/// Database Studio classifies each discovered datasource by how much it looks like the database the
+/// application actually runs on, so a repository's own test fixtures stop being presented as
+/// first-class production databases. Existing rows keep the permissive default: a source discovered
+/// before this migration was surfaced, and silently hiding it on upgrade would be a regression.
+fn migrate_v29(connection: &Connection) -> AppResult<()> {
+    connection
+        .execute_batch("BEGIN IMMEDIATE;")
+        .map_err(AppError::database)?;
+    let result = (|| {
+        add_column_if_missing(
+            connection,
+            "database_sources",
+            "relevance",
+            "TEXT NOT NULL DEFAULT 'application'",
+        )?;
+        record_migration(connection, 29)
+    })();
+    finish_migration_transaction(connection, result, 29)
 }
 
 fn table_exists(connection: &Connection, table: &str) -> AppResult<bool> {

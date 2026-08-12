@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
-import { AlertTriangle, Database, Loader2, Lock } from 'lucide-react'
+import { AlertTriangle, Check, Database, Loader2, Lock, Minus, RotateCcw } from 'lucide-react'
 import { Button } from '../../../../components/ui/Button'
-import { databaseApi } from '../../api'
+import { asDatabaseError, databaseApi } from '../../api'
 import { useDatabaseStore } from '../../databaseStore'
 import type { DatabaseAdapterSupport } from '../../databaseTypes'
 
@@ -15,17 +15,43 @@ import type { DatabaseAdapterSupport } from '../../databaseTypes'
  * that exists and describes the absence of the one that does not, rather than showing a control
  * that would fail.
  */
+const ADAPTER_LABEL: Record<string, string> = {
+  prisma: 'Prisma',
+  drizzle: 'Drizzle',
+  raw_sql: 'Raw SQL',
+  sqlite: 'SQLite',
+  postgres: 'PostgreSQL',
+  mysql: 'MySQL',
+}
+
+const CAPABILITY_COLUMNS = [
+  { key: 'extractDeclaredSchema', label: 'Declared schema' },
+  { key: 'extractMigrations', label: 'Migrations' },
+  { key: 'introspectObservedSchema', label: 'Observed schema' },
+  { key: 'generateChange', label: 'Change generation' },
+] as const satisfies ReadonlyArray<{ key: keyof DatabaseAdapterSupport['capabilities']; label: string }>
+
 export function ConnectionsSection() {
   const activeSourceId = useDatabaseStore((state) => state.activeSourceId)
   const introspect = useDatabaseStore((state) => state.introspectSqliteFile)
   const introspectionLoad = useDatabaseStore((state) => state.introspectionLoad)
   const observedSnapshot = useDatabaseStore((state) => state.observedSnapshot)
+  const [reloadAdapters, setReloadAdapters] = useState(0)
   const [path, setPath] = useState('')
   const [adapters, setAdapters] = useState<DatabaseAdapterSupport[]>([])
+  const [adapterError, setAdapterError] = useState<string | undefined>()
 
+  // Swallowing this failure made the capability matrix silently disappear, which reads exactly like
+  // "no adapters are supported" — the opposite of what a failed read actually establishes.
   useEffect(() => {
-    databaseApi.adapterSupport().then(setAdapters).catch(() => setAdapters([]))
-  }, [])
+    let cancelled = false
+    setAdapterError(undefined)
+    databaseApi
+      .adapterSupport()
+      .then((result) => { if (!cancelled) setAdapters(result) })
+      .catch((caught) => { if (!cancelled) setAdapterError(asDatabaseError(caught).message) })
+    return () => { cancelled = true }
+  }, [reloadAdapters])
 
   return (
     <div className="db-connections">
@@ -47,6 +73,8 @@ export function ConnectionsSection() {
             onChange={(event) => setPath(event.target.value)}
             placeholder="dev.sqlite"
             aria-label="Project-relative database file"
+            aria-describedby="db-introspect-hint"
+            spellCheck={false}
           />
           <Button
             onClick={() => void introspect(path.trim())}
@@ -55,6 +83,9 @@ export function ConnectionsSection() {
             {introspectionLoad.status === 'loading' ? 'Reading…' : 'Introspect'}
           </Button>
         </div>
+        <p id="db-introspect-hint" className="db-inspector-list-secondary">
+          A path relative to the Project root. Files outside the Project are refused.
+        </p>
         {introspectionLoad.status === 'loading' && (
           <div className="db-changes-draft-selector"><Loader2 size={14} className="is-spinning" /> Reading structure…</div>
         )}
@@ -72,25 +103,47 @@ export function ConnectionsSection() {
         )}
       </section>
 
+      {adapterError && (
+        <div className="db-inline-error" role="alert">
+          <AlertTriangle size={14} />
+          <span>Adapter support could not be read: {adapterError}</span>
+          <Button variant="secondary" icon={<RotateCcw size={14} />} onClick={() => setReloadAdapters((value) => value + 1)}>
+            Retry
+          </Button>
+        </div>
+      )}
       {adapters.length > 0 && (
-        <section aria-label="Adapter support">
-          <ul className="db-inspector-list">
-            {adapters.map((adapter) => (
-              <li key={adapter.adapterId}>
-                <span>{adapter.adapterId}</span>
-                <span className="db-inspector-list-secondary">
-                  {[
-                    adapter.capabilities.extractDeclaredSchema && 'declared schema',
-                    adapter.capabilities.extractMigrations && 'migrations',
-                    adapter.capabilities.introspectObservedSchema && 'observed schema',
-                    adapter.capabilities.generateChange && 'change generation',
-                  ]
-                    .filter(Boolean)
-                    .join(' · ')}
-                </span>
-              </li>
-            ))}
-          </ul>
+        <section aria-label="Adapter support" className="db-capability-matrix">
+          <h3>Adapter capabilities</h3>
+          <p className="db-inspector-list-secondary">
+            What each adapter can actually do, read from the backend capability contract rather than
+            assumed. A capability that is off is a limit of this version, not an error.
+          </p>
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">Adapter</th>
+                {CAPABILITY_COLUMNS.map((column) => <th key={column.key} scope="col">{column.label}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {adapters.map((adapter) => (
+                <tr key={adapter.adapterId}>
+                  <th scope="row">{ADAPTER_LABEL[adapter.adapterId] ?? adapter.adapterId}</th>
+                  {CAPABILITY_COLUMNS.map((column) => {
+                    const supported = adapter.capabilities[column.key]
+                    return (
+                      <td key={column.key} className={supported ? 'is-supported' : 'is-unsupported'}>
+                        {supported
+                          ? <><Check size={13} aria-hidden /><span className="sr-only">supported</span></>
+                          : <><Minus size={13} aria-hidden /><span className="sr-only">not available</span></>}
+                      </td>
+                    )
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </section>
       )}
 

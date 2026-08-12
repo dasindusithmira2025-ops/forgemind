@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use crate::errors::{AppError, AppResult};
-use crate::models::{DatabaseAdapterId, DatabaseEngine, DatabaseSource};
+use crate::models::{DatabaseAdapterId, DatabaseEngine, DatabaseSource, DatabaseSourceRelevance};
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -18,6 +18,55 @@ pub struct DiscoveredLogicalDatabase {
     /// to these paths (plus migration directories beside them) so a repository with several logical
     /// databases never attributes one datasource's schema to another.
     pub evidence_paths: Vec<String>,
+    /// How application-relevant this datasource is, derived from where its evidence lives.
+    pub relevance: DatabaseSourceRelevance,
+    /// The human-readable label. Assigned once the whole report is known, because disambiguating
+    /// two same-named databases requires seeing both of them.
+    pub display_name: String,
+}
+
+/// Classify one project-relative path. The most application-like classification across a source's
+/// evidence wins, so a schema that is *also* referenced from real application code is never demoted
+/// to a fixture just because a test happens to include it too.
+fn classify_path(relative: &str) -> DatabaseSourceRelevance {
+    let lower = relative.to_ascii_lowercase();
+    let mut best = DatabaseSourceRelevance::Application;
+    for segment in lower.split('/') {
+        // A file named `schema.test.ts` is test evidence just as much as one under `tests/`.
+        let segment_relevance = match segment {
+            "tests" | "test" | "__tests__" | "__fixtures__" | "fixtures" | "fixture" | "spec"
+            | "specs" | "__mocks__" | "mocks" | "e2e" | "testdata" | "test-data" => {
+                DatabaseSourceRelevance::Test
+            }
+            "examples" | "example" | "samples" | "sample" | "demo" | "demos" | "playground"
+            | "templates" | "starter" | "starters" => DatabaseSourceRelevance::Example,
+            "generated" | "__generated__" | ".generated" | "codegen" | "out" | "output"
+            | "artifacts" | ".artifacts" | "tmp" | "temp" => DatabaseSourceRelevance::Generated,
+            "seed" | "seeds" | "sandbox" | "scratch" | "local" | "fixtures-dev" => {
+                DatabaseSourceRelevance::Development
+            }
+            _ if segment.ends_with(".test.ts")
+                || segment.ends_with(".test.js")
+                || segment.ends_with(".spec.ts")
+                || segment.ends_with(".spec.js") =>
+            {
+                DatabaseSourceRelevance::Test
+            }
+            _ => DatabaseSourceRelevance::Application,
+        };
+        best = best.max(segment_relevance);
+    }
+    best
+}
+
+/// A source's relevance is the *most* application-like of its evidence paths: one fixture file
+/// beside a real schema does not make the database a fixture.
+fn classify_source(evidence_paths: &[String]) -> DatabaseSourceRelevance {
+    evidence_paths
+        .iter()
+        .map(|path| classify_path(path))
+        .min()
+        .unwrap_or(DatabaseSourceRelevance::Application)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -35,7 +84,7 @@ pub fn discover_repository(project_root: &Path) -> AppResult<DiscoveryReport> {
     for path in &files {
         let relative = relative_path(project_root, path);
         if relative.ends_with(".prisma") {
-            let content = fs::read_to_string(path).map_err(AppError::database)?;
+            let content = fs::read_to_string(path).map_err(AppError::from)?;
             let tables = extract_prisma_models(&content);
             if tables.is_empty() {
                 continue;
@@ -54,9 +103,11 @@ pub fn discover_repository(project_root: &Path) -> AppResult<DiscoveryReport> {
                 adapter_ids: vec![DatabaseAdapterId::Prisma],
                 table_names: tables,
                 evidence_paths: vec![relative.clone()],
+                relevance: classify_path(&relative),
+                display_name: String::new(),
             });
         } else if is_drizzle_schema_candidate(&relative) {
-            let content = fs::read_to_string(path).map_err(AppError::database)?;
+            let content = fs::read_to_string(path).map_err(AppError::from)?;
             if !content.contains("drizzle-orm") {
                 continue;
             }
@@ -73,12 +124,14 @@ pub fn discover_repository(project_root: &Path) -> AppResult<DiscoveryReport> {
                 adapter_ids: vec![DatabaseAdapterId::Drizzle],
                 table_names: tables,
                 evidence_paths: vec![relative.clone()],
+                relevance: classify_path(&relative),
+                display_name: String::new(),
             });
         } else if relative.ends_with(".sql") {
             if relative.contains("prisma/migrations/") {
                 continue;
             }
-            let content = fs::read_to_string(path).map_err(AppError::database)?;
+            let content = fs::read_to_string(path).map_err(AppError::from)?;
             let tables = extract_table_names(&content);
             if tables.is_empty() {
                 continue;
@@ -92,6 +145,8 @@ pub fn discover_repository(project_root: &Path) -> AppResult<DiscoveryReport> {
                 adapter_ids: vec![DatabaseAdapterId::RawSql],
                 table_names: tables,
                 evidence_paths: vec![relative.clone()],
+                relevance: classify_path(&relative),
+                display_name: String::new(),
             });
         } else if is_sqlite_file_evidence(&relative) {
             let owner = owner_for_path(project_root, path, &packages);
@@ -103,6 +158,8 @@ pub fn discover_repository(project_root: &Path) -> AppResult<DiscoveryReport> {
                 adapter_ids: vec![DatabaseAdapterId::Sqlite],
                 table_names: Vec::new(),
                 evidence_paths: vec![relative.clone()],
+                relevance: classify_path(&relative),
+                display_name: String::new(),
             });
         }
     }
@@ -130,6 +187,8 @@ pub fn discover_repository(project_root: &Path) -> AppResult<DiscoveryReport> {
         source.evidence_paths.dedup();
         source.consumer_projects.sort();
         source.consumer_projects.dedup();
+        // Merging brought in evidence the per-file classification never saw.
+        source.relevance = classify_source(&source.evidence_paths);
         if source.engine == DatabaseEngine::Sqlite {
             if let Some((raw, raw_paths)) = sqlite_tables.clone() {
                 if source.table_names.is_empty() {
@@ -151,17 +210,96 @@ pub fn discover_repository(project_root: &Path) -> AppResult<DiscoveryReport> {
                 consumer_projects: Vec::new(),
                 adapter_ids: vec![DatabaseAdapterId::Sqlite, DatabaseAdapterId::RawSql],
                 table_names: raw,
+                relevance: classify_source(&raw_paths),
+                display_name: String::new(),
                 evidence_paths: raw_paths,
             });
         }
     }
     merged
         .retain(|source| !source.table_names.is_empty() || source.engine == DatabaseEngine::Sqlite);
-    merged.sort_by(|left, right| left.logical_name.cmp(&right.logical_name));
+    // Application-relevant datasources first: the default Overview should open on the database the
+    // project actually runs on, not on whichever fixture sorts alphabetically first.
+    merged.sort_by(|left, right| {
+        left.relevance
+            .cmp(&right.relevance)
+            .then_with(|| left.logical_name.cmp(&right.logical_name))
+            .then_with(|| left.owner_project.cmp(&right.owner_project))
+    });
+    assign_display_names(&mut merged);
     Ok(DiscoveryReport {
         sources: merged,
         opened_connection: false,
     })
+}
+
+/// Give every logical datasource a readable label, qualifying only the ones that would otherwise be
+/// indistinguishable. Two packages that each declare a `primary` PostgreSQL database are genuinely
+/// two databases and must not present as one name twice — but qualifying *every* source with its
+/// owning path (the previous behaviour) turned every label into an unreadable directory listing.
+fn assign_display_names(sources: &mut [DiscoveredLogicalDatabase]) {
+    let base_of =
+        |source: &DiscoveredLogicalDatabase| display_name_for(&source.logical_name, &source.engine);
+    let mut base_counts: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
+    for source in sources.iter() {
+        *base_counts.entry(base_of(source)).or_default() += 1;
+    }
+
+    // Disambiguate progressively: the owning package's leaf first, widening only as far as the
+    // remaining collision actually requires. `Primary PostgreSQL · db` is readable in a rail;
+    // `Primary PostgreSQL · a/b/c/d/e` is the directory listing this exists to avoid.
+    for index in 0..sources.len() {
+        let base = base_of(&sources[index]);
+        if base_counts.get(&base).copied().unwrap_or(0) <= 1 {
+            sources[index].display_name = base;
+            continue;
+        }
+        let owner = sources[index].owner_project.clone();
+        let peers: Vec<&str> = sources
+            .iter()
+            .enumerate()
+            .filter(|(other, source)| *other != index && base_of(source) == base)
+            .map(|(_, source)| source.owner_project.as_str())
+            .collect();
+        let mut label = None;
+        for depth in 1..=owner_depth(&owner) {
+            let candidate = owner_label(&owner, depth);
+            if peers
+                .iter()
+                .all(|peer| owner_label(peer, depth) != candidate)
+            {
+                label = Some(candidate);
+                break;
+            }
+        }
+        // Two sources with the same base name *and* the same owner path are not distinguishable by
+        // owner at all; the full path is the honest last resort rather than a silent duplicate.
+        sources[index].display_name =
+            format!("{base} · {}", label.unwrap_or_else(|| owner.clone()));
+    }
+}
+
+fn owner_depth(owner: &str) -> usize {
+    if owner == "." || owner.is_empty() {
+        return 1;
+    }
+    owner.split('/').filter(|part| !part.is_empty()).count()
+}
+
+/// The last `depth` segments of an owning package path, ellipsised when that is not the whole path.
+fn owner_label(owner: &str, depth: usize) -> String {
+    if owner == "." || owner.is_empty() {
+        return "root".to_owned();
+    }
+    let parts: Vec<&str> = owner.split('/').filter(|part| !part.is_empty()).collect();
+    let take = depth.min(parts.len()).max(1);
+    let tail = parts[parts.len() - take..].join("/");
+    if take == parts.len() {
+        tail
+    } else {
+        format!("…/{tail}")
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -182,7 +320,7 @@ fn discover_packages(project_root: &Path, files: &[PathBuf]) -> AppResult<Vec<Pa
             .rsplit_once('/')
             .map(|(root, _)| root)
             .unwrap_or("");
-        let content = fs::read_to_string(path).map_err(AppError::database)?;
+        let content = fs::read_to_string(path).map_err(AppError::from)?;
         packages.push(PackageInfo {
             root: root.to_owned(),
             name: json_string_field(&content, "name"),
@@ -331,7 +469,7 @@ fn discover_compose_database_names(files: &[PathBuf]) -> AppResult<Vec<String>> 
         {
             continue;
         }
-        let content = fs::read_to_string(path).map_err(AppError::database)?;
+        let content = fs::read_to_string(path).map_err(AppError::from)?;
         for line in content.lines() {
             let trimmed = line.trim();
             if let Some((key, value)) = trimmed.split_once(':') {
@@ -507,7 +645,7 @@ fn merged_sqlite_tables(
     for path in files {
         let relative = relative_path(project_root, path);
         if relative.ends_with(".sql") && !relative.contains("prisma/migrations/") {
-            let content = fs::read_to_string(path).map_err(AppError::database)?;
+            let content = fs::read_to_string(path).map_err(AppError::from)?;
             if sql_engine(&content, &relative) == DatabaseEngine::Sqlite
                 || relative.contains("sqlite")
             {
@@ -542,15 +680,15 @@ fn collect_files(root: &Path) -> AppResult<Vec<PathBuf>> {
     let mut out = Vec::new();
     let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
-        for entry in fs::read_dir(&dir).map_err(AppError::database)? {
-            let entry = entry.map_err(AppError::database)?;
+        for entry in fs::read_dir(&dir).map_err(AppError::from)? {
+            let entry = entry.map_err(AppError::from)?;
             let path = entry.path();
             let name = path
                 .file_name()
                 .and_then(|name| name.to_str())
                 .unwrap_or_default();
             if path.is_dir() {
-                if !matches!(name, "node_modules" | ".git" | "target") {
+                if !crate::services::database_studio::graph::is_skipped_scan_directory(name) {
                     stack.push(path);
                 }
             } else {
@@ -696,11 +834,14 @@ pub fn to_database_source(
     hasher.update(b"\0");
     hasher.update(logical_key.as_bytes());
     let id = format!("dbsource:{:x}", hasher.finalize());
-    let label = display_name_for(&discovered.logical_name, &discovered.engine);
-    let display_name = if discovered.owner_project == "." || discovered.owner_project.is_empty() {
-        label
+    // The visible name is a name, never a path. A datasource discovered five directories deep used
+    // to render as `Analytics PostgreSQL · a/b/c/d/e`, which is unreadable in a rail and tells the
+    // developer nothing the Inspector does not already show. Ownership and evidence paths are
+    // carried as their own fields precisely so the label does not have to encode them.
+    let display_name = if discovered.display_name.is_empty() {
+        display_name_for(&discovered.logical_name, &discovered.engine)
     } else {
-        format!("{label} · {}", discovered.owner_project)
+        discovered.display_name.clone()
     };
     DatabaseSource {
         id,
@@ -715,6 +856,8 @@ pub fn to_database_source(
         consumer_project_ids: discovered.consumer_projects.clone(),
         environment_ids: Vec::new(),
         evidence_ids: Vec::new(),
+        relevance: discovered.relevance,
+        evidence_paths: discovered.evidence_paths.clone(),
         confidence: 1.0,
         discovered_at: now.to_owned(),
         updated_at: now.to_owned(),
@@ -844,6 +987,101 @@ model LedgerEntry { id String @id }"#,
         let report = discover_repository(&root).unwrap();
         fs::remove_dir_all(&root).unwrap();
         assert!(report.sources.is_empty());
+    }
+
+    /// A repository's own test fixtures are still discovered — erasing them would be a lie about
+    /// what the repository contains — but they must not be presented as application databases.
+    #[test]
+    fn fixture_and_example_schemas_are_classified_below_the_application_schema() {
+        let root = temp_project("dbstudio-relevance");
+        for (relative, table) in [
+            ("packages/db/schema.sql", "users"),
+            (
+                "src-tauri/tests/fixtures/database_studio/analytics/schema.sql",
+                "fixture_rows",
+            ),
+            ("examples/blog/schema.sql", "posts"),
+        ] {
+            let path = root.join(relative);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(
+                &path,
+                format!("CREATE TABLE {table} (id INTEGER PRIMARY KEY);"),
+            )
+            .unwrap();
+        }
+
+        let report = discover_repository(&root).unwrap();
+        fs::remove_dir_all(&root).unwrap();
+
+        let by_relevance = |relevance: DatabaseSourceRelevance| {
+            report
+                .sources
+                .iter()
+                .filter(|source| source.relevance == relevance)
+                .count()
+        };
+        assert_eq!(by_relevance(DatabaseSourceRelevance::Application), 1);
+        assert_eq!(by_relevance(DatabaseSourceRelevance::Test), 1);
+        assert_eq!(by_relevance(DatabaseSourceRelevance::Example), 1);
+        // Application-relevant sources sort first, so the default selection lands on the real one.
+        assert_eq!(
+            report.sources[0].relevance,
+            DatabaseSourceRelevance::Application
+        );
+        assert!(report.sources[0]
+            .evidence_paths
+            .contains(&"packages/db/schema.sql".to_owned()));
+    }
+
+    /// The visible name is a name. A source five directories deep must not render its path.
+    #[test]
+    fn display_names_are_labels_and_only_collisions_are_qualified() {
+        let root = temp_project("dbstudio-naming");
+        let write_package = |owner: &str, env_var: &str| {
+            let path = root.join(owner).join("prisma/schema.prisma");
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(
+                &path,
+                format!("datasource main {{\n  provider = \"postgresql\"\n  url = env(\"{env_var}\")\n}}\nmodel Row {{ id String @id }}"),
+            )
+            .unwrap();
+            // Package boundaries are what make two same-named datasources two databases.
+            fs::write(
+                root.join(owner).join("package.json"),
+                format!("{{\"name\":\"@repo/{}\"}}", owner.replace('/', "-")),
+            )
+            .unwrap();
+        };
+        write_package("packages/db", "DATABASE_URL");
+        write_package("services/edge/workers/analytics", "DATABASE_URL");
+        write_package("apps/reporting", "REPORTING_DATABASE_URL");
+
+        let report = discover_repository(&root).unwrap();
+        fs::remove_dir_all(&root).unwrap();
+        let names: Vec<&str> = report
+            .sources
+            .iter()
+            .map(|source| source.display_name.as_str())
+            .collect();
+        // The uncontested name stays clean.
+        assert!(names.contains(&"Reporting PostgreSQL"), "{names:?}");
+        // The two colliding ones are qualified by the shortest owner suffix that separates them,
+        // never by the whole path.
+        assert!(names.contains(&"Main PostgreSQL · …/db"), "{names:?}");
+        assert!(
+            names.contains(&"Main PostgreSQL · …/analytics"),
+            "{names:?}"
+        );
+        assert!(
+            !names.iter().any(|name| name.contains("services/edge")),
+            "a datasource label must never spell out its full path: {names:?}"
+        );
+        // Every name is distinct, which is what makes the rail usable at all.
+        let mut unique = names.clone();
+        unique.sort();
+        unique.dedup();
+        assert_eq!(unique.len(), names.len());
     }
 
     fn temp_project(prefix: &str) -> PathBuf {

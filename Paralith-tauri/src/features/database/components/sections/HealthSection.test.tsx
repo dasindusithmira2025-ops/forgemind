@@ -15,7 +15,7 @@ describe('HealthSection empty/loading/error states', () => {
   it('shows the success-tone "No issues detected." copy, not a neutral empty state', () => {
     useDatabaseStore.setState({ issuesLoad: { status: 'ready' }, issues: [], activeSourceId: 's1' })
     render(<HealthSection />)
-    const empty = screen.getByText('No issues detected.')
+    const empty = screen.getByText('No deterministic issues detected in this schema.')
     expect(empty).toBeInTheDocument()
     expect(empty.closest('.db-health-empty')).toHaveClass('success')
   })

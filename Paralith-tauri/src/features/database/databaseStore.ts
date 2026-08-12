@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { native } from '../../native/commands'
 import { asDatabaseError, databaseApi } from './api'
 import type {
   CreateDatabaseDraftBase,
@@ -15,6 +16,7 @@ import type {
   DatabaseLoadState,
   DatabaseMigration,
   DatabaseObjectDetail,
+  DatabaseSectionId,
   DatabaseSelection,
   DatabaseSnapshot,
   DatabaseSource,
@@ -24,14 +26,23 @@ import type {
 } from './databaseTypes'
 import { emptyDatabaseSelection, isDatabaseStaleRevisionError } from './databaseTypes'
 import { applyDesignOperation, type ProposedGraph } from './databaseDesignOperations'
+import { visibleDatabaseSources } from './databaseSelectors'
 
 interface DatabaseState {
   projectId?: string
+  /** Absolute project root, resolved once per project. Needed to turn a project-relative evidence
+   * path into something the OS can open or reveal — the same absolute-path rule `FileExplorer`
+   * uses. Never used to widen what the backend will read. */
+  projectRootPath?: string
   loadToken: number
 
   sourcesLoad: DatabaseLoadState
+  /** Every discovered source, whatever its relevance. `visibleSources` is what the UI shows. */
   sources: DatabaseSource[]
   activeSourceId?: string
+  /** Opt-in to test/example/generated datasources. Off by default: discovery is deliberately broad,
+   * but the default view has to be the databases the application actually runs on. */
+  showAllSources: boolean
 
   activeLayer: DatabaseLayer
   schemaLoad: DatabaseLoadState
@@ -58,6 +69,13 @@ interface DatabaseState {
   /** The optimistic Proposed graph overlay (UI-SPEC.md §5.1-5.2) — confirmed state lives in `activeBundle`. */
   proposedGraph: ProposedGraph
   staleRevisionNotice?: { designId: string }
+
+  /**
+   * A cross-surface navigation request. Health, Explorer and the Inspector all resolve an object to
+   * the *same* semantic id and ask to reveal it; the target surface reacts to `nonce` changing so a
+   * repeated request for the same object still re-centres the canvas.
+   */
+  revealTarget?: { objectId: SemanticId; section?: DatabaseSectionId; nonce: number }
 
   /** Ephemeral session-only selection/filter/pin state — never backend-persisted (UI-SPEC.md §7). */
   selection: DatabaseSelection
@@ -108,7 +126,13 @@ interface DatabaseState {
   publishCanvasState: (zoomTier: DatabaseZoomTier, visibleObjectIds: SemanticId[]) => Promise<void>
   dismissStaleRevisionNotice: () => void
   selectObjects: (ids: SemanticId[], options?: { additive?: boolean; focusedId?: SemanticId }) => void
+  /** Select a relationship (FK) rather than a table, so the Inspector can describe the edge itself. */
+  selectRelationship: (edgeId: string, endpoints: { from: SemanticId; to: SemanticId }) => void
   clearSelection: () => void
+  setShowAllSources: (value: boolean) => void
+  /** Select `objectId` and ask `section` (default: the diagram) to bring it into view. */
+  revealObject: (objectId: SemanticId, section?: DatabaseSectionId) => void
+  clearRevealTarget: () => void
   setSearch: (search: string) => void
   setHideUnrelated: (value: boolean) => void
   setNHop: (value: number) => void
@@ -122,6 +146,7 @@ export const useDatabaseStore = create<DatabaseState>((set, get) => ({
   loadToken: 0,
   sourcesLoad: EMPTY_LOAD,
   sources: [],
+  showAllSources: false,
   activeLayer: 'declared',
   schemaLoad: EMPTY_LOAD,
   objectDetailLoad: {},
@@ -143,9 +168,11 @@ export const useDatabaseStore = create<DatabaseState>((set, get) => ({
 
   reset: () => set({
     projectId: undefined,
+    projectRootPath: undefined,
     sourcesLoad: EMPTY_LOAD,
     sources: [],
     activeSourceId: undefined,
+    revealTarget: undefined,
     activeLayer: 'declared',
     schemaLoad: EMPTY_LOAD,
     schemaPage: undefined,
@@ -180,6 +207,12 @@ export const useDatabaseStore = create<DatabaseState>((set, get) => ({
     if (get().projectId !== projectId) get().reset()
     const token = get().loadToken + 1
     set({ projectId, loadToken: token })
+    // Best-effort: without it the Inspector simply cannot offer "open/reveal source", which it
+    // then does not offer, rather than offering a control that would fail.
+    void native
+      .getProject(projectId)
+      .then((project) => { if (get().projectId === projectId) set({ projectRootPath: project.canonicalRootPath }) })
+      .catch(() => undefined)
     await get().discoverSources()
   },
 
@@ -191,15 +224,31 @@ export const useDatabaseStore = create<DatabaseState>((set, get) => ({
     try {
       const response = await databaseApi.discoverSources({ projectId, force })
       if (get().loadToken !== token) return
+      // A rescan can remove a source; keeping the previous id would point every later request at a
+      // source that no longer exists.
+      const current = get().activeSourceId
+      const stillPresent = current && response.sources.some((source) => source.id === current)
+      // Default to the first *visible* source: discovery sorts application-relevant databases first,
+      // so opening a project lands on its real database rather than on a test fixture.
+      const activeSourceId = stillPresent
+        ? current
+        : visibleDatabaseSources(response.sources, get().showAllSources)[0]?.id
       set({
         sourcesLoad: { status: 'ready' },
         sources: response.sources,
-        activeSourceId: get().activeSourceId ?? response.sources[0]?.id,
+        activeSourceId,
+        // Discovery already computed the issue set. Ignoring it left the Health count empty until
+        // the user happened to open Health, and made the same rows get fetched a second time.
+        issues: response.issues,
+        issuesLoad: { status: 'ready' },
       })
+      if (!stillPresent && current !== activeSourceId) {
+        set({ schemaPage: undefined, schemaLoad: EMPTY_LOAD, objectDetails: {}, objectDetailLoad: {} })
+      }
     } catch (caught) {
       if (get().loadToken !== token) return
       const error = asDatabaseError(caught)
-      set({ sourcesLoad: { status: 'error', errorCode: error.code, errorMessage: error.message } })
+      set({ sourcesLoad: { status: 'error', errorCode: error.code, errorMessage: error.message, errorDetail: error.detail } })
     }
   },
 
@@ -212,6 +261,10 @@ export const useDatabaseStore = create<DatabaseState>((set, get) => ({
       activeLayer: layer ?? 'declared',
       schemaPage: undefined,
       schemaLoad: EMPTY_LOAD,
+      // Object detail is cached by object id alone, so it has to be dropped with its source —
+      // otherwise the Inspector keeps showing the previous database's table.
+      objectDetails: {},
+      objectDetailLoad: {},
       selection: emptyDatabaseSelection(),
       designsLoad: EMPTY_LOAD,
       designs: [],
@@ -234,7 +287,14 @@ export const useDatabaseStore = create<DatabaseState>((set, get) => ({
 
   setLayer: (layer) => {
     if (get().activeLayer === layer) return
-    set({ activeLayer: layer, schemaPage: undefined, schemaLoad: EMPTY_LOAD, selection: emptyDatabaseSelection() })
+    set({
+      activeLayer: layer,
+      schemaPage: undefined,
+      schemaLoad: EMPTY_LOAD,
+      objectDetails: {},
+      objectDetailLoad: {},
+      selection: emptyDatabaseSelection(),
+    })
     void get().loadSchema()
   },
 
@@ -256,7 +316,7 @@ export const useDatabaseStore = create<DatabaseState>((set, get) => ({
     } catch (caught) {
       if (get().loadToken !== loadToken || get().activeSourceId !== activeSourceId) return
       const error = asDatabaseError(caught)
-      set({ schemaLoad: { status: 'error', errorCode: error.code, errorMessage: error.message } })
+      set({ schemaLoad: { status: 'error', errorCode: error.code, errorMessage: error.message, errorDetail: error.detail } })
     }
   },
 
@@ -274,7 +334,7 @@ export const useDatabaseStore = create<DatabaseState>((set, get) => ({
     } catch (caught) {
       if (get().projectId !== projectId) return
       const error = asDatabaseError(caught)
-      set({ objectDetailLoad: { ...get().objectDetailLoad, [objectId]: { status: 'error', errorCode: error.code, errorMessage: error.message } } })
+      set({ objectDetailLoad: { ...get().objectDetailLoad, [objectId]: { status: 'error', errorCode: error.code, errorMessage: error.message, errorDetail: error.detail } } })
     }
   },
 
@@ -289,7 +349,7 @@ export const useDatabaseStore = create<DatabaseState>((set, get) => ({
     } catch (caught) {
       if (get().activeSourceId !== activeSourceId) return
       const error = asDatabaseError(caught)
-      set({ migrationsLoad: { status: 'error', errorCode: error.code, errorMessage: error.message } })
+      set({ migrationsLoad: { status: 'error', errorCode: error.code, errorMessage: error.message, errorDetail: error.detail } })
     }
   },
 
@@ -304,7 +364,7 @@ export const useDatabaseStore = create<DatabaseState>((set, get) => ({
     } catch (caught) {
       if (get().activeSourceId !== activeSourceId) return
       const error = asDatabaseError(caught)
-      set({ issuesLoad: { status: 'error', errorCode: error.code, errorMessage: error.message } })
+      set({ issuesLoad: { status: 'error', errorCode: error.code, errorMessage: error.message, errorDetail: error.detail } })
     }
   },
 
@@ -319,7 +379,7 @@ export const useDatabaseStore = create<DatabaseState>((set, get) => ({
     } catch (caught) {
       if (get().activeSourceId !== activeSourceId) return
       const error = asDatabaseError(caught)
-      set({ designsLoad: { status: 'error', errorCode: error.code, errorMessage: error.message } })
+      set({ designsLoad: { status: 'error', errorCode: error.code, errorMessage: error.message, errorDetail: error.detail } })
     }
   },
 
@@ -347,6 +407,12 @@ export const useDatabaseStore = create<DatabaseState>((set, get) => ({
         activeLayer: 'proposed',
         schemaPage: undefined,
         schemaLoad: EMPTY_LOAD,
+        objectDetails: {},
+        objectDetailLoad: {},
+        comparison: undefined,
+        comparisonLoad: EMPTY_LOAD,
+        implementationRun: undefined,
+        implementationLoad: EMPTY_LOAD,
       })
       void get().loadSchema()
     } catch (caught) {
@@ -365,6 +431,12 @@ export const useDatabaseStore = create<DatabaseState>((set, get) => ({
         activeLayer: 'declared',
         schemaPage: undefined,
         schemaLoad: EMPTY_LOAD,
+        objectDetails: {},
+        objectDetailLoad: {},
+        comparison: undefined,
+        comparisonLoad: EMPTY_LOAD,
+        implementationRun: undefined,
+        implementationLoad: EMPTY_LOAD,
       })
       return
     }
@@ -378,6 +450,14 @@ export const useDatabaseStore = create<DatabaseState>((set, get) => ({
         activeToken: bundle.concurrency,
         proposedGraph: proposedGraphFromBundle(bundle),
         staleRevisionNotice: undefined,
+        objectDetails: {},
+        objectDetailLoad: {},
+        // A comparison and an implementation run describe one design; showing the previous
+        // design's result under this design's header would be a plain factual error.
+        comparison: undefined,
+        comparisonLoad: EMPTY_LOAD,
+        implementationRun: undefined,
+        implementationLoad: EMPTY_LOAD,
         // Opening a design projects the Proposed layer, so the diagram shows what is being
         // designed rather than silently continuing to render the declared schema.
         activeLayer: 'proposed',
@@ -424,7 +504,7 @@ export const useDatabaseStore = create<DatabaseState>((set, get) => ({
       set({ comparison, comparisonLoad: { status: 'ready' } })
     } catch (caught) {
       const error = asDatabaseError(caught)
-      set({ comparisonLoad: { status: 'error', errorCode: error.code, errorMessage: error.message } })
+      set({ comparisonLoad: { status: 'error', errorCode: error.code, errorMessage: error.message, errorDetail: error.detail } })
     }
   },
 
@@ -448,10 +528,14 @@ export const useDatabaseStore = create<DatabaseState>((set, get) => ({
         dryRun: options.dryRun ?? false,
       })
       set({ implementationRun: run, implementationLoad: { status: 'ready' } })
-      if (!run.dryRun) await get().discoverSources(true)
+      if (!run.dryRun) {
+        // The repository schema just changed on disk; every cached read of it is stale.
+        set({ schemaPage: undefined, schemaLoad: EMPTY_LOAD, objectDetails: {}, objectDetailLoad: {} })
+        await get().discoverSources(true)
+      }
     } catch (caught) {
       const error = asDatabaseError(caught)
-      set({ implementationLoad: { status: 'error', errorCode: error.code, errorMessage: error.message } })
+      set({ implementationLoad: { status: 'error', errorCode: error.code, errorMessage: error.message, errorDetail: error.detail } })
     }
   },
 
@@ -469,7 +553,7 @@ export const useDatabaseStore = create<DatabaseState>((set, get) => ({
       set({ observedSnapshot: snapshot, introspectionLoad: { status: 'ready' } })
     } catch (caught) {
       const error = asDatabaseError(caught)
-      set({ introspectionLoad: { status: 'error', errorCode: error.code, errorMessage: error.message } })
+      set({ introspectionLoad: { status: 'error', errorCode: error.code, errorMessage: error.message, errorDetail: error.detail } })
     }
   },
 
@@ -553,7 +637,26 @@ export const useDatabaseStore = create<DatabaseState>((set, get) => ({
     set({ selection: next })
   },
 
+  selectRelationship: (edgeId, endpoints) => set({
+    selection: {
+      ...emptyDatabaseSelection(),
+      // Both endpoints stay selected so the canvas still highlights the pair the edge joins.
+      tableIds: [endpoints.from, endpoints.to],
+      relationshipIds: [edgeId],
+      focusedId: endpoints.from,
+    },
+  }),
+
   clearSelection: () => set({ selection: emptyDatabaseSelection() }),
+
+  setShowAllSources: (value) => set({ showAllSources: value }),
+
+  revealObject: (objectId, section = 'diagram') => {
+    get().selectObjects([objectId], { focusedId: objectId })
+    set({ revealTarget: { objectId, section, nonce: Date.now() } })
+  },
+
+  clearRevealTarget: () => set({ revealTarget: undefined }),
 
   setSearch: (search) => set({ filters: { ...get().filters, search } }),
   setHideUnrelated: (value) => set({ filters: { ...get().filters, hideUnrelated: value } }),

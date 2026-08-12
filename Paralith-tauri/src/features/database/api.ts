@@ -102,18 +102,30 @@ export interface DatabaseNativeError {
   code: string
   message: string
   recoverable: boolean
-  details?: Record<string, unknown>
+  /** The backend's `AppError.detail` — the concrete cause behind the user-facing message. */
+  detail?: string
+  affectedEntity?: string
+  recommendedAction?: string
 }
 
 /** Mirrors `native/commands.ts`'s `asNativeError` so store error handling stays consistent app-wide. */
 export function asDatabaseError(caught: unknown): DatabaseNativeError {
   if (caught && typeof caught === 'object' && 'code' in caught && 'message' in caught) {
-    const candidate = caught as { code: unknown; message: unknown; recoverable?: unknown; details?: unknown }
+    const candidate = caught as {
+      code: unknown
+      message: unknown
+      recoverable?: unknown
+      detail?: unknown
+      affectedEntity?: unknown
+      recommendedAction?: unknown
+    }
     return {
       code: String(candidate.code),
       message: String(candidate.message),
       recoverable: Boolean(candidate.recoverable),
-      details: candidate.details as Record<string, unknown> | undefined,
+      detail: typeof candidate.detail === 'string' ? candidate.detail : undefined,
+      affectedEntity: typeof candidate.affectedEntity === 'string' ? candidate.affectedEntity : undefined,
+      recommendedAction: typeof candidate.recommendedAction === 'string' ? candidate.recommendedAction : undefined,
     }
   }
   if (caught instanceof Error) return { code: 'unknown', message: caught.message, recoverable: false }
