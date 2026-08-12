@@ -140,12 +140,28 @@ describe('theme registry', () => {
 })
 
 describe('design genome', () => {
-  it('keeps solid controls achromatic so chroma stays reserved for meaning', () => {
-    // A primary button tinted toward the accent makes every screen with a save button look like
-    // the accent is the subject. The control layer is therefore held to near-grey.
+  it('fills the highest-emphasis control from the accent ramp, not from a fifth colour', () => {
+    // design.md §7.1: the single dominant action in a region takes the accent fill. The risk that
+    // creates is a *second* brand colour appearing on buttons, so the fill is pinned to a step of
+    // the accent ramp rather than merely being "blue-ish". Light themes take the ramp's darker
+    // step, since the primary step itself cannot carry white text at 4.5:1.
     for (const theme of CONCRETE_THEME_ORDER) {
-      const { primary, primaryHover, primaryActive, secondary } = theme.colors.control
-      for (const [name, value] of Object.entries({ primary, primaryHover, primaryActive, secondary })) {
+      const { primary, primaryHover, primaryActive, onPrimary } = theme.colors.control
+      const { primary: aPrimary, hover: aHover, active: aActive, contrast } = theme.colors.accent
+      const ramp = [aPrimary, aHover, aActive]
+      for (const [name, value] of Object.entries({ primary, primaryHover, primaryActive })) {
+        expect(ramp, `${theme.id}.control.${name} (${value}) is off the accent ramp`).toContain(value)
+      }
+      expect(onPrimary, `${theme.id}: primary label must be the accent's own contrast colour`).toBe(contrast)
+    }
+  })
+
+  it('keeps every control tier below primary achromatic so the accent stays the only colour', () => {
+    // The 90/8/2 budget only holds if exactly one tier is coloured. Secondary fills, the two
+    // floating surfaces and the focus ring all stay on the neutral ladder.
+    for (const theme of CONCRETE_THEME_ORDER) {
+      const { secondary, secondaryHover, card, popover } = theme.colors.control
+      for (const [name, value] of Object.entries({ secondary, secondaryHover, card, popover })) {
         expect(chroma(value), `${theme.id}.control.${name} (${value}) carries chroma`).toBeLessThanOrEqual(CONTROL_CHROMA_BUDGET)
       }
     }
@@ -163,8 +179,8 @@ describe('design genome', () => {
     // One border value has to sit correctly on canvas, card and popover. An opaque grey cannot:
     // it reads heavy on the canvas and disappears on a raised surface.
     for (const theme of CONCRETE_THEME_ORDER) {
-      const { default: base, subtle, strong } = theme.colors.border
-      for (const [name, value] of Object.entries({ default: base, subtle, strong })) {
+      const { faint, default: base, subtle, hover, strong } = theme.colors.border
+      for (const [name, value] of Object.entries({ faint, default: base, subtle, hover, strong })) {
         expect(value, `${theme.id}.border.${name} is not translucent`).toMatch(/^rgb\(|^rgba\(|color-mix/)
       }
     }
@@ -197,17 +213,38 @@ describe('design genome', () => {
     }
   })
 
-  it('never lets a component rule repaint a solid control in the accent', () => {
-    // The token-level half of rule 3 is covered by `keeps solid controls achromatic`. It is still
-    // breakable in component CSS: a single `.button-primary { background: var(--accent) }` override
-    // puts the brand hue on the highest-emphasis control and undoes the rule for that surface.
+  it('never lets a component rule paint a solid control outside the control tokens', () => {
+    // The token-level half of rule 3 is covered by the two tests above. It is still breakable in
+    // component CSS: a single `.button-primary { background: #4f86ea }` pins one surface to a
+    // literal and quietly desynchronises it from every theme but the default.
     for (const [name, sheet] of Object.entries(GENOME_STYLESHEETS)) {
       for (const rule of sheet.split('}')) {
         if (!/\.button-primary\b/.test(rule)) continue
         const background = /background(-color)?:\s*([^;]+)/.exec(rule)
         if (!background) continue
-        expect(background[2], `${name}: .button-primary must stay on --primary`)
-          .not.toMatch(/var\(--accent/)
+        expect(background[2], `${name}: .button-primary must stay on the --primary tokens`)
+          .toMatch(/var\(--primary/)
+      }
+    }
+  })
+
+  it('keeps the hairline ladder monotonic so each step reads as one notch of structure', () => {
+    // design.md §4.1 gives five border steps. They are only useful if they are ordered: a `hover`
+    // edge that is fainter than the `default` edge it replaces makes a control look like it lost
+    // focus on pointer-enter.
+    const alpha = (value: string): number => {
+      const match = /\/\s*([\d.]+)\s*\)/.exec(value)
+      return match ? Number(match[1]) : Number.NaN
+    }
+    for (const theme of CONCRETE_THEME_ORDER) {
+      const { faint, subtle, default: base, hover, strong } = theme.colors.border
+      const steps = [faint, subtle, base, hover, strong].map(alpha)
+      for (const [index, value] of steps.entries()) {
+        expect(value, `${theme.id}: border step ${index} is not an alpha wash`).not.toBeNaN()
+      }
+      for (let i = 1; i < steps.length; i += 1) {
+        expect(steps[i], `${theme.id}: border ladder is not ascending at step ${i}`)
+          .toBeGreaterThan(steps[i - 1])
       }
     }
   })

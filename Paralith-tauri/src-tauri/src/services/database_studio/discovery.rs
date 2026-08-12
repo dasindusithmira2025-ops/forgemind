@@ -627,6 +627,27 @@ fn split_sql_statements(content: &str) -> Vec<String> {
     statements
 }
 
+fn engine_key(engine: &DatabaseEngine) -> &'static str {
+    match engine {
+        DatabaseEngine::Postgres => "postgres",
+        DatabaseEngine::Mysql => "mysql",
+        DatabaseEngine::Mariadb => "mariadb",
+        DatabaseEngine::Sqlite => "sqlite",
+        DatabaseEngine::Unknown => "unknown",
+    }
+}
+
+/// A repository-unique key for a logical datasource. `discover_repository` treats
+/// `(logical_name, owner_project, engine)` as one database, so the stored key has to carry the
+/// owning package too: a monorepo where two packages each declare a `primary` datasource holds two
+/// databases, not one, and `database_sources` enforces `UNIQUE(repository_id, logical_key)`.
+fn logical_key_for(logical_name: &str, owner_project: &str, engine: &DatabaseEngine) -> String {
+    if owner_project == "." || owner_project.is_empty() {
+        return format!("{}@{logical_name}", engine_key(engine));
+    }
+    format!("{}@{owner_project}/{logical_name}", engine_key(engine))
+}
+
 /// Human-facing label for a logical datasource: the discovered logical key in title case, suffixed
 /// with the engine when it is known. `primary` + postgres becomes `Primary PostgreSQL`, which keeps
 /// the explorer readable without inventing information the evidence does not support.
@@ -662,16 +683,30 @@ pub fn to_database_source(
     discovered: &DiscoveredLogicalDatabase,
     now: &str,
 ) -> DatabaseSource {
+    // The identity has to be the same tuple `discover_repository` merges on. Hashing the logical
+    // name alone collapsed every `primary` datasource in a monorepo onto one row, so the last
+    // package scanned overwrote the previous one's evidence and schema.
+    let logical_key = logical_key_for(
+        &discovered.logical_name,
+        &discovered.owner_project,
+        &discovered.engine,
+    );
     let mut hasher = Sha256::new();
     hasher.update(repository_id.as_bytes());
     hasher.update(b"\0");
-    hasher.update(discovered.logical_name.as_bytes());
+    hasher.update(logical_key.as_bytes());
     let id = format!("dbsource:{:x}", hasher.finalize());
+    let label = display_name_for(&discovered.logical_name, &discovered.engine);
+    let display_name = if discovered.owner_project == "." || discovered.owner_project.is_empty() {
+        label
+    } else {
+        format!("{label} · {}", discovered.owner_project)
+    };
     DatabaseSource {
         id,
         repository_id: repository_id.to_owned(),
-        logical_key: discovered.logical_name.clone(),
-        display_name: display_name_for(&discovered.logical_name, &discovered.engine),
+        logical_key,
+        display_name,
         engine: discovered.engine.clone(),
         adapter_ids: discovered.adapter_ids.clone(),
         owner_project_id: Some(discovered.owner_project.clone()),

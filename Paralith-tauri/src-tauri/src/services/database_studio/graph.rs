@@ -88,18 +88,23 @@ pub fn discover_project(
             evidence.extend(adapter.detect(&DetectionContext {
                 repository_id,
                 project_id: &logical.owner_project,
+                source_id: &source.id,
                 project_root,
                 changed_paths: &candidates,
                 extractor_version: EXTRACTOR_VERSION,
             })?);
         }
+        evidence.extend(consumer_evidence(repository_id, &source.id, logical, &now));
+        // Ids are source-scoped, so this only collapses genuine repeats within one source; it must
+        // run after consumer evidence joins the list because `database_source_evidence.id` is a
+        // primary key and one duplicate aborts the whole discovery transaction.
+        evidence.sort_by(|left, right| left.id.cmp(&right.id));
+        evidence.dedup_by(|left, right| left.id == right.id);
         evidence.sort_by(|left, right| {
             left.relative_path
                 .cmp(&right.relative_path)
                 .then(left.id.cmp(&right.id))
         });
-        evidence.dedup_by(|left, right| left.id == right.id);
-        evidence.extend(consumer_evidence(repository_id, logical, &now));
 
         discovered_sources.push(DiscoveredSource { source, evidence });
     }
@@ -584,6 +589,7 @@ fn companion_paths(
 /// as heuristic: a dependency edge is strong evidence of use, but it is not a schema declaration.
 fn consumer_evidence(
     repository_id: &str,
+    source_id: &str,
     logical: &DiscoveredLogicalDatabase,
     now: &str,
 ) -> Vec<DatabaseSourceEvidence> {
@@ -597,7 +603,7 @@ fn consumer_evidence(
                 format!("{consumer}/package.json")
             };
             DatabaseSourceEvidence {
-                id: stable_id(&[repository_id, &logical.logical_name, consumer, "consumer"]),
+                id: stable_id(&[repository_id, source_id, consumer, "consumer"]),
                 repository_id: repository_id.to_owned(),
                 project_id: Some(consumer.clone()),
                 adapter_id: logical
@@ -1026,7 +1032,7 @@ pub fn issues_for_graph(
     graph: &ExtractedDatabaseGraph,
 ) -> Vec<DatabaseIssue> {
     let now = Utc::now().to_rfc3339();
-    super::health::evaluate_graph_health(graph)
+    let mut issues: Vec<DatabaseIssue> = super::health::evaluate_graph_health(graph)
         .into_iter()
         .map(|issue| DatabaseIssue {
             id: format!(
@@ -1052,7 +1058,20 @@ pub fn issues_for_graph(
             detected_at: now.clone(),
             resolved_at: None,
         })
-        .collect()
+        .collect();
+    // Health rules walk the object list, so a graph that already carries duplicate identities (which
+    // `DuplicateIdentity` reports) yields the same finding more than once. `database_issues.id` is a
+    // primary key, so one repeat would abort the whole scan rather than surface the duplicate.
+    issues.sort_by(|left, right| left.id.cmp(&right.id));
+    issues.dedup_by(|left, right| left.id == right.id);
+    issues
+}
+
+/// Bind a graph-derived issue id to the snapshot it was detected in. Issue rows are per-snapshot and
+/// `database_issues.id` is a global primary key, so an id that only describes the finding collides
+/// with the same finding on an earlier snapshot of the same source.
+pub fn scoped_issue_id(source_id: &str, snapshot_id: &str, issue_id: &str) -> String {
+    format!("dbissue:{}", stable_id(&[source_id, snapshot_id, issue_id]))
 }
 
 /// V1 adapter capability matrix, surfaced to the UI so the Connections surface can state exactly

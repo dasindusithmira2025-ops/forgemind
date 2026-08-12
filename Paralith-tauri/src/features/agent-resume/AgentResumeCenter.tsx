@@ -254,7 +254,9 @@ export function AgentResumeCenter() {
                       <p className="agent-resume-error" role="alert">{failures[record.terminalSessionId] || record.errorMessage}</p>
                     )}
                     <div className="agent-resume-actions">
-                      <Button variant="primary" icon={<Play size={13} />} disabled={working || record.recoveryStatus !== 'resumable'} onClick={() => void resumeOne(record)}>Resume</Button>
+                      {/* Per-record action: secondary, so the footer's "Resume all" stays the one
+                          accent-filled control in this dialog (design.md §7.1). */}
+                      <Button variant="secondary" icon={<Play size={13} />} disabled={working || record.recoveryStatus !== 'resumable'} onClick={() => void resumeOne(record)}>Resume</Button>
                       <button disabled={working || (record.recoveryStatus !== 'resumable' && !canRecreatePane)} onClick={() => void resumeOne(record, true)}>Resume in new terminal</button>
                       <button onClick={() => void openProject(record)}><ExternalLink size={13} />Open project</button>
                       <button onClick={() => void navigator.clipboard.writeText(record.commandPreview)}><Clipboard size={13} />Copy command</button>

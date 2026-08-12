@@ -9,6 +9,6 @@ application and must render identically offline and on first paint.
 - Upstream: https://github.com/vercel/geist-font
 - License: SIL OFL 1.1 — https://github.com/vercel/geist-font/blob/main/LICENSE.TXT
 
-Geist is the UI typeface for the whole application (`--font-ui`). Monospace stays
+Geist is the UI typeface for the whole application (`--font-sans`). Monospace stays
 a system stack (`--font-mono`) so terminal and editor glyph metrics match what the
 OS ships.

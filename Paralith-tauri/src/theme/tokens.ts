@@ -52,11 +52,23 @@ export interface ForegroundTokens {
   onAccent: string
 }
 
+/**
+ * The five-step hairline ladder from design.md §4.1.
+ *
+ * Structure in Paralith is carried by borders, not elevation, so the ladder needs more resolution
+ * than a single divider value: `faint` separates panes that are already distinguished by surface,
+ * `default` draws control edges, and `hover`/`strong` mark interaction and the active pane. Every
+ * step is an alpha wash so one value stays correct on every surface it can land on.
+ */
 export interface BorderTokens {
+  /** Pane-to-pane seams, where the surfaces already differ. The quietest step. */
+  faint: string
+  /** The faintest hairline dividers inside a pane. */
+  subtle: string
   /** Default separators and control borders. */
   default: string
-  /** The faintest hairline dividers. */
-  subtle: string
+  /** Border under the pointer — a control's hover edge. */
+  hover: string
   /** Emphasised borders (focused inputs, active pane outline). */
   strong: string
   /** Accent-tinted border used on accent chips/badges. */
@@ -128,6 +140,9 @@ export interface StatusTokens {
   errorBorder: string
   errorText: string
   info: string
+  /** Connected / live / ready-to-run. design.md reserves teal for "the resource exists and is
+   *  reachable", which is distinct from `success` ("the work finished correctly"). */
+  ready: string
   /** Agent/task lifecycle states. These carry meaning through a dot, badge, or icon — never
    *  through a filled panel. `success` and `error` above serve as the terminal success/failure
    *  states, so they are deliberately not duplicated here. */
@@ -308,9 +323,17 @@ export function toCssVars(theme: ThemeDefinition): Record<string, string> {
     '--bg-selected': bg.selected,
     '--surface-pressed': bg.pressed,
     '--surface-disabled': bg.disabled,
+    // design.md §4.1 names the surface ladder positionally. Emitted here as well as the role
+    // names above so a rule can say "one step up from the card" without knowing which role that is.
+    '--canvas-base': bg.canvas,
+    '--surface-1': bg.surface,
+    '--surface-4': bg.hover,
 
+    '--border-faint': border.faint,
     '--border': border.default,
+    '--border-default': border.default,
     '--border-subtle': border.subtle,
+    '--border-hover': border.hover,
     '--border-strong': border.strong,
     '--accent-border': border.accent,
 
@@ -319,10 +342,18 @@ export function toCssVars(theme: ThemeDefinition): Record<string, string> {
     '--muted': fg.secondary,
     '--faint': fg.muted,
     '--disabled': fg.disabled,
+    // design.md §5.3 contrast levels 1-4, by their canonical names.
+    '--text-primary': fg.primary,
+    '--text-secondary': fg.secondary,
+    '--text-muted': fg.muted,
+    '--text-faint': fg.disabled,
 
     '--accent': accent.primary,
+    '--accent-primary': accent.primary,
     '--accent-strong': accent.hover,
+    '--accent-hover': accent.hover,
     '--accent-active': accent.active,
+    '--accent-pressed': accent.active,
     '--accent-soft': accent.soft,
     '--accent-edge': accent.edge,
     '--on-accent': accent.contrast,
@@ -350,6 +381,24 @@ export function toCssVars(theme: ThemeDefinition): Record<string, string> {
     '--danger-border': status.errorBorder,
     '--danger-text': status.errorText,
     '--info': status.info,
+    '--ready': status.ready,
+    '--ready-soft': `color-mix(in srgb, ${status.ready} 10%, transparent)`,
+    '--ready-border': `color-mix(in srgb, ${status.ready} 25%, transparent)`,
+    // design.md §4.2 meaning contract, by its canonical names. Blue = active/informational,
+    // green = verified, amber = attention, red = failure, purple = agent, teal = live, grey = idle.
+    '--state-info': status.info,
+    '--state-info-soft': `color-mix(in srgb, ${status.info} 11%, transparent)`,
+    '--state-success': status.success,
+    '--state-success-soft': status.successSoft,
+    '--state-warning': status.warning,
+    '--state-warning-soft': status.warningSoft,
+    '--state-danger': status.error,
+    '--state-danger-soft': status.errorSoft,
+    '--state-agent': agent.action,
+    '--state-agent-soft': `color-mix(in srgb, ${agent.action} 11%, transparent)`,
+    '--state-ready': status.ready,
+    '--state-ready-soft': `color-mix(in srgb, ${status.ready} 10%, transparent)`,
+    '--state-neutral': status.offline,
     '--status-working': status.working,
     '--status-waiting': status.waiting,
     '--status-blocked': status.blocked,
@@ -409,14 +458,22 @@ export function toCssVars(theme: ThemeDefinition): Record<string, string> {
 export const REQUIRED_CSS_VARS: readonly string[] = [
   '--bg', '--canvas', '--surface', '--surface-2', '--surface-3', '--surface-hover',
   '--sidebar-bg', '--bg-input', '--bg-selected', '--surface-pressed', '--surface-disabled',
-  '--border', '--border-subtle', '--border-strong', '--accent-border',
+  '--canvas-base', '--surface-1', '--surface-4',
+  '--border', '--border-default', '--border-faint', '--border-subtle', '--border-hover',
+  '--border-strong', '--accent-border',
   '--text', '--text-strong', '--muted', '--faint', '--disabled',
-  '--accent', '--accent-strong', '--accent-active', '--accent-soft', '--accent-edge', '--on-accent',
+  '--text-primary', '--text-secondary', '--text-muted', '--text-faint',
+  '--accent', '--accent-primary', '--accent-strong', '--accent-hover', '--accent-active',
+  '--accent-pressed', '--accent-soft', '--accent-edge', '--on-accent',
   '--primary', '--primary-hover', '--primary-active', '--on-primary',
   '--secondary', '--secondary-hover', '--on-secondary', '--card', '--popover', '--ring',
   '--success', '--success-soft', '--success-border',
   '--warning', '--warning-soft', '--warning-border', '--warning-text',
   '--danger', '--danger-soft', '--danger-border', '--danger-text', '--info',
+  '--ready', '--ready-soft', '--ready-border',
+  '--state-info', '--state-info-soft', '--state-success', '--state-success-soft',
+  '--state-warning', '--state-warning-soft', '--state-danger', '--state-danger-soft',
+  '--state-agent', '--state-agent-soft', '--state-ready', '--state-ready-soft', '--state-neutral',
   '--status-working', '--status-waiting', '--status-blocked',
   '--status-unread', '--status-offline', '--status-idle',
   '--git-added', '--git-modified', '--git-deleted', '--git-renamed',

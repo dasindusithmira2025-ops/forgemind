@@ -173,7 +173,10 @@ export function ProjectLauncher() {
                     <span className="workspace-summary">{workspaceSummary(workspace)}<span className="dot-sep">·</span><span className="workspace-time"><Clock3 size={11} />{relativeTime(workspace.lastOpenedAt)}</span></span>
                   </div>
                   <div className="workspace-row-actions">
-                    <Button variant="primary" icon={<Play size={14} />} disabled={folderMissing || Boolean(pendingId)} title={folderMissing ? 'Project folder is missing' : `Open ${workspace.name}`} onClick={() => openWorkspace(project, workspace)}>Open</Button>
+                    {/* Secondary, not primary: this repeats once per Workspace row. The accent fill
+                        marks the one dominant action on a screen (design.md §7.1), and a list of
+                        eight accent buttons marks nothing at all. */}
+                    <Button variant="secondary" icon={<Play size={14} />} disabled={folderMissing || Boolean(pendingId)} title={folderMissing ? 'Project folder is missing' : `Open ${workspace.name}`} onClick={() => openWorkspace(project, workspace)}>Open</Button>
                     <div className="menu-wrap">
                       <Button variant="ghost" icon={<MoreHorizontal size={16} />} aria-label={`More actions for workspace ${workspace.name}`} onClick={() => setWorkspaceMenu(workspaceMenu === workspace.id ? undefined : workspace.id)} />
                       {workspaceMenu === workspace.id && <><button className="context-scrim" aria-label="Close workspace actions" onClick={() => setWorkspaceMenu(undefined)} /><div className="context-popover" role="menu">

@@ -1,7 +1,7 @@
 {
   "name": "paralith",
   "private": true,
-  "version": "0.4.10",
+  "version": "0.4.11",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,6 +11,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "preview": "vite preview",
+    "visual": "vite --config vite.visual.config.ts",
     "tauri": "tauri",
     "release:sync": "node scripts/release/sync-version.mjs",
     "release:check": "node scripts/release/sync-version.mjs --check",

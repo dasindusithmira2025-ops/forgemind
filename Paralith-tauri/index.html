@@ -19,8 +19,8 @@
           if (scheme === 'light' || scheme === 'dark') root.style.colorScheme = scheme;
           // The cached blob is only replayable while it was written by this token revision;
           // otherwise it would paint one frame of the previous palette on an upgraded install.
-          // Keep '2' in sync with TOKEN_REVISION in src/theme/applyTheme.ts.
-          var raw = localStorage.getItem('paralith.theme.rev') === '2'
+          // Keep '3' in sync with TOKEN_REVISION in src/theme/applyTheme.ts.
+          var raw = localStorage.getItem('paralith.theme.rev') === '3'
             ? localStorage.getItem('paralith.theme.vars')
             : null;
           if (raw) {
