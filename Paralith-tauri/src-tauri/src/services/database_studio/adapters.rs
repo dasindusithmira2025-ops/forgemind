@@ -24,6 +24,11 @@ const SKIPPED_DIRECTORIES: [&str; 4] = [".git", "node_modules", "target", "dist"
 pub struct DetectionContext<'a> {
     pub repository_id: &'a str,
     pub project_id: &'a str,
+    /// The logical datasource this detection pass is attributing evidence to. One file can be
+    /// evidence for more than one datasource (a shared schema, a package consumed by two apps), and
+    /// `database_source_evidence.id` is a global primary key, so evidence identity must carry the
+    /// owning source or the second source's insert fails with a UNIQUE violation.
+    pub source_id: &'a str,
     pub project_root: &'a Path,
     pub changed_paths: &'a [PathBuf],
     pub extractor_version: &'a str,
@@ -186,7 +191,12 @@ fn detect_static_evidence(
         evidence.push(DatabaseSourceEvidence {
             id: stable_id(
                 "evidence",
-                &[ctx.repository_id, &relative, adapter_name(&adapter_id)],
+                &[
+                    ctx.repository_id,
+                    ctx.source_id,
+                    &relative,
+                    adapter_name(&adapter_id),
+                ],
             ),
             repository_id: ctx.repository_id.to_owned(),
             project_id: Some(ctx.project_id.to_owned()),
@@ -2920,6 +2930,7 @@ mod tests {
             .detect(&DetectionContext {
                 repository_id: "repo",
                 project_id: "project",
+                source_id: "dbsource:test",
                 project_root: root,
                 changed_paths,
                 extractor_version: "test-extractor",

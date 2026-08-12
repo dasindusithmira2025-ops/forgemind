@@ -196,11 +196,17 @@ impl DatabaseStudioRuntime {
             let snapshot = self.persist_declared_snapshot(&source, &extracted)?;
             let mut issues =
                 graph::issues_for_graph(&source.id, Some(&snapshot.id), None, &extracted);
+            // Adapter issue ids are content-addressed over the graph alone, but an issue row belongs
+            // to one snapshot and `replace_issues` only clears the snapshot it is writing. Rebinding
+            // the id to the snapshot keeps a re-scan from colliding with the issues it superseded.
             issues.extend(adapter_issues.into_iter().map(|mut issue| {
+                issue.id = graph::scoped_issue_id(&source.id, &snapshot.id, &issue.id);
                 issue.source_id.clone_from(&source.id);
                 issue.snapshot_id = Some(snapshot.id.clone());
                 issue
             }));
+            issues.sort_by(|left, right| left.id.cmp(&right.id));
+            issues.dedup_by(|left, right| left.id == right.id);
             self.database.database_studio_replace_issues(
                 &source.id,
                 &GraphRef::Snapshot(snapshot.id.clone()),
@@ -1461,11 +1467,13 @@ fn invalid_canvas(message: &str) -> AppError {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
     use std::fs;
     use std::path::PathBuf;
 
+    use super::super::discovery;
     use super::*;
-    use crate::models::Project;
+    use crate::models::{DatabaseEngine, Project};
 
     struct TempProject {
         path: PathBuf,
@@ -1532,6 +1540,91 @@ mod tests {
             semantic_lod: 3,
             captured_at: "2026-08-11T00:00:00Z".into(),
         }
+    }
+
+    /// Regression: a repository where one `.sql` file is legitimately evidence for several logical
+    /// datasources. Evidence ids used to be derived from the file path alone, so the second source's
+    /// insert hit `UNIQUE constraint failed: database_source_evidence.id`, the whole discovery
+    /// transaction rolled back, and Database Studio surfaced a bare `database_error`.
+    #[test]
+    fn one_file_shared_by_several_sources_does_not_abort_discovery() {
+        let project = TempProject::new();
+        // A raw SQL file under a `sqlite` path is merged into every sqlite source that has no
+        // schema of its own, so both `.sqlite` files below claim it as evidence.
+        fs::create_dir_all(project.path.join("sqlite")).unwrap();
+        fs::write(
+            project.path.join("sqlite/schema.sql"),
+            "CREATE TABLE users (id INTEGER PRIMARY KEY);",
+        )
+        .unwrap();
+        fs::write(project.path.join("dev.sqlite"), b"").unwrap();
+        fs::write(project.path.join("analytics.sqlite"), b"").unwrap();
+        let runtime = runtime(&project.path);
+
+        let discovered = runtime.discover_sources("project-1", true).unwrap();
+        assert!(
+            discovered.sources.len() >= 2,
+            "expected the sqlite files to be separate sources: {:?}",
+            discovered
+                .sources
+                .iter()
+                .map(|source| source.logical_key.clone())
+                .collect::<Vec<_>>()
+        );
+        let ids: HashSet<&str> = discovered
+            .sources
+            .iter()
+            .map(|source| source.id.as_str())
+            .collect();
+        assert_eq!(ids.len(), discovered.sources.len());
+        // Every source kept its own evidence rows rather than one source's write erasing another's.
+        for source in &discovered.sources {
+            let detail = runtime.source_detail("project-1", &source.id).unwrap();
+            assert!(
+                !detail.evidence.is_empty(),
+                "source {} lost its evidence",
+                source.logical_key
+            );
+        }
+    }
+
+    /// Two packages that each declare a `primary` datasource are two databases. Deriving the source
+    /// id from the logical name alone collapsed them onto one row, so the last package scanned
+    /// overwrote the first one's evidence and declared schema.
+    #[test]
+    fn same_logical_name_in_two_packages_stays_two_sources() {
+        let left = discovery::to_database_source(
+            "repo",
+            &discovery::DiscoveredLogicalDatabase {
+                logical_name: "primary".into(),
+                engine: DatabaseEngine::Postgres,
+                owner_project: "packages/db".into(),
+                consumer_projects: Vec::new(),
+                adapter_ids: vec![DatabaseAdapterId::Prisma],
+                table_names: vec!["users".into()],
+                evidence_paths: vec!["packages/db/prisma/schema.prisma".into()],
+            },
+            "2026-08-12T00:00:00Z",
+        );
+        let right = discovery::to_database_source(
+            "repo",
+            &discovery::DiscoveredLogicalDatabase {
+                logical_name: "primary".into(),
+                engine: DatabaseEngine::Postgres,
+                owner_project: "apps/api".into(),
+                consumer_projects: Vec::new(),
+                adapter_ids: vec![DatabaseAdapterId::Prisma],
+                table_names: vec!["orders".into()],
+                evidence_paths: vec!["apps/api/prisma/schema.prisma".into()],
+            },
+            "2026-08-12T00:00:00Z",
+        );
+
+        assert_ne!(left.id, right.id);
+        // `database_sources` enforces UNIQUE(repository_id, logical_key), so the stored key has to
+        // separate them too.
+        assert_ne!(left.logical_key, right.logical_key);
+        assert_ne!(left.display_name, right.display_name);
     }
 
     #[test]
