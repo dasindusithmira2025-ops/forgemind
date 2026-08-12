@@ -1,0 +1,282 @@
+/**
+ * Fixture data for the visual harness (see `visual/README.md`).
+ *
+ * These shapes mirror `src/native/types.ts` closely enough for the real screens to render a
+ * representative, *populated* state — the states that actually stress the design system. They are
+ * deliberately hand-written rather than generated: a screenshot of an empty app proves nothing
+ * about density, truncation or hierarchy.
+ */
+
+const NOW = '2026-08-12T09:41:00Z'
+
+export const project = {
+  id: 'proj-paralith',
+  name: 'paralith',
+  rootPath: 'C:\\dev\\paralith',
+  canonicalRootPath: 'C:\\dev\\paralith',
+  gitBranch: 'feat/database-studio',
+  detectedFramework: 'Tauri',
+  packageManager: 'npm',
+  majorLanguages: ['TypeScript', 'Rust'],
+  isGitRepository: true,
+  hasPackageJson: true,
+  hasLockfile: true,
+  createdAt: NOW,
+  updatedAt: NOW,
+  lastOpenedAt: NOW,
+}
+
+const project2 = { ...project, id: 'proj-corelith-web', name: 'corelith-web', rootPath: 'C:\\dev\\corelith-web', canonicalRootPath: 'C:\\dev\\corelith-web', gitBranch: 'main', majorLanguages: ['TypeScript'] }
+
+function pane(id: string, title: string, provider: string, order: number) {
+  return {
+    id, workspaceId: 'ws-main', title, provider,
+    executablePath: provider === 'claude' ? 'C:\\bin\\claude.exe' : 'C:\\bin\\codex.exe',
+    args: [], workingDirectory: 'C:\\dev\\paralith', workingDirectoryMode: 'project_relative',
+    positionOrder: order,
+  }
+}
+
+const panes = [
+  pane('pane-1', 'Architect', 'claude', 0),
+  pane('pane-2', 'Builder', 'codex', 1),
+  pane('pane-3', 'Reviewer', 'claude', 2),
+  pane('pane-4', 'Shell', 'powershell', 3),
+]
+
+const layout = {
+  type: 'split', direction: 'horizontal', sizes: [50, 50],
+  children: [
+    { type: 'split', direction: 'vertical', sizes: [50, 50], children: [{ type: 'pane', paneId: 'pane-1' }, { type: 'pane', paneId: 'pane-3' }] },
+    { type: 'split', direction: 'vertical', sizes: [50, 50], children: [{ type: 'pane', paneId: 'pane-2' }, { type: 'pane', paneId: 'pane-4' }] },
+  ],
+}
+
+export const workspace = {
+  id: 'ws-main', projectId: project.id, name: 'Database Studio', normalizedName: 'database-studio',
+  layout, activePaneId: 'pane-1', restoreBehavior: 'inherit', panes,
+  createdAt: NOW, updatedAt: NOW, lastOpenedAt: NOW,
+}
+
+const workspace2 = { ...workspace, id: 'ws-review', name: 'Review + CI', normalizedName: 'review-ci', panes: panes.slice(0, 2) }
+const workspace3 = { ...workspace, id: 'ws-web', projectId: project2.id, name: 'Marketing site', normalizedName: 'marketing-site', panes: panes.slice(0, 1) }
+
+function session(paneId: string, title: string, provider: string, status: string) {
+  return {
+    id: `sess-${paneId}`, projectId: project.id, workspaceId: 'ws-main', paneId, provider,
+    executable: 'C:\\bin\\claude.exe', arguments: [], title,
+    workingDirectory: 'C:\\dev\\paralith', status, processId: 4242,
+    startedAt: NOW, outputTail: [], nextSequence: 1,
+    restorationState: 'restored', hardBlockers: [],
+  }
+}
+
+export const sessions = [
+  session('pane-1', 'Architect', 'claude', 'running'),
+  session('pane-2', 'Builder', 'codex', 'running'),
+  session('pane-3', 'Reviewer', 'claude', 'running'),
+  session('pane-4', 'Shell', 'powershell', 'running'),
+]
+
+export const settings = {
+  sidebarOpen: true, sidebarWidth: 252, sidebarGroupBy: 'project', sidebarSortMode: 'manual',
+  sidebarCollapsedGroups: [], uiScale: 1, uiDensity: 'standard', themeId: 'paralith-dark',
+  terminalFontSize: 13, terminalFontFamily: 'Cascadia Code', terminalLineHeight: 1.2,
+  cursorStyle: 'bar', scrollbackSize: 5000, copyOnSelect: false, confirmMultilinePaste: true,
+  confirmClosePane: true, reopenLastWorkspace: true, restoreBehavior: 'ask',
+  outputLogRetention: 'tail_only', restorationLaunchBudget: 4, defaultLayout: 'grid',
+  defaultPaneCount: 4, inactiveWorkspaceProcesses: 'keep_running',
+  inactiveWorkspaceRendering: 'hibernate', automaticUpdateChecks: true, settingsVersion: 4,
+}
+
+const agents = [
+  { provider: 'claude', available: true, executablePath: 'C:\\bin\\claude.exe', version: '2.4.0', detectedAt: NOW },
+  { provider: 'codex', available: true, executablePath: 'C:\\bin\\codex.exe', version: '0.51.0', detectedAt: NOW },
+  { provider: 'opencode', available: false, errorCode: 'not_found', errorMessage: 'Not on PATH', detectedAt: NOW },
+]
+
+const shells = [
+  { id: 'pwsh', name: 'PowerShell 7', executablePath: 'C:\\pwsh.exe', args: [], available: true, source: 'detected' },
+  { id: 'cmd', name: 'Command Prompt', executablePath: 'C:\\cmd.exe', args: [], available: true, source: 'detected' },
+]
+
+function swarm(id: string, name: string, mission: string, lifecycle: string, phase: string, progress: number) {
+  return {
+    id, projectId: project.id, projectRoot: project.rootPath, name, mission, lifecycle, phase,
+    teamPreset: 'balanced', maxParallel: 4, instructions: '', progress, priority: 1, archived: false,
+    gitState: {}, safeguards: [], attachments: [], revision: 3,
+    roles: [
+      { role: 'coordinator', provider: 'claude', model: 'opus-5', instances: 1 },
+      { role: 'builder', provider: 'codex', model: 'gpt-5.6', instances: 2 },
+      { role: 'reviewer', provider: 'claude', model: 'sonnet-5', instances: 1 },
+    ],
+    createdAt: NOW, updatedAt: NOW, startedAt: NOW,
+  }
+}
+
+const swarms = [
+  { swarm: swarm('swarm-1', 'Schema migration', 'Migrate the schema to v12 and regenerate typed clients', 'building', 'building', 0.62),
+    activity: { activeAgents: 3, totalAgents: 4, tasksTotal: 11, tasksDone: 6, tasksRunning: 3 } },
+  { swarm: swarm('swarm-2', 'Flake triage', 'Isolate the three intermittent terminal tests', 'decision_required', 'verifying', 0.34),
+    activity: { activeAgents: 1, totalAgents: 2, tasksTotal: 6, tasksDone: 2, tasksRunning: 1 } },
+]
+
+function agent(id: string, role: string, runtime: string, model: string, displayName: string, status: string, taskId: string | null, worktree: string) {
+  return {
+    id, swarmId: 'swarm-1', role, runtime,
+    modelConfig: { providerId: runtime, providerDisplayName: runtime === 'codex' ? 'Codex' : 'Claude', modelId: model, modelDisplayName: model === 'opus-5' ? 'Opus 5' : model === 'sonnet-5' ? 'Sonnet 5' : 'GPT 5.6', reasoningEffort: 'high', contextStrategy: 'balanced', permissionMode: 'ask' },
+    displayName, status, currentTaskId: taskId, terminalSessionId: null,
+    runtimeSessionState: status === 'active' ? 'working' : 'idle',
+    workingDirectory: worktree, worktree, permissions: [], changedFiles: [],
+    testProgress: { total: 0, passed: 0, failed: 0 },
+    createdAt: NOW, updatedAt: NOW,
+  }
+}
+
+const swarmAgents = [
+  agent('a1', 'coordinator', 'claude', 'opus-5', 'Coordinator', 'active', 't1', 'C:\\dev\\paralith'),
+  agent('a2', 'builder', 'codex', 'gpt-5.6', 'Builder 1', 'active', 't2', 'C:\\dev\\paralith-b1'),
+  agent('a3', 'builder', 'codex', 'gpt-5.6', 'Builder 2', 'waiting', 't3', 'C:\\dev\\paralith-b2'),
+  agent('a4', 'reviewer', 'claude', 'sonnet-5', 'Reviewer', 'idle', null, 'C:\\dev\\paralith'),
+]
+
+function task(id: string, title: string, state: string, agentId: string | null, dependsOn: string[]) {
+  return {
+    id, swarmId: 'swarm-1', title, description: title, state, role: 'builder',
+    assignedAgentId: agentId, dependsOn, blockedBy: [], order: 0,
+    createdAt: NOW, updatedAt: NOW,
+  }
+}
+
+const swarmDetail = {
+  swarm: swarms[0].swarm,
+  activity: swarms[0].activity,
+  agents: swarmAgents,
+  tasks: [
+    task('t1', 'Inventory the current schema', 'completed', 'a1', []),
+    task('t2', 'Write migration 0042', 'running', 'a2', ['t1']),
+    task('t3', 'Regenerate typed clients', 'blocked', 'a3', ['t2']),
+    task('t4', 'Review the migration diff', 'ready', 'a4', ['t2', 't3']),
+  ],
+  events: [], messages: [], connections: [], lifecycleHistory: [], runtimeSessions: [],
+  evidence: [], tests: [], memories: [], reviews: [], runs: [], agentRuns: [],
+  attentionRequests: [],
+}
+
+
+
+const repositorySnapshot = {
+  projectId: project.id, repositoryPath: project.rootPath, worktreePath: project.rootPath,
+  currentBranch: 'feat/database-studio', upstream: 'origin/feat/database-studio',
+  ahead: 3, behind: 0, isDirty: true, isDetached: false,
+  staged: [
+    { path: 'src/index.css', status: 'modified', insertions: 214, deletions: 190 },
+    { path: 'src/theme/themes.ts', status: 'modified', insertions: 96, deletions: 84 },
+  ],
+  unstaged: [
+    { path: 'src/theme/tokens.ts', status: 'modified', insertions: 41, deletions: 6 },
+    { path: 'src/features/swarms/SwarmOverview.tsx', status: 'modified', insertions: 12, deletions: 30 },
+  ],
+  untracked: [{ path: 'visual/fixtures.ts', status: 'untracked', insertions: 0, deletions: 0 }],
+  conflicts: [], stashCount: 1, lastFetchedAt: NOW,
+}
+
+function usageWindow(kind: string, usedPercent: number, resetLabel: string) {
+  return {
+    kind, usedPercent, remainingPercent: 100 - usedPercent, resetsAt: '2026-08-12T14:00:00Z',
+    resetLabel, source: 'local_session_state', confidence: 'high',
+    isWarning: usedPercent >= 75, isCritical: usedPercent >= 90,
+  }
+}
+
+const usageSnapshots = [
+  { provider: 'claude', collectedAt: NOW, freshness: 'fresh', source: 'local_session_state', status: 'ok',
+    windows: [usageWindow('session', 38, 'in 3h'), usageWindow('weekly', 54, 'Mon')],
+    tokenSummary: { inputTokens: 812_400, outputTokens: 96_210, cachedInputTokens: 640_100, cacheCreationTokens: 41_020, reasoningTokens: 12_400, totalTokens: 1_602_130 } },
+  { provider: 'codex', collectedAt: NOW, freshness: 'fresh', source: 'provider_cli', status: 'ok',
+    windows: [usageWindow('session', 61, 'in 7h')] },
+]
+
+/**
+ * Command fixtures, keyed by the Rust command name. Anything absent falls through to
+ * `defaultFor`, which returns the empty shape the calling screen expects.
+ */
+export const FIXTURES: Record<string, unknown> = {
+  get_startup_status: { recoveryMode: false },
+  get_settings: settings,
+  save_settings: settings,
+  confirm_healthy_startup: null,
+  check_for_updates: null,
+  get_update_status: null,
+  open_project: project,
+  get_project: project,
+  list_recent_projects: [project, project2],
+  list_projects_overview: [
+    { project, workspaces: [workspace, workspace2], folderMissing: false },
+    { project: project2, workspaces: [workspace3], folderMissing: false },
+  ],
+  list_open_projects: [
+    { projectId: project.id, project, isActive: true, lastWorkspaceId: workspace.id, openedAt: NOW },
+    { projectId: project2.id, project: project2, isActive: false, lastWorkspaceId: workspace3.id, openedAt: NOW },
+  ],
+  get_workspace: workspace,
+  save_workspace: workspace,
+  list_workspaces_for_project: [workspace, workspace2],
+  list_recent_workspaces: [
+    { workspace, projectName: project.name, projectPath: project.rootPath, projectMissing: false },
+    { workspace: workspace2, projectName: project.name, projectPath: project.rootPath, projectMissing: false },
+    { workspace: workspace3, projectName: project2.name, projectPath: project2.rootPath, projectMissing: false },
+  ],
+  suggest_workspace_name: 'New workspace',
+  detect_agents: agents,
+  detect_shells: shells,
+  get_layout_preset: layout,
+  split_layout_pane: layout,
+  remove_layout_pane: layout,
+  create_terminal_session: sessions[0],
+  list_terminal_sessions: sessions,
+  restore_workspace_sessions: { restored: sessions, deferred: [], failed: [] },
+  get_sidebar_preferences: { groupBy: 'project', sortMode: 'manual', collapsedGroups: [] },
+  get_swarm_execution_defaults: { member: { providerId: 'claude', providerDisplayName: 'Claude', modelId: 'opus-5', modelDisplayName: 'Opus 5', reasoningEffort: 'high', contextStrategy: 'balanced', permissionMode: 'ask' } },
+  get_swarm_command_draft: null,
+  save_swarm_command_draft: null,
+  list_swarms: swarms,
+  get_swarm: swarmDetail,
+  get_swarm_detail: swarmDetail,
+  list_swarm_presets: [
+    { id: 'balanced', name: 'Balanced', description: 'One of each role.', roles: [] },
+  ],
+  list_swarm_model_registry: [
+    { providerId: 'claude', providerDisplayName: 'Claude', modelId: 'opus-5', displayName: 'Opus 5', description: 'Deep reasoning and broad repository work.', available: true, deprecated: false, coding: true, planning: true, review: true, toolUse: true, vision: true, supportedReasoningEfforts: ['low', 'medium', 'high', 'max'], supportedExecutionModes: ['ask', 'trusted'], recommendedRoles: ['coordinator', 'reviewer'], authenticated: true },
+    { providerId: 'claude', providerDisplayName: 'Claude', modelId: 'sonnet-5', displayName: 'Sonnet 5', description: 'Fast implementation and review.', available: true, deprecated: false, coding: true, planning: true, review: true, toolUse: true, vision: true, supportedReasoningEfforts: ['low', 'medium', 'high'], supportedExecutionModes: ['ask', 'trusted'], recommendedRoles: ['builder'], authenticated: true },
+    { providerId: 'codex', providerDisplayName: 'Codex', modelId: 'gpt-5.6', displayName: 'GPT 5.6', description: 'Focused implementation and verification.', available: true, deprecated: false, coding: true, planning: false, review: true, toolUse: true, vision: false, supportedReasoningEfforts: ['low', 'medium', 'high'], supportedExecutionModes: ['ask', 'restricted'], recommendedRoles: ['builder', 'debugger'], authenticated: true },
+  ],
+  inspect_repository: repositorySnapshot,
+  list_repository_branches: [
+    { name: 'feat/database-studio', isCurrent: true, isRemote: false, ahead: 3, behind: 0, upstream: 'origin/feat/database-studio', lastCommitAt: NOW, lastCommitSummary: 'feat(dbstudio): professional Database Studio UI' },
+    { name: 'main', isCurrent: false, isRemote: false, ahead: 0, behind: 12, upstream: 'origin/main', lastCommitAt: NOW, lastCommitSummary: 'release: prepare Stable 0.4.10' },
+  ],
+  get_ai_usage_snapshots: usageSnapshots,
+  refresh_ai_usage: usageSnapshots,
+  get_ai_usage_diagnostics: [],
+  set_last_active_workspace: null,
+  recover_workspace_windows: { recovered: [], reconnectable: [] },
+  terminal_session_status: 'running',
+  list_monitors: [{ id: 'monitor-1', name: 'Primary', isPrimary: true, position: { x: 0, y: 0 }, size: { width: 2560, height: 1440 }, scaleFactor: 1.25 }],
+  list_workspace_placements: [],
+  list_live_sessions: sessions,
+  get_workspace_canvas_layout: { revision: 1, canvasJson: null },
+  open_project_session: [
+    { projectId: project.id, project, isActive: true, lastWorkspaceId: workspace.id, openedAt: NOW },
+    { projectId: project2.id, project: project2, isActive: false, lastWorkspaceId: workspace3.id, openedAt: NOW },
+  ],
+  set_project_last_active: null,
+  get_diagnostics_snapshot: { generatedAt: NOW, entries: [] },
+}
+
+/** The empty shape a screen expects when a command has no fixture. */
+export function defaultFor(command: string): unknown {
+  if (command.startsWith('list_') || command.startsWith('detect_')) return []
+  if (command.startsWith('get_') || command.startsWith('inspect_')) return null
+  return null
+}

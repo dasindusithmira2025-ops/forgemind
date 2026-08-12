@@ -25,7 +25,7 @@ export const STORAGE_KEYS = {
  *
  * IMPORTANT: keep this value in sync with the inline script in `index.html`.
  */
-export const TOKEN_REVISION = '2'
+export const TOKEN_REVISION = '3'
 
 /**
  * Apply a resolved theme to the document: write every CSS custom property as an inline style on the
