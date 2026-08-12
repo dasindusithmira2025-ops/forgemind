@@ -7,7 +7,9 @@
     "Reworked color, border, and typography tokens for a five-step hairline border ladder, a four-level text contrast hierarchy, and named semantic state colors (info/success/warning/danger/agent/ready/neutral)",
     "Buttons: only one accent-filled action per screen now — repeated per-row/per-record actions (Workspace launcher, Agent Resume) switched from primary to secondary so the dominant action stays legible"
   ],
-  "fixes": [],
+  "fixes": [
+    "Database Studio: fixed a real repository scan on a multi-package project sometimes failing with \"PARALITH could not access its local database\" — several identifier collisions (shared schema files, packages sharing a datasource name, repeated health issues) could abort the discovery transaction"
+  ],
   "databaseChanges": [
     "No database schema changes",
     "Preserve existing Projects, Workspaces, terminals, Missions, Memory, settings, and Stable updater state"
