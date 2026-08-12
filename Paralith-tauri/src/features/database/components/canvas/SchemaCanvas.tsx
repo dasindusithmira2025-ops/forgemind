@@ -1,17 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Crosshair, Loader2, Maximize2, Search as SearchIcon, X, ZoomIn, ZoomOut } from 'lucide-react'
 import type { CanvasEdgeRef, CanvasNodeRect, DatabaseNamespaceGroupView, DatabaseTableNodeView } from '../../databaseTypes'
-import { applyHideUnrelated, computeBoundingBox, computeFitZoom, computeVisibleNodeIds, highlightedEdges, nHopNodes, resolveRenderDescriptors } from './canvasSelectors'
+import { applyHideUnrelated, computeBoundingBox, computeVisibleNodeIds, highlightedEdges, nHopNodes, resolveRenderDescriptors } from './canvasSelectors'
+import { searchTables } from '../../databaseSelectors'
 import { useDatabaseCanvasStore } from './databaseCanvasStore'
 import { COMPACT_NODE_HEIGHT, DOMAIN_NODE_WIDTH, NODE_WIDTH, estimateTableNodeHeight } from './nodeMetrics'
 import { DomainAggregateNode, TableNode } from './TableNode'
 
 const OVERSCAN_PX = 200
 const CANVAS_PADDING = 48
-/** The lower bound for the automatic initial fit — never opens a large schema shrunk past the
- * point of legibility (UI-SPEC.md/mission §14). Matches the medium-LOD zoom threshold. */
-const INITIAL_FIT_MIN_ZOOM = 0.35
-const INITIAL_FIT_MAX_ZOOM = 1
 
 export interface SchemaCanvasProps {
   tables: DatabaseTableNodeView[]
@@ -23,10 +20,20 @@ export interface SchemaCanvasProps {
   onHideUnrelatedChange: (value: boolean) => void
   nHop: number
   onNHopChange: (value: number) => void
+  /** Selecting the relationship itself, so the Inspector can describe the edge rather than a table. */
+  onSelectEdge: (edgeId: string, endpoints: { from: string; to: string }) => void
+  selectedEdgeIds: ReadonlySet<string>
+  /** Identity of the graph being shown; a change re-frames the viewport, a repeat never does. */
+  framingKey: string
+  /** A cross-surface request to bring one object into view. */
+  revealTarget?: { objectId: string; nonce: number }
+  onRevealHandled: () => void
   grouped: boolean
   onGroupedChange: (value: boolean) => void
   loading: boolean
   layoutPending: boolean
+  /** Pin a table at a world position, or release it (`undefined`) back to automatic layout. */
+  onPinPosition: (id: string, position: { x: number; y: number } | undefined) => void
 }
 
 interface Rect { x: number; y: number; w: number; h: number }
@@ -70,8 +77,13 @@ function buildEdgePath(from: Rect, to: Rect, spreadIndex: number, spreadOf: numb
  * here — `DiagramSection` owns the `recomputeLayout` effect; this component only *reads*
  * `positions`/`bounds` from the store.
  */
-export function SchemaCanvas({ tables, groups, edges, selection, onSelect, hideUnrelated, onHideUnrelatedChange, nHop, onNHopChange, grouped, onGroupedChange, loading, layoutPending }: SchemaCanvasProps) {
+export function SchemaCanvas({ tables, groups, edges, selection, onSelect, hideUnrelated, onHideUnrelatedChange, nHop, onNHopChange, grouped, onGroupedChange, loading, layoutPending, onPinPosition, onSelectEdge, selectedEdgeIds, framingKey, revealTarget, onRevealHandled }: SchemaCanvasProps) {
   const viewportRef = useRef<HTMLDivElement>(null)
+  /** The node under the pointer, rendered at its live position so the card tracks the cursor
+   * without a layout round-trip on every frame. */
+  const [drag, setDrag] = useState<{ id: string; x: number; y: number; moved: boolean } | undefined>()
+  const dragRef = useRef<{ id: string; x: number; y: number; moved: boolean } | undefined>(undefined)
+  dragRef.current = drag
   const viewport = useDatabaseCanvasStore((state) => state.viewport)
   const lod = useDatabaseCanvasStore((state) => state.lod)
   const positions = useDatabaseCanvasStore((state) => state.positions)
@@ -79,15 +91,17 @@ export function SchemaCanvas({ tables, groups, edges, selection, onSelect, hideU
   const setViewport = useDatabaseCanvasStore((state) => state.setViewport)
   const zoomAround = useDatabaseCanvasStore((state) => state.zoomAround)
   const fitToRect = useDatabaseCanvasStore((state) => state.fitToRect)
+  const frameGraph = useDatabaseCanvasStore((state) => state.frameGraph)
+  const centerOn = useDatabaseCanvasStore((state) => state.centerOn)
   const [searchTerm, setSearchTerm] = useState('')
   const [searchOpen, setSearchOpen] = useState(false)
 
   const nodeRects: CanvasNodeRect[] = useMemo(
     () => tables.map((table) => {
-      const position = positions[table.id] ?? { x: 0, y: 0 }
+      const position = (drag?.id === table.id ? drag : positions[table.id]) ?? { x: 0, y: 0 }
       return { id: table.id, x: position.x, y: position.y, w: NODE_WIDTH, h: estimateTableNodeHeight(table.columns.length), groupId: table.groupId }
     }),
-    [tables, positions],
+    [tables, positions, drag],
   )
   const nodeRectsById = useMemo(() => new Map(nodeRects.map((rect) => [rect.id, rect])), [nodeRects])
 
@@ -177,25 +191,77 @@ export function SchemaCanvas({ tables, groups, edges, selection, onSelect, hideU
     return [...pairs.entries()].map(([key, value]) => ({ id: `group-edge:${key}`, ...value }))
   }, [resolveLod, tables, edges, highlightSet])
 
+  // Searching a column name has to find its owning table: the column is what the developer
+  // remembers, the table is what the canvas can actually show them.
   const searchMatches = useMemo(() => {
-    const query = searchTerm.trim().toLowerCase()
-    if (!query) return []
-    return tables.filter((table) => table.name.toLowerCase().includes(query) || table.qualifiedName.toLowerCase().includes(query)).slice(0, 8)
+    if (!searchTerm.trim()) return []
+    return searchTables(tables, searchTerm).slice(0, 8)
   }, [searchTerm, tables])
+
+  // Window listeners were previously removed only on pointerup, so a gesture interrupted by an
+  // unmount (switching source or section mid-drag) leaked a handler that kept driving a canvas that
+  // no longer existed. One tracked gesture at a time, always detached on teardown.
+  const detachRef = useRef<(() => void) | undefined>(undefined)
+  useEffect(() => () => detachRef.current?.(), [])
+
+  const attachPointerGesture = useCallback((move: (event: PointerEvent) => void, finish: () => void) => {
+    detachRef.current?.()
+    const detach = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      window.removeEventListener('pointercancel', up)
+      detachRef.current = undefined
+    }
+    function up() { detach(); finish() }
+    detachRef.current = detach
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+    window.addEventListener('pointercancel', up)
+  }, [])
 
   const startPan = useCallback((event: React.PointerEvent) => {
     if ((event.target as HTMLElement).closest('[data-node-id]')) return
     event.preventDefault()
     const origin = { x: event.clientX, y: event.clientY }
     const startViewport = { ...viewport }
-    const move = (moveEvent: PointerEvent) => {
-      setViewport({ x: startViewport.x + (moveEvent.clientX - origin.x), y: startViewport.y + (moveEvent.clientY - origin.y) })
-    }
-    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up) }
-    window.addEventListener('pointermove', move)
-    window.addEventListener('pointerup', up)
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- viewport captured at drag start intentionally
-  }, [viewport, setViewport])
+    attachPointerGesture(
+      (moveEvent) => setViewport({ x: startViewport.x + (moveEvent.clientX - origin.x), y: startViewport.y + (moveEvent.clientY - origin.y) }),
+      () => {},
+    )
+  }, [viewport, setViewport, attachPointerGesture])
+
+  /**
+   * Drag a table to a fixed position. A pinned position is authoritative layout input, so the card
+   * stays where it was put across every later re-layout until it is released — which is what
+   * `pinnedPositions` and `layoutCore`'s `pinned` preference were built for and nothing reached.
+   */
+  const startNodeDrag = useCallback((event: React.PointerEvent, id: string) => {
+    if (event.button !== 0) return
+    const start = positions[id]
+    if (!start) return
+    const origin = { x: event.clientX, y: event.clientY }
+    const zoom = viewport.zoom
+    setDrag({ id, x: start.x, y: start.y, moved: false })
+    attachPointerGesture(
+      (moveEvent) => {
+        // A few pixels of travel is a click, not a drag; only past that does the node detach.
+        const moved = Math.abs(moveEvent.clientX - origin.x) > 3 || Math.abs(moveEvent.clientY - origin.y) > 3
+        setDrag({
+          id,
+          x: start.x + (moveEvent.clientX - origin.x) / zoom,
+          y: start.y + (moveEvent.clientY - origin.y) / zoom,
+          moved,
+        })
+      },
+      () => {
+        const final = dragRef.current
+        setDrag(undefined)
+        if (final?.moved) onPinPosition(id, { x: final.x, y: final.y })
+      },
+    )
+  }, [positions, viewport.zoom, attachPointerGesture, onPinPosition])
+
+  const releasePin = useCallback((id: string) => onPinPosition(id, undefined), [onPinPosition])
 
   const onWheel = useCallback((event: React.WheelEvent) => {
     if (!event.ctrlKey) return // plain wheel scrolls the surrounding page per UI-SPEC.md §3.2
@@ -203,6 +269,12 @@ export function SchemaCanvas({ tables, groups, edges, selection, onSelect, hideU
     const rect = viewportRef.current?.getBoundingClientRect()
     if (!rect) return
     zoomAround(event.deltaY, event.clientX, event.clientY, rect)
+  }, [zoomAround])
+
+  const zoomAtCenter = useCallback((delta: number) => {
+    const rect = viewportRef.current?.getBoundingClientRect()
+    if (!rect) return
+    zoomAround(delta, rect.left + rect.width / 2, rect.top + rect.height / 2, rect)
   }, [zoomAround])
 
   const fitToView = useCallback(() => {
@@ -221,36 +293,37 @@ export function SchemaCanvas({ tables, groups, edges, selection, onSelect, hideU
     fitToRect(box, rect.width, rect.height, CANVAS_PADDING)
   }, [nodeRects, selection, fitToRect])
 
-  const goToTable = useCallback((id: string) => {
+  /** Bring a table into view and select it. Zoom never *decreases*, so locating a table from
+   * search or from another surface cannot silently zoom the developer out of their own view. */
+  const goToTable = useCallback((id: string, options: { select?: boolean } = {}) => {
     const rect = viewportRef.current?.getBoundingClientRect()
     const node = nodeRects.find((candidate) => candidate.id === id)
-    if (!rect || !node) return
-    onSelect(id, false)
-    const zoom = Math.max(viewport.zoom, 0.7)
-    const x = rect.width / 2 - (node.x + node.w / 2) * zoom
-    const y = rect.height / 2 - (node.y + node.h / 2) * zoom
-    setViewport({ x, y, zoom })
+    if (!rect || !node) return false
+    if (options.select !== false) onSelect(id, false)
+    centerOn({ x: node.x + node.w / 2, y: node.y + node.h / 2 }, rect.width, rect.height)
     setSearchTerm('')
     setSearchOpen(false)
-  }, [nodeRects, onSelect, setViewport, viewport.zoom])
+    return true
+  }, [nodeRects, onSelect, centerOn])
 
+  // Frame the graph for comprehension the first time each distinct graph's layout lands. Keyed on
+  // `framingKey` (source + layer + schema revision), so switching database re-frames but panning,
+  // zooming, selecting, searching and pinning never do.
   useEffect(() => {
-    // Auto-fit once, the first time real layout bounds arrive, so the diagram never opens blank —
-    // but never shrink a large schema past legibility just to fit every table on screen at once
-    // (mission §14). Zoom is clamped to at least the medium-LOD threshold; it is fine for a big
-    // schema to render off-screen content the user then pans/searches to.
-    if (bounds.width > 0 && viewport.x === 0 && viewport.y === 0 && viewport.zoom === 0.6) {
-      const rect = viewportRef.current?.getBoundingClientRect()
-      const box = computeBoundingBox(nodeRects)
-      if (!rect || box.width <= 0 || box.height <= 0) return
-      const naturalZoom = computeFitZoom(box, rect.width, rect.height, CANVAS_PADDING)
-      const zoom = Math.min(INITIAL_FIT_MAX_ZOOM, Math.max(INITIAL_FIT_MIN_ZOOM, naturalZoom))
-      const x = CANVAS_PADDING - box.x * zoom + Math.max(0, (rect.width - CANVAS_PADDING * 2 - box.width * zoom) / 2)
-      const y = CANVAS_PADDING - box.y * zoom + Math.max(0, (rect.height - CANVAS_PADDING * 2 - box.height * zoom) / 2)
-      setViewport({ x, y, zoom })
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally runs once when bounds first populate
-  }, [bounds.width])
+    if (bounds.width <= 0 || tables.length === 0) return
+    const rect = viewportRef.current?.getBoundingClientRect()
+    if (!rect) return
+    frameGraph(computeBoundingBox(nodeRects), tables.length, rect.width, rect.height, CANVAS_PADDING, framingKey)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- nodeRects changes on every drag; framing is keyed by `framingKey` and guarded inside the store
+  }, [bounds.width, framingKey, tables.length, frameGraph])
+
+  // A reveal request from Health/Explorer/Inspector. The nonce means asking twice for the same
+  // object still re-centres it.
+  useEffect(() => {
+    if (!revealTarget) return
+    if (goToTable(revealTarget.objectId, { select: false })) onRevealHandled()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-runs when the request changes, not when the canvas moves
+  }, [revealTarget?.objectId, revealTarget?.nonce, goToTable])
 
   if (loading) {
     return <div className="db-canvas-state"><Loader2 size={18} className="is-spinning" /><span>Loading schema graph…</span></div>
@@ -263,8 +336,8 @@ export function SchemaCanvas({ tables, groups, edges, selection, onSelect, hideU
   return (
     <div className="db-canvas-shell">
       <div className="db-canvas-toolbar">
-        <button type="button" className="db-canvas-tool" onClick={() => zoomAround(-120, (viewportRef.current?.getBoundingClientRect().width ?? 0) / 2, (viewportRef.current?.getBoundingClientRect().height ?? 0) / 2, viewportRef.current!.getBoundingClientRect())} aria-label="Zoom in"><ZoomIn size={14} /></button>
-        <button type="button" className="db-canvas-tool" onClick={() => zoomAround(120, (viewportRef.current?.getBoundingClientRect().width ?? 0) / 2, (viewportRef.current?.getBoundingClientRect().height ?? 0) / 2, viewportRef.current!.getBoundingClientRect())} aria-label="Zoom out"><ZoomOut size={14} /></button>
+        <button type="button" className="db-canvas-tool" onClick={() => zoomAtCenter(-120)} aria-label="Zoom in"><ZoomIn size={14} /></button>
+        <button type="button" className="db-canvas-tool" onClick={() => zoomAtCenter(120)} aria-label="Zoom out"><ZoomOut size={14} /></button>
         <button type="button" className="db-canvas-tool" onClick={fitToView} aria-label="Fit to view"><Maximize2 size={14} /></button>
         {selection.size > 0 && <button type="button" className="db-canvas-tool" onClick={fitToSelection} aria-label="Fit to selection"><Crosshair size={14} /></button>}
 
@@ -275,18 +348,22 @@ export function SchemaCanvas({ tables, groups, edges, selection, onSelect, hideU
             onChange={(event) => { setSearchTerm(event.target.value); setSearchOpen(true) }}
             onFocus={() => setSearchOpen(true)}
             onBlur={() => setTimeout(() => setSearchOpen(false), 120)}
-            onKeyDown={(event) => { if (event.key === 'Enter' && searchMatches[0]) goToTable(searchMatches[0].id) }}
-            placeholder="Search tables…"
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && searchMatches[0]) goToTable(searchMatches[0].table.id)
+              if (event.key === 'Escape') { setSearchTerm(''); setSearchOpen(false); event.currentTarget.blur() }
+            }}
+            placeholder="Search tables and columns…"
             aria-label="Search the diagram"
           />
           {searchTerm && <button type="button" onClick={() => setSearchTerm('')} aria-label="Clear search"><X size={12} /></button>}
           {searchOpen && searchMatches.length > 0 && (
             <ul className="db-canvas-search-results" role="listbox">
-              {searchMatches.map((table) => (
-                <li key={table.id}>
-                  <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => goToTable(table.id)}>
-                    {table.name}
-                    <span>{table.groupLabel}</span>
+              {searchMatches.map((match) => (
+                <li key={match.table.id}>
+                  <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => goToTable(match.table.id)}>
+                    {match.table.name}
+                    {/* Say *why* a table matched when the query hit a column, not the table name. */}
+                    <span>{match.matchedColumn ? `.${match.matchedColumn}` : match.table.groupLabel}</span>
                   </button>
                 </li>
               ))}
@@ -337,7 +414,28 @@ export function SchemaCanvas({ tables, groups, edges, selection, onSelect, hideU
                   if (!fromRect || !toRect) return null
                   const spread = edgeSpread.get(edge.id) ?? { index: 0, of: 1 }
                   const path = buildEdgePath(fromRect, toRect, spread.index, spread.of)
-                  return <path key={edge.id} d={path} fill="none" className={highlightSet.has(edge.id) ? 'is-highlighted' : ''} />
+                  const dimmed = neighborhood ? !neighborhood.has(edge.from) && !neighborhood.has(edge.to) : false
+                  const className = [
+                    selectedEdgeIds.has(edge.id) ? 'is-selected' : '',
+                    highlightSet.has(edge.id) ? 'is-highlighted' : '',
+                    dimmed ? 'is-dimmed' : '',
+                  ].filter(Boolean).join(' ')
+                  return (
+                    <g key={edge.id}>
+                      <path d={path} fill="none" className={className} />
+                      {/* A 1.4px line is not a click target. An invisible wide stroke over the same
+                          path makes the relationship selectable without thickening it visually. */}
+                      <path
+                        d={path}
+                        fill="none"
+                        className="db-canvas-edge-hit"
+                        onPointerDown={(event) => {
+                          event.stopPropagation()
+                          onSelectEdge(edge.id, { from: edge.from, to: edge.to })
+                        }}
+                      />
+                    </g>
+                  )
                 })}
           </svg>
           {descriptors.map((descriptor) => {
@@ -348,13 +446,25 @@ export function SchemaCanvas({ tables, groups, edges, selection, onSelect, hideU
               return <DomainAggregateNode key={descriptor.id} group={group} x={position.x} y={position.y} width={DOMAIN_NODE_WIDTH} selected={selection.has(descriptor.id)} onSelect={onSelect} />
             }
             const table = tablesById.get(descriptor.id)
-            const position = positions[descriptor.id]
-            if (!table || !position) return null
+            const stored = positions[descriptor.id]
+            if (!table || !stored) return null
+            const position = drag?.id === descriptor.id ? drag : stored
             const dimmed = neighborhood ? !neighborhood.has(descriptor.id) : false
             const nodeLod = lod === 'far' && !groupingActive ? 'compact' : lod === 'far' ? 'medium' : lod
             return (
               <div key={descriptor.id} className={dimmed ? 'db-canvas-node-dimmed' : ''}>
-                <TableNode table={table} lod={nodeLod} x={position.x} y={position.y} width={NODE_WIDTH} selected={selection.has(descriptor.id)} onSelect={onSelect} />
+                <TableNode
+                  table={table}
+                  lod={nodeLod}
+                  x={position.x}
+                  y={position.y}
+                  width={NODE_WIDTH}
+                  selected={selection.has(descriptor.id)}
+                  onSelect={onSelect}
+                  onPointerDownDrag={startNodeDrag}
+                  onReleasePin={releasePin}
+                  dragging={drag?.id === descriptor.id && drag.moved}
+                />
               </div>
             )
           })}

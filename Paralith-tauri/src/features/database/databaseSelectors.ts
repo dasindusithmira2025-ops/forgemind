@@ -1,3 +1,4 @@
+import { isPrimaryDatabaseSource } from './databaseTypes'
 import type {
   DatabaseColumn,
   DatabaseGraphObject,
@@ -5,6 +6,7 @@ import type {
   DatabaseIndex,
   DatabaseNamespaceGroupView,
   DatabaseTable,
+  DatabaseSource,
   DatabaseTableNodeView,
   ForeignKey,
   PrimaryKey,
@@ -158,4 +160,61 @@ export function filterTablesBySearch(tables: DatabaseTableNodeView[], search: st
   const query = search?.trim().toLowerCase()
   if (!query) return tables
   return tables.filter((table) => table.qualifiedName.toLowerCase().includes(query) || table.name.toLowerCase().includes(query))
+}
+
+/**
+ * What the source rail and Overview show. Discovery reports every datasource it can prove exists,
+ * including a repository's own test fixtures; the default view is the application-relevant subset.
+ *
+ * A repository whose *only* databases are fixtures still shows them — hiding everything would
+ * assert "this project has no database", which is a different and false statement.
+ */
+export function visibleDatabaseSources(sources: DatabaseSource[], showAll: boolean): DatabaseSource[] {
+  if (showAll) return sources
+  const primary = sources.filter(isPrimaryDatabaseSource)
+  return primary.length > 0 ? primary : sources
+}
+
+export function hiddenDatabaseSourceCount(sources: DatabaseSource[], showAll: boolean): number {
+  return sources.length - visibleDatabaseSources(sources, showAll).length
+}
+
+/** Table and relation counts for one source's loaded graph — the Overview's headline numbers. */
+export interface DatabaseSourceStats {
+  tableCount: number
+  relationCount: number
+}
+
+export function statsFromGraphPage(page: DatabaseGraphPage | undefined): DatabaseSourceStats {
+  if (!page) return { tableCount: 0, relationCount: 0 }
+  return {
+    tableCount: page.objects.filter((object) => object.kind === 'table').length,
+    relationCount: page.edges.filter((edge) => edge.edgeType === 'REFERENCES').length,
+  }
+}
+
+/**
+ * Search that answers "where does this column live". Matching only table names meant searching a
+ * column name returned nothing, even though the owning table is exactly what the user wanted.
+ */
+export interface TableSearchMatch {
+  table: DatabaseTableNodeView
+  /** The column that matched, when the query matched a column rather than the table itself. */
+  matchedColumn?: string
+}
+
+export function searchTables(tables: DatabaseTableNodeView[], search: string | undefined): TableSearchMatch[] {
+  const query = search?.trim().toLowerCase()
+  if (!query) return tables.map((table) => ({ table }))
+  const matches: TableSearchMatch[] = []
+  for (const table of tables) {
+    if (table.name.toLowerCase().includes(query) || table.qualifiedName.toLowerCase().includes(query)) {
+      matches.push({ table })
+      continue
+    }
+    const column = table.columns.find((candidate) => candidate.name.toLowerCase().includes(query))
+    if (column) matches.push({ table, matchedColumn: column.name })
+  }
+  // Table-name matches rank above column matches: the direct answer comes first.
+  return matches.sort((left, right) => Number(Boolean(left.matchedColumn)) - Number(Boolean(right.matchedColumn)))
 }

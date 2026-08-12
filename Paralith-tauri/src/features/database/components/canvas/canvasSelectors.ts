@@ -122,3 +122,44 @@ export function computeFitZoom(bounds: WorldRect, viewportW: number, viewportH: 
   const availableH = Math.max(1, viewportH - paddingPx * 2)
   return Math.min(availableW / bounds.width, availableH / bounds.height)
 }
+
+/**
+ * Zoom bounds for the *initial* framing of a graph, chosen for comprehension rather than for
+ * technically fitting every node on screen.
+ *
+ * Fitting alone fails in both directions. A two-table schema fits at any zoom, so a pure fit leaves
+ * two small cards adrift in an empty canvas; a three-hundred-table schema fits only when shrunk
+ * past the point where anything is readable. So the target zoom is clamped into a band chosen by
+ * graph size: small graphs open close enough to read a card, large graphs open at an architecture
+ * zoom and are navigated by search and focus instead.
+ */
+export function initialZoomBand(nodeCount: number): { min: number; max: number } {
+  if (nodeCount <= 5) return { min: 0.75, max: 1.4 }
+  if (nodeCount <= 30) return { min: 0.5, max: 1 }
+  if (nodeCount <= 120) return { min: 0.38, max: 0.8 }
+  return { min: 0.3, max: 0.6 }
+}
+
+export interface FramedViewport {
+  x: number
+  y: number
+  zoom: number
+}
+
+/** The viewport that opens `bounds` legibly for a graph of `nodeCount` nodes. */
+export function computeInitialFraming(
+  bounds: WorldRect,
+  nodeCount: number,
+  viewportW: number,
+  viewportH: number,
+  paddingPx: number,
+): FramedViewport | undefined {
+  if (bounds.width <= 0 || bounds.height <= 0 || viewportW <= 0 || viewportH <= 0) return undefined
+  const band = initialZoomBand(nodeCount)
+  const zoom = Math.min(band.max, Math.max(band.min, computeFitZoom(bounds, viewportW, viewportH, paddingPx)))
+  // Centre the content whenever it is smaller than the viewport; otherwise anchor it at the padding
+  // so the graph opens on its top-left rather than on an arbitrary interior point.
+  const x = paddingPx - bounds.x * zoom + Math.max(0, (viewportW - paddingPx * 2 - bounds.width * zoom) / 2)
+  const y = paddingPx - bounds.y * zoom + Math.max(0, (viewportH - paddingPx * 2 - bounds.height * zoom) / 2)
+  return { x, y, zoom }
+}

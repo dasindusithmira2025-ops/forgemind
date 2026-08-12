@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useDatabaseStore } from '../databaseStore'
+import { hiddenDatabaseSourceCount, visibleDatabaseSources } from '../databaseSelectors'
 import { loadDatabaseNav, saveDatabaseNav, type DatabaseNavState } from '../databaseNav'
 import { DatabaseSidebar } from './DatabaseSidebar'
 import { InspectorPanel } from './InspectorPanel'
@@ -10,13 +11,16 @@ import { MigrationsSection } from './sections/MigrationsSection'
 import { ChangesSection } from './sections/ChangesSection'
 import { HealthSection } from './sections/HealthSection'
 import { ConnectionsSection } from './sections/ConnectionsSection'
-import { DATABASE_SECTIONS, type DatabaseLayer } from '../databaseTypes'
+import { DATABASE_SECTIONS, type DatabaseLayer, type DatabaseSectionId } from '../databaseTypes'
 
 /**
  * Declared, Observed, and Proposed are distinct answers to distinct questions and are never merged.
  * The switcher makes that separation explicit instead of leaving the user to guess which one the
  * canvas is showing.
  */
+/** Surfaces whose work is object-centric, so the Inspector describes the current selection there. */
+const INSPECTOR_SECTIONS: DatabaseSectionId[] = ['diagram', 'explorer', 'health']
+
 const LAYERS: Array<{ id: DatabaseLayer; label: string; hint: string }> = [
   { id: 'declared', label: 'Declared', hint: 'What the repository schema declares' },
   { id: 'observed', label: 'Observed', hint: 'What an introspected database actually contains' },
@@ -34,13 +38,15 @@ export function DatabaseStudio({ projectId }: { projectId: string }) {
   const sources = useDatabaseStore((state) => state.sources)
   const activeSourceId = useDatabaseStore((state) => state.activeSourceId)
   const selectSource = useDatabaseStore((state) => state.selectSource)
-  const filters = useDatabaseStore((state) => state.filters)
-  const setSearch = useDatabaseStore((state) => state.setSearch)
+  const sourcesLoad = useDatabaseStore((state) => state.sourcesLoad)
   const issues = useDatabaseStore((state) => state.issues)
   const activeLayer = useDatabaseStore((state) => state.activeLayer)
   const setLayer = useDatabaseStore((state) => state.setLayer)
   const activeBundle = useDatabaseStore((state) => state.activeBundle)
   const observedSnapshot = useDatabaseStore((state) => state.observedSnapshot)
+  const showAllSources = useDatabaseStore((state) => state.showAllSources)
+  const setShowAllSources = useDatabaseStore((state) => state.setShowAllSources)
+  const revealTarget = useDatabaseStore((state) => state.revealTarget)
 
   const [nav, setNav] = useState<DatabaseNavState>(() => loadDatabaseNav(projectId))
 
@@ -51,6 +57,21 @@ export function DatabaseStudio({ projectId }: { projectId: string }) {
 
   useEffect(() => { saveDatabaseNav(projectId, nav) }, [projectId, nav])
 
+  // Cross-surface navigation: Health, Explorer and the Inspector all ask to reveal a semantic
+  // object rather than reaching into another screen's state. The request carries the surface it
+  // wants; this is the only place that turns it into a section change.
+  useEffect(() => {
+    if (revealTarget?.section && revealTarget.section !== nav.section) {
+      setNav({ section: revealTarget.section })
+    }
+  }, [revealTarget, nav.section])
+
+  const visibleSources = useMemo(
+    () => visibleDatabaseSources(sources, showAllSources),
+    [sources, showAllSources],
+  )
+  const hiddenSourceCount = hiddenDatabaseSourceCount(sources, showAllSources)
+
   const openIssueCount = issues.filter((issue) => issue.status === 'open').length
   const sectionLabel = DATABASE_SECTIONS.find((item) => item.id === nav.section)?.label
 
@@ -59,13 +80,15 @@ export function DatabaseStudio({ projectId }: { projectId: string }) {
       <div className="db-studio-body">
         <DatabaseSidebar
           active={nav.section}
-          sources={sources}
+          sources={visibleSources}
+          sourcesLoad={sourcesLoad}
           activeSourceId={activeSourceId}
           onSelectSource={selectSource}
           onNavigate={(section) => setNav({ section })}
           issueCounts={{ health: openIssueCount || undefined }}
-          search={filters.search}
-          onSearchChange={setSearch}
+          showAllSources={showAllSources}
+          onShowAllSourcesChange={setShowAllSources}
+          hiddenSourceCount={hiddenSourceCount}
         />
 
         <div className="db-studio-surface" role="region" aria-label={sectionLabel}>
@@ -103,7 +126,7 @@ export function DatabaseStudio({ projectId }: { projectId: string }) {
           {nav.section === 'connections' && <ConnectionsSection />}
         </div>
 
-        {(nav.section === 'diagram' || nav.section === 'explorer') && <InspectorPanel />}
+        {INSPECTOR_SECTIONS.includes(nav.section) && <InspectorPanel />}
       </div>
     </div>
   )

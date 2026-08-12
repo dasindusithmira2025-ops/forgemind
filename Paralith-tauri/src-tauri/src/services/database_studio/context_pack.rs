@@ -63,6 +63,9 @@ pub fn build(input: ContextPackInput<'_>) -> DatabaseContextPack {
     }
 
     let adjacency = build_adjacency(input.graph);
+    let columns_by_table = columns_by_table(input.graph);
+    let attachments_by_table = attachments_by_table(input.graph);
+    let incident_edges_by_table = incident_edges_by_table(input.graph);
     let mut selected_tables: Vec<String> = Vec::new();
     let mut visited: HashSet<String> = HashSet::new();
     let mut queue: VecDeque<String> = VecDeque::new();
@@ -72,10 +75,24 @@ pub fn build(input: ContextPackInput<'_>) -> DatabaseContextPack {
         }
     }
 
-    let mut budget_tokens = input.budget.max_estimated_tokens;
+    // Issues and usage references are charged to the pack but were never charged to the walk, so a
+    // pack could report `estimated_tokens` above its own `max_estimated_tokens`. Reserve what they
+    // can actually cost (their own hard caps, or fewer if that is all the input holds) up front.
+    let reserved = input.issues.len().min(input.budget.max_issues) * TOKENS_PER_ISSUE
+        + input.usage.len().min(input.budget.max_usage_refs) * TOKENS_PER_USAGE_REF;
+    let mut budget_tokens = input.budget.max_estimated_tokens.saturating_sub(reserved);
     while let Some(id) = queue.pop_front() {
-        let column_count = columns_of(input.graph, &id).len();
-        let cost = TOKENS_PER_TABLE + column_count * TOKENS_PER_COLUMN;
+        // A table never arrives alone: its columns, its keys and indexes, and its relationship
+        // edges all ship with it, and all of them are counted in `estimated_tokens`. Charging only
+        // the table and its columns is what let the budget be exceeded.
+        let cost = TOKENS_PER_TABLE
+            + columns_by_table.get(id.as_str()).map_or(0, Vec::len) * TOKENS_PER_COLUMN
+            + attachments_by_table.get(id.as_str()).copied().unwrap_or(0) * TOKENS_PER_EDGE
+            + incident_edges_by_table
+                .get(id.as_str())
+                .copied()
+                .unwrap_or(0)
+                * TOKENS_PER_EDGE;
         if selected_tables.len() >= input.budget.max_objects || cost > budget_tokens {
             continue;
         }
@@ -94,8 +111,8 @@ pub fn build(input: ContextPackInput<'_>) -> DatabaseContextPack {
         if let Some(object) = by_id.get(id.as_str()) {
             objects.push((*object).clone());
         }
-        for column in columns_of(input.graph, id) {
-            objects.push(DatabaseObject::Column(column.clone()));
+        for column in columns_by_table.get(id.as_str()).into_iter().flatten() {
+            objects.push(DatabaseObject::Column((*column).clone()));
         }
     }
     // Keys and indexes on the selected tables carry the constraints an agent must respect.
@@ -188,20 +205,55 @@ fn is_table(by_id: &HashMap<&str, &DatabaseObject>, id: &str) -> bool {
     matches!(by_id.get(id), Some(DatabaseObject::Table(_)))
 }
 
-fn columns_of<'a>(
-    graph: &'a ExtractedDatabaseGraph,
-    table_id: &str,
-) -> Vec<&'a crate::models::DatabaseColumn> {
-    let mut columns: Vec<&crate::models::DatabaseColumn> = graph
-        .objects
-        .iter()
-        .filter_map(|object| match object {
-            DatabaseObject::Column(column) if column.table_id == table_id => Some(column),
+/// Columns indexed by owning table, ordinal-sorted. Built once: the previous per-table linear scan
+/// was O(tables x objects), which on a four-hundred-table schema is a million comparisons per pack.
+fn columns_by_table(
+    graph: &ExtractedDatabaseGraph,
+) -> HashMap<&str, Vec<&crate::models::DatabaseColumn>> {
+    let mut by_table: HashMap<&str, Vec<&crate::models::DatabaseColumn>> = HashMap::new();
+    for object in &graph.objects {
+        if let DatabaseObject::Column(column) = object {
+            by_table
+                .entry(column.table_id.as_str())
+                .or_default()
+                .push(column);
+        }
+    }
+    for columns in by_table.values_mut() {
+        columns.sort_by_key(|column| column.ordinal);
+    }
+    by_table
+}
+
+/// How many keys, constraints and indexes hang off each table — every one of them ships with the
+/// table and is charged to `estimated_tokens`.
+fn attachments_by_table(graph: &ExtractedDatabaseGraph) -> HashMap<&str, usize> {
+    let mut counts: HashMap<&str, usize> = HashMap::new();
+    for object in &graph.objects {
+        let parent = match object {
+            DatabaseObject::PrimaryKey(key) => Some(key.table_id.as_str()),
+            DatabaseObject::ForeignKey(key) => Some(key.table_id.as_str()),
+            DatabaseObject::UniqueConstraint(constraint) => Some(constraint.table_id.as_str()),
+            DatabaseObject::CheckConstraint(constraint) => Some(constraint.table_id.as_str()),
+            DatabaseObject::Index(index) => Some(index.table_id.as_str()),
             _ => None,
-        })
-        .collect();
-    columns.sort_by_key(|column| column.ordinal);
-    columns
+        };
+        if let Some(parent) = parent {
+            *counts.entry(parent).or_default() += 1;
+        }
+    }
+    counts
+}
+
+/// An upper bound on the edges a table can contribute. Edges are only kept when both endpoints are
+/// selected, so this over-charges slightly — the safe direction for a token budget.
+fn incident_edges_by_table(graph: &ExtractedDatabaseGraph) -> HashMap<&str, usize> {
+    let mut counts: HashMap<&str, usize> = HashMap::new();
+    for edge in &graph.edges {
+        *counts.entry(edge.source_object_id.as_str()).or_default() += 1;
+        *counts.entry(edge.target_object_id.as_str()).or_default() += 1;
+    }
+    counts
 }
 
 /// Table-to-table adjacency. Foreign keys are the edges that matter for context: two tables joined
@@ -355,6 +407,8 @@ mod tests {
             consumer_project_ids: Vec::new(),
             environment_ids: Vec::new(),
             evidence_ids: Vec::new(),
+            relevance: crate::models::DatabaseSourceRelevance::Application,
+            evidence_paths: Vec::new(),
             confidence: 1.0,
             discovered_at: "t".into(),
             updated_at: "t".into(),

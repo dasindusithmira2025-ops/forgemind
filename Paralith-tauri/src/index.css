@@ -2353,9 +2353,8 @@ html[data-theme-swapping] *, html[data-theme-swapping] *::before, html[data-them
 .db-nav-count { min-width: 18px; height: 17px; padding: 0 5px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-pill); background: var(--surface-3); color: var(--muted); font-size: var(--font-xs); flex-shrink: 0; }
 .db-nav button.active .db-nav-count { background: var(--accent-soft); color: var(--accent-strong); }
 .db-rail-heading { padding: 12px 10px 5px; color: var(--faint); font-size: var(--font-xs); text-transform: uppercase; letter-spacing: .07em; }
-.db-rail-empty { margin: 0; padding: 4px 10px; color: var(--faint); font-size: var(--font-xs); }
-.db-rail-search { padding: 6px 8px; }
-.db-rail-search input { width: 100%; box-sizing: border-box; min-height: var(--control-h-sm); padding: 0 9px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text); font-size: var(--font-xs); }
+.db-rail-empty { margin: 0; padding: 4px 10px; display: flex; align-items: center; gap: 5px; color: var(--faint); font-size: var(--font-xs); }
+.db-rail-empty.is-error { color: var(--danger-text); }
 
 .db-badge { display: inline-flex; align-items: center; gap: 4px; padding: 1px 6px; border-radius: var(--radius-xs); border: 1px solid var(--border); background: var(--surface-2); color: var(--muted); font-size: var(--font-xs); line-height: 1.5; white-space: nowrap; }
 .db-badge svg { flex-shrink: 0; }
@@ -2371,6 +2370,32 @@ html[data-theme-swapping] *, html[data-theme-swapping] *::before, html[data-them
 .db-overview-header h2 { font-size: var(--font-lg); font-weight: 650; color: var(--text-strong); }
 .db-overview-stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--space-2); }
 .db-overview-source-card { padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); display: flex; flex-direction: column; gap: 4px; }
+/* Cards are capped so three databases do not stretch across a 32" monitor as three giant panels. */
+.db-overview-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 340px)); gap: var(--space-3); align-content: start; }
+.db-overview-header-actions { display: flex; align-items: center; gap: var(--space-3); }
+.db-overview-toggle { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: var(--font-xs); cursor: pointer; }
+.db-overview-hidden-note { color: var(--faint); font-size: var(--font-sm); font-weight: 400; }
+.db-overview-empty p { max-width: 56ch; margin: 0; color: var(--muted); font-size: var(--font-sm); line-height: var(--lh-body); }
+.db-overview-empty-actions { display: flex; align-items: center; gap: var(--space-3); }
+.db-overview-note { margin: 0; padding: var(--space-2) var(--space-3); border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-2); color: var(--muted); font-size: var(--font-xs); line-height: var(--lh-body); }
+
+.db-source-card { display: flex; flex-direction: column; gap: 10px; padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.db-source-card.is-active { border-color: var(--accent-edge); box-shadow: inset 2px 0 0 var(--accent-edge); }
+.db-source-card > header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.db-source-card > header strong { min-width: 0; color: var(--text-strong); font-size: var(--font-md); font-weight: 620; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.db-source-card-engine { margin: -6px 0 0; color: var(--muted); font-size: var(--font-xs); }
+.db-source-card-meta { margin: 0; display: flex; flex-direction: column; gap: 3px; }
+.db-source-card-meta > div { display: flex; align-items: baseline; gap: 8px; }
+.db-source-card-meta dt { flex-shrink: 0; width: 60px; color: var(--faint); font-size: var(--font-2xs); text-transform: uppercase; letter-spacing: .05em; }
+.db-source-card-meta dd { margin: 0; min-width: 0; color: var(--text); font-size: var(--font-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.db-source-card-stats { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding-top: 8px; border-top: 1px solid var(--border-subtle); color: var(--muted); font-size: var(--font-xs); }
+.db-source-card-stats span { display: inline-flex; align-items: center; gap: 4px; }
+.db-source-card-unknown { color: var(--faint); font-style: italic; }
+.db-source-card-issues { color: var(--warning-text); }
+.db-source-card-actions { display: flex; align-items: center; gap: var(--space-3); }
+
+.db-rail-relevance, .db-nav-relevance { flex-shrink: 0; padding: 0 5px; border-radius: var(--radius-pill); background: var(--surface-3); color: var(--faint); font-size: var(--font-2xs); }
+.db-rail-toggle { display: flex; align-items: center; gap: 6px; padding: 8px 10px; color: var(--faint); font-size: var(--font-2xs); cursor: pointer; }
 .db-overview-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-2); padding: var(--space-5); color: var(--muted); text-align: center; }
 .db-overview-empty h2 { font-size: var(--font-md); font-weight: 600; color: var(--text); }
 .db-empty-link { border: 0; background: none; color: var(--accent-strong); font-size: var(--font-sm); cursor: pointer; }
@@ -2402,7 +2427,11 @@ html[data-theme-swapping] *, html[data-theme-swapping] *::before, html[data-them
 .db-changes { padding: var(--space-3); display: flex; flex-direction: column; gap: var(--space-3); }
 .db-changes-draft-selector { display: flex; align-items: center; gap: 8px; padding: var(--space-4); color: var(--muted); font-size: var(--font-sm); }
 .db-stale-revision-notice { display: flex; align-items: center; gap: 8px; padding: var(--space-2) var(--space-3); border: 1px solid var(--warning-border); border-radius: var(--radius); background: var(--warning-soft); color: var(--warning-text); font-size: var(--font-sm); }
-.db-inline-error { padding: var(--space-2) var(--space-3); border: 1px solid var(--danger-border); border-radius: var(--radius); background: var(--danger-soft); color: var(--danger-text); font-size: var(--font-sm); }
+/* These carry an icon, a message, and sometimes a recovery action; laying them out as a block left
+   the action wrapped under the text with no alignment. */
+.db-inline-error { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: var(--space-2) var(--space-3); border: 1px solid var(--danger-border); border-radius: var(--radius); background: var(--danger-soft); color: var(--danger-text); font-size: var(--font-sm); }
+.db-inline-error svg { flex-shrink: 0; }
+.db-inline-error > span { flex: 1; min-width: 0; }
 .db-connections { padding: var(--space-4); display: flex; flex-direction: column; gap: var(--space-4); }
 .db-connections-safety-notice { display: flex; gap: 10px; padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-2); }
 .db-connections-safety-notice svg { flex-shrink: 0; margin-top: 2px; color: var(--faint); }
@@ -2411,6 +2440,10 @@ html[data-theme-swapping] *, html[data-theme-swapping] *::before, html[data-them
 .db-unsupported-banner { display: flex; align-items: center; gap: 8px; padding: 6px var(--space-3); background: var(--surface-2); color: var(--muted); font-size: var(--font-xs); border-bottom: 1px solid var(--border-subtle); }
 
 .db-section-error { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: var(--space-5); color: var(--danger-text); text-align: center; }
+.db-section-error-message { font-size: var(--font-sm); }
+/* The concrete cause is the diagnosable part, but it is not the headline — it reads as secondary. */
+.db-section-error-detail { max-width: 62ch; color: var(--muted); font-size: var(--font-xs); line-height: var(--lh-body); overflow-wrap: anywhere; }
+.db-section-error-code { color: var(--faint); font-size: var(--font-2xs); }
 
 /* Inspector */
 .db-inspector { width: 328px; flex-shrink: 0; min-height: 0; display: flex; flex-direction: column; border-left: 1px solid var(--border); background: var(--surface); }
@@ -2438,6 +2471,100 @@ html[data-theme-swapping] *, html[data-theme-swapping] *::before, html[data-them
 .db-inspector-list-secondary { color: var(--faint); font-size: var(--font-xs); }
 .db-inspector-jump { display: flex; align-items: center; gap: 4px; border: 0; background: none; color: var(--accent-strong); font-size: var(--font-sm); cursor: pointer; padding: 0; }
 .db-inspector-source { margin: 0; padding: var(--space-2); background: var(--bg); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); font-family: var(--font-mono); font-size: var(--font-xs); color: var(--text); overflow: auto; white-space: pre-wrap; }
+
+/* Explorer hierarchy — namespace > kind > object. Density is the point; every row is one line. */
+.db-explorer-match-count { color: var(--faint); font-size: var(--font-2xs); }
+.db-explorer-group { border-bottom: 1px solid var(--border-subtle); }
+.db-explorer-group-header, .db-explorer-kind-header {
+  width: 100%; display: flex; align-items: center; gap: 6px; border: 0; background: none;
+  color: var(--text); font-size: var(--font-xs); cursor: pointer; text-align: left;
+}
+.db-explorer-group-header { height: 30px; padding: 0 var(--space-3); color: var(--text-strong); font-weight: 600; }
+.db-explorer-group-header:hover, .db-explorer-kind-header:hover { background: var(--surface-hover); }
+.db-explorer-kind-header { height: 26px; padding: 0 var(--space-3) 0 calc(var(--space-3) + 12px); color: var(--muted); text-transform: uppercase; letter-spacing: .04em; font-size: var(--font-2xs); }
+.db-explorer-group-header .db-explorer-row-count, .db-explorer-kind-header .db-explorer-row-count { margin-left: auto; }
+.db-explorer-row { display: flex; align-items: center; padding-left: calc(var(--space-3) + 24px); }
+.db-explorer-row-main { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; height: 100%; padding: 0 var(--space-2) 0 0; border: 0; background: none; color: inherit; font-size: var(--font-sm); cursor: pointer; text-align: left; }
+.db-explorer-row-match { color: var(--accent-strong); font-size: var(--font-2xs); font-family: var(--font-mono); }
+.db-explorer-row-action { flex-shrink: 0; width: 22px; height: 22px; margin-right: 6px; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: var(--radius-xs); background: none; color: var(--faint); cursor: pointer; opacity: 0; }
+.db-explorer-row:hover .db-explorer-row-action, .db-explorer-row-action:focus-visible { opacity: 1; }
+.db-explorer-row-action:hover { background: var(--surface-3); color: var(--accent-strong); }
+.db-explorer-virtual { max-height: 420px; overflow-y: auto; position: relative; }
+
+/* An unavailable layer is a missing prerequisite, and reads as an explanation, not as an error. */
+.db-layer-unavailable { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: var(--space-5); color: var(--muted); text-align: center; }
+.db-layer-unavailable svg { color: var(--faint); }
+.db-layer-unavailable h2 { font-size: var(--font-md); font-weight: 600; color: var(--text); }
+.db-layer-unavailable p { max-width: 56ch; margin: 0; font-size: var(--font-sm); line-height: var(--lh-body); }
+.db-layer-unavailable-actions { display: flex; align-items: center; gap: var(--space-3); }
+
+/* Health — findings are rows of work, each with the navigation that resolves them. */
+.db-health { display: flex; flex-direction: column; min-height: 0; }
+.db-health-toolbar { display: flex; align-items: center; gap: 4px; padding: 6px var(--space-3); border-bottom: 1px solid var(--border-subtle); }
+.db-health-toolbar button { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); color: var(--muted); font-size: var(--font-2xs); text-transform: capitalize; cursor: pointer; }
+.db-health-toolbar button:hover { background: var(--surface-hover); color: var(--text); }
+.db-health-toolbar button.is-active { background: var(--accent-soft); color: var(--accent-strong); border-color: var(--accent-edge); }
+.db-health-toolbar button span { color: var(--faint); }
+.db-health-list { list-style: none; margin: 0; padding: var(--space-3); display: flex; flex-direction: column; gap: var(--space-2); overflow-y: auto; }
+.db-health-issue { display: flex; flex-direction: column; gap: 5px; padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.db-health-issue.is-active { border-color: var(--accent-edge); box-shadow: inset 2px 0 0 var(--accent-edge); }
+.db-health-issue-head { display: flex; align-items: center; gap: 8px; }
+.db-health-issue-head strong { flex: 1; min-width: 0; color: var(--text-strong); font-size: var(--font-sm); }
+.db-health-issue-code { color: var(--faint); font-size: var(--font-2xs); }
+.db-health-issue-explanation { margin: 0; color: var(--muted); font-size: var(--font-xs); line-height: var(--lh-body); }
+.db-health-issue-objects { margin: 0; color: var(--faint); font-size: var(--font-2xs); }
+.db-health-issue-actions { display: flex; align-items: center; gap: var(--space-3); margin-top: 2px; }
+.db-health-empty p { max-width: 60ch; margin: 0; text-align: center; line-height: var(--lh-body); }
+
+/* Migrations */
+.db-migrations { display: flex; flex-direction: column; min-height: 0; }
+.db-migrations-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px var(--space-3); border-bottom: 1px solid var(--border-subtle); color: var(--text); font-size: var(--font-sm); }
+.db-migrations-header .db-inspector-list-secondary { display: inline-flex; align-items: center; gap: 4px; }
+.db-migrations-empty h2 { font-size: var(--font-md); font-weight: 600; color: var(--text); }
+.db-migrations-empty p { max-width: 60ch; margin: 0; line-height: var(--lh-body); }
+.db-migrations-diagnostic { width: min(420px, 100%); text-align: left; padding: var(--space-2) var(--space-3); border: 1px solid var(--border-subtle); border-radius: var(--radius); background: var(--surface-2); }
+.db-migrations-list li { flex-direction: column; align-items: flex-start; gap: 2px; }
+
+/* Changes / proposed designs */
+.db-changes-empty h2 { font-size: var(--font-md); font-weight: 600; color: var(--text); }
+.db-changes-empty p { max-width: 62ch; margin: 0; line-height: var(--lh-body); }
+.db-changes-empty-points { max-width: 62ch; margin: 0; padding-left: 18px; text-align: left; color: var(--faint); font-size: var(--font-xs); line-height: var(--lh-body); }
+.db-design-list li { padding: 0; border-bottom: 1px solid var(--border-subtle); }
+.db-design-row { width: 100%; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 8px 0; border: 0; background: none; color: var(--text); text-align: left; cursor: pointer; }
+.db-design-row-name { display: flex; align-items: center; gap: 8px; font-size: var(--font-sm); color: var(--text-strong); }
+
+/* Connections capability matrix */
+.db-capability-matrix h3 { font-size: var(--font-sm); font-weight: 600; color: var(--text-strong); margin-bottom: 2px; }
+.db-capability-matrix table { width: 100%; margin-top: var(--space-2); border-collapse: collapse; font-size: var(--font-xs); }
+.db-capability-matrix th, .db-capability-matrix td { padding: 6px 8px; border-bottom: 1px solid var(--border-subtle); text-align: left; }
+.db-capability-matrix thead th { color: var(--faint); font-size: var(--font-2xs); font-weight: 500; text-transform: uppercase; letter-spacing: .05em; }
+.db-capability-matrix tbody th { color: var(--text); font-weight: 500; }
+.db-capability-matrix td { text-align: center; }
+.db-capability-matrix td.is-supported { color: var(--success); }
+.db-capability-matrix td.is-unsupported { color: var(--faint); }
+
+/* Inspector additions */
+.db-inspector-title { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.db-inspector-title .db-inspector-list-secondary { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.db-inspector-header-actions { flex-shrink: 0; display: flex; align-items: center; gap: 4px; }
+.db-inspector-header-actions button { border: 0; background: none; color: var(--faint); cursor: pointer; display: inline-flex; padding: 2px; border-radius: var(--radius-xs); }
+.db-inspector-header-actions button:hover { color: var(--text); background: var(--surface-hover); }
+.db-inspector-tab-count { margin-left: 4px; color: var(--faint); }
+.db-inspector-empty p { margin: 0 0 6px; }
+.db-inspector-columns li { flex-direction: column; align-items: flex-start; gap: 2px; }
+.db-inspector-column-main { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.db-inspector-column-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; color: var(--faint); font-size: var(--font-2xs); }
+.db-inspector-relations { display: flex; flex-direction: column; gap: var(--space-3); }
+.db-inspector-relations h4 { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; color: var(--faint); font-size: var(--font-2xs); text-transform: uppercase; letter-spacing: .05em; font-weight: 500; }
+.db-inspector-relations li { flex-direction: column; align-items: flex-start; gap: 2px; }
+.db-inspector-relation { width: 100%; display: flex; align-items: center; gap: 6px; padding: 0; border: 0; background: none; color: var(--text); font-size: var(--font-sm); cursor: pointer; text-align: left; }
+.db-inspector-relation:hover { color: var(--accent-strong); }
+.db-inspector-relation-cols { flex-shrink: 0; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.db-inspector-relation-card { flex-shrink: 0; color: var(--faint); font-size: var(--font-2xs); }
+.db-inspector-relation-target { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--accent-strong); }
+.db-inspector-relation-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; width: 100%; }
+.db-inspector-source-tab { display: flex; flex-direction: column; gap: var(--space-2); }
+.db-inspector-source-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
 
 /* Canvas — SchemaCanvas engine. DOM nodes + one SVG edge overlay (SwarmOverview.AgentCanvas precedent), no library. */
 .db-canvas-shell { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--bg); }
@@ -2469,6 +2596,11 @@ html[data-theme-swapping] *, html[data-theme-swapping] *::before, html[data-them
 .db-canvas-edges { position: absolute; top: 0; left: 0; overflow: visible; pointer-events: none; }
 .db-canvas-edges path { stroke: var(--border-strong); stroke-width: 1.4; fill: none; }
 .db-canvas-edges path.is-highlighted { stroke: var(--accent); stroke-width: 2.25; }
+.db-canvas-edges path.is-selected { stroke: var(--accent-strong); stroke-width: 2.75; }
+/* Focus mode dims context instead of deleting it: the relationship is still there, just quiet. */
+.db-canvas-edges path.is-dimmed { stroke: var(--border-subtle); opacity: .35; }
+/* A 1.4px line cannot be clicked. This transparent wide stroke is the hit target for the same path. */
+.db-canvas-edges path.db-canvas-edge-hit { stroke: transparent; stroke-width: 14; pointer-events: stroke; cursor: pointer; }
 .db-canvas-state { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: var(--muted); font-size: var(--font-sm); }
 
 .db-canvas-node { position: absolute; box-sizing: border-box; border: 1px solid var(--border); border-radius: var(--radius); background: var(--card); color: var(--text); cursor: pointer; outline: none; transition: border-color .1s ease, box-shadow .1s ease; }
@@ -2476,6 +2608,13 @@ html[data-theme-swapping] *, html[data-theme-swapping] *::before, html[data-them
 .db-canvas-node:focus-visible { outline: none; box-shadow: var(--focus-shadow); }
 .db-canvas-node.is-selected { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
 .db-canvas-node-dimmed { opacity: .28; filter: saturate(.6); }
+/* A pinned table is held out of automatic layout; the state reads on the card, not only in a tooltip. */
+.db-canvas-node.is-pinned { border-color: var(--border-strong); border-style: dashed; }
+.db-canvas-node.is-dragging { cursor: grabbing; box-shadow: var(--shadow-lg, 0 8px 24px rgb(0 0 0 / .45)); z-index: 2; transition: none; }
+.db-table-node-pin-button { display: inline-flex; align-items: center; padding: 0; border: 0; background: none; color: var(--faint); cursor: pointer; flex-shrink: 0; }
+.db-table-node-pin-button:hover { color: var(--text); }
+.db-table-node-pin-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: var(--radius-xs); }
+.db-table-node-pin { flex-shrink: 0; color: var(--faint); }
 
 .db-table-node-header { display: flex; align-items: center; justify-content: space-between; gap: 6px; height: var(--row-h); padding: 0 var(--space-2); border-bottom: 1px solid var(--border-subtle); background: var(--surface-2); border-radius: var(--radius) var(--radius) 0 0; }
 .db-canvas-node.is-selected .db-table-node-header { background: var(--accent-soft); }

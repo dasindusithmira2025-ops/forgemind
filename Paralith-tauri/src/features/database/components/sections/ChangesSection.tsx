@@ -1,8 +1,17 @@
 import { useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, Check, GitBranch, Loader2, Play, Plus, RotateCcw, Scale, X } from 'lucide-react'
+import { AlertTriangle, Archive, Check, GitBranch, Loader2, Play, Plus, Scale, X } from 'lucide-react'
 import { Button } from '../../../../components/ui/Button'
 import { useDatabaseStore } from '../../databaseStore'
-import type { DatabaseChange, DatabaseDesign } from '../../databaseTypes'
+import { SectionError } from '../SectionError'
+import { StatusBadge, type BadgeTone } from '../StatusBadge'
+import type { DatabaseChange, DatabaseDesign, DatabaseDesignStatus } from '../../databaseTypes'
+
+const DESIGN_STATUS_TONE: Record<DatabaseDesignStatus, BadgeTone> = {
+  draft: 'pending',
+  approved: 'success',
+  rejected: 'danger',
+  archived: 'neutral',
+}
 
 /**
  * Design Mode: the surface where a proposed schema is created, compared, approved, and implemented.
@@ -19,6 +28,8 @@ export function ChangesSection() {
   const activeDesignId = useDatabaseStore((state) => state.activeDesignId)
   const activeBundle = useDatabaseStore((state) => state.activeBundle)
   const schemaPage = useDatabaseStore((state) => state.schemaPage)
+  const schemaLoad = useDatabaseStore((state) => state.schemaLoad)
+  const loadSchema = useDatabaseStore((state) => state.loadSchema)
   const createDraft = useDatabaseStore((state) => state.createDraft)
   const selectDesign = useDatabaseStore((state) => state.selectDesign)
   const decideDesign = useDatabaseStore((state) => state.decideDesign)
@@ -40,6 +51,13 @@ export function ChangesSection() {
   useEffect(() => {
     if (load.status === 'idle' && activeSourceId) void loadDesigns()
   }, [load.status, activeSourceId, loadDesigns])
+
+  // A draft is rooted in a concrete snapshot, so this surface needs the schema loaded even though it
+  // does not render it. Without this, opening Changes directly left "New design" permanently
+  // disabled with no control anywhere on the screen that could enable it.
+  useEffect(() => {
+    if (schemaLoad.status === 'idle' && activeSourceId) void loadSchema()
+  }, [schemaLoad.status, activeSourceId, loadSchema])
 
   const otherDesigns = useMemo(
     () => designs.filter((design) => design.id !== activeDesignId),
@@ -84,13 +102,7 @@ export function ChangesSection() {
   }
 
   if (load.status === 'error') {
-    return (
-      <div className="db-section-error">
-        <AlertTriangle size={18} />
-        <span>{load.errorMessage ?? 'Failed to load designs.'}</span>
-        <Button variant="secondary" icon={<RotateCcw size={14} />} onClick={() => void loadDesigns()}>Retry</Button>
-      </div>
-    )
+    return <SectionError load={load} fallback="Failed to load designs." onRetry={() => void loadDesigns()} />
   }
 
   const destructiveChanges = implementationRun?.residualChanges.filter((change) => change.destructive) ?? []
@@ -105,7 +117,7 @@ export function ChangesSection() {
           <Button variant="secondary" onClick={dismissStaleRevisionNotice}>Reload design</Button>
         </div>
       )}
-      {designError && <div className="db-inline-error">{designError}</div>}
+      {designError && <div className="db-inline-error" role="alert">{designError}</div>}
 
       <div className="db-changes-draft-selector">
         <input
@@ -118,8 +130,16 @@ export function ChangesSection() {
         <Button
           icon={<Plus size={14} />}
           onClick={() => void create()}
-          disabled={creating || !schemaPage?.snapshot}
-          title={schemaPage?.snapshot ? undefined : 'Load a schema first'}
+          disabled={creating || schemaLoad.status === 'loading' || !schemaPage?.snapshot}
+          title={
+            schemaPage?.snapshot
+              ? undefined
+              : schemaLoad.status === 'loading'
+                ? 'Reading the current schema…'
+                : schemaLoad.status === 'error'
+                  ? 'The current schema could not be read, so there is nothing to base a design on'
+                  : 'This source has no extracted schema to base a design on yet'
+          }
         >
           {creating ? 'Creating…' : 'New design'}
         </Button>
@@ -127,17 +147,46 @@ export function ChangesSection() {
 
       {designs.length === 0 ? (
         <div className="db-changes-empty">
-          <GitBranch size={22} />
-          <span>No designs yet. A design is an isolated proposal — nothing it contains touches the repository until you implement it.</span>
+          <GitBranch size={24} />
+          <h2>Proposed designs</h2>
+          <p>
+            Design database architecture safely. A design is an isolated proposal rooted in a
+            concrete schema revision — nothing it contains touches repository files or a live
+            database until you explicitly approve and implement it.
+          </p>
+          <ul className="db-changes-empty-points">
+            <li>Start from the current Declared schema and edit it semantically.</li>
+            <li>Compare it against the schema, or against another design.</li>
+            <li>Claude and Codex can operate the same design through its semantic revision.</li>
+          </ul>
+          {!schemaPage?.snapshot && (
+            <p className="db-inline-error" role="note">
+              {schemaLoad.status === 'loading'
+                ? 'Reading the current schema…'
+                : 'This datasource has no extracted schema yet, so there is nothing to base a design on.'}
+            </p>
+          )}
         </div>
       ) : (
         <ul className="db-inspector-list db-design-list">
           {designs.map((design) => (
             <li key={design.id} className={design.id === activeDesignId ? 'is-active' : undefined}>
               <button type="button" className="db-design-row" onClick={() => void selectDesign(design.id)}>
-                <span>{design.name}</span>
+                <span className="db-design-row-name">
+                  {design.name}
+                  <StatusBadge tone={DESIGN_STATUS_TONE[design.status]}>{design.status}</StatusBadge>
+                </span>
                 <span className="db-inspector-list-secondary">
-                  {design.status} · rev {design.revisionNumber} · {actorLabel(design)}
+                  revision {design.revisionNumber} · created by {actorLabel(design)}
+                  {design.approvedRevisionId ? ' · approved' : ''}
+                </span>
+                {/* The base is what makes two designs comparable; it is a fact worth surfacing. */}
+                <span className="db-inspector-list-secondary mono">
+                  {design.baseSnapshotId
+                    ? `from snapshot ${design.baseSnapshotId.slice(0, 12)}`
+                    : design.baseRevisionId
+                      ? `from revision ${design.baseRevisionId.slice(0, 12)}`
+                      : 'no recorded base'}
                 </span>
               </button>
             </li>
@@ -191,18 +240,32 @@ export function ChangesSection() {
                 </Button>
               </>
             )}
+            {activeBundle.design.status !== 'archived' && (
+              <Button
+                variant="secondary"
+                icon={<Archive size={14} />}
+                onClick={() => void decideDesign('archive')}
+                title="Keep the design and its history, but take it out of the active list"
+              >
+                Archive
+              </Button>
+            )}
           </div>
 
           {comparisonLoad.status === 'loading' && (
             <div className="db-changes-draft-selector"><Loader2 size={14} className="is-spinning" /> Comparing…</div>
           )}
           {comparisonLoad.status === 'error' && (
-            <div className="db-inline-error">{comparisonLoad.errorMessage}</div>
+            <div className="db-inline-error" role="alert">{comparisonLoad.errorMessage}</div>
           )}
           {comparison && (
             <div className="db-design-comparison">
               <header>
-                <span>{comparison.changes.length === 0 ? 'No semantic differences' : `${comparison.changes.length} change(s)`}</span>
+                <span>
+                  {comparison.changes.length === 0
+                    ? 'No semantic differences'
+                    : `${comparison.changes.length} change${comparison.changes.length === 1 ? '' : 's'}`}
+                </span>
                 <Button variant="secondary" onClick={clearComparison}>Clear</Button>
               </header>
               <ChangeList changes={comparison.changes} />
@@ -254,7 +317,9 @@ export function ChangesSection() {
                 </div>
               )}
               {destructiveChanges.length > 0 && (
-                <div className="db-inline-error">{destructiveChanges.length} destructive change(s) in this run.</div>
+                <div className="db-inline-error" role="alert">
+                  {destructiveChanges.length} destructive change{destructiveChanges.length === 1 ? '' : 's'} in this run.
+                </div>
               )}
             </div>
           )}

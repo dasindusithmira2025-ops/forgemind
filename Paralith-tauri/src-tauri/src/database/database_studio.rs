@@ -61,7 +61,7 @@ impl GraphRef {
 pub fn insert_source(connection: &Connection, source: &DatabaseSource) -> AppResult<()> {
     connection
         .execute(
-            "INSERT INTO database_sources(id,repository_id,logical_key,display_name,engine,owner_project_id,confidence,discovered_at,updated_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+            "INSERT INTO database_sources(id,repository_id,logical_key,display_name,engine,owner_project_id,relevance,confidence,discovered_at,updated_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
             params![
                 source.id,
                 source.repository_id,
@@ -69,6 +69,7 @@ pub fn insert_source(connection: &Connection, source: &DatabaseSource) -> AppRes
                 source.display_name,
                 serde_json::to_string(&source.engine).map_err(AppError::database)?.trim_matches('"'),
                 source.owner_project_id,
+                source.relevance.as_str(),
                 source.confidence,
                 source.discovered_at,
                 source.updated_at,
@@ -488,8 +489,8 @@ impl DatabaseService {
             let engine = enum_value(&source.engine)?;
             transaction
                 .execute(
-                    "INSERT INTO database_sources(id,repository_id,logical_key,display_name,engine,owner_project_id,confidence,discovered_at,updated_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)
-                     ON CONFLICT(id) DO UPDATE SET logical_key=excluded.logical_key, display_name=excluded.display_name, engine=excluded.engine, owner_project_id=excluded.owner_project_id, confidence=excluded.confidence, updated_at=excluded.updated_at",
+                    "INSERT INTO database_sources(id,repository_id,logical_key,display_name,engine,owner_project_id,relevance,confidence,discovered_at,updated_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)
+                     ON CONFLICT(id) DO UPDATE SET logical_key=excluded.logical_key, display_name=excluded.display_name, engine=excluded.engine, owner_project_id=excluded.owner_project_id, relevance=excluded.relevance, confidence=excluded.confidence, updated_at=excluded.updated_at",
                     params![
                         source.id,
                         source.repository_id,
@@ -497,6 +498,7 @@ impl DatabaseService {
                         source.display_name,
                         engine,
                         source.owner_project_id,
+                        source.relevance.as_str(),
                         source.confidence,
                         source.discovered_at,
                         source.updated_at,
@@ -527,7 +529,7 @@ impl DatabaseService {
         let connection = self.connection.lock();
         let mut statement = connection
             .prepare(
-                "SELECT id,repository_id,logical_key,display_name,engine,owner_project_id,confidence,discovered_at,updated_at FROM database_sources WHERE repository_id=?1 ORDER BY display_name",
+                "SELECT id,repository_id,logical_key,display_name,engine,owner_project_id,confidence,discovered_at,updated_at,relevance FROM database_sources WHERE repository_id=?1 ORDER BY CASE relevance WHEN 'application' THEN 0 WHEN 'development' THEN 1 WHEN 'test' THEN 2 WHEN 'example' THEN 3 ELSE 4 END, display_name",
             )
             .map_err(AppError::database)?;
         let rows = statement
@@ -545,7 +547,7 @@ impl DatabaseService {
         let connection = self.connection.lock();
         let source = connection
             .query_row(
-                "SELECT id,repository_id,logical_key,display_name,engine,owner_project_id,confidence,discovered_at,updated_at FROM database_sources WHERE id=?1",
+                "SELECT id,repository_id,logical_key,display_name,engine,owner_project_id,confidence,discovered_at,updated_at,relevance FROM database_sources WHERE id=?1",
                 params![source_id],
                 source_from_row,
             )
@@ -996,7 +998,7 @@ fn hydrate_source(
     mut source: DatabaseSource,
 ) -> AppResult<DatabaseSource> {
     let mut statement = connection
-        .prepare("SELECT id,adapter_id,project_id,consumer_signal FROM database_source_evidence WHERE source_id=?1 ORDER BY relative_path")
+        .prepare("SELECT id,adapter_id,project_id,consumer_signal,relative_path FROM database_source_evidence WHERE source_id=?1 ORDER BY relative_path")
         .map_err(AppError::database)?;
     let rows = statement
         .query_map(params![source.id], |row| {
@@ -1005,13 +1007,17 @@ fn hydrate_source(
                 row.get::<_, String>(1)?,
                 row.get::<_, Option<String>>(2)?,
                 row.get::<_, f64>(3)?,
+                row.get::<_, String>(4)?,
             ))
         })
         .map_err(AppError::database)?
         .collect::<rusqlite::Result<Vec<_>>>()
         .map_err(AppError::database)?;
-    for (evidence_id, adapter, project_id, consumer_signal) in rows {
+    for (evidence_id, adapter, project_id, consumer_signal, relative_path) in rows {
         source.evidence_ids.push(evidence_id);
+        if !source.evidence_paths.contains(&relative_path) {
+            source.evidence_paths.push(relative_path);
+        }
         if let Ok(adapter_id) = parse_enum(&adapter) {
             if !source.adapter_ids.contains(&adapter_id) {
                 source.adapter_ids.push(adapter_id);
@@ -1282,6 +1288,10 @@ fn source_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<DatabaseSource> 
         consumer_project_ids: Vec::new(),
         environment_ids: Vec::new(),
         evidence_ids: Vec::new(),
+        relevance: crate::models::DatabaseSourceRelevance::from_str_or_application(
+            &row.get::<_, String>(9)?,
+        ),
+        evidence_paths: Vec::new(),
         confidence: row.get::<_, f64>(6)? as f32,
         discovered_at: row.get(7)?,
         updated_at: row.get(8)?,

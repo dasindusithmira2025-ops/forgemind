@@ -15,7 +15,7 @@ describe('OverviewSection empty/loading/error states', () => {
   it('shows the exact empty-state copy when no sources are discovered', () => {
     useDatabaseStore.setState({ sourcesLoad: { status: 'ready' }, sources: [] })
     render(<OverviewSection onNavigate={() => undefined} />)
-    expect(screen.getByText('No database sources discovered in this project yet.')).toBeInTheDocument()
+    expect(screen.getByText('No database sources discovered in this project')).toBeInTheDocument()
   })
 
   it('shows ErrorNotice with Retry on a load error', () => {
@@ -41,7 +41,7 @@ describe('OverviewSection monorepo ownership', () => {
           ownerProjectId: 'packages/db',
           consumerProjectIds: ['apps/api', 'apps/worker'],
           environmentIds: [],
-          evidenceIds: [],
+          evidenceIds: [], relevance: 'application', evidencePaths: [],
           confidence: 1,
           discoveredAt: '',
           updatedAt: '',
@@ -51,7 +51,12 @@ describe('OverviewSection monorepo ownership', () => {
     render(<OverviewSection onNavigate={() => {}} />)
     // One card, not three, even though three packages reference the datasource.
     expect(screen.getAllByRole('article')).toHaveLength(1)
-    expect(screen.getByText('owned by packages/db')).toBeInTheDocument()
-    expect(screen.getByText('used by apps/api, apps/worker')).toBeInTheDocument()
+    // Owner and consumers are separate facts and are labelled as such.
+    expect(screen.getByText('Owner')).toBeInTheDocument()
+    expect(screen.getByText('packages/db')).toBeInTheDocument()
+    expect(screen.getByText('Used by')).toBeInTheDocument()
+    expect(screen.getByText('apps/api, apps/worker')).toBeInTheDocument()
+    // The label is a name, never a path.
+    expect(screen.getByText('Primary PostgreSQL')).toBeInTheDocument()
   })
 })

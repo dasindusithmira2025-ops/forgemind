@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { computeLayout, toCanvasNodeRects } from './layoutCore'
-import { computeFitZoom, computeVisibleNodeIds, resolveRenderDescriptors, type WorldRect } from './canvasSelectors'
+import { computeFitZoom, computeInitialFraming, computeVisibleNodeIds, initialZoomBand, resolveRenderDescriptors, type WorldRect } from './canvasSelectors'
 import { buildLargeSchemaFixture, LARGE_SCHEMA_GROUP_COUNT, LARGE_SCHEMA_TABLE_COUNT, LARGE_SCHEMA_VIEWPORT } from './largeSchemaFixture'
 import type { CanvasNodeRect } from '../../databaseTypes'
 // Vite `?raw` imports pull file text at build/transform time — no Node `fs` needed in this
@@ -69,6 +69,26 @@ describe('largeSchema: 400-table bounded canvas rendering + off-render-path layo
 
       const descriptors = resolveRenderDescriptors(visible, nodeRects, 'near')
       for (const descriptor of descriptors) expect(descriptor.kind).toBe('table-card')
+    })
+
+    it('opens the 400-table schema at an architecture zoom that still bounds the rendered nodes', () => {
+      // The initial framing is what a developer actually lands on. It must not be the raw fit
+      // (unreadable at this scale) and must still keep the mounted node count bounded.
+      const box = { x: 0, y: 0, width: layoutResult.bounds.width, height: layoutResult.bounds.height }
+      const framed = computeInitialFraming(box, LARGE_SCHEMA_TABLE_COUNT, LARGE_SCHEMA_VIEWPORT.width, LARGE_SCHEMA_VIEWPORT.height, 48)!
+      const rawFit = computeFitZoom(box, LARGE_SCHEMA_VIEWPORT.width, LARGE_SCHEMA_VIEWPORT.height, 48)
+
+      expect(framed.zoom).toBeGreaterThan(rawFit)
+      expect(framed.zoom).toBe(initialZoomBand(LARGE_SCHEMA_TABLE_COUNT).min)
+
+      const viewportWorldRect: WorldRect = {
+        x: 0,
+        y: 0,
+        width: LARGE_SCHEMA_VIEWPORT.width / framed.zoom,
+        height: LARGE_SCHEMA_VIEWPORT.height / framed.zoom,
+      }
+      const visible = computeVisibleNodeIds(nodeRects, viewportWorldRect, 'far', 200)
+      expect(visible.length).toBeLessThanOrEqual(LARGE_SCHEMA_GROUP_COUNT)
     })
 
     it('regression trip-wire: a deliberately-broken "cull nothing" implementation would fail both bounds above', () => {

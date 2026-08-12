@@ -33,7 +33,29 @@ use super::discovery::{self, DiscoveredLogicalDatabase};
 pub const EXTRACTOR_VERSION: &str = "dbstudio-static/1";
 
 const MAX_SCANNED_FILES: usize = 20_000;
-const SKIPPED_DIRECTORIES: [&str; 6] = [".git", "node_modules", "target", "dist", ".next", "build"];
+/// Directories that never contain a repository's own schema. `.worktrees` is the important one:
+/// Paralith's isolated worktrees are complete copies of the repository, so walking them reported
+/// every datasource once per worktree and made a monorepo's source list unreadable.
+const SKIPPED_DIRECTORIES: [&str; 12] = [
+    ".git",
+    ".worktrees",
+    "node_modules",
+    "target",
+    "dist",
+    ".next",
+    "build",
+    "vendor",
+    ".venv",
+    "__pycache__",
+    ".turbo",
+    "coverage",
+];
+
+/// Shared by both repository walks (discovery's file collection and extraction's companion scan) so
+/// the two can never disagree about what is part of the project.
+pub fn is_skipped_scan_directory(name: &str) -> bool {
+    SKIPPED_DIRECTORIES.contains(&name)
+}
 
 /// One logical datasource plus the evidence that proves it exists.
 #[derive(Debug, Clone)]

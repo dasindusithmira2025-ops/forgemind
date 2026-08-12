@@ -1,4 +1,4 @@
-import { ArrowUpRight, Key } from 'lucide-react'
+import { ArrowUpRight, Key, Pin } from 'lucide-react'
 import type { DatabaseNamespaceGroupView, DatabaseSemanticLod, DatabaseTableNodeView } from '../../databaseTypes'
 import { MEDIUM_ROW_CAP, NEAR_ROW_CAP } from './nodeMetrics'
 
@@ -16,6 +16,9 @@ interface TableNodeProps {
   selected: boolean
   onSelect: (id: string, additive: boolean) => void
   onPointerDownDrag?: (event: React.PointerEvent, id: string) => void
+  /** Release a pinned table back to automatic layout. */
+  onReleasePin?: (id: string) => void
+  dragging?: boolean
 }
 
 /**
@@ -28,11 +31,11 @@ interface TableNodeProps {
  * constraint membership renders as icons/badges, not `@relation(...)`/`@@index(...)` strings. The
  * right Inspector is always the exhaustive source (mission §2).
  */
-export function TableNode({ table, lod, x, y, width, selected, onSelect, onPointerDownDrag }: TableNodeProps) {
+export function TableNode({ table, lod, x, y, width, selected, onSelect, onPointerDownDrag, onReleasePin, dragging }: TableNodeProps) {
   if (lod === 'compact') {
     return (
       <div
-        className={`db-canvas-node db-table-node-compact ${selected ? 'is-selected' : ''}`}
+        className={`db-canvas-node db-table-node-compact ${selected ? 'is-selected' : ''} ${table.pinned ? 'is-pinned' : ''} ${dragging ? 'is-dragging' : ''}`}
         style={{ left: x, top: y, width }}
         data-node-id={table.id}
         role="button"
@@ -42,6 +45,7 @@ export function TableNode({ table, lod, x, y, width, selected, onSelect, onPoint
         onClick={(event) => onSelect(table.id, event.shiftKey || event.ctrlKey || event.metaKey)}
         onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelect(table.id, event.shiftKey) } }}
       >
+        {table.pinned && <Pin size={10} className="db-table-node-pin" aria-label="Pinned" />}
         <span className="db-table-node-compact-name" title={table.qualifiedName}>{table.name}</span>
         <span className="db-table-node-compact-count">{table.relationCount || table.columns.length}</span>
         {table.issueCount > 0 && <span className="db-table-node-issue-dot" title={`${table.issueCount} health issue${table.issueCount === 1 ? '' : 's'}`} />}
@@ -65,7 +69,7 @@ export function TableNode({ table, lod, x, y, width, selected, onSelect, onPoint
 
   return (
     <div
-      className={`db-canvas-node db-table-node ${selected ? 'is-selected' : ''}`}
+      className={`db-canvas-node db-table-node ${selected ? 'is-selected' : ''} ${table.pinned ? 'is-pinned' : ''} ${dragging ? 'is-dragging' : ''}`}
       style={{ left: x, top: y, width }}
       data-node-id={table.id}
       role="button"
@@ -76,6 +80,20 @@ export function TableNode({ table, lod, x, y, width, selected, onSelect, onPoint
       onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelect(table.id, event.shiftKey) } }}
     >
       <header className="db-table-node-header">
+        {table.pinned && (
+          // A pinned table is held out of automatic layout, so the state has to be visible and
+          // reversible from the card itself rather than only from wherever it was pinned.
+          <button
+            type="button"
+            className="db-table-node-pin-button"
+            title="Pinned — release to automatic layout"
+            aria-label="Release pinned position"
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={(event) => { event.stopPropagation(); onReleasePin?.(table.id) }}
+          >
+            <Pin size={11} />
+          </button>
+        )}
         <span className="db-table-node-name" title={table.qualifiedName}>{table.name}</span>
         {table.issueCount > 0 && <span className="db-table-node-issue-badge" title={`${table.issueCount} health issue${table.issueCount === 1 ? '' : 's'}`}>{table.issueCount}</span>}
       </header>

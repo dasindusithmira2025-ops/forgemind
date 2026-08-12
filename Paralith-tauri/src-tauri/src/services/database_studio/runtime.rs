@@ -271,9 +271,9 @@ impl DatabaseStudioRuntime {
         project_id: &str,
         source_id: &str,
     ) -> AppResult<DatabaseSourceDetail> {
-        self.database.get_project(project_id)?;
+        let source = self.require_source_in_project(project_id, source_id)?;
         Ok(DatabaseSourceDetail {
-            source: self.database.database_studio_get_source(source_id)?,
+            source,
             evidence: self.database.database_studio_list_evidence(source_id)?,
             environments: Vec::new(),
         })
@@ -394,6 +394,60 @@ impl DatabaseStudioRuntime {
             .selection)
     }
 
+    // ----- project scoping --------------------------------------------------------------------
+
+    /// The command layer proves the *caller* may act on a Project; it cannot prove that the ids in
+    /// the payload belong to it. Every id a request carries is renderer-supplied, so each one is
+    /// resolved back to its owning Project here. Without this a window scoped to Project A could
+    /// read — and, through the design commands, mutate — Project B's schema simply by sending B's
+    /// source, snapshot, revision, or design id.
+    fn require_source_in_project(
+        &self,
+        project_id: &str,
+        source_id: &str,
+    ) -> AppResult<DatabaseSource> {
+        self.database.get_project(project_id)?;
+        let source = self.database.database_studio_get_source(source_id)?;
+        if source.repository_id != project_id {
+            return Err(cross_project_denied(source_id));
+        }
+        Ok(source)
+    }
+
+    fn require_snapshot_in_source(
+        &self,
+        source_id: &str,
+        snapshot_id: &str,
+    ) -> AppResult<DatabaseSnapshot> {
+        let snapshot = self.database.database_studio_get_snapshot(snapshot_id)?;
+        if snapshot.source_id != source_id {
+            return Err(cross_project_denied(snapshot_id));
+        }
+        Ok(snapshot)
+    }
+
+    fn require_revision_in_source(&self, source_id: &str, revision_id: &str) -> AppResult<()> {
+        let revision = self.database.database_studio_get_revision(revision_id)?;
+        let design = self
+            .database
+            .database_studio_get_design(&revision.design_id)?;
+        if design.source_id != source_id {
+            return Err(cross_project_denied(revision_id));
+        }
+        Ok(())
+    }
+
+    /// Resolve a design back to the Project that owns the source it belongs to.
+    fn require_design_in_project(
+        &self,
+        project_id: &str,
+        design_id: &str,
+    ) -> AppResult<DatabaseDesign> {
+        let design = self.database.database_studio_get_design(design_id)?;
+        self.require_source_in_project(project_id, &design.source_id)?;
+        Ok(design)
+    }
+
     // ----- graph reads ------------------------------------------------------------------------
 
     /// Resolve the graph reference a request names, defaulting to the newest ready snapshot for the
@@ -406,10 +460,13 @@ impl DatabaseStudioRuntime {
         snapshot_id: Option<&str>,
         design_revision_id: Option<&str>,
     ) -> AppResult<GraphRef> {
+        self.require_source_in_project(project_id, source_id)?;
         if let Some(revision_id) = design_revision_id {
+            self.require_revision_in_source(source_id, revision_id)?;
             return Ok(GraphRef::Revision(revision_id.to_owned()));
         }
         if let Some(snapshot_id) = snapshot_id {
+            self.require_snapshot_in_source(source_id, snapshot_id)?;
             return Ok(GraphRef::Snapshot(snapshot_id.to_owned()));
         }
         if *layer == DatabaseLayer::Proposed {
@@ -643,7 +700,7 @@ impl DatabaseStudioRuntime {
     }
 
     pub fn list_usage(&self, request: &ListDatabaseUsageRequest) -> AppResult<DatabaseUsagePage> {
-        self.database.get_project(&request.project_id)?;
+        self.require_source_in_project(&request.project_id, &request.source_id)?;
         let limit = request.limit.unwrap_or(100).clamp(1, 500);
         let offset = request
             .continuation
@@ -668,7 +725,7 @@ impl DatabaseStudioRuntime {
         &self,
         request: &ListDatabaseIssuesRequest,
     ) -> AppResult<Vec<DatabaseIssue>> {
-        self.database.get_project(&request.project_id)?;
+        self.require_source_in_project(&request.project_id, &request.source_id)?;
         self.database.database_studio_list_issues(
             &request.source_id,
             request.status.as_ref(),
@@ -684,6 +741,9 @@ impl DatabaseStudioRuntime {
         mode: DatabaseComparisonMode,
     ) -> AppResult<DatabaseDiff> {
         self.database.get_project(project_id)?;
+        // Both sides of a comparison must belong to the same source, and that source to this
+        // Project. Deriving the source from one side alone would happily diff this Project's
+        // declared schema against another Project's design revision.
         let (left, right, source_id) = match &mode {
             DatabaseComparisonMode::DeclaredObservedDrift {
                 declared_snapshot_id,
@@ -692,6 +752,8 @@ impl DatabaseStudioRuntime {
                 let snapshot = self
                     .database
                     .database_studio_get_snapshot(declared_snapshot_id)?;
+                self.require_source_in_project(project_id, &snapshot.source_id)?;
+                self.require_snapshot_in_source(&snapshot.source_id, observed_snapshot_id)?;
                 (
                     GraphRef::Snapshot(declared_snapshot_id.clone()),
                     GraphRef::Snapshot(observed_snapshot_id.clone()),
@@ -705,6 +767,8 @@ impl DatabaseStudioRuntime {
                 let snapshot = self
                     .database
                     .database_studio_get_snapshot(declared_snapshot_id)?;
+                self.require_source_in_project(project_id, &snapshot.source_id)?;
+                self.require_revision_in_source(&snapshot.source_id, proposed_revision_id)?;
                 (
                     GraphRef::Snapshot(declared_snapshot_id.clone()),
                     GraphRef::Revision(proposed_revision_id.clone()),
@@ -721,6 +785,8 @@ impl DatabaseStudioRuntime {
                 let design = self
                     .database
                     .database_studio_get_design(&revision.design_id)?;
+                self.require_source_in_project(project_id, &design.source_id)?;
+                self.require_revision_in_source(&design.source_id, right_revision_id)?;
                 (
                     GraphRef::Revision(left_revision_id.clone()),
                     GraphRef::Revision(right_revision_id.clone()),
@@ -794,9 +860,7 @@ impl DatabaseStudioRuntime {
         request: &IntrospectSqliteFileRequest,
     ) -> AppResult<DatabaseSnapshot> {
         let project = self.database.get_project(&request.project_id)?;
-        let source = self
-            .database
-            .database_studio_get_source(&request.source_id)?;
+        let source = self.require_source_in_project(&request.project_id, &request.source_id)?;
         let extracted = sqlite_introspect::introspect_file(
             Path::new(&project.canonical_root_path),
             &source.id,
@@ -840,13 +904,10 @@ impl DatabaseStudioRuntime {
         request: &CreateDatabaseDraftRequest,
         actor: DatabaseActor,
     ) -> AppResult<DatabaseDesignBundle> {
-        self.database.get_project(&request.project_id)?;
-        let source = self
-            .database
-            .database_studio_get_source(&request.source_id)?;
+        let source = self.require_source_in_project(&request.project_id, &request.source_id)?;
         let (base_graph, base_snapshot_id, base_revision_id) = match &request.base {
             CreateDatabaseDraftBase::Snapshot { snapshot_id } => {
-                let snapshot = self.database.database_studio_get_snapshot(snapshot_id)?;
+                let snapshot = self.require_snapshot_in_source(&source.id, snapshot_id)?;
                 (
                     self.database
                         .database_studio_load_graph(&GraphRef::Snapshot(snapshot_id.clone()))?,
@@ -854,12 +915,15 @@ impl DatabaseStudioRuntime {
                     None,
                 )
             }
-            CreateDatabaseDraftBase::Revision { revision_id } => (
-                self.database
-                    .database_studio_load_graph(&GraphRef::Revision(revision_id.clone()))?,
-                None,
-                Some(revision_id.clone()),
-            ),
+            CreateDatabaseDraftBase::Revision { revision_id } => {
+                self.require_revision_in_source(&source.id, revision_id)?;
+                (
+                    self.database
+                        .database_studio_load_graph(&GraphRef::Revision(revision_id.clone()))?,
+                    None,
+                    Some(revision_id.clone()),
+                )
+            }
         };
 
         let mut proposed = match &request.base {
@@ -918,7 +982,7 @@ impl DatabaseStudioRuntime {
         project_id: &str,
         source_id: &str,
     ) -> AppResult<Vec<DatabaseDesign>> {
-        self.database.get_project(project_id)?;
+        self.require_source_in_project(project_id, source_id)?;
         self.database.database_studio_list_designs(source_id)
     }
 
@@ -926,10 +990,7 @@ impl DatabaseStudioRuntime {
         &self,
         request: &GetDatabaseDesignRequest,
     ) -> AppResult<DatabaseDesignBundle> {
-        self.database.get_project(&request.project_id)?;
-        let design = self
-            .database
-            .database_studio_get_design(&request.design_id)?;
+        let design = self.require_design_in_project(&request.project_id, &request.design_id)?;
         let revision_id = request
             .revision_id
             .clone()
@@ -947,10 +1008,7 @@ impl DatabaseStudioRuntime {
         request: &ApplyDatabaseDesignOperationRequest,
         actor: DatabaseActor,
     ) -> AppResult<DatabaseDesignMutationResult> {
-        self.database.get_project(&request.project_id)?;
-        let design = self
-            .database
-            .database_studio_get_design(&request.design_id)?;
+        let design = self.require_design_in_project(&request.project_id, &request.design_id)?;
         if design.status != crate::models::DatabaseDesignStatus::Draft {
             return Err(AppError::new(
                 "database_design_not_editable",
@@ -1017,10 +1075,7 @@ impl DatabaseStudioRuntime {
         decision: DesignDecision,
         actor: DatabaseActor,
     ) -> AppResult<DatabaseDesignMutationResult> {
-        self.database.get_project(&request.project_id)?;
-        let design = self
-            .database
-            .database_studio_get_design(&request.design_id)?;
+        let design = self.require_design_in_project(&request.project_id, &request.design_id)?;
         if design.head_revision_id != request.concurrency.expected_head_revision_id
             || design.revision_number != request.concurrency.expected_revision_number
         {
@@ -1122,7 +1177,7 @@ impl DatabaseStudioRuntime {
     // ----- layouts and context ------------------------------------------------------------------
 
     pub fn save_layout(&self, request: &SaveDatabaseLayoutRequest) -> AppResult<DatabaseLayout> {
-        self.database.get_project(&request.project_id)?;
+        self.require_source_in_project(&request.project_id, &request.source_id)?;
         let mut hasher = Sha256::new();
         for (id, position) in &request.layout.positions {
             hasher.update(format!("{id}:{}:{}", position.x, position.y).as_bytes());
@@ -1148,7 +1203,7 @@ impl DatabaseStudioRuntime {
         &self,
         request: &GetDatabaseLayoutRequest,
     ) -> AppResult<Option<DatabaseLayout>> {
-        self.database.get_project(&request.project_id)?;
+        self.require_source_in_project(&request.project_id, &request.source_id)?;
         let reference = GraphRef::from_columns(
             request.snapshot_id.clone().unwrap_or_default(),
             request.design_revision_id.clone().unwrap_or_default(),
@@ -1165,10 +1220,7 @@ impl DatabaseStudioRuntime {
         &self,
         request: &BuildDatabaseContextPackRequest,
     ) -> AppResult<DatabaseContextPack> {
-        self.database.get_project(&request.project_id)?;
-        let source = self
-            .database
-            .database_studio_get_source(&request.source_id)?;
+        let source = self.require_source_in_project(&request.project_id, &request.source_id)?;
         let layer = request
             .layer
             .clone()
@@ -1215,9 +1267,9 @@ impl DatabaseStudioRuntime {
     ) -> AppResult<DatabaseImplementationRun> {
         let project = self.database.get_project(&request.project_id)?;
         let root = PathBuf::from(&project.canonical_root_path);
-        let design = self
-            .database
-            .database_studio_get_design(&request.design_id)?;
+        // Implementation writes migration files into this Project's tree, so the design must
+        // genuinely belong to it — otherwise one Project could materialize another's schema here.
+        let design = self.require_design_in_project(&request.project_id, &request.design_id)?;
         let source = self
             .database
             .database_studio_get_source(&design.source_id)?;
@@ -1317,6 +1369,18 @@ pub enum DesignDecision {
     Approve,
     Reject,
     Archive,
+}
+
+/// One message for every cross-Project id, deliberately not saying whether the entity exists: the
+/// caller is not entitled to learn that another Project has an object with that id.
+fn cross_project_denied(entity: &str) -> AppError {
+    AppError::new(
+        "database_scope_denied",
+        "That database object does not belong to this Project.",
+        false,
+    )
+    .entity(entity)
+    .layer("database_studio")
 }
 
 fn actor_kind(actor: &DatabaseActor) -> &'static str {
@@ -1542,6 +1606,110 @@ mod tests {
         }
     }
 
+    /// The command layer proves the caller may act on a Project; it cannot prove the ids in the
+    /// payload belong to it. Every read and every design mutation must reject another Project's
+    /// source, snapshot, revision, and design id.
+    #[test]
+    fn another_projects_ids_are_refused_even_with_a_valid_project_scope() {
+        let mine = TempProject::new();
+        let theirs = TempProject::new();
+        fs::write(
+            mine.path.join("schema.sql"),
+            "CREATE TABLE users (id INTEGER PRIMARY KEY);",
+        )
+        .unwrap();
+        fs::write(
+            theirs.path.join("schema.sql"),
+            "CREATE TABLE invoices (id INTEGER PRIMARY KEY);",
+        )
+        .unwrap();
+        let runtime = runtime(&mine.path);
+        runtime
+            .database
+            .upsert_project(&Project {
+                id: "project-2".into(),
+                name: "Other".into(),
+                root_path: theirs.path.to_string_lossy().into_owned(),
+                canonical_root_path: theirs.path.to_string_lossy().into_owned(),
+                git_branch: None,
+                detected_framework: None,
+                package_manager: None,
+                major_languages: Vec::new(),
+                is_git_repository: false,
+                has_package_json: false,
+                has_lockfile: false,
+                created_at: Utc::now().to_rfc3339(),
+                updated_at: Utc::now().to_rfc3339(),
+                last_opened_at: Utc::now().to_rfc3339(),
+            })
+            .unwrap();
+
+        runtime.discover_sources("project-1", true).unwrap();
+        let foreign = runtime.discover_sources("project-2", true).unwrap().sources[0].clone();
+        let foreign_snapshot = runtime
+            .database
+            .database_studio_latest_snapshot(&foreign.id, &DatabaseLayer::Declared)
+            .unwrap()
+            .unwrap();
+
+        let denied = |error: AppError| assert_eq!(error.code, "database_scope_denied");
+
+        denied(runtime.source_detail("project-1", &foreign.id).unwrap_err());
+        denied(
+            runtime
+                .get_schema(&GetDatabaseSchemaRequest {
+                    project_id: "project-1".into(),
+                    source_id: foreign.id.clone(),
+                    layer: DatabaseLayer::Declared,
+                    snapshot_id: None,
+                    design_revision_id: None,
+                    lod: 3,
+                })
+                .unwrap_err(),
+        );
+        denied(
+            runtime
+                .list_issues(&ListDatabaseIssuesRequest {
+                    project_id: "project-1".into(),
+                    source_id: foreign.id.clone(),
+                    status: None,
+                    severity: None,
+                })
+                .unwrap_err(),
+        );
+        denied(runtime.list_designs("project-1", &foreign.id).unwrap_err());
+        denied(
+            runtime
+                .create_draft(
+                    &CreateDatabaseDraftRequest {
+                        project_id: "project-1".into(),
+                        source_id: foreign.id.clone(),
+                        name: "stolen".into(),
+                        base: CreateDatabaseDraftBase::Snapshot {
+                            snapshot_id: foreign_snapshot.id.clone(),
+                        },
+                    },
+                    DatabaseActor::System,
+                )
+                .unwrap_err(),
+        );
+
+        // A source this Project *does* own cannot be used to smuggle in another source's snapshot.
+        let ours = runtime.list_sources("project-1").unwrap()[0].clone();
+        denied(
+            runtime
+                .get_schema(&GetDatabaseSchemaRequest {
+                    project_id: "project-1".into(),
+                    source_id: ours.id.clone(),
+                    layer: DatabaseLayer::Declared,
+                    snapshot_id: Some(foreign_snapshot.id.clone()),
+                    design_revision_id: None,
+                    lod: 3,
+                })
+                .unwrap_err(),
+        );
+    }
+
     /// Regression: a repository where one `.sql` file is legitimately evidence for several logical
     /// datasources. Evidence ids used to be derived from the file path alone, so the second source's
     /// insert hit `UNIQUE constraint failed: database_source_evidence.id`, the whole discovery
@@ -1603,6 +1771,8 @@ mod tests {
                 adapter_ids: vec![DatabaseAdapterId::Prisma],
                 table_names: vec!["users".into()],
                 evidence_paths: vec!["packages/db/prisma/schema.prisma".into()],
+                relevance: crate::models::DatabaseSourceRelevance::Application,
+                display_name: "Primary PostgreSQL · packages/db".into(),
             },
             "2026-08-12T00:00:00Z",
         );
@@ -1616,6 +1786,8 @@ mod tests {
                 adapter_ids: vec![DatabaseAdapterId::Prisma],
                 table_names: vec!["orders".into()],
                 evidence_paths: vec!["apps/api/prisma/schema.prisma".into()],
+                relevance: crate::models::DatabaseSourceRelevance::Application,
+                display_name: "Primary PostgreSQL · apps/api".into(),
             },
             "2026-08-12T00:00:00Z",
         );
@@ -2402,10 +2574,20 @@ mod tests {
                 budget: None,
             })
             .unwrap();
+        // The budget bounds *tables*, which is the unit a pack is selected in; each carried table
+        // legitimately brings its own columns and keys. Asserting on the raw object count instead
+        // only held while inline foreign keys were unresolvable and the neighbourhood walk could
+        // not leave its seeds.
+        let packed_tables = pack
+            .objects
+            .iter()
+            .filter(|object| matches!(object, DatabaseObject::Table(_)))
+            .count();
         assert!(
-            pack.objects.len() < 400,
-            "context pack must not carry the whole schema"
+            packed_tables <= DatabaseContextBudget::default().max_objects && packed_tables < tables,
+            "context pack must not carry the whole schema: {packed_tables} of {tables} tables"
         );
+        assert!(pack.objects.len() < full.objects.len());
         assert!(pack.estimated_tokens <= DatabaseContextBudget::default().max_estimated_tokens);
         assert!(
             extraction.as_secs() < 60,

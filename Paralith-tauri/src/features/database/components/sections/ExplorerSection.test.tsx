@@ -12,13 +12,13 @@ describe('ExplorerSection empty/loading/error states', () => {
     expect(container.querySelector('.code-explorer-skeleton')).toBeTruthy()
   })
 
-  it('shows "No tables in this schema." when the schema is genuinely empty', () => {
+  it('distinguishes a genuinely empty schema from a filtered-out one', () => {
     useDatabaseStore.setState({ schemaLoad: { status: 'ready' }, schemaPage: { objects: [], edges: [], issues: [] }, activeSourceId: 's1' })
     render(<ExplorerSection />)
-    expect(screen.getByText('No tables in this schema.')).toBeInTheDocument()
+    expect(screen.getByText('No schema objects detected for this datasource.')).toBeInTheDocument()
   })
 
-  it('shows "No tables match your filter." (distinct copy) when a search filters out every table', () => {
+  it('uses distinct copy when a search filters out every object', () => {
     useDatabaseStore.setState({
       schemaLoad: { status: 'ready' },
       activeSourceId: 's1',
@@ -36,7 +36,9 @@ describe('ExplorerSection empty/loading/error states', () => {
       },
     })
     render(<ExplorerSection />)
-    expect(screen.getByText('No tables match your filter.')).toBeInTheDocument()
+    expect(screen.getByText(/Nothing matches/)).toBeInTheDocument()
+    // The empty-schema copy must not appear: the schema is not empty, the filter is.
+    expect(screen.queryByText('No schema objects detected for this datasource.')).not.toBeInTheDocument()
   })
 
   it('shows ErrorNotice with Retry on a load error', () => {

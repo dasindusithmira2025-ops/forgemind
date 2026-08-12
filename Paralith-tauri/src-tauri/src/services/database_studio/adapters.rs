@@ -174,11 +174,11 @@ fn detect_static_evidence(
         let Some(kind) = evidence_kind_for(&adapter_id, &relative) else {
             continue;
         };
-        let metadata = fs::metadata(&path).map_err(AppError::database)?;
+        let metadata = fs::metadata(&path).map_err(AppError::from)?;
         if metadata.len() > MAX_EVIDENCE_FILE_BYTES {
             continue;
         }
-        let bytes = fs::read(&path).map_err(AppError::database)?;
+        let bytes = fs::read(&path).map_err(AppError::from)?;
         let content = if is_sqlite_path(&relative) {
             None
         } else {
@@ -250,11 +250,11 @@ fn extract_static_graph(
             continue;
         }
         let path = guarded_evidence_path(ctx.project_root, &evidence.relative_path)?;
-        let metadata = fs::metadata(&path).map_err(AppError::database)?;
+        let metadata = fs::metadata(&path).map_err(AppError::from)?;
         if metadata.len() > MAX_EVIDENCE_FILE_BYTES {
             continue;
         }
-        let content = fs::read_to_string(path).map_err(AppError::database)?;
+        let content = fs::read_to_string(path).map_err(AppError::from)?;
         let parsed = match adapter_id {
             DatabaseAdapterId::Prisma => parse_prisma_schema(&content),
             DatabaseAdapterId::Drizzle => parse_drizzle_schema(&content),
@@ -467,7 +467,7 @@ fn issue(
 }
 
 fn candidate_files(root: &Path, changed_paths: &[PathBuf]) -> AppResult<Vec<PathBuf>> {
-    let canonical_root = root.canonicalize().map_err(AppError::database)?;
+    let canonical_root = root.canonicalize().map_err(AppError::from)?;
     if !changed_paths.is_empty() {
         let mut files = Vec::new();
         for changed in changed_paths {
@@ -479,7 +479,7 @@ fn candidate_files(root: &Path, changed_paths: &[PathBuf]) -> AppResult<Vec<Path
             if !joined.exists() || !joined.is_file() {
                 continue;
             }
-            let canonical = joined.canonicalize().map_err(AppError::database)?;
+            let canonical = joined.canonicalize().map_err(AppError::from)?;
             if canonical.starts_with(&canonical_root) {
                 files.push(canonical);
             }
@@ -492,8 +492,8 @@ fn candidate_files(root: &Path, changed_paths: &[PathBuf]) -> AppResult<Vec<Path
     let mut files = Vec::new();
     let mut stack = vec![canonical_root];
     while let Some(directory) = stack.pop() {
-        for entry in fs::read_dir(&directory).map_err(AppError::database)? {
-            let entry = entry.map_err(AppError::database)?;
+        for entry in fs::read_dir(&directory).map_err(AppError::from)? {
+            let entry = entry.map_err(AppError::from)?;
             let path = entry.path();
             let name = path
                 .file_name()
@@ -513,9 +513,9 @@ fn candidate_files(root: &Path, changed_paths: &[PathBuf]) -> AppResult<Vec<Path
 }
 
 fn guarded_evidence_path(root: &Path, relative: &str) -> AppResult<PathBuf> {
-    let canonical_root = root.canonicalize().map_err(AppError::database)?;
+    let canonical_root = root.canonicalize().map_err(AppError::from)?;
     let candidate = canonical_root.join(relative);
-    let canonical = candidate.canonicalize().map_err(AppError::database)?;
+    let canonical = candidate.canonicalize().map_err(AppError::from)?;
     if !canonical.starts_with(&canonical_root) || !canonical.is_file() {
         return Err(AppError::new(
             "database_evidence_scope_denied",
@@ -983,37 +983,36 @@ fn parse_sql_table_clause(clause: &str, table: &mut ParsedTable) {
         return;
     }
 
-    let mut tokens = sql_tokens(remainder);
-    if tokens.len() < 2 {
+    // The tail is read from the raw clause, not from `sql_tokens`: that tokenizer drops `(` and `)`
+    // entirely, which silently destroyed both `numeric(10,2)` precision and — worse — the target of
+    // an inline `REFERENCES page_views(id)`, turning it into the table name `"page_views id"`. Every
+    // column-level foreign key in a raw-SQL schema therefore pointed at a table that does not exist,
+    // so the relationship edge was dropped and the diagram rendered no relationships at all.
+    let Some((name, native_type, tail)) = split_sql_column_head(remainder) else {
         return;
-    }
-    let name = unquote_identifier(&tokens.remove(0)).to_owned();
-    let native_type = tokens.remove(0);
-    let tail = tokens.join(" ");
+    };
+    let tail_lower = tail.to_ascii_lowercase();
     table.columns.push(ParsedColumn {
         name: name.clone(),
         mapped_name: None,
         native_type,
-        nullable: !tail.to_ascii_lowercase().contains("not null")
-            && !tail.to_ascii_lowercase().contains("primary key"),
+        nullable: !tail_lower.contains("not null") && !tail_lower.contains("primary key"),
         default: sql_default(&tail),
         enum_name: None,
     });
-    if tail.to_ascii_lowercase().contains("primary key") {
+    if tail_lower.contains("primary key") {
         table.primary_key = Some(ParsedKey {
             name: constraint_name.clone(),
             columns: vec![name.clone()],
         });
     }
-    if tail.to_ascii_lowercase().contains(" unique")
-        || tail.to_ascii_lowercase().starts_with("unique")
-    {
+    if tail_lower.contains(" unique") || tail_lower.starts_with("unique") {
         table.unique_constraints.push(ParsedKey {
             name: constraint_name.clone(),
             columns: vec![name.clone()],
         });
     }
-    if let Some(reference_position) = tail.to_ascii_lowercase().find("references") {
+    if let Some(reference_position) = find_keyword_unquoted(&tail, "references") {
         let reference = &tail[reference_position + "references".len()..];
         let referenced_table = reference
             .split('(')
@@ -1022,16 +1021,91 @@ fn parse_sql_table_clause(clause: &str, table: &mut ParsedTable) {
             .map(unquote_identifier)
             .unwrap_or_default()
             .to_owned();
-        let referenced_columns = parenthesized_identifiers(reference);
-        table.foreign_keys.push(ParsedForeignKey {
-            name: constraint_name,
-            columns: vec![name],
-            referenced_table,
-            referenced_columns,
-            on_delete: parse_sql_action(&tail, "on delete"),
-            on_update: parse_sql_action(&tail, "on update"),
-        });
+        if !referenced_table.is_empty() {
+            table.foreign_keys.push(ParsedForeignKey {
+                name: constraint_name,
+                columns: vec![name],
+                referenced_table,
+                referenced_columns: parenthesized_identifiers(reference),
+                on_delete: parse_sql_action(&tail, "on delete"),
+                on_update: parse_sql_action(&tail, "on update"),
+            });
+        }
     }
+}
+
+/// Split a raw column clause into `(name, native_type, tail)` while preserving parentheses. The
+/// native type keeps its parameter list (`varchar(255)`, `numeric(10,2)`) and any array suffix, so
+/// `data_type` can read length/precision/scale instead of receiving a bare type word.
+fn split_sql_column_head(remainder: &str) -> Option<(String, String, String)> {
+    let clause = remainder.trim();
+    let name_end = clause
+        .char_indices()
+        .find(|(_, character)| character.is_whitespace())
+        .map(|(index, _)| index)?;
+    let name = unquote_identifier(&clause[..name_end]).to_owned();
+    if name.is_empty() {
+        return None;
+    }
+    let rest = clause[name_end..].trim_start();
+    let mut type_end = rest
+        .char_indices()
+        .find(|(_, character)| character.is_whitespace() || *character == '(')
+        .map(|(index, _)| index)
+        .unwrap_or(rest.len());
+    if type_end == 0 {
+        return None;
+    }
+    if rest[type_end..].starts_with('(') {
+        let group = balanced_slice(rest, type_end, '(', ')')?;
+        // `balanced_slice` yields the interior; step past the closing paren.
+        type_end += group.len() + 2;
+    }
+    while rest[type_end..].starts_with("[]") {
+        type_end += 2;
+    }
+    Some((
+        name,
+        rest[..type_end].trim().to_owned(),
+        rest[type_end..].trim().to_owned(),
+    ))
+}
+
+/// Case-insensitive search for a bare SQL keyword outside quoted literals. `LIKE '%references%'`
+/// in a CHECK expression must not be mistaken for a foreign-key clause.
+fn find_keyword_unquoted(value: &str, keyword: &str) -> Option<usize> {
+    let bytes = value.as_bytes();
+    let mut quote: Option<u8> = None;
+    let mut index = 0;
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if let Some(active) = quote {
+            if byte == active {
+                quote = None;
+            }
+            index += 1;
+            continue;
+        }
+        if matches!(byte, b'\'' | b'"' | b'`') {
+            quote = Some(byte);
+            index += 1;
+            continue;
+        }
+        let end = index + keyword.len();
+        if end <= bytes.len()
+            && value[index..end].eq_ignore_ascii_case(keyword)
+            && (index == 0 || !is_identifier_byte(bytes[index - 1]))
+            && (end == bytes.len() || !is_identifier_byte(bytes[end]))
+        {
+            return Some(index);
+        }
+        index += 1;
+    }
+    None
+}
+
+fn is_identifier_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || byte == b'_'
 }
 
 fn parse_sql_foreign_key(value: &str, name: Option<String>) -> Option<ParsedForeignKey> {
@@ -2914,6 +2988,79 @@ mod tests {
         assert!(evidence.is_empty());
     }
 
+    /// Regression: `sql_tokens` discards parentheses, so parsing an inline column constraint from
+    /// the tokenized tail read `REFERENCES page_views(id)` as the table name `"page_views id"`. The
+    /// foreign key then pointed at a semantic id no table owned, `get_schema` filtered the dangling
+    /// REFERENCES edge out, and the diagram showed FK badges with no relationships between cards.
+    #[test]
+    fn raw_sql_inline_column_reference_resolves_to_the_referenced_table() {
+        let root = TempDir::new().unwrap();
+        fs::write(
+            root.path().join("schema.sql"),
+            "CREATE TABLE page_views (id uuid PRIMARY KEY, path text NOT NULL);\n\
+             CREATE TABLE conversions (\n\
+               id uuid PRIMARY KEY,\n\
+               page_view_id uuid NOT NULL REFERENCES page_views(id) ON DELETE CASCADE,\n\
+               amount numeric(10,2) NOT NULL,\n\
+               label varchar(255)\n\
+             );",
+        )
+        .unwrap();
+        let adapter = adapter(DatabaseAdapterId::RawSql);
+        let evidence = detect(&adapter, root.path(), &[]);
+        let graph = extract(&adapter, root.path(), &evidence);
+
+        let table_id = |name: &str| {
+            graph
+                .objects
+                .iter()
+                .find_map(|object| match object {
+                    DatabaseObject::Table(table) if table.name == name => {
+                        Some(table.meta.identity.id.clone())
+                    }
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("missing table {name}"))
+        };
+        let conversions = table_id("conversions");
+        let page_views = table_id("page_views");
+
+        let foreign_key = graph
+            .objects
+            .iter()
+            .find_map(|object| match object {
+                DatabaseObject::ForeignKey(key) => Some(key),
+                _ => None,
+            })
+            .expect("inline column reference produces a foreign key");
+        assert_eq!(foreign_key.referenced_table_id, page_views);
+        assert_eq!(foreign_key.referenced_column_ids.len(), 1);
+        assert_eq!(foreign_key.on_delete, ReferentialAction::Cascade);
+        assert!(graph.edges.iter().any(|edge| {
+            edge.edge_type == DatabaseEdgeType::References
+                && edge.source_object_id == conversions
+                && edge.target_object_id == page_views
+        }));
+
+        // The same tokenizer loss silently dropped every type parameter.
+        let column = |name: &str| {
+            graph
+                .objects
+                .iter()
+                .find_map(|object| match object {
+                    DatabaseObject::Column(column) if column.name == name => Some(column.clone()),
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("missing column {name}"))
+        };
+        let amount = column("amount");
+        assert_eq!(amount.native_type, "numeric(10,2)");
+        assert_eq!(amount.data_type.precision, Some(10));
+        assert_eq!(amount.data_type.scale, Some(2));
+        assert_eq!(column("label").data_type.length, Some(255));
+        assert!(!column("page_view_id").nullable);
+    }
+
     fn adapter(id: DatabaseAdapterId) -> StaticAdapter {
         registered_v1_adapters()
             .into_iter()
@@ -2966,6 +3113,8 @@ mod tests {
             adapter_ids: vec![adapter_id],
             owner_project_id: Some("project".to_owned()),
             consumer_project_ids: Vec::new(),
+            relevance: crate::models::DatabaseSourceRelevance::Application,
+            evidence_paths: Vec::new(),
             environment_ids: Vec::new(),
             evidence_ids: Vec::new(),
             confidence: 1.0,

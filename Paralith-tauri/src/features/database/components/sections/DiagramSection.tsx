@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef } from 'react'
-import { AlertTriangle, RotateCcw } from 'lucide-react'
-import { Button } from '../../../../components/ui/Button'
 import { useDatabaseStore } from '../../databaseStore'
+import { SectionError } from '../SectionError'
 import { buildTableNodeViews, groupTableViews } from '../../databaseSelectors'
 import { useDatabaseCanvasStore } from '../canvas/databaseCanvasStore'
 import { NODE_WIDTH, estimateTableNodeHeight } from '../canvas/nodeMetrics'
 import { SchemaCanvas } from '../canvas/SchemaCanvas'
 import type { CanvasEdgeRef, DatabaseEdge, DatabaseZoomTier } from '../../databaseTypes'
+import { LayerUnavailableNotice } from './LayerUnavailableNotice'
+import { layerUnavailableReason } from './layerAvailability'
 
 /** The canvas' visual detail tiers map onto the backend's numeric semantic LOD. */
 const ZOOM_TIER_BY_LOD: Record<string, DatabaseZoomTier> = {
@@ -33,8 +34,12 @@ export function DiagramSection() {
   const setNHop = useDatabaseStore((state) => state.setNHop)
   const setGroupBy = useDatabaseStore((state) => state.setGroupBy)
   const pinnedPositions = useDatabaseStore((state) => state.pinnedPositions)
+  const setPinnedPosition = useDatabaseStore((state) => state.setPinnedPosition)
   const activeSourceId = useDatabaseStore((state) => state.activeSourceId)
   const activeLayer = useDatabaseStore((state) => state.activeLayer)
+  const selectRelationship = useDatabaseStore((state) => state.selectRelationship)
+  const revealTarget = useDatabaseStore((state) => state.revealTarget)
+  const clearRevealTarget = useDatabaseStore((state) => state.clearRevealTarget)
 
   const recomputeLayout = useDatabaseCanvasStore((state) => state.recomputeLayout)
   const layoutPending = useDatabaseCanvasStore((state) => state.layoutPending)
@@ -48,6 +53,7 @@ export function DiagramSection() {
   }, [schemaLoad.status, activeSourceId, loadSchema])
 
   const pinnedIds = useMemo(() => new Set(Object.keys(pinnedPositions)), [pinnedPositions])
+  const selectedEdgeIds = useMemo(() => new Set(selection.relationshipIds), [selection.relationshipIds])
   const tables = useMemo(() => buildTableNodeViews(schemaPage, pinnedIds), [schemaPage, pinnedIds])
   const groups = useMemo(() => groupTableViews(tables), [tables])
   const canvasEdges: CanvasEdgeRef[] = useMemo(
@@ -57,9 +63,26 @@ export function DiagramSection() {
     [schemaPage],
   )
 
-  const fingerprint = useMemo(
+  // Pinned positions are layout *input*, so they belong in the fingerprint: without them a pin
+  // would be recorded but never applied, because the recompute would be skipped as a no-op.
+  const pinnedFingerprint = useMemo(
+    () => Object.entries(pinnedPositions)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([id, position]) => `${id}@${Math.round(position.x)},${Math.round(position.y)}`)
+      .join('|'),
+    [pinnedPositions],
+  )
+
+  // Graph identity *without* pinned positions: this is what decides whether the viewport should be
+  // re-framed. Including pins here would re-frame the canvas every time a card is dragged.
+  const framingKey = useMemo(
     () => `${activeSourceId ?? ''}:${activeLayer}:${schemaPage?.snapshot?.fingerprint ?? tables.length}`,
-    [activeSourceId, activeLayer, schemaPage, tables.length],
+    [activeSourceId, activeLayer, schemaPage?.snapshot?.fingerprint, tables.length],
+  )
+
+  const fingerprint = useMemo(
+    () => `${framingKey}:${pinnedFingerprint}`,
+    [framingKey, pinnedFingerprint],
   )
 
   useEffect(() => {
@@ -93,13 +116,10 @@ export function DiagramSection() {
   }, [activeSourceId, tables, selection, canvasLod, publishCanvasState])
 
   if (schemaLoad.status === 'error') {
-    return (
-      <div className="db-section-error">
-        <AlertTriangle size={18} />
-        <span>{schemaLoad.errorMessage ?? 'Failed to load the schema graph.'}</span>
-        <Button variant="secondary" icon={<RotateCcw size={14} />} onClick={() => void loadSchema()}>Retry</Button>
-      </div>
-    )
+    // An empty Observed/Proposed layer is a missing prerequisite, not a failure and not an empty
+    // database. Showing a blank canvas for it would state something false.
+    if (layerUnavailableReason(activeLayer, schemaLoad)) return <LayerUnavailableNotice layer={activeLayer} />
+    return <SectionError load={schemaLoad} fallback="Failed to load the schema graph." onRetry={() => void loadSchema()} />
   }
 
   return (
@@ -117,6 +137,12 @@ export function DiagramSection() {
       onGroupedChange={(value) => setGroupBy(value ? 'namespace' : 'none')}
       loading={schemaLoad.status === 'loading' && tables.length === 0}
       layoutPending={layoutPending}
+      onPinPosition={setPinnedPosition}
+      onSelectEdge={selectRelationship}
+      selectedEdgeIds={selectedEdgeIds}
+      framingKey={framingKey}
+      revealTarget={revealTarget?.section === 'diagram' ? revealTarget : undefined}
+      onRevealHandled={clearRevealTarget}
     />
   )
 }

@@ -80,12 +80,62 @@ pub struct RepositoryProject {
     pub workspace_kind: Option<String>,
 }
 
+/// How much a discovered datasource looks like the database the application actually runs on.
+///
+/// Discovery is deliberately broad — it has to be, because a repository can put its schema almost
+/// anywhere — but breadth without classification is what produced an Overview listing a dozen
+/// entries where a developer expected two. This is modelled rather than expressed as one exclusion
+/// regex so a project that genuinely keeps a schema under `tests/` is demoted, never erased, and can
+/// still be shown on request.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[serde(rename_all = "snake_case")]
+pub enum DatabaseSourceRelevance {
+    /// Application schema, project-owned DB package, real migration directory, project SQLite file.
+    Application,
+    /// Local development scaffolding — seeds, sandboxes, scratch databases.
+    Development,
+    /// Test fixtures and integration-test schemas.
+    Test,
+    /// Examples, samples and demos shipped alongside the product.
+    Example,
+    /// Vendored or build-generated artifacts that happen to contain DDL.
+    Generated,
+}
+
+impl DatabaseSourceRelevance {
+    /// Whether this datasource belongs in the default (application-relevant) view.
+    pub fn is_primary(self) -> bool {
+        matches!(self, Self::Application | Self::Development)
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Application => "application",
+            Self::Development => "development",
+            Self::Test => "test",
+            Self::Example => "example",
+            Self::Generated => "generated",
+        }
+    }
+
+    pub fn from_str_or_application(value: &str) -> Self {
+        match value {
+            "development" => Self::Development,
+            "test" => Self::Test,
+            "example" => Self::Example,
+            "generated" => Self::Generated,
+            _ => Self::Application,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct DatabaseSource {
     pub id: String,
     pub repository_id: String,
     pub logical_key: String,
+    /// Human-readable label only — never a path. Provenance lives in `evidence` and `ownerProjectId`.
     pub display_name: String,
     pub engine: DatabaseEngine,
     pub adapter_ids: Vec<DatabaseAdapterId>,
@@ -93,6 +143,10 @@ pub struct DatabaseSource {
     pub consumer_project_ids: Vec<ProjectId>,
     pub environment_ids: Vec<String>,
     pub evidence_ids: Vec<String>,
+    pub relevance: DatabaseSourceRelevance,
+    /// Project-relative paths the discovery evidence came from, most significant first. The
+    /// Inspector shows these; the datasource name never does.
+    pub evidence_paths: Vec<String>,
     pub confidence: f32,
     pub discovered_at: String,
     pub updated_at: String,

@@ -51,10 +51,33 @@ export interface DatabaseObjectMeta {
 // §2 Canonical semantic object model
 // ---------------------------------------------------------------------------------------------
 
+/**
+ * How application-relevant a discovered datasource is. Mirrors the backend
+ * `DatabaseSourceRelevance`. Discovery reports everything it finds; the UI decides what a developer
+ * sees by default, so a repository's own test fixtures stop competing with its real database.
+ */
+export type DatabaseSourceRelevance = 'application' | 'development' | 'test' | 'example' | 'generated'
+
+/** The relevance tiers shown without an explicit opt-in. */
+export const PRIMARY_SOURCE_RELEVANCE: DatabaseSourceRelevance[] = ['application', 'development']
+
+export function isPrimaryDatabaseSource(source: DatabaseSource): boolean {
+  return PRIMARY_SOURCE_RELEVANCE.includes(source.relevance)
+}
+
+export const SOURCE_RELEVANCE_LABEL: Record<DatabaseSourceRelevance, string> = {
+  application: 'Application',
+  development: 'Development',
+  test: 'Test fixture',
+  example: 'Example',
+  generated: 'Generated',
+}
+
 export interface DatabaseSource {
   id: string
   repositoryId: string
   logicalKey: string
+  /** A label, never a path — provenance is in `evidencePaths`/`ownerProjectId`. */
   displayName: string
   engine: DatabaseEngine
   adapterIds: DatabaseAdapterId[]
@@ -62,6 +85,9 @@ export interface DatabaseSource {
   consumerProjectIds: DbProjectId[]
   environmentIds: string[]
   evidenceIds: string[]
+  relevance: DatabaseSourceRelevance
+  /** Project-relative files this datasource was discovered from. */
+  evidencePaths: string[]
   confidence: number
   discoveredAt: string
   updatedAt: string
@@ -740,6 +766,9 @@ export interface DatabaseLoadState {
   status: 'idle' | 'loading' | 'ready' | 'error'
   errorCode?: string
   errorMessage?: string
+  /** The backend's concrete cause. `errorMessage` is written for a person; this is what makes a
+   * failure diagnosable, so it is carried through instead of being dropped at the boundary. */
+  errorDetail?: string
 }
 
 export type DatabaseSectionId = 'overview' | 'diagram' | 'explorer' | 'migrations' | 'changes' | 'health' | 'connections'

@@ -59,7 +59,9 @@ describe('ConnectionsSection', () => {
 
   it('reports adapter capabilities from the backend rather than claiming blanket support', async () => {
     render(<ConnectionsSection />)
-    await waitFor(() => expect(screen.getByText('sqlite')).toBeInTheDocument())
-    expect(screen.getByText(/observed schema/)).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByRole('rowheader', { name: 'SQLite' })).toBeInTheDocument())
+    // The matrix states each capability explicitly, supported or not — no blanket claim.
+    expect(screen.getByRole('columnheader', { name: 'Observed schema' })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: 'Migrations' })).toBeInTheDocument()
   })
 })

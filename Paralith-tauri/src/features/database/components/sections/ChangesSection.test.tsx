@@ -71,7 +71,7 @@ describe('ChangesSection design mode', () => {
   it('explains that a design changes nothing until it is implemented', () => {
     useDatabaseStore.setState({ designsLoad: { status: 'ready' }, designs: [], activeSourceId: 's1' })
     render(<ChangesSection />)
-    expect(screen.getByText(/nothing it contains touches the repository/i)).toBeInTheDocument()
+    expect(screen.getByText(/nothing it contains touches repository files or a live\s+database/i)).toBeInTheDocument()
   })
 
   it('shows ErrorNotice with Retry on a load error', () => {
@@ -85,6 +85,52 @@ describe('ChangesSection design mode', () => {
     render(<ChangesSection />)
     expect(screen.getByText('This design changed elsewhere.')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /reload design/i })).toBeInTheDocument()
+  })
+
+  it('loads the schema itself so New design is reachable without visiting Diagram first', async () => {
+    // Opening Changes directly used to leave the only action on the screen permanently disabled,
+    // with nothing anywhere in the section that could load the snapshot it needed.
+    const loadSchema = vi.fn().mockResolvedValue(undefined)
+    useDatabaseStore.setState({
+      designsLoad: { status: 'ready' },
+      designs: [],
+      activeSourceId: 's1',
+      schemaLoad: { status: 'idle' },
+      schemaPage: undefined,
+      loadSchema,
+    })
+    render(<ChangesSection />)
+    expect(loadSchema).toHaveBeenCalled()
+  })
+
+  it('says why New design is unavailable instead of showing a control that cannot work', () => {
+    useDatabaseStore.setState({
+      designsLoad: { status: 'ready' },
+      designs: [],
+      activeSourceId: 's1',
+      schemaLoad: { status: 'error', errorMessage: 'no schema' },
+      schemaPage: undefined,
+    })
+    render(<ChangesSection />)
+    const button = screen.getByRole('button', { name: /new design/i })
+    expect(button).toBeDisabled()
+    expect(button).toHaveAttribute('title', expect.stringContaining('could not be read'))
+  })
+
+  it('offers Archive, which the backend and store supported but nothing ever reached', async () => {
+    const decideDesign = vi.fn().mockResolvedValue(undefined)
+    useDatabaseStore.setState({
+      designsLoad: { status: 'ready' },
+      designs: [design()],
+      activeSourceId: 's1',
+      activeDesignId: 'd1',
+      activeBundle: bundle(),
+      schemaPage,
+      decideDesign,
+    })
+    render(<ChangesSection />)
+    await userEvent.click(screen.getByRole('button', { name: /archive/i }))
+    expect(decideDesign).toHaveBeenCalledWith('archive')
   })
 
   it('creates a draft rooted in the loaded snapshot, so two drafts provably share a base', async () => {

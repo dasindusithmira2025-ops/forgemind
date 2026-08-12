@@ -45,7 +45,7 @@ function openInspector(table: DatabaseTable, detail: DatabaseObjectDetail) {
 }
 
 function openTab(label: string) {
-  fireEvent.click(screen.getByRole('button', { name: label }))
+  fireEvent.click(screen.getByRole('tab', { name: label }))
 }
 
 describe('InspectorPanel selection states', () => {
@@ -83,11 +83,11 @@ describe('InspectorPanel per-tab empty states (UI-SPEC.md §4)', () => {
     expect(screen.getByText(/Add one from Design mode\./)).toBeInTheDocument()
   })
 
-  it('Constraints: "No constraints beyond the primary key"', () => {
+  it('Constraints: states plainly that none are declared', () => {
     const table = emptyTable('t1')
     openInspector(table, emptyDetail(table))
     openTab('Constraints')
-    expect(screen.getByText('No constraints beyond the primary key')).toBeInTheDocument()
+    expect(screen.getByText('No constraints declared')).toBeInTheDocument()
   })
 
   it('Indexes: "No indexes declared"', () => {
@@ -111,11 +111,11 @@ describe('InspectorPanel per-tab empty states (UI-SPEC.md §4)', () => {
     expect(screen.getByText('No migration history found for this object')).toBeInTheDocument()
   })
 
-  it('Source: "No static source — this object exists only in Observed/Proposed"', () => {
+  it('Source: distinguishes "no repository source" from a failure', () => {
     const table = emptyTable('t1')
     openInspector(table, emptyDetail(table))
     openTab('Source')
-    expect(screen.getByText('No static source — this object exists only in Observed/Proposed')).toBeInTheDocument()
+    expect(screen.getByText(/No repository source for this object/)).toBeInTheDocument()
   })
 
   it('Health: success-tone "No issues detected for this object" (not neutral)', () => {
