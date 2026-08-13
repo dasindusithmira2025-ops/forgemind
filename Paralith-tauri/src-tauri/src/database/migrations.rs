@@ -1,7 +1,7 @@
 use crate::errors::{AppError, AppResult};
 use rusqlite::{params, Connection};
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 29;
+pub const CURRENT_SCHEMA_VERSION: i64 = 30;
 
 const MIGRATION_1: &str = r#"
 CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
@@ -913,6 +913,9 @@ pub fn apply(connection: &Connection) -> AppResult<()> {
     if current < 29 || !column_exists(connection, "database_sources", "relevance")? {
         migrate_v29(connection)?;
     }
+    if current < 30 || !table_exists(connection, "ai_usage_daily")? {
+        migrate_v30(connection)?;
+    }
     Ok(())
 }
 
@@ -928,6 +931,7 @@ pub fn requires_migration(connection: &Connection) -> AppResult<bool> {
         || !table_exists(connection, "usage_snapshots")?
         || !table_exists(connection, "ai_usage_snapshots")?
         || !table_exists(connection, "ai_usage_file_checkpoints")?
+        || !table_exists(connection, "ai_usage_daily")?
         || !column_exists(connection, "workspaces", "system_kind")?
         || !column_exists(connection, "missions", "origin_workspace_id")?
         || !column_exists(connection, "workspace_placements", "preferred_monitor_id")?
@@ -1193,6 +1197,40 @@ fn migrate_v29(connection: &Connection) -> AppResult<()> {
         record_migration(connection, 29)
     })();
     finish_migration_transaction(connection, result, 29)
+}
+
+/// Historical token analytics. `ai_usage_snapshots` only ever held the *current* subscription
+/// quota per provider, which cannot answer "what did I consume over the last 30 days" — that
+/// history is derived from provider transcripts and now persisted in its own aggregate table.
+///
+/// Only bucketed counters are stored: no transcript text, session ids, prompts, or file paths.
+/// The primary key is the analytics grain itself, so a recomputation of the same day and model
+/// can never accumulate a second row.
+fn migrate_v30(connection: &Connection) -> AppResult<()> {
+    connection
+        .execute_batch(
+            r#"
+BEGIN IMMEDIATE;
+CREATE TABLE IF NOT EXISTS ai_usage_daily(
+  provider TEXT NOT NULL,
+  bucket_date TEXT NOT NULL,
+  model TEXT NOT NULL DEFAULT '',
+  input_tokens INTEGER NOT NULL DEFAULT 0,
+  cached_input_tokens INTEGER NOT NULL DEFAULT 0,
+  cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+  output_tokens INTEGER NOT NULL DEFAULT 0,
+  reasoning_tokens INTEGER NOT NULL DEFAULT 0,
+  total_tokens INTEGER NOT NULL DEFAULT 0,
+  captured_at TEXT NOT NULL,
+  PRIMARY KEY(provider, bucket_date, model)
+);
+CREATE INDEX IF NOT EXISTS idx_ai_usage_daily_date ON ai_usage_daily(bucket_date);
+INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(30, datetime('now'));
+PRAGMA user_version=30;
+COMMIT;
+"#,
+        )
+        .map_err(AppError::database)
 }
 
 fn table_exists(connection: &Connection, table: &str) -> AppResult<bool> {

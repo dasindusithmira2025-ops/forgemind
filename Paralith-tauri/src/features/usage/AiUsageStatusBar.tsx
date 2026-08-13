@@ -1,6 +1,7 @@
 import { Gauge, RefreshCw } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { holdNativeOverlay } from '../../stores/nativeOverlay'
 import { aiUsageStore, useAiUsage } from './aiUsageStore'
 import { POPOVER_WIDTH, VIEWPORT_MARGIN, placeUsagePopover, type PopoverPosition } from './usagePopoverPlacement'
 import type { ProviderUsageSnapshot, UsageWindow, UsageWindowKind } from '../../native/types'
@@ -51,6 +52,10 @@ function UsagePopover({ snapshots, isRefreshing, anchor, onClose }: { snapshots:
   const [position, setPosition] = useState<PopoverPosition | null>(null)
   const [now, setNow] = useState(Date.now())
   const sorted = useMemo(() => [...snapshots].sort((a, b) => urgency(b) - urgency(a)), [snapshots])
+
+  // The roster opens upward over the right-side tool panel, which may host the native Browser
+  // webview — that is composited above all HTML, so hide it while the roster is up.
+  useEffect(holdNativeOverlay, [])
 
   useEffect(() => {
     const place = () => {

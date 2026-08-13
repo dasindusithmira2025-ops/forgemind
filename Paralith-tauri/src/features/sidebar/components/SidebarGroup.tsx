@@ -24,6 +24,12 @@ interface SidebarGroupProps {
    * sidebar filter is active, so a matching row can never hide inside a collapsed group.
    */
   forceExpanded?: boolean
+  /**
+   * Drop the visible header while keeping the labelled region. Used when the group is the only one
+   * in the list: a disclosure header for the sole section is chrome that states what the section
+   * above it already said, and it costs a row of height on every paint.
+   */
+  headerHidden?: boolean
   className?: string
   children: ReactNode
 }
@@ -46,20 +52,24 @@ export function SidebarGroup({
   actions,
   defaultCollapsed = false,
   forceExpanded = false,
+  headerHidden = false,
   className = '',
   children,
 }: SidebarGroupProps) {
   const collapsedGroups = useSidebarStore((state) => state.collapsedGroups)
   const setGroupCollapsed = useSidebarStore((state) => state.setGroupCollapsed)
   const persistedCollapsed = id in collapsedGroups ? collapsedGroups[id] : defaultCollapsed
-  const collapsed = forceExpanded ? false : persistedCollapsed
+  // With no header there is no way back from collapsed, so a headerless group is always open.
+  const collapsed = forceExpanded || headerHidden ? false : persistedCollapsed
 
   return (
     <section
-      className={`sb-group ${collapsed ? 'is-collapsed' : ''} ${active ? 'is-active' : ''} ${className}`.trim()}
+      className={`sb-group ${collapsed ? 'is-collapsed' : ''} ${active ? 'is-active' : ''} ${
+        headerHidden ? 'is-headerless' : ''
+      } ${className}`.trim()}
       aria-label={label}
     >
-      <div className="sb-group-head">
+      {!headerHidden && <div className="sb-group-head">
         <button
           type="button"
           className="sb-group-toggle"
@@ -72,7 +82,7 @@ export function SidebarGroup({
           {count != null && count > 0 && <span className="sb-group-count">{count}</span>}
         </button>
         {actions && <div className="sb-group-actions">{actions}</div>}
-      </div>
+      </div>}
       {!collapsed && <div className="sb-group-body">{children}</div>}
     </section>
   )

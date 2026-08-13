@@ -2,7 +2,8 @@ use crate::database::DatabaseService;
 use crate::errors::{AppError, AppResult};
 use crate::models::{
     clamp_percent, AiUsageDiagnostics, ProviderUsageSnapshot, TokenUsageSummary, UsageConfidence,
-    UsageFreshness, UsageProvider, UsageSnapshotStatus, UsageSource, UsageWindow, UsageWindowKind,
+    UsageDailyRow, UsageFreshness, UsageProvider, UsageSnapshotStatus, UsageSource, UsageWindow,
+    UsageWindowKind,
 };
 use chrono::{DateTime, Utc};
 use parking_lot::Mutex;
@@ -21,8 +22,14 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-const PARSER_VERSION: u8 = 2;
+// 3: records carry the serving model, and Codex token counters are read from the `info` envelope
+// the CLI actually writes. Bumping this re-reads every transcript once so history is rebuilt with
+// model attribution rather than silently mixing old model-less records into the breakdown.
+const PARSER_VERSION: u8 = 3;
 const LIVE_USAGE_TIMEOUT: Duration = Duration::from_secs(12);
+/// Upper bound on a single analytics query. The UI offers 7/30/90; this only stops a malformed
+/// request from turning into an unbounded scan.
+const MAX_HISTORY_DAYS: u32 = 400;
 const CLAUDE_USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
 const CLAUDE_OAUTH_BETA: &str = "oauth-2025-04-20";
 const CLAUDE_CODE_USER_AGENT: &str = "claude-code/2.1.0";
@@ -51,6 +58,10 @@ struct FileCheckpoint {
     parser_version: u8,
     records: Vec<SafeRecord>,
     codex_totals: BTreeMap<String, TokenUsageSummary>,
+    /// Codex writes the serving model on `turn_context`, not on the `token_count` event, so the
+    /// last-seen model has to survive across an append-only resume of the same transcript.
+    #[serde(default)]
+    current_model: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -59,11 +70,16 @@ struct SafeRecord {
     key: String,
     timestamp: String,
     tokens: TokenUsageSummary,
+    /// A model name is the only identifier kept here, and only because cost cannot be estimated
+    /// without it. `None` means the transcript did not report one — never a guess.
+    #[serde(default)]
+    model: Option<String>,
 }
 
 struct ParsedFile {
     records: Vec<SafeRecord>,
     codex_totals: BTreeMap<String, TokenUsageSummary>,
+    current_model: Option<String>,
     final_offset: u64,
 }
 
@@ -106,6 +122,16 @@ impl UsageService {
 
     pub fn diagnostics(&self) -> Vec<AiUsageDiagnostics> {
         self.state.lock().diagnostics.clone()
+    }
+
+    /// Persisted daily token history for the last `days` days, aggregated per provider and model.
+    /// The query is bounded by the caller's selected period rather than returning all history.
+    pub fn history(&self, days: u32) -> AppResult<Vec<UsageDailyRow>> {
+        let days = days.clamp(1, MAX_HISTORY_DAYS) as i64;
+        let from = (Utc::now() - chrono::Duration::days(days - 1))
+            .format("%Y-%m-%d")
+            .to_string();
+        self.database.load_ai_usage_daily(&from)
     }
 
     /// Coalesces callers across windows. The loser gets last-known values rather than beginning a
@@ -179,13 +205,36 @@ impl UsageService {
         }
         let now = Utc::now();
         let mut seen = HashSet::new();
+        let mut buckets: BTreeMap<(String, String), TokenUsageSummary> = BTreeMap::new();
         let tokens = records
             .into_iter()
             .filter(|record| seen.insert(record.key.clone()))
             .fold(TokenUsageSummary::default(), |mut total, record| {
                 add_tokens(&mut total, &record.tokens);
+                if let Some(date) = record.timestamp.get(..10) {
+                    add_tokens(
+                        buckets
+                            .entry((date.to_string(), record.model.clone().unwrap_or_default()))
+                            .or_default(),
+                        &record.tokens,
+                    );
+                }
                 total
             });
+        // Recomputed wholesale from the deduplicated record set, so re-reading a transcript can
+        // never inflate a bucket. A failed persist must not discard the live snapshot below.
+        let daily = buckets
+            .into_iter()
+            .map(|((date, model), tokens)| UsageDailyRow {
+                date,
+                provider,
+                model: (!model.is_empty()).then_some(model),
+                tokens,
+            })
+            .collect::<Vec<_>>();
+        let _ = self
+            .database
+            .replace_ai_usage_daily(provider, &daily, &now.to_rfc3339());
         let has_tokens =
             tokens.total_tokens > 0 || tokens.input_tokens > 0 || tokens.output_tokens > 0;
         let token_summary = has_tokens.then_some(tokens);
@@ -255,9 +304,16 @@ impl UsageService {
         } else {
             0
         };
-        let parsed = parse_file(provider, path, offset, checkpoint.codex_totals.clone())?;
+        let parsed = parse_file(
+            provider,
+            path,
+            offset,
+            checkpoint.codex_totals.clone(),
+            checkpoint.current_model.clone(),
+        )?;
         checkpoint.records.extend(parsed.records);
         checkpoint.codex_totals = parsed.codex_totals;
+        checkpoint.current_model = parsed.current_model;
         checkpoint.offset = parsed.final_offset;
         checkpoint.size = metadata.len();
         checkpoint.modified_at_ms = modified_at_ms;
@@ -322,6 +378,7 @@ fn parse_file(
     path: &Path,
     offset: u64,
     mut codex_totals: BTreeMap<String, TokenUsageSummary>,
+    mut current_model: Option<String>,
 ) -> AppResult<ParsedFile> {
     let mut file = File::open(path)?;
     file.seek(SeekFrom::Start(offset))?;
@@ -352,7 +409,12 @@ fn parse_file(
                 }
             }
             UsageProvider::Codex => {
-                if let Some(record) = parse_codex_record(&value, &mut codex_totals) {
+                if let Some(model) = codex_model(&value) {
+                    current_model = Some(model);
+                }
+                if let Some(record) =
+                    parse_codex_record(&value, &mut codex_totals, current_model.as_deref())
+                {
                     records.push(record);
                 }
             }
@@ -361,8 +423,20 @@ fn parse_file(
     Ok(ParsedFile {
         records,
         codex_totals,
+        current_model,
         final_offset: position,
     })
+}
+
+/// Codex announces the serving model on `turn_context` (and, for older CLI builds, in the session
+/// header) rather than on each usage event, so the model is tracked as parser state.
+fn codex_model(value: &Value) -> Option<String> {
+    let kind = value.get("type")?.as_str()?;
+    if kind != "turn_context" && kind != "session_meta" {
+        return None;
+    }
+    let model = value.pointer("/payload/model")?.as_str()?.trim();
+    (!model.is_empty()).then(|| model.to_string())
 }
 
 fn parse_claude_record(value: &Value) -> Option<SafeRecord> {
@@ -391,12 +465,19 @@ fn parse_claude_record(value: &Value) -> Option<SafeRecord> {
         key: format!("claude:{}", hash(identity)),
         timestamp,
         tokens,
+        model: value
+            .pointer("/message/model")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|model| !model.is_empty())
+            .map(str::to_string),
     })
 }
 
 fn parse_codex_record(
     value: &Value,
     totals: &mut BTreeMap<String, TokenUsageSummary>,
+    model: Option<&str>,
 ) -> Option<SafeRecord> {
     if value.get("type")?.as_str()? != "event_msg"
         || value.pointer("/payload/type")?.as_str()? != "token_count"
@@ -410,8 +491,14 @@ fn parse_codex_record(
         .and_then(Value::as_str)
         .or_else(|| value.get("sessionId").and_then(Value::as_str))
         .unwrap_or("global");
-    let total = codex_tokens(payload.get("total_token_usage"));
-    let delta = codex_tokens(payload.get("last_token_usage")).or_else(|| {
+    // The CLI nests the counters under `payload.info`; only very old builds put them directly on
+    // the payload. Reading just the flat shape silently produced zero Codex tokens forever.
+    let counters = payload
+        .get("info")
+        .filter(|info| info.is_object())
+        .unwrap_or(payload);
+    let total = codex_tokens(counters.get("total_token_usage"));
+    let delta = codex_tokens(counters.get("last_token_usage")).or_else(|| {
         total.as_ref().map(|next| {
             let key = hash(session);
             let previous = totals.get(&key).cloned().unwrap_or_default();
@@ -428,24 +515,33 @@ fn parse_codex_record(
         "{}:{:?}:{:?}",
         timestamp,
         total,
-        payload.get("last_token_usage")
+        counters.get("last_token_usage")
     );
     Some(SafeRecord {
         key: format!("codex:{}", hash(&raw_key)),
         timestamp,
         tokens: delta,
+        model: model.map(str::to_string),
     })
 }
 
+/// Normalises Codex counters onto the same contract Claude reports, so every downstream total
+/// means the same thing for both providers: `input_tokens` is *uncached* input.
+///
+/// Codex reports `input_tokens` as the full input including the cached portion, while Anthropic
+/// reports the cache reads separately. Summing the two shapes unchanged would count Codex's cached
+/// input twice and bill it at the uncached rate.
 fn codex_tokens(value: Option<&Value>) -> Option<TokenUsageSummary> {
     let value = value?;
+    let input = counter(value, "input_tokens")?;
+    let cached = counter(value, "cached_input_tokens")?;
     Some(TokenUsageSummary {
-        input_tokens: counter(value, "input_tokens")?,
-        cached_input_tokens: counter(value, "cached_input_tokens")?,
+        input_tokens: input.saturating_sub(cached),
+        cached_input_tokens: cached,
         output_tokens: counter(value, "output_tokens")?,
         reasoning_tokens: counter(value, "reasoning_output_tokens")
             .or_else(|| counter(value, "reasoning_tokens"))?,
-        cache_creation_tokens: 0,
+        cache_creation_tokens: counter(value, "cache_write_input_tokens").unwrap_or(0),
         total_tokens: counter(value, "total_tokens")?,
     })
 }
@@ -1056,19 +1152,52 @@ mod tests {
         let one = serde_json::json!({"type":"event_msg","timestamp":"2026-01-01T00:00:00Z","payload":{"type":"token_count","session_id":"x","total_token_usage":{"input_tokens":10,"cached_input_tokens":0,"output_tokens":2,"reasoning_output_tokens":0,"total_tokens":12}}});
         let two = serde_json::json!({"type":"event_msg","timestamp":"2026-01-01T00:01:00Z","payload":{"type":"token_count","session_id":"x","total_token_usage":{"input_tokens":15,"cached_input_tokens":0,"output_tokens":4,"reasoning_output_tokens":0,"total_tokens":19}}});
         assert_eq!(
-            parse_codex_record(&one, &mut totals)
+            parse_codex_record(&one, &mut totals, None)
                 .unwrap()
                 .tokens
                 .total_tokens,
             12
         );
         assert_eq!(
-            parse_codex_record(&two, &mut totals)
+            parse_codex_record(&two, &mut totals, None)
                 .unwrap()
                 .tokens
                 .total_tokens,
             7
         );
+    }
+    #[test]
+    fn codex_reads_counters_from_the_info_envelope_the_cli_actually_writes() {
+        let mut totals = BTreeMap::new();
+        let event = serde_json::json!({"type":"event_msg","timestamp":"2026-01-01T00:00:00Z","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":20268,"cached_input_tokens":9984,"cache_write_input_tokens":0,"output_tokens":137,"reasoning_output_tokens":60,"total_tokens":20405},"last_token_usage":{"input_tokens":20268,"cached_input_tokens":9984,"cache_write_input_tokens":0,"output_tokens":137,"reasoning_output_tokens":60,"total_tokens":20405}}}});
+        let record = parse_codex_record(&event, &mut totals, Some("gpt-5.6-sol")).unwrap();
+        assert_eq!(record.model.as_deref(), Some("gpt-5.6-sol"));
+        // Codex counts cached input inside `input_tokens`; the normalised record must not bill it
+        // twice at the uncached rate.
+        assert_eq!(record.tokens.input_tokens, 10_284);
+        assert_eq!(record.tokens.cached_input_tokens, 9_984);
+        assert_eq!(record.tokens.output_tokens, 137);
+        assert_eq!(record.tokens.reasoning_tokens, 60);
+    }
+    #[test]
+    fn codex_tracks_the_serving_model_from_turn_context() {
+        let turn = serde_json::json!({"type":"turn_context","payload":{"model":"gpt-5.6-sol"}});
+        assert_eq!(codex_model(&turn).as_deref(), Some("gpt-5.6-sol"));
+        // A blank model is absent data, never an empty-named model.
+        let blank = serde_json::json!({"type":"turn_context","payload":{"model":"  "}});
+        assert_eq!(codex_model(&blank), None);
+        let unrelated = serde_json::json!({"type":"event_msg","payload":{"model":"x"}});
+        assert_eq!(codex_model(&unrelated), None);
+    }
+    #[test]
+    fn claude_records_carry_the_serving_model() {
+        let value = serde_json::json!({
+            "type":"assistant","timestamp":"2026-01-01T00:00:00Z",
+            "message":{"id":"msg_1","model":"claude-opus-5","usage":{"input_tokens":2,"output_tokens":832,"cache_read_input_tokens":17624,"cache_creation_input_tokens":16066}}
+        });
+        let record = parse_claude_record(&value).unwrap();
+        assert_eq!(record.model.as_deref(), Some("claude-opus-5"));
+        assert_eq!(record.tokens.cached_input_tokens, 17_624);
     }
     #[test]
     fn claude_live_payload_uses_current_utilization_and_scoped_limits() {

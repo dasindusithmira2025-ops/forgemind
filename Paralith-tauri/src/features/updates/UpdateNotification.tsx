@@ -1,6 +1,6 @@
 import { AlertTriangle, Download, RotateCcw, ShieldCheck } from 'lucide-react'
 import type { SafeRestartAssessment, UpdateDownloadProgress, UpdateStatus } from '../../native/types'
-import { useUpdateController } from './updateController'
+import { requestUpdateNow, updateActionable, useUpdateController } from './updateController'
 
 interface UpdateNotificationViewProps {
   status: UpdateStatus
@@ -32,8 +32,7 @@ export function UpdateNotificationView({
   onLater,
 }: UpdateNotificationViewProps) {
   const update = status.journal.available
-  const visiblePhase = ['available', 'downloading', 'downloaded', 'failed', 'restart_requested'].includes(status.journal.phase)
-  if (!update || !visiblePhase || dismissed) return null
+  if (!updateActionable(status) || !update || dismissed) return null
 
   const received = progress?.received ?? status.journal.downloadReceived
   const total = progress?.total ?? status.journal.downloadTotal
@@ -103,10 +102,7 @@ export function UpdateNotification() {
     error={error}
     deferred={deferred}
     dismissed={dismissedVersion === status.journal.available?.version}
-    onUpdateNow={() => void updateNow(
-      { unsavedEditorState: false, unsavedSettings: false, unsavedBrowserState: false },
-      (next) => window.confirm(`PARALITH will checkpoint and stop active work before restarting.\n\n${next.blockers.join('\n')}\n\nUpdate now?`),
-    )}
+    onUpdateNow={() => void requestUpdateNow(updateNow)}
     onRetry={() => void retry()}
     onLater={dismiss}
   />

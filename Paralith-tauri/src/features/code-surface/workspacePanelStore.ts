@@ -1,7 +1,9 @@
 import { create } from 'zustand'
+import { isSurfaceKind, type SurfaceKind } from './surfaceRegistry'
 
 /**
- * State for the docked workspace-tool panel that sits beside the terminal canvas. It is kept in a
+ * State for the docked Surface Workspace panel that sits beside the terminal canvas: a tab strip of
+ * open tool surfaces (Files, Browser, Diff, Agents), plus panel visibility/size. Kept in a
  * standalone store (not React component state) for two reasons:
  *   1. The terminal canvas must never remount when the panel opens/closes/resizes, so panel state
  *      cannot live in a component that also owns the canvas subtree.
@@ -9,15 +11,14 @@ import { create } from 'zustand'
  *      panel by reading the same per-workspace record.
  *
  * State is scoped and persisted per Workspace: switching Workspaces restores that Workspace's own
- * panel visibility, width, active tool and (independently) its open editor tabs.
+ * panel visibility, width and open tabs (independently of each surface's own internal state, e.g.
+ * open editor tabs or browser URL, which live in their own stores).
+ *
+ * Every registered kind is currently a singleton, so a surface's stable identity is just its kind —
+ * see `surfaceRegistry.ts` for why. `surfaces` is the open tab order; `activeSurface` is the visible
+ * tab and is always a member of `surfaces` (or undefined when there are none, showing the chooser).
  */
-export type WorkspaceTool = 'files' | 'browser'
-
-const KNOWN_TOOLS: WorkspaceTool[] = ['files', 'browser']
-
-function normalizeTool(tool: unknown): WorkspaceTool {
-  return KNOWN_TOOLS.includes(tool as WorkspaceTool) ? (tool as WorkspaceTool) : 'files'
-}
+export type { SurfaceKind }
 
 const MIN_WIDTH = 320
 const MAX_WIDTH = 1100
@@ -25,29 +26,37 @@ const DEFAULT_WIDTH = 520
 
 export interface WorkspacePanelState {
   workspaceId: string
-  /** Once the panel has been opened it stays mounted (hidden while closed) so Monaco models,
-   * editor buffers, cursor and scroll survive a collapse. */
+  /** Once the panel has been opened it stays mounted (hidden while closed) so surface state —
+   * Monaco models, browser URL, scroll positions — survives a collapse. */
   mounted: boolean
   open: boolean
   width: number
   /** Temporarily fills the whole workspace, overlaying the still-mounted terminal canvas. */
   maximized: boolean
-  tool: WorkspaceTool
+  surfaces: SurfaceKind[]
+  activeSurface?: SurfaceKind
 
   init: (workspaceId: string) => void
-  openPanel: (tool?: WorkspaceTool) => void
+  openPanel: () => void
   closePanel: () => void
   toggle: () => void
   toggleMaximized: () => void
-  setTool: (tool: WorkspaceTool) => void
   setWidth: (width: number) => void
+  /** Opens a surface, or focuses it if already open (singleton enforcement lives here, not just in
+   * the UI, so any caller — the picker, a future "open in right panel" action elsewhere — gets it
+   * for free). */
+  openSurface: (kind: SurfaceKind) => void
+  focusSurface: (kind: SurfaceKind) => void
+  closeSurface: (kind: SurfaceKind) => void
+  reorderSurface: (kind: SurfaceKind, toIndex: number) => void
 }
 
 interface Persisted {
   open: boolean
   width: number
   maximized: boolean
-  tool: WorkspaceTool
+  surfaces: SurfaceKind[]
+  activeSurface?: SurfaceKind
 }
 
 function persistKey(workspaceId: string): string {
@@ -58,18 +67,33 @@ export function clampPanelWidth(width: number): number {
   return Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, Math.round(width)))
 }
 
+/** Normalizes and validates persisted (or legacy) shapes so a corrupted/outdated record can never
+ * brick the panel: unknown kinds are dropped, duplicates are collapsed, and an invalid active id
+ * falls back to the first remaining surface. */
+function normalize(parsed: Record<string, unknown>): Persisted {
+  const width = clampPanelWidth(typeof parsed.width === 'number' ? parsed.width : DEFAULT_WIDTH)
+  const open = parsed.open === true
+  const maximized = parsed.maximized === true
+
+  // Legacy single-tool shape (`{ tool: 'browser' }`) migrates to a one-item tab list.
+  const rawSurfaces = Array.isArray(parsed.surfaces)
+    ? parsed.surfaces
+    : isSurfaceKind(parsed.tool) ? [parsed.tool] : []
+  const surfaces = [...new Set(rawSurfaces.filter(isSurfaceKind))]
+
+  const rawActive = parsed.activeSurface ?? parsed.tool
+  const activeSurface = isSurfaceKind(rawActive) && surfaces.includes(rawActive) ? rawActive : surfaces[0]
+
+  return { open, width, maximized: open ? maximized : false, surfaces, activeSurface }
+}
+
 function loadPersisted(workspaceId: string): Persisted | undefined {
   try {
     const raw = localStorage.getItem(persistKey(workspaceId))
     if (!raw) return undefined
-    const parsed = JSON.parse(raw) as Partial<Persisted>
-    if (typeof parsed.open !== 'boolean') return undefined
-    return {
-      open: parsed.open,
-      width: clampPanelWidth(typeof parsed.width === 'number' ? parsed.width : DEFAULT_WIDTH),
-      maximized: parsed.maximized === true,
-      tool: normalizeTool(parsed.tool),
-    }
+    const parsed = JSON.parse(raw) as Record<string, unknown>
+    if (typeof parsed !== 'object' || parsed === null) return undefined
+    return normalize(parsed)
   } catch {
     return undefined
   }
@@ -78,7 +102,13 @@ function loadPersisted(workspaceId: string): Persisted | undefined {
 const saveTimers = new Map<string, ReturnType<typeof setTimeout>>()
 function savePersisted(state: WorkspacePanelState): void {
   if (!state.workspaceId) return
-  const snapshot: Persisted = { open: state.open, width: state.width, maximized: state.maximized, tool: state.tool }
+  const snapshot: Persisted = {
+    open: state.open,
+    width: state.width,
+    maximized: state.maximized,
+    surfaces: state.surfaces,
+    activeSurface: state.activeSurface,
+  }
   const key = persistKey(state.workspaceId)
   // Debounced: resizing must not thrash localStorage on every pointer frame.
   const existing = saveTimers.get(key)
@@ -102,7 +132,8 @@ export const useWorkspacePanelStore = create<WorkspacePanelState>((set, get) => 
     open: false,
     width: DEFAULT_WIDTH,
     maximized: false,
-    tool: 'files',
+    surfaces: [],
+    activeSurface: undefined,
 
     init: (workspaceId) => {
       if (get().workspaceId === workspaceId) return
@@ -110,21 +141,22 @@ export const useWorkspacePanelStore = create<WorkspacePanelState>((set, get) => 
       set({
         workspaceId,
         open: persisted?.open ?? false,
-        // Mount immediately if it was left open, so its files reappear without an interaction.
+        // Mount immediately if it was left open, so its surfaces reappear without an interaction.
         mounted: persisted?.open ?? false,
         width: persisted?.width ?? DEFAULT_WIDTH,
         maximized: (persisted?.open ?? false) ? (persisted?.maximized ?? false) : false,
-        tool: persisted?.tool ?? 'files',
+        surfaces: persisted?.surfaces ?? [],
+        activeSurface: persisted?.activeSurface,
       })
     },
 
-    openPanel: (tool) => {
-      set({ mounted: true, open: true, tool: tool ?? get().tool })
+    openPanel: () => {
+      set({ mounted: true, open: true })
       commit()
     },
 
     closePanel: () => {
-      // Keep `mounted` true: the panel is only hidden, preserving editor state for reopening.
+      // Keep `mounted` true: the panel is only hidden, preserving surface state for reopening.
       set({ open: false, maximized: false })
       commit()
     },
@@ -140,13 +172,49 @@ export const useWorkspacePanelStore = create<WorkspacePanelState>((set, get) => 
       commit()
     },
 
-    setTool: (tool) => {
-      set({ tool })
+    setWidth: (width) => {
+      set({ width: clampPanelWidth(width) })
       commit()
     },
 
-    setWidth: (width) => {
-      set({ width: clampPanelWidth(width) })
+    openSurface: (kind) => {
+      const { surfaces } = get()
+      set({
+        mounted: true,
+        open: true,
+        surfaces: surfaces.includes(kind) ? surfaces : [...surfaces, kind],
+        activeSurface: kind,
+      })
+      commit()
+    },
+
+    focusSurface: (kind) => {
+      if (!get().surfaces.includes(kind)) return
+      set({ activeSurface: kind })
+      commit()
+    },
+
+    closeSurface: (kind) => {
+      const { surfaces, activeSurface } = get()
+      const index = surfaces.indexOf(kind)
+      if (index === -1) return
+      const remaining = surfaces.filter((item) => item !== kind)
+      const nextActive = activeSurface !== kind
+        ? activeSurface
+        // Prefer the previous neighbor, then the next one, then none — never a dangling id.
+        : (remaining[index - 1] ?? remaining[index] ?? remaining[remaining.length - 1])
+      set({ surfaces: remaining, activeSurface: nextActive })
+      commit()
+    },
+
+    reorderSurface: (kind, toIndex) => {
+      const { surfaces } = get()
+      const from = surfaces.indexOf(kind)
+      if (from === -1) return
+      const next = [...surfaces]
+      next.splice(from, 1)
+      next.splice(Math.max(0, Math.min(toIndex, next.length)), 0, kind)
+      set({ surfaces: next })
       commit()
     },
   }

@@ -614,6 +614,7 @@ pub fn run() {
             commands::evaluate_merge_readiness,
             commands::get_settings,
             commands::get_ai_usage_snapshots,
+            commands::get_ai_usage_history,
             commands::refresh_ai_usage,
             commands::get_ai_usage_diagnostics,
             commands::save_settings,

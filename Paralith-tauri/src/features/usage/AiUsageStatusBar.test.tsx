@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({ native: { getAiUsageSnapshots: vi.fn(), refres
 vi.mock('../../native/commands', () => ({ native: mocks.native }))
 vi.mock('../../native/events', () => ({ onAiUsageChanged: vi.fn().mockResolvedValue(() => undefined), onTerminalExit: vi.fn().mockResolvedValue(() => undefined) }))
 
+import { useNativeOverlayStore } from '../../stores/nativeOverlay'
 import { AiUsageStatusBar } from './AiUsageStatusBar'
 import { placeUsagePopover } from './usagePopoverPlacement'
 
@@ -39,6 +40,19 @@ describe('AiUsageStatusBar', () => {
     const dialog = await screen.findByRole('dialog', { name: /subscription usage/i })
     expect(dialog.style.transform).toBe('')
     expect(Number.parseFloat(dialog.style.top)).toBeGreaterThanOrEqual(0)
+  })
+
+  // The roster opens over the right-side tool panel, and the native Browser webview there is
+  // composited above all HTML: without this lease no z-index can keep the roster visible.
+  it('suppresses native webview overlays only while the roster is open', async () => {
+    render(<AiUsageStatusBar />)
+    const chip = await screen.findByRole('button', { name: /subscription usage/i })
+    expect(useNativeOverlayStore.getState().count).toBe(0)
+    fireEvent.click(chip)
+    await screen.findByRole('dialog', { name: /subscription usage/i })
+    expect(useNativeOverlayStore.getState().count).toBe(1)
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(useNativeOverlayStore.getState().count).toBe(0)
   })
 })
 

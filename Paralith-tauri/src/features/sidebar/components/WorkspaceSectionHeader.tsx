@@ -1,9 +1,13 @@
 import { useEffect, useRef } from 'react'
-import { FolderPlus, Plus, SlidersHorizontal } from 'lucide-react'
+import { ChevronDown, FolderPlus, Plus, SlidersHorizontal } from 'lucide-react'
 import type { RecentWorkspace } from '../../../native/types'
 import { useSidebarStore, type SidebarGroupBy, type SidebarSortMode } from '../sidebarStore'
 import type { SidebarActions, SidebarOpenProject } from '../sidebarTypes'
 import { ProjectPopover } from './ProjectPopover'
+
+/** The persisted collapse key for the whole Workspace section. Shares the group-collapse store, so
+ *  it survives a restart exactly like every other section. */
+export const WORKSPACE_SECTION_ID = 'workspaces-section'
 
 const GROUP_BY_OPTIONS: { id: SidebarGroupBy; label: string; hint: string }[] = [
   { id: 'project', label: 'Projects', hint: 'Group Workspaces under their Project' },
@@ -16,22 +20,27 @@ const SORT_OPTIONS: { id: SidebarSortMode; label: string; hint: string }[] = [
 ]
 
 /**
- * The list's section header: what the list below is, and the controls that are scoped to it.
+ * The one section header the sidebar has: WORKSPACES, plus the controls scoped to that list.
  *
- * The title is not decoration — it names the current grouping, so "Projects" vs "Workspaces" is
- * the one-word answer to "why is this list shaped like this". Everything that changes the list
- * (grouping, ordering) lives behind the one options popover; everything that adds to it (open a
- * Project, create a Workspace) is a direct control, because those are the two actions worth a
- * permanent target.
+ * Two controls are permanent, because they are the two the list is worth having: add, and
+ * collapse. Everything that *changes* the list rather than adding to it — grouping, order, opening
+ * another Project — is revealed on hover or focus, so the resting sidebar is a label and a
+ * plus sign rather than a row of chrome. Keyboard reach is unchanged: the buttons are always in
+ * the tab order and appear the moment they take focus.
  */
-export function SidebarListHeader({
+export function WorkspaceSectionHeader({
   openProjects,
   recents,
   actions,
+  collapsed,
+  count,
 }: {
   openProjects: SidebarOpenProject[]
   recents: RecentWorkspace[]
   actions: SidebarActions
+  collapsed: boolean
+  /** Workspaces in the list, shown only while it is collapsed — otherwise the rows say it. */
+  count: number
 }) {
   const groupBy = useSidebarStore((state) => state.groupBy)
   const setGroupBy = useSidebarStore((state) => state.setGroupBy)
@@ -41,6 +50,7 @@ export function SidebarListHeader({
   const setOptionsOpen = useSidebarStore((state) => state.setListOptionsOpen)
   const projectsOpen = useSidebarStore((state) => state.projectSwitcherOpen)
   const setProjectsOpen = useSidebarStore((state) => state.setProjectSwitcherOpen)
+  const setGroupCollapsed = useSidebarStore((state) => state.setGroupCollapsed)
   const optionsRef = useRef<HTMLDivElement>(null)
 
   // Escape closes the options popover from anywhere inside it, matching every other overlay.
@@ -58,15 +68,18 @@ export function SidebarListHeader({
   }, [optionsOpen, setOptionsOpen])
 
   return (
-    <div className="sb-list-header">
-      <span className="sb-list-title" data-group-by={groupBy}>
-        {groupBy === 'project' ? 'Projects' : 'Workspaces'}
-      </span>
+    <div className={`sb-section-header ${optionsOpen || projectsOpen ? 'is-open' : ''}`}>
+      <span className="sb-section-title">Workspaces</span>
+      {collapsed && count > 0 && (
+        <span className="sb-section-count" aria-hidden>
+          {count}
+        </span>
+      )}
 
-      <div className="sb-list-actions">
+      <div className="sb-section-actions">
         <button
           type="button"
-          className="sb-list-action"
+          className="sb-section-action is-secondary"
           aria-label="List options"
           aria-haspopup="dialog"
           aria-expanded={optionsOpen}
@@ -77,7 +90,7 @@ export function SidebarListHeader({
         </button>
         <button
           type="button"
-          className="sb-list-action"
+          className="sb-section-action is-secondary"
           aria-label="Open a Project"
           aria-haspopup="dialog"
           aria-expanded={projectsOpen}
@@ -88,12 +101,23 @@ export function SidebarListHeader({
         </button>
         <button
           type="button"
-          className="sb-list-action"
+          className="sb-section-action"
           aria-label="New workspace"
           title="New workspace"
           onClick={actions.onNewWorkspace}
         >
           <Plus size={15} />
+        </button>
+        <button
+          type="button"
+          className="sb-section-action sb-section-chevron"
+          aria-expanded={!collapsed}
+          aria-controls="sidebar-workspace-list"
+          aria-label={collapsed ? 'Expand workspace list' : 'Collapse workspace list'}
+          title={collapsed ? 'Expand workspace list' : 'Collapse workspace list'}
+          onClick={() => setGroupCollapsed(WORKSPACE_SECTION_ID, !collapsed)}
+        >
+          <ChevronDown size={14} />
         </button>
       </div>
 

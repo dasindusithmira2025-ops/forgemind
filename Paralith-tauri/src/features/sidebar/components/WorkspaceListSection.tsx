@@ -46,7 +46,7 @@ export function WorkspaceListSection({
 
   if (loading && totalWorkspaces === 0) {
     return (
-      <SidebarGroup id="workspaces" label="Workspaces">
+      <SidebarGroup id="workspaces" label="Workspaces" headerHidden>
         <WorkspaceSkeletons />
       </SidebarGroup>
     )
@@ -54,7 +54,7 @@ export function WorkspaceListSection({
 
   if (totalWorkspaces === 0) {
     return (
-      <SidebarGroup id="workspaces" label="Workspaces">
+      <SidebarGroup id="workspaces" label="Workspaces" headerHidden>
         <div className="ws-empty">
           <p>No Workspaces yet for this Project.</p>
           <button type="button" className="button button-secondary" onClick={actions.onNewWorkspace}>
@@ -66,21 +66,27 @@ export function WorkspaceListSection({
     )
   }
 
+  const visibleGroups = presentation.groups.filter((group) => !group.hidden)
+
   return (
     <>
       {groupBy === 'project' ? (
-        presentation.groups
-          .filter((group) => !group.hidden)
-          .map((group) => (
-            <ProjectGroup
-              key={group.project.id}
-              group={group}
-              filtering={presentation.filtering}
-              activeWorkspaceId={activeWorkspaceId}
-              switchingWorkspaceId={switchingWorkspaceId}
-              actions={actions}
-            />
-          ))
+        visibleGroups.map((group) => (
+          <ProjectGroup
+            key={group.project.id}
+            group={group}
+            filtering={presentation.filtering}
+            // With one Project open its name is already the app's context; a header naming it
+            // again directly under "WORKSPACES" is a section inside a section. It comes back the
+            // moment a second Project is open, where it is the only thing telling the rows apart.
+            // A Project whose folder is missing always keeps its header — that warning has
+            // nowhere else to live in the list.
+            headerHidden={visibleGroups.length === 1 && !group.folderMissing}
+            activeWorkspaceId={activeWorkspaceId}
+            switchingWorkspaceId={switchingWorkspaceId}
+            actions={actions}
+          />
+        ))
       ) : (
         <FlatList
           group={presentation.flat}
@@ -115,12 +121,14 @@ export function WorkspaceListSection({
 function ProjectGroup({
   group,
   filtering,
+  headerHidden,
   activeWorkspaceId,
   switchingWorkspaceId,
   actions,
 }: {
   group: PresentedGroup
   filtering: boolean
+  headerHidden: boolean
   activeWorkspaceId: string
   switchingWorkspaceId?: string
   actions: SidebarActions
@@ -134,6 +142,7 @@ function ProjectGroup({
       active={group.isActive}
       count={filtering ? group.visibleCount : group.totalCount}
       forceExpanded={filtering}
+      headerHidden={headerHidden}
       className="sb-project-group"
       meta={
         group.folderMissing ? (
@@ -199,6 +208,7 @@ function FlatList({
       label="Workspaces"
       count={filtering ? group.visibleCount : group.totalCount}
       forceExpanded={filtering}
+      headerHidden
     >
       {group.workspaces.length === 0 ? (
         <p className="sb-no-match">No Workspace matches the filter.</p>
@@ -298,10 +308,7 @@ function WorkspaceSkeletons() {
       {[0, 1, 2].map((key) => (
         <li key={key} className="ws-row ws-row-skeleton">
           <span className="ws-skel-dot" />
-          <span className="ws-skel-lines">
-            <span className="ws-skel-line" />
-            <span className="ws-skel-line short" />
-          </span>
+          <span className="ws-skel-line" />
         </li>
       ))}
     </ul>

@@ -21,6 +21,7 @@ const SettingsScreen = lazy(() => import('../src/screens/SettingsScreen').then((
 const RepositoryScreen = lazy(() => import('../src/screens/RepositoryScreen').then((m) => ({ default: m.RepositoryScreen })))
 const DatabaseScreen = lazy(() => import('../src/screens/DatabaseScreen').then((m) => ({ default: m.DatabaseScreen })))
 const SwarmsScreen = lazy(() => import('../src/screens/SwarmsScreen').then((m) => ({ default: m.SwarmsScreen })))
+const UsageScreen = lazy(() => import('../src/screens/UsageScreen').then((m) => ({ default: m.UsageScreen })))
 const Primitives = lazy(() => import('./Primitives').then((m) => ({ default: m.Primitives })))
 
 const SURFACES: Record<string, { label: string; path: string; element: ReactElement; route: string }> = {
@@ -31,6 +32,7 @@ const SURFACES: Record<string, { label: string; path: string; element: ReactElem
   settings: { label: 'Settings', path: '/settings', route: '/settings', element: <SettingsScreen /> },
   repository: { label: 'Repository command center', path: '/repository/proj-paralith', route: '/repository/:projectId', element: <RepositoryScreen /> },
   database: { label: 'Database studio', path: '/database/proj-paralith', route: '/database/:projectId', element: <DatabaseScreen /> },
+  usage: { label: 'Usage analytics', path: '/usage', route: '/usage', element: <UsageScreen /> },
   swarms: { label: 'Swarms', path: '/swarms/proj-paralith', route: '/swarms/:projectId', element: <SwarmsScreen /> },
   swarm: { label: 'Swarm (running)', path: '/swarms/proj-paralith/swarm-1', route: '/swarms/:projectId/:swarmId', element: <SwarmsScreen /> },
 }

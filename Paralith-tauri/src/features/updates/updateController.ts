@@ -160,6 +160,31 @@ export const useUpdateController = create<UpdateControllerState>((set, get) => {
   }
 })
 
+/**
+ * The renderer half of "update now", shared by every surface that offers it (the toast and the
+ * sidebar's persistent status area). Kept in one place so the two can never disagree about what
+ * the client reports as unsaved, or about how a soft blocker is confirmed.
+ */
+export function requestUpdateNow(updateNow: UpdateControllerState['updateNow']): Promise<void> {
+  return updateNow(
+    { unsavedEditorState: false, unsavedSettings: false, unsavedBrowserState: false },
+    (assessment) =>
+      window.confirm(
+        `PARALITH will checkpoint and stop active work before restarting.\n\n${assessment.blockers.join('\n')}\n\nUpdate now?`,
+      ),
+  )
+}
+
+/** Phases where an available update is worth a visible action; anything else is quiet. */
+export function updateActionable(status?: UpdateStatus): boolean {
+  return (
+    Boolean(status?.journal.available) &&
+    ['available', 'downloading', 'downloaded', 'failed', 'restart_requested'].includes(
+      status?.journal.phase ?? '',
+    )
+  )
+}
+
 let startPromise: Promise<void> | undefined
 let unlisteners: UnlistenFn[] = []
 let controllerGeneration = 0

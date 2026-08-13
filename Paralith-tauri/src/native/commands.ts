@@ -80,12 +80,14 @@ import type {
   FsPath,
   ProjectFileIndex,
   ProviderUsageSnapshot,
+  UsageDailyRow,
   AiUsageDiagnostics,
 } from './types'
 
 export const native = {
   getAiUsageSnapshots: () => invoke<ProviderUsageSnapshot[]>('get_ai_usage_snapshots'),
   refreshAiUsage: () => invoke<ProviderUsageSnapshot[]>('refresh_ai_usage'),
+  getAiUsageHistory: (days: number) => invoke<UsageDailyRow[]>('get_ai_usage_history', { days }),
   getAiUsageDiagnostics: () => invoke<AiUsageDiagnostics[]>('get_ai_usage_diagnostics'),
   openProject: (path: string) => invoke<Project>('open_project', { path }),
   getProject: (projectId: string) => invoke<Project>('get_project', { projectId }),

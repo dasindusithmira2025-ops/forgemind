@@ -190,12 +190,54 @@ function usageWindow(kind: string, usedPercent: number, resetLabel: string) {
 }
 
 const usageSnapshots = [
-  { provider: 'claude', collectedAt: NOW, freshness: 'fresh', source: 'local_session_state', status: 'ok',
+  { provider: 'claude', collectedAt: NOW, freshness: 'live', source: 'supported_endpoint', status: 'ready',
     windows: [usageWindow('session', 38, 'in 3h'), usageWindow('weekly', 54, 'Mon')],
     tokenSummary: { inputTokens: 812_400, outputTokens: 96_210, cachedInputTokens: 640_100, cacheCreationTokens: 41_020, reasoningTokens: 12_400, totalTokens: 1_602_130 } },
-  { provider: 'codex', collectedAt: NOW, freshness: 'fresh', source: 'provider_cli', status: 'ok',
+  { provider: 'codex', collectedAt: NOW, freshness: 'live', source: 'provider_cli', status: 'ready',
     windows: [usageWindow('session', 61, 'in 7h')] },
 ]
+
+/**
+ * 90 days of daily usage buckets, shaped like the real `ai_usage_daily` table: cache reads
+ * dominate input, Codex reports reasoning, and one model is deliberately absent from the pricing
+ * table so the "unpriced but still counted" path is visible in a screenshot. Deterministic — a
+ * harness screenshot has to be comparable between runs.
+ */
+const usageHistory = (() => {
+  const models = [
+    { provider: 'claude', model: 'claude-opus-5', weight: 1 },
+    { provider: 'claude', model: 'claude-sonnet-5', weight: 0.35 },
+    { provider: 'codex', model: 'gpt-5.6-sol', weight: 0.7 },
+    { provider: 'codex', model: 'gpt-5.4-mini', weight: 0.12 },
+    { provider: 'codex', model: 'new-unknown-model', weight: 0.05 },
+  ]
+  const end = Date.parse('2026-08-13T00:00:00Z')
+  const rows: unknown[] = []
+  for (let day = 0; day < 90; day += 1) {
+    const date = new Date(end - (89 - day) * 86_400_000).toISOString().slice(0, 10)
+    // A deterministic pseudo-random weekday-weighted shape; weekends dip.
+    const wobble = 0.55 + 0.45 * Math.abs(Math.sin(day * 1.7))
+    const weekend = [0, 6].includes(new Date(`${date}T00:00:00Z`).getUTCDay()) ? 0.35 : 1
+    for (const entry of models) {
+      const scale = wobble * weekend * entry.weight
+      if (scale < 0.06) continue
+      rows.push({
+        date,
+        provider: entry.provider,
+        model: entry.model,
+        tokens: {
+          inputTokens: Math.round(340_000 * scale),
+          cachedInputTokens: Math.round(34_000_000 * scale),
+          cacheCreationTokens: Math.round(300_000 * scale),
+          outputTokens: Math.round(120_000 * scale),
+          reasoningTokens: entry.provider === 'codex' ? Math.round(11_000 * scale) : 0,
+          totalTokens: Math.round(34_760_000 * scale),
+        },
+      })
+    }
+  }
+  return rows
+})()
 
 /**
  * Command fixtures, keyed by the Rust command name. Anything absent falls through to
@@ -259,6 +301,7 @@ export const FIXTURES: Record<string, unknown> = {
   get_ai_usage_snapshots: usageSnapshots,
   refresh_ai_usage: usageSnapshots,
   get_ai_usage_diagnostics: [],
+  get_ai_usage_history: usageHistory,
   set_last_active_workspace: null,
   recover_workspace_windows: { recovered: [], reconnectable: [] },
   terminal_session_status: 'running',

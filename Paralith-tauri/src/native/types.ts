@@ -177,6 +177,15 @@ export type UsageConfidence = 'authoritative' | 'derived' | 'estimated'
 export interface UsageWindow { kind: UsageWindowKind; usedPercent: number; remainingPercent: number; resetsAt?: string; resetLabel?: string; source: 'local_session_state' | 'provider_cli' | 'supported_endpoint'; confidence: UsageConfidence; isWarning: boolean; isCritical: boolean }
 export interface TokenUsageSummary { inputTokens: number; outputTokens: number; cachedInputTokens: number; cacheCreationTokens: number; reasoningTokens: number; totalTokens: number }
 export interface ProviderUsageSnapshot { provider: UsageProvider; collectedAt: string; sourceUpdatedAt?: string; freshness: UsageFreshness; source: 'local_session_state' | 'provider_cli' | 'supported_endpoint'; windows: UsageWindow[]; tokenSummary?: TokenUsageSummary; status: UsageSnapshotStatus; diagnosticCode?: string; diagnosticMessage?: string }
+/**
+ * One observed analytics bucket: a provider's token totals for one UTC day and one model.
+ * `model` is absent when the provider transcript did not record which model served the request —
+ * the tokens are still real and still counted; only the cost attribution is unknown.
+ *
+ * `inputTokens` is *uncached* input on both providers; the backend normalises Codex's inclusive
+ * counter before persisting so the two shapes can be summed.
+ */
+export interface UsageDailyRow { date: string; provider: UsageProvider; model?: string; tokens: TokenUsageSummary }
 export interface AiUsageDiagnostics { provider: UsageProvider; filesSeen: number; filesReused: number; filesScanned: number; elapsedMs: number; status: UsageSnapshotStatus; diagnosticCode?: string }
 
 export interface RestorationProgress {

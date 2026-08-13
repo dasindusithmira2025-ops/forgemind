@@ -131,6 +131,8 @@ export interface SidebarActions {
   onOpenRepository?: () => void
   /** Open the Database Studio surface for the active project. */
   onOpenDatabase?: () => void
+  /** Open Usage analytics. Application-scoped: token consumption is observed per machine. */
+  onOpenUsage?: () => void
   onToggleCollapse: () => void
   onResizeCommit: (width: number) => void
   // ---- Multi-monitor Workspace placement (optional; present only in the main window) ------
