@@ -1,51 +1,48 @@
 import { Suspense, lazy } from 'react'
-import { Files, Globe, Maximize2, Minimize2, PanelRightClose } from 'lucide-react'
+import { Maximize2, Minimize2, PanelRightClose } from 'lucide-react'
 import './workspaceToolPanel.css'
-import type { WorkspaceTool } from './workspacePanelStore'
+import type { PaneAssignment, TerminalSession } from '../../native/types'
+import type { SurfaceKind } from './workspacePanelStore'
+import { SurfaceTabBar } from './SurfaceTabBar'
+import { SurfaceEmptyState } from './SurfaceEmptyState'
 import { BrowserSurface, type BrowserContextInfo } from './browser/BrowserSurface'
 import type { AgentContextPackage } from './browser/inspectContext'
+import { DiffSurface } from './surfaces/DiffSurface'
+import { AgentsSurface } from './surfaces/AgentsSurface'
 
-// Lazy so Monaco and the whole editor bundle are only fetched the first time the panel is opened —
-// the terminal-only startup path never loads the editor runtime.
+// Lazy so Monaco and the whole editor bundle are only fetched once the Files surface is actually
+// opened — the terminal-only startup path never loads the editor runtime.
 const CodeSurface = lazy(() => import('./CodeSurface').then((module) => ({ default: module.CodeSurface })))
-
-interface ToolDef {
-  id: WorkspaceTool
-  label: string
-  icon: typeof Files
-  shortcut: string
-}
-
-// Only tools with a real, complete surface are listed. Browser and Editor are the primary tools;
-// Search, Source Control and Agent Changes are added here as their surfaces land — there are
-// deliberately no placeholder/dead entries or overflow stubs.
-const TOOLS: ToolDef[] = [
-  { id: 'browser', label: 'Browser', icon: Globe, shortcut: 'Ctrl+Shift+E' },
-  { id: 'files', label: 'Editor', icon: Files, shortcut: 'Ctrl+Shift+E' },
-]
 
 export interface WorkspaceToolPanelProps {
   projectId: string
   projectRootPath: string
   workspaceId: string
-  /** Whether the panel is the visible surface. Kept mounted-but-hidden when false so editor and
-   * browser state survive a collapse; also gates each surface's focus-scoped shortcuts and hides the
+  /** Whether the panel is the visible surface. Kept mounted-but-hidden when false so open surfaces'
+   * state survives a collapse; also gates each surface's focus-scoped shortcuts and hides the
    * native browser webview (which HTML display:none cannot clip). */
   visible: boolean
   maximized: boolean
-  tool: WorkspaceTool
+  surfaces: SurfaceKind[]
+  activeSurface?: SurfaceKind
   browserContext: BrowserContextInfo
+  agents: { panes: PaneAssignment[]; sessions: TerminalSession[]; activePaneId?: string; onFocusPane: (paneId: string) => void }
   onSendToAgent?: (pkg: AgentContextPackage) => Promise<void> | void
-  onToolChange: (tool: WorkspaceTool) => void
+  onSelectSurface: (kind: SurfaceKind) => void
+  onOpenSurface: (kind: SurfaceKind) => void
+  onCloseSurface: (kind: SurfaceKind) => void
+  onReorderSurface: (kind: SurfaceKind, toIndex: number) => void
   onToggleMaximize: () => void
   onClose: () => void
 }
 
 /**
- * The docked right-side workspace-tool panel. A compact tool bar switches between the Browser and
- * Editor surfaces, both of which stay mounted so their state (editor tabs/buffers, browser URL/zoom)
- * survives switching. It never owns the terminal canvas, so opening, resizing, collapsing or
- * maximizing it cannot remount or resize any PTY.
+ * The docked right-side Surface Workspace: a registry-driven tab strip switches between tool
+ * surfaces (Files, Browser, Diff, Agents). Each open surface stays mounted while present in
+ * `surfaces` (display-toggled, not unmounted) so its state — editor tabs/buffers, browser URL/zoom,
+ * diff staging selection, scroll position — survives switching tabs; it mounts only once opened, so
+ * a surface the user never opens never pays its runtime's startup cost. It never owns the terminal
+ * canvas, so opening, resizing, collapsing or maximizing it cannot remount or resize any PTY.
  */
 export function WorkspaceToolPanel({
   projectId,
@@ -53,43 +50,38 @@ export function WorkspaceToolPanel({
   workspaceId,
   visible,
   maximized,
-  tool,
+  surfaces,
+  activeSurface,
   browserContext,
+  agents,
   onSendToAgent,
-  onToolChange,
+  onSelectSurface,
+  onOpenSurface,
+  onCloseSurface,
+  onReorderSurface,
   onToggleMaximize,
   onClose,
 }: WorkspaceToolPanelProps) {
+  const isOpen = (kind: SurfaceKind) => surfaces.includes(kind)
+  const isActive = (kind: SurfaceKind) => visible && kind === activeSurface
+
   return (
     <aside
       className="workspace-tool-panel"
       style={{ display: visible ? undefined : 'none' }}
-      aria-label="Workspace tools"
+      aria-label="Workspace surfaces"
       aria-hidden={!visible}
     >
       <div className="tool-panel-main">
         <div className="tool-panel-header">
-          <nav className="tool-switcher" aria-label="Workspace tool switcher">
-            {TOOLS.map((item) => {
-              const Icon = item.icon
-              const selected = item.id === tool
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  className={`tool-switch-btn ${selected ? 'is-active' : ''}`}
-                  aria-pressed={selected}
-                  aria-label={item.label}
-                  title={item.label}
-                  onClick={() => onToolChange(item.id)}
-                >
-                  <Icon size={15} aria-hidden />
-                  <span>{item.label}</span>
-                </button>
-              )
-            })}
-          </nav>
-          <span className="tool-panel-spacer" />
+          <SurfaceTabBar
+            surfaces={surfaces}
+            activeSurface={activeSurface}
+            onSelect={onSelectSurface}
+            onClose={onCloseSurface}
+            onReorder={onReorderSurface}
+            onOpen={onOpenSurface}
+          />
           <div className="tool-panel-actions">
             <button
               type="button"
@@ -107,19 +99,39 @@ export function WorkspaceToolPanel({
         </div>
 
         <div className="tool-panel-body">
-          {/* Browser stays mounted; it hides its own native webview when not the active surface. */}
-          <BrowserSurface active={visible && tool === 'browser'} context={browserContext} onSendToAgent={onSendToAgent} />
-          {/* Editor stays mounted (display-toggled) so tabs and unsaved buffers survive switching. */}
-          <div className="tool-surface-host" style={{ display: tool === 'files' ? undefined : 'none' }}>
-            <Suspense fallback={<div className="code-editor-loading" aria-label="Loading Editor" />}>
-              <CodeSurface
-                projectId={projectId}
-                projectRootPath={projectRootPath}
+          {surfaces.length === 0 && <SurfaceEmptyState onOpen={onOpenSurface} />}
+
+          {isOpen('browser') && (
+            <div className="tool-surface-host" style={{ display: isActive('browser') ? undefined : 'none' }}>
+              <BrowserSurface active={isActive('browser')} context={browserContext} onSendToAgent={onSendToAgent} />
+            </div>
+          )}
+
+          {isOpen('files') && (
+            <div className="tool-surface-host" style={{ display: isActive('files') ? undefined : 'none' }}>
+              <Suspense fallback={<div className="code-editor-loading" aria-label="Loading Editor" />}>
+                <CodeSurface projectId={projectId} projectRootPath={projectRootPath} workspaceId={workspaceId} active={isActive('files')} />
+              </Suspense>
+            </div>
+          )}
+
+          {isOpen('diff') && (
+            <div className="tool-surface-host" style={{ display: isActive('diff') ? undefined : 'none' }}>
+              <DiffSurface projectId={projectId} />
+            </div>
+          )}
+
+          {isOpen('agents') && (
+            <div className="tool-surface-host" style={{ display: isActive('agents') ? undefined : 'none' }}>
+              <AgentsSurface
                 workspaceId={workspaceId}
-                active={visible && tool === 'files'}
+                panes={agents.panes}
+                sessions={agents.sessions}
+                activePaneId={agents.activePaneId}
+                onFocusPane={agents.onFocusPane}
               />
-            </Suspense>
-          </div>
+            </div>
+          )}
         </div>
       </div>
     </aside>

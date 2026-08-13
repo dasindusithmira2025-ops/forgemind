@@ -55,9 +55,15 @@
   flex-direction: column;
 }
 
-/* Compact top tool switcher (Browser | Editor). Scrolls horizontally rather than wrapping so it
- * degrades gracefully on a narrow panel. */
-.tool-switcher {
+/* Surface tab strip: tabs scroll horizontally rather than wrapping so it degrades gracefully on a
+ * narrow panel, and the "+" button (outside the scroller) never gets pushed off-screen. */
+.surface-tab-bar {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: stretch;
+}
+.surface-tabs {
   flex: 1 1 auto;
   min-width: 0;
   display: flex;
@@ -66,13 +72,13 @@
   overflow-x: auto;
   scrollbar-width: none;
 }
-.tool-switcher::-webkit-scrollbar { display: none; }
-.tool-switch-btn {
+.surface-tabs::-webkit-scrollbar { display: none; }
+.surface-tab {
   position: relative;
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
-  padding: 0 var(--space-3);
+  padding: 0 var(--space-2) 0 var(--space-3);
   height: var(--pane-header-height);
   color: var(--muted);
   background: transparent;
@@ -83,12 +89,116 @@
   cursor: pointer;
   transition: color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out);
 }
-.tool-switch-btn:hover { color: var(--text); background: var(--surface-hover); }
-.tool-switch-btn.is-active { color: var(--text-strong); border-bottom-color: var(--accent-edge); }
-.tool-switch-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.tool-switch-btn:disabled { opacity: .5; cursor: default; }
+.surface-tab:hover { color: var(--text); background: var(--surface-hover); }
+.surface-tab.is-active { color: var(--text-strong); border-bottom-color: var(--accent-edge); }
+.surface-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.surface-tab-label { pointer-events: none; }
+.surface-tab-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  color: var(--faint);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  opacity: 0;
+  cursor: pointer;
+}
+.surface-tab:hover .surface-tab-close,
+.surface-tab.is-active .surface-tab-close,
+.surface-tab-close:focus-visible { opacity: 1; }
+.surface-tab-close:hover { color: var(--text); background: var(--surface-hover); }
+
+.surface-add-wrap { flex: 0 0 auto; position: relative; display: flex; align-items: center; }
+.surface-add-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--icon-btn);
+  height: var(--icon-btn);
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.surface-add-btn:hover { color: var(--text); background: var(--surface-hover); }
+.surface-add-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.surface-picker { width: 180px; left: 0; right: auto; }
+.surface-picker-empty { display: block; padding: 0 9px; min-height: var(--control-h); display: flex; align-items: center; color: var(--faint); font-size: var(--font-sm); }
 
 .tool-panel-spacer { flex: 0 0 auto; }
+
+/* Empty-state chooser, shown when the panel has zero open surfaces. */
+.surface-empty-state {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-5);
+  padding: var(--space-6);
+  width: 100%;
+}
+.surface-empty-heading { text-align: center; }
+.surface-empty-heading h2 { font-size: var(--font-md); font-weight: 650; color: var(--text-strong); }
+.surface-empty-heading p { margin-top: 4px; font-size: var(--font-sm); color: var(--muted); }
+.surface-empty-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(140px, 180px));
+  gap: var(--space-3);
+}
+.surface-empty-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: var(--space-3);
+  color: var(--muted);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out);
+}
+.surface-empty-card:hover { color: var(--text); background: var(--surface-hover); border-color: var(--border-strong); }
+.surface-empty-card:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.surface-empty-card-label { font-size: var(--font-sm); font-weight: 600; color: var(--text-strong); }
+.surface-empty-card-desc { font-size: var(--font-xs); color: var(--faint); }
+
+/* Diff surface: fills the body, scrolls its own content. */
+.diff-surface { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; overflow: auto; }
+
+/* Agents surface: live agent activity per terminal Pane. */
+.agents-surface { flex: 1 1 auto; min-width: 0; min-height: 0; overflow: auto; padding: var(--space-2); display: flex; flex-direction: column; gap: 2px; }
+.agent-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  color: var(--text);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius);
+  text-align: left;
+  cursor: pointer;
+}
+.agent-row:hover { background: var(--surface-hover); }
+.agent-row.is-active { background: var(--surface-selected, var(--surface-hover)); }
+.agent-row-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.agent-row-title { font-size: var(--font-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-row-meta { font-size: var(--font-xs); color: var(--faint); }
+.agent-row-attention { flex: 0 0 auto; font-size: var(--font-xs); color: var(--muted); }
+.agent-row-attention.attention-needs_you, .agent-row.attention-needs_you { color: var(--warning); }
+.agent-row-attention.attention-working { color: var(--accent); }
+.agent-row-attention.attention-settled { color: var(--success); }
+
+/* Shared loading/error state for surfaces backed by an async load (Diff). */
+.surface-status { flex: 1 1 auto; display: flex; align-items: center; justify-content: center; gap: var(--space-2); color: var(--muted); font-size: var(--font-sm); padding: var(--space-6); text-align: center; }
 
 /* Surface host keeps the (display-toggled) Editor filling the body while inactive. */
 .tool-surface-host {

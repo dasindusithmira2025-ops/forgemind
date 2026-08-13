@@ -108,27 +108,33 @@ describe('Workspace screen', () => {
     await waitFor(() => expect(restoreWorkspace).toHaveBeenCalledWith('workspace', 4, 'restart_agents'))
   })
 
-  it('renders the four sidebar zones without removed navigation surfaces', async () => {
+  it('renders the four sidebar bands without removed navigation surfaces', async () => {
     renderWorkspace(); await screen.findByTestId('terminal-pane')
-    // Zone 1 — nav: destinations only, each with a real target.
-    expect(screen.getByRole('navigation', { name: 'Go to' })).toBeInTheDocument()
+    // Band 1 — header: application identity, plus the one destination that is not an entity.
+    expect(screen.getByLabelText('PARALITH')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /^Search/ })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Repository' })).toBeInTheDocument()
-    // Zone 2 — list header: the title names the current grouping.
-    expect(screen.getByText('Projects')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Open a Project' })).toBeInTheDocument()
+    // Band 2 — section header: the list is Workspaces, and the controls are scoped to it.
+    expect(screen.getByText('Workspaces')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'New workspace' })).toBeInTheDocument()
-    // Zone 3 — scroll body: one group per open Project, plus Swarms. "Other Monitors" appears
-    // only when a Workspace is detached; the fixture has none.
+    expect(screen.getByRole('button', { name: 'Collapse workspace list' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Open a Project' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'List options' })).toBeInTheDocument()
+    // Band 3 — scroll body: one group per open Project, plus Swarms. "Other Monitors" appears
+    // only when a Workspace is detached; the fixture has none. With a single Project open the
+    // group keeps its labelled region but drops the visible header the section above restates.
     expect(screen.getByRole('region', { name: 'Fixture' })).toBeInTheDocument()
     expect(screen.getByRole('region', { name: 'Swarms' })).toBeInTheDocument()
     expect(screen.getAllByRole('region')).toHaveLength(2)
     expect(screen.queryByText('Other Monitors')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'New swarm' })).toBeInTheDocument()
-    // Zone 4 — toolbar: identity plus the least-used controls.
-    expect(screen.getByLabelText('PARALITH')).toBeInTheDocument()
+    // Band 4 — status: the destinations that are not Workspaces. No update is available in the
+    // fixture, so no update control exists at all rather than a dead disabled one.
+    expect(screen.getByRole('button', { name: 'Repository' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Settings' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Diagnostics' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Update now|Install & restart/ })).not.toBeInTheDocument()
+    // The nav band of destination rows is gone; nothing re-creates it.
+    expect(screen.queryByRole('navigation', { name: 'Go to' })).not.toBeInTheDocument()
     // Two Workspaces and no Swarms is under the filter threshold, so the field stays hidden.
     expect(screen.queryByRole('searchbox', { name: 'Filter Workspaces and Swarms' })).not.toBeInTheDocument()
     // Removed navigation must not exist anywhere.
@@ -151,11 +157,29 @@ describe('Workspace screen', () => {
     expect(screen.getAllByRole('button', { name: 'Close project Fixture' })).toHaveLength(1)
   })
 
+  it('collapses the Workspace list alone, and persists that through typed settings', async () => {
+    renderWorkspace(); await screen.findByTestId('terminal-pane')
+    const list = () => document.getElementById('sidebar-workspace-list') as HTMLElement
+    expect(list()).toBeVisible()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse workspace list' }))
+
+    // The Workspace rows go; Swarms and the pinned bands are not the chevron's business.
+    await waitFor(() => expect(list()).not.toBeVisible())
+    expect(screen.getByRole('region', { name: 'Swarms' })).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Settings' })).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Expand workspace list' })).toBeInTheDocument()
+    await waitFor(() =>
+      expect(setSidebarPreferences).toHaveBeenCalledWith(
+        expect.objectContaining({ collapsedGroups: expect.arrayContaining(['workspaces-section']) }),
+      ),
+    )
+  })
+
   it('groups Workspaces by Project and flips to one flat list on demand', async () => {
     renderWorkspace(); await screen.findByTestId('terminal-pane')
-    // Default grouping: a section per open Project, titled with the Project's name.
+    // Default grouping: a labelled section per open Project.
     expect(screen.getByRole('region', { name: 'Fixture' })).toBeInTheDocument()
-    expect(screen.getByText('Projects')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'List options' }))
     fireEvent.click(await screen.findByRole('radio', { name: 'Workspaces' }))
@@ -169,15 +193,15 @@ describe('Workspace screen', () => {
 
   it('suspends drag reordering while the attention order is active', async () => {
     renderWorkspace(); await screen.findByTestId('terminal-pane')
-    const group = () => within(screen.getByRole('region', { name: 'Fixture' }))
+    const rows = () => screen.getByRole('region', { name: 'Fixture' }).querySelectorAll('.ws-row[draggable="true"]')
     // Manual order is draggable: a drop index maps onto the persisted order.
-    expect(group().getAllByTitle('Drag to reorder').length).toBeGreaterThan(0)
+    expect(rows().length).toBeGreaterThan(0)
 
     fireEvent.click(screen.getByRole('button', { name: 'List options' }))
     fireEvent.click(await screen.findByRole('radio', { name: 'Needs you' }))
 
-    // Attention order owns the sequence, so the handle that implies "you own it" disappears.
-    await waitFor(() => expect(group().queryByTitle('Drag to reorder')).not.toBeInTheDocument())
+    // Attention order owns the sequence, so rows stop accepting a drop entirely.
+    await waitFor(() => expect(rows()).toHaveLength(0))
   })
 
   it('filters both primary lists once they are long enough to need it', async () => {

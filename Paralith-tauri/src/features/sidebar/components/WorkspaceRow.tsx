@@ -1,7 +1,8 @@
-import { memo, useCallback } from 'react'
-import { GripVertical, MoreVertical } from 'lucide-react'
+import { memo, useCallback, type CSSProperties } from 'react'
+import { MoreVertical, X } from 'lucide-react'
 import { runtimeStatusText } from '../sidebarSelectors'
 import type { SidebarActions, SidebarWorkspace } from '../sidebarTypes'
+import { workspaceIdentityColor } from '../workspaceIdentity'
 import { WorkspaceRuntimeIndicator } from './WorkspaceRuntimeIndicator'
 
 interface WorkspaceRowProps {
@@ -28,8 +29,15 @@ interface WorkspaceRowProps {
 }
 
 /**
- * One Workspace row. Memoized so a runtime change to a single Workspace only rerenders that
- * row. The whole row is a button; the overflow trigger and drag handle are nested controls.
+ * One Workspace row: identity mark, name, pane count, and the actions scoped to it.
+ *
+ * One line, not two. The second line used to restate the runtime in words on every row at all
+ * times, which made a list of eight Workspaces sixteen lines of text to scan; the indicator and
+ * the row's tooltip carry the same facts without spending the height. Colour on the row is the
+ * Workspace's own identity (see `workspaceIdentity`) — it tints the dot, the count and the
+ * selected state, so "which one am I in" is answered by hue before any text is read.
+ *
+ * Memoized so a runtime change to a single Workspace only rerenders that row.
  */
 function WorkspaceRowImpl({
   entry,
@@ -49,6 +57,8 @@ function WorkspaceRowImpl({
 }: WorkspaceRowProps) {
   const { workspace, runtime, providers } = entry
   const paneCount = workspace.panes.length
+  // Nothing to stop when nothing is running, so the control that stops it is not offered.
+  const running = runtime.status !== 'closed'
 
   const onKeyDown = useCallback(
     (event: React.KeyboardEvent) => {
@@ -71,11 +81,21 @@ function WorkspaceRowImpl({
     [actions, workspace.id, active, onOpenMenu],
   )
 
+  // Everything the removed second line used to say, plus the providers, in the row's own tooltip.
+  const detail = [
+    workspace.name,
+    runtime.status === 'closed' ? 'Not running' : runtimeStatusText(runtime),
+    providers.text,
+  ]
+    .filter(Boolean)
+    .join('\n')
+
   return (
     <li
       className={`ws-row ${active ? 'is-active' : ''} ${dragging ? 'is-dragging' : ''} ${
         dropTarget ? 'is-drop-target' : ''
-      } ${switching ? 'is-switching' : ''}`}
+      } ${switching ? 'is-switching' : ''} ${reorderable ? 'is-reorderable' : ''}`}
+      style={{ '--ws-identity': workspaceIdentityColor(workspace.id) } as CSSProperties}
       aria-current={active ? 'true' : undefined}
       draggable={reorderable}
       onDragStart={() => reorderable && onDragStart(workspace.id)}
@@ -84,57 +104,58 @@ function WorkspaceRowImpl({
       onDrop={() => reorderable && onDrop(workspace.id)}
       onDragEnd={onDragEnd}
     >
-      <span className="ws-row-accent" aria-hidden />
       <button
         type="button"
         className="ws-row-main"
+        title={detail}
         aria-label={`${workspace.name}${projectName ? ` in ${projectName}` : ''}, ${runtime.status}, ${paneCount} panes`}
         onClick={() => !active && actions.onSelectWorkspace(workspace.id)}
         onDoubleClick={(event) => event.preventDefault()}
         onKeyDown={onKeyDown}
       >
         <WorkspaceRuntimeIndicator status={runtime.status} />
-        <span className="ws-row-body">
-          <span className="ws-row-title-line">
-            <strong className="ws-row-name">{workspace.name}</strong>
-            <span
-              className="ws-pane-badge"
-              title={`${paneCount} configured terminal pane${paneCount === 1 ? '' : 's'}`}
-              aria-label={`${paneCount} configured terminal pane${paneCount === 1 ? '' : 's'}`}
-            >
-              {paneCount}
-            </span>
-          </span>
-          <span className="ws-row-secondary" title={providers.labels.join(' · ')}>
-            {projectName && <span className="ws-row-project">{projectName}</span>}
-            {runtime.status === 'closed' ? providers.text || 'Not running' : runtimeStatusText(runtime)}
-          </span>
-        </span>
-      </button>
-      {reorderable && (
+        <span className="ws-row-name">{workspace.name}</span>
+        {projectName && <span className="ws-row-project">{projectName}</span>}
         <span
-          className="ws-row-handle"
-          aria-hidden
-          title="Drag to reorder"
-          onMouseDown={(event) => event.stopPropagation()}
+          className="ws-pane-badge"
+          aria-label={`${paneCount} configured terminal pane${paneCount === 1 ? '' : 's'}`}
         >
-          <GripVertical size={13} />
+          {paneCount}
         </span>
-      )}
-      <button
-        type="button"
-        className="ws-row-menu"
-        aria-haspopup="menu"
-        aria-expanded={menuOpen}
-        aria-label={`${workspace.name} actions`}
-        onClick={(event) => {
-          event.stopPropagation()
-          const rect = event.currentTarget.getBoundingClientRect()
-          onOpenMenu(menuOpen ? undefined : workspace.id, { x: rect.right, y: rect.bottom })
-        }}
-      >
-        <MoreVertical size={15} />
       </button>
+
+      {/* Fixed width whether or not the controls are showing, so a row never reflows under the
+          pointer and a long name never truncates differently on hover. */}
+      <span className="ws-row-actions">
+        {running && (
+          <button
+            type="button"
+            className="ws-row-close"
+            aria-label={`Stop ${workspace.name} terminals`}
+            title="Stop workspace terminals"
+            onClick={(event) => {
+              event.stopPropagation()
+              actions.onStopWorkspace(workspace.id)
+            }}
+          >
+            <X size={14} />
+          </button>
+        )}
+        <button
+          type="button"
+          className="ws-row-menu"
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
+          aria-label={`${workspace.name} actions`}
+          onClick={(event) => {
+            event.stopPropagation()
+            const rect = event.currentTarget.getBoundingClientRect()
+            onOpenMenu(menuOpen ? undefined : workspace.id, { x: rect.right, y: rect.bottom })
+          }}
+        >
+          <MoreVertical size={15} />
+        </button>
+      </span>
     </li>
   )
 }

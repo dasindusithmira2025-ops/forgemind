@@ -40,7 +40,7 @@ import { normalizeSplitTree, removePaneFromDockedTree } from '../features/worksp
 import { workspaceLayoutCommands, toSaveRequest } from '../native/workspaceLayoutCommands'
 import { isActiveLifecycle } from '../features/swarms/swarmPresentation'
 import { WorkspaceToolPanel } from '../features/code-surface/WorkspaceToolPanel'
-import { useWorkspacePanelStore, clampPanelWidth, type WorkspaceTool } from '../features/code-surface/workspacePanelStore'
+import { useWorkspacePanelStore, clampPanelWidth, type SurfaceKind } from '../features/code-surface/workspacePanelStore'
 import type { AgentContextPackage } from '../features/code-surface/browser/inspectContext'
 
 type ProviderChoice = { provider: AgentProvider; name: string; executablePath: string; args: string[]; shellProfileId?: string }
@@ -103,7 +103,8 @@ export function WorkspaceScreen() {
   const panelMounted = useWorkspacePanelStore((state) => state.mounted)
   const panelWidth = useWorkspacePanelStore((state) => state.width)
   const panelMaximized = useWorkspacePanelStore((state) => state.maximized)
-  const panelTool = useWorkspacePanelStore((state) => state.tool)
+  const panelSurfaces = useWorkspacePanelStore((state) => state.surfaces)
+  const panelActiveSurface = useWorkspacePanelStore((state) => state.activeSurface)
   const [panelResizing, setPanelResizing] = useState(false)
   const [projectClosePrompt, setProjectClosePrompt] = useState<{ projectId: string; projectName: string; activeSwarms: number }>()
   const [projectCloseBusy, setProjectCloseBusy] = useState(false)
@@ -293,11 +294,18 @@ export function WorkspaceScreen() {
   // id is unchanged, so a remount never clobbers live state.
   useEffect(() => { useWorkspacePanelStore.getState().init(workspaceId) }, [workspaceId])
 
-  const togglePanel = useCallback((tool?: WorkspaceTool) => {
+  const togglePanel = useCallback(() => {
     const store = useWorkspacePanelStore.getState()
     if (store.open) store.closePanel()
-    else store.openPanel(tool)
+    else store.openPanel()
   }, [])
+
+  // Focus a Pane from the Agents surface: same "select + focus the terminal" pair the attention
+  // chip uses, just addressable by an arbitrary paneId instead of always the oldest waiting one.
+  const focusPane = useCallback((paneId: string) => {
+    setActivePane(paneId)
+    dispatchTerminalAction(paneId, 'focus')
+  }, [setActivePane])
 
   // "Send to Active Agent" from the Browser's Inspect mode: paste the focused, sanitized context
   // package into the active pane's terminal so the user can review it and press Enter to submit.
@@ -993,6 +1001,7 @@ export function WorkspaceScreen() {
     onOpenSettings: () => navigate('/settings'),
     onOpenRepository: () => { if (project) navigate(`/repository/${project.id}`) },
     onOpenDatabase: () => { if (project) navigate(`/database/${project.id}`) },
+    onOpenUsage: () => navigate('/usage'),
     onToggleCollapse: toggleCollapse,
     onResizeCommit: commitSidebarWidth,
     onOpenInNewWindow: (id) => void openInNewWindow(id),
@@ -1140,7 +1149,7 @@ export function WorkspaceScreen() {
   return <AppShell className={`workspace-shell ${switchingWorkspaceId ? 'workspace-switching' : ''}`} sidebarOpen={!maximizedPaneId}
     titleBar={<><div className="workspace-heading"><strong title={workspace.name}>{workspace.name}</strong>{project.gitBranch && <span className="branch-label" title={`Branch: ${project.gitBranch}`}>{project.gitBranch}</span>}</div><div className="titlebar-spacer" />{attentionQueue.length > 0 && <button className="attention-chip" onClick={focusNextAttention} title="Ctrl+Shift+P focuses the oldest agent needing attention">{attentionQueue.length} agent{attentionQueue.length === 1 ? '' : 's'} waiting</button>}<span className="compact-count">{running}/{workspace.panes.length} running</span><button className={`workspace-tool-panel-toggle ${panelOpen ? 'is-active' : ''}`} aria-pressed={panelOpen} aria-label={panelOpen ? 'Close workspace panel' : 'Open workspace panel'} title={`${panelOpen ? 'Close' : 'Open'} workspace panel (Ctrl+Shift+E)`} onClick={() => togglePanel()}>{panelOpen ? <PanelRightClose size={15} /> : <PanelRightOpen size={15} />}</button><div className="workspace-menu-wrap"><Button variant="ghost" icon={<ChevronDown size={14} />} aria-expanded={workspaceMenu} aria-haspopup="menu" onClick={() => setWorkspaceMenu((value) => !value)}>Workspace</Button>{workspaceMenu && <><button className="context-scrim" aria-label="Close workspace menu" onClick={() => setWorkspaceMenu(false)} /><div className="context-popover workspace-popover" role="menu"><button role="menuitem" onClick={() => { setWorkspaceMenu(false); renameWorkspaceById(workspace.id) }}>Rename workspace</button><button role="menuitem" onClick={reconfigureWorkspace}>Reconfigure workspace</button><button role="menuitem" onClick={() => navigate(`/setup/${project.id}`)}>New workspace for this project</button><span className="menu-separator" /><button role="menuitem" onClick={() => { setWorkspaceMenu(false); openAgentResumeCenter() }}><RotateCcw size={14} />Agent Resume Center</button><button role="menuitem" onClick={() => void restartAll()}><RotateCcw size={14} />Restart all terminals</button><button role="menuitem" onClick={() => void stopAll()}><CircleStop size={14} />Stop all terminals</button><button role="menuitem" onClick={openLauncher}><FolderOpen size={14} />Project launcher</button><button role="menuitem" className="danger-item" onClick={() => void closeWorkspace()}>Close workspace</button></div></>}</div></>}
     sidebar={<ForgeSpaceSidebar project={project} activeWorkspaceId={workspace.id} workspaces={sidebarWorkspaces} recents={recentWorkspaces} collapsed={collapsed} width={sidebarWidth} switchingWorkspaceId={switchingWorkspaceId} projectFolderMissing={projectFolderMissing} loadingWorkspaces={projectWorkspaces.length === 0 && loading} actions={sidebarActions} placements={placements} monitors={monitors} openProjects={sidebarOpenProjects} groups={sidebarGroups} runtimeSeeded={sidebarRuntime.seeded} />}
-    canvas={<>{error && <div className="workspace-error"><ErrorNotice message={error} onRetry={() => void restartAll()} /></div>}<MonitorRecoveryWatcher monitors={monitors} onChanged={handleMonitorChanged} /><div className={`workspace-surface-host${panelOpen && !panelMaximized ? ' has-panel' : ''}${panelOpen && panelMaximized ? ' is-panel-max' : ''}${panelResizing ? ' is-resizing' : ''}`} style={{ '--tool-panel-width': `${panelWidth}px` } as CSSProperties}><section className="terminal-canvas"><WorkspaceCanvas reducedMotion={reducedMotion} persist={persistCanvas} onFocusPane={setActivePane} renderPane={renderPane} /></section>{panelOpen && !panelMaximized && <div className="tool-panel-resizer" role="separator" aria-orientation="vertical" aria-label="Resize workspace panel" onPointerDown={startPanelResize} />}{panelMounted && <WorkspaceToolPanel projectId={project.id} projectRootPath={project.rootPath} workspaceId={workspace.id} visible={panelOpen} maximized={panelMaximized} tool={panelTool} browserContext={{ workspaceId: workspace.id, workspaceName: workspace.name, projectId: project.id, projectName: project.name, worktree: project.gitBranch ?? undefined, agentLabel: activePane?.title }} onSendToAgent={sendContextToAgent} onToolChange={(tool) => useWorkspacePanelStore.getState().setTool(tool)} onToggleMaximize={() => useWorkspacePanelStore.getState().toggleMaximized()} onClose={() => useWorkspacePanelStore.getState().closePanel()} />}</div></>}
+    canvas={<>{error && <div className="workspace-error"><ErrorNotice message={error} onRetry={() => void restartAll()} /></div>}<MonitorRecoveryWatcher monitors={monitors} onChanged={handleMonitorChanged} /><div className={`workspace-surface-host${panelOpen && !panelMaximized ? ' has-panel' : ''}${panelOpen && panelMaximized ? ' is-panel-max' : ''}${panelResizing ? ' is-resizing' : ''}`} style={{ '--tool-panel-width': `${panelWidth}px` } as CSSProperties}><section className="terminal-canvas"><WorkspaceCanvas reducedMotion={reducedMotion} persist={persistCanvas} onFocusPane={setActivePane} renderPane={renderPane} /></section>{panelOpen && !panelMaximized && <div className="tool-panel-resizer" role="separator" aria-orientation="vertical" aria-label="Resize workspace panel" onPointerDown={startPanelResize} />}{panelMounted && <WorkspaceToolPanel projectId={project.id} projectRootPath={project.rootPath} workspaceId={workspace.id} visible={panelOpen} maximized={panelMaximized} surfaces={panelSurfaces} activeSurface={panelActiveSurface} browserContext={{ workspaceId: workspace.id, workspaceName: workspace.name, projectId: project.id, projectName: project.name, worktree: project.gitBranch ?? undefined, agentLabel: activePane?.title }} agents={{ panes: workspace.panes, sessions, activePaneId, onFocusPane: focusPane }} onSendToAgent={sendContextToAgent} onSelectSurface={(kind: SurfaceKind) => useWorkspacePanelStore.getState().focusSurface(kind)} onOpenSurface={(kind: SurfaceKind) => useWorkspacePanelStore.getState().openSurface(kind)} onCloseSurface={(kind: SurfaceKind) => useWorkspacePanelStore.getState().closeSurface(kind)} onReorderSurface={(kind: SurfaceKind, index: number) => useWorkspacePanelStore.getState().reorderSurface(kind, index)} onToggleMaximize={() => useWorkspacePanelStore.getState().toggleMaximized()} onClose={() => useWorkspacePanelStore.getState().closePanel()} />}</div></>}
     statusBar={<><span>{project.gitBranch || 'No branch'}</span><span className="status-path" title={project.rootPath}>{project.name}</span><span>{running}/{workspace.panes.length} running</span><span>{activePane?.title || 'No active pane'}</span><AiUsageStatusBar />{attentionQueue.length > 0 && <span className="status-alert">{attentionQueue.length} agent attention</span>}{Object.keys(paneErrors).some((id) => paneErrors[id]) && <span className="status-alert">Pane error</span>}</>}
   >
     {projectClosePrompt && <Modal title={`Close ${projectClosePrompt.projectName}?`} onClose={() => { if (!projectCloseBusy) setProjectClosePrompt(undefined) }}><div className="restore-summary"><div><strong>{projectClosePrompt.activeSwarms} active Swarm{projectClosePrompt.activeSwarms === 1 ? '' : 's'}</strong><span>Swarm state remains bound to this Project.</span></div><p>Keep the Swarms running in the background, or pause them before closing the Project session.</p><div className="modal-actions"><Button variant="ghost" disabled={projectCloseBusy} onClick={() => setProjectClosePrompt(undefined)}>Cancel</Button><Button variant="secondary" data-autofocus disabled={projectCloseBusy} onClick={() => void completeProjectClose(projectClosePrompt.projectId, 'pause_and_close')}>Pause and close</Button><Button variant="primary" disabled={projectCloseBusy} onClick={() => void completeProjectClose(projectClosePrompt.projectId, 'keep_running')}>Keep running</Button></div></div></Modal>}

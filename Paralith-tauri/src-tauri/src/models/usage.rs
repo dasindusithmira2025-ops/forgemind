@@ -94,6 +94,22 @@ pub struct ProviderUsageSnapshot {
     pub diagnostic_message: Option<String>,
 }
 
+/// One persisted analytics bucket: a provider's token totals for one UTC day and one model.
+///
+/// This is deliberately separate from [`ProviderUsageSnapshot`], which describes *subscription
+/// quota*. A quota percentage and a token count answer different questions and must never be
+/// merged into one number. `model` is `None` when the provider's transcript did not record which
+/// model served the request — that stays distinguishable from a model literally named "unknown",
+/// and the row is still counted in every token total.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageDailyRow {
+    pub date: String,
+    pub provider: UsageProvider,
+    pub model: Option<String>,
+    pub tokens: TokenUsageSummary,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AiUsageDiagnostics {

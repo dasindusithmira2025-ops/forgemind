@@ -17,6 +17,7 @@ import {
 import { openUrl } from '@tauri-apps/plugin-opener'
 import './browser.css'
 import { native } from '../../../native/commands'
+import { useNativeOverlayStore } from '../../../stores/nativeOverlay'
 import { onBrowserEvent } from '../../../native/events'
 import type { BrowserBounds } from '../../../native/types'
 import {
@@ -75,7 +76,10 @@ export function BrowserSurface({ active, context, onSendToAgent }: BrowserSurfac
   const [quickOpen, setQuickOpen] = useState(false)
 
   const url = currentEntry(store.history)
-  const shouldShowWebview = active && Boolean(url)
+  // The native webview is composited above all HTML, so an open overlay (usage roster, dialog…) can
+  // never be layered over it — hide the page for as long as one is up instead of losing the overlay.
+  const overlayed = useNativeOverlayStore((state) => state.count > 0)
+  const shouldShowWebview = active && Boolean(url) && !overlayed
 
   // Native child-webview creation can take long enough for the panel to close or the Workspace to
   // change before it finishes. Keep lifecycle mutations ordered so a late creation is always
@@ -370,7 +374,7 @@ export function BrowserSurface({ active, context, onSendToAgent }: BrowserSurfac
         )}
         {/* Sits behind the native webview: visible only until the native surface is created and
           * paints over it, so a creation failure or slow start is never a silent black rectangle. */}
-        {url && !store.error && shouldShowWebviewSupported() && (
+        {url && !store.error && !overlayed && shouldShowWebviewSupported() && (
           <div className="browser-viewport-status" role="status">
             <span className="browser-viewport-status-spinner" aria-hidden />
             <span>Starting browser…</span>

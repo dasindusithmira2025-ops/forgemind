@@ -1,12 +1,15 @@
+import type { CSSProperties } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Activity, Boxes, Database, Folder, FolderGit2, MoreHorizontal, Settings } from 'lucide-react'
+import { Activity, BarChart3, Boxes, Database, Folder, FolderGit2, MoreHorizontal, Settings } from 'lucide-react'
 import { Brand } from '../../../components/ui/Brand'
 import { useSwarmStore } from '../../swarms/swarmStore'
 import { isActiveLifecycle, lifecycleLabel, lifecycleTone } from '../../swarms/swarmPresentation'
 import { useSidebarStore } from '../sidebarStore'
 import { runtimeStatusLabel, runtimeStatusText } from '../sidebarSelectors'
 import type { ForgeSpaceSidebarProps } from '../sidebarTypes'
+import { workspaceIdentityColor } from '../workspaceIdentity'
 import { WorkspaceRuntimeIndicator } from './WorkspaceRuntimeIndicator'
+import { CollapsedUpdateAction } from './SidebarStatusArea'
 
 const MAX_VISIBLE = 9
 
@@ -77,6 +80,9 @@ export function CollapsedSidebar({
               <button
                 type="button"
                 className={`collapsed-ws ${active ? 'is-active' : ''}`}
+                // Same identity colour as the expanded row, so collapsing changes the size of the
+                // mark and nothing about what it means.
+                style={{ '--ws-identity': workspaceIdentityColor(entry.workspace.id) } as CSSProperties}
                 aria-current={active ? 'true' : undefined}
                 aria-label={`${entry.workspace.name}, ${runtimeStatusLabel(entry.runtime.status)}`}
                 title={tooltip}
@@ -129,6 +135,11 @@ export function CollapsedSidebar({
             <Database size={16} />
           </button>
         )}
+        {actions.onOpenUsage && (
+          <button type="button" aria-label="Usage" title="Usage" onClick={actions.onOpenUsage}>
+            <BarChart3 size={16} />
+          </button>
+        )}
         <button type="button" aria-label="Settings" title="Settings" onClick={actions.onOpenSettings}>
           <Settings size={16} />
         </button>
@@ -136,6 +147,10 @@ export function CollapsedSidebar({
           <Activity size={16} />
         </button>
       </div>
+
+      {/* The expanded footer's capsule, at rail width: an icon and an attention marker, never a
+          widened rail. */}
+      <CollapsedUpdateAction />
     </nav>
   )
 }
