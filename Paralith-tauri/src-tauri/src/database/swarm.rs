@@ -6,11 +6,17 @@
 
 use super::DatabaseService;
 use crate::errors::{AppError, AppResult};
+use crate::models::context::ContextRequest;
 use crate::models::swarm::*;
+use crate::models::vnext::CompiledContextPack;
 use crate::models::{AgentProvider, CreateTerminalRequest};
 use chrono::Utc;
 use rusqlite::{params, Connection, OptionalExtension, Row};
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
+
+const MAX_EVIDENCE_PAYLOAD_BYTES: usize = 32 * 1024;
+const MAX_COMPILED_CONTEXT_BYTES: usize = 512 * 1024;
 
 /// A new task the engine wants to insert, before it is assigned an id.
 pub struct NewSwarmTask {
@@ -30,6 +36,70 @@ pub struct SwarmAgentRunCompletion<'a> {
 }
 
 impl DatabaseService {
+    pub fn persist_swarm_compiled_context_pack(
+        &self,
+        swarm_id: &str,
+        agent_id: &str,
+        request: &ContextRequest,
+        compiled: &CompiledContextPack,
+    ) -> AppResult<()> {
+        compiled.validate_scope().map_err(|message| {
+            AppError::new("context_scope_invalid", message, false).entity(&compiled.task_id)
+        })?;
+        let pack_json = serde_json::to_string(compiled).map_err(AppError::database)?;
+        if pack_json.len() > MAX_COMPILED_CONTEXT_BYTES {
+            return Err(AppError::new(
+                "context_pack_too_large",
+                "The compiled ContextPack exceeded its persistence boundary.",
+                false,
+            )
+            .entity(&compiled.id));
+        }
+        let request_json = serde_json::to_vec(request).map_err(AppError::database)?;
+        let request_fingerprint = format!("sha256:{:x}", Sha256::digest(request_json));
+        let diagnostics_json =
+            serde_json::to_string(&compiled.pack.diagnostics).map_err(AppError::database)?;
+        self.connection.lock().execute(
+            "INSERT INTO swarm_compiled_context_packs(id,project_id,swarm_id,task_id,agent_id,agent_run_id,compiler_version,request_fingerprint,budget_tokens,used_tokens,semantic_status,pack_json,diagnostics_json,created_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
+            params![
+                compiled.id,
+                compiled.project_id,
+                swarm_id,
+                compiled.task_id,
+                agent_id,
+                compiled.agent_run_id,
+                compiled.compiler_version,
+                request_fingerprint,
+                compiled.pack.budget_tokens as i64,
+                compiled.pack.used_tokens as i64,
+                compiled.pack.diagnostics.semantic_status,
+                pack_json,
+                diagnostics_json,
+                compiled.created_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    #[cfg(test)]
+    pub fn swarm_compiled_context_pack(
+        &self,
+        agent_run_id: &str,
+    ) -> AppResult<Option<CompiledContextPack>> {
+        let encoded: Option<String> = self
+            .connection
+            .lock()
+            .query_row(
+                "SELECT pack_json FROM swarm_compiled_context_packs WHERE agent_run_id=?1",
+                [agent_run_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        encoded
+            .map(|value| serde_json::from_str(&value).map_err(AppError::database))
+            .transpose()
+    }
+
     pub fn swarm_execution_defaults(&self, swarm_id: &str) -> AppResult<SwarmExecutionDefaults> {
         let raw: Option<String> = self
             .connection
@@ -53,34 +123,6 @@ impl DatabaseService {
         self.connection.lock().execute("INSERT INTO swarm_execution_defaults(swarm_id,config_json,updated_at) VALUES(?1,?2,?3) ON CONFLICT(swarm_id) DO UPDATE SET config_json=excluded.config_json,updated_at=excluded.updated_at", params![swarm_id, serde_json::to_string(defaults).map_err(AppError::database)?, Utc::now().to_rfc3339()])?;
         Ok(())
     }
-    #[cfg(test)]
-    pub fn seed_project_memory_for_test(&self, project_id: &str, title: &str) -> AppResult<String> {
-        let item_id = Uuid::new_v4().to_string();
-        let revision_id = Uuid::new_v4().to_string();
-        let source_id = Uuid::new_v4().to_string();
-        let now = Utc::now().to_rfc3339();
-        let mut connection = self.connection.lock();
-        let transaction = connection.transaction()?;
-        transaction.execute(
-            "INSERT INTO memory_items(id,project_id,memory_type,dedup_key,title,state,visibility,pinned,current_revision_id,created_at,updated_at) VALUES(?1,?2,'procedure',?3,?4,'active','project_shared',1,?5,?6,?6)",
-            params![item_id, project_id, format!("test-{item_id}"), title, revision_id, now],
-        )?;
-        transaction.execute(
-            "INSERT INTO memory_revisions(id,item_id,revision_number,title,body,summary,confidence,observed_at,content_hash,extraction_method,created_at) VALUES(?1,?2,1,?3,?4,?4,0.9,?5,?6,'deterministic',?5)",
-            params![revision_id, item_id, title, format!("Verified project procedure for {title}"), now, format!("hash-{revision_id}")],
-        )?;
-        transaction.execute(
-            "INSERT INTO memory_sources(id,source_type,project_id,uri,content_hash,captured_at,sensitivity) VALUES(?1,'file',?2,?3,?4,?5,'normal')",
-            params![source_id, project_id, format!("file:///{title}"), format!("source-{source_id}"), now],
-        )?;
-        transaction.execute(
-            "INSERT INTO memory_revision_sources(revision_id,source_id) VALUES(?1,?2)",
-            params![revision_id, source_id],
-        )?;
-        transaction.commit()?;
-        Ok(item_id)
-    }
-
     // ---- Presets -------------------------------------------------------------------------
 
     pub fn list_swarm_presets(&self) -> AppResult<Vec<SwarmPreset>> {
@@ -318,60 +360,6 @@ impl DatabaseService {
             agent_runs,
             attention_requests,
         })
-    }
-
-    /// Snapshot a bounded set of canonical project Memories into this task's persisted context
-    /// pack. The Memory rows remain authoritative and immutable; the snapshot records exactly
-    /// what the provider received so later review can trace provenance.
-    pub fn ensure_swarm_context_pack(
-        &self,
-        swarm: &Swarm,
-        task: &SwarmTask,
-        agent: &SwarmAgent,
-    ) -> AppResult<Vec<SwarmMemoryContext>> {
-        let mut connection = self.connection.lock();
-        let candidates: Vec<(String, String, String, String, String, String, f64)> = {
-            let mut statement = connection.prepare(
-                "SELECT item.id,revision.id,item.title,item.memory_type,item.state,CASE WHEN trim(revision.summary)<>'' THEN revision.summary ELSE substr(revision.body,1,1200) END,revision.confidence FROM memory_items item JOIN memory_revisions revision ON revision.id=item.current_revision_id WHERE item.project_id=?1 AND item.state<>'archived' ORDER BY item.pinned DESC,item.updated_at DESC LIMIT 8",
-            )?;
-            let rows = statement
-                .query_map([&swarm.project_id], |row| {
-                    Ok((
-                        row.get(0)?,
-                        row.get(1)?,
-                        row.get(2)?,
-                        row.get(3)?,
-                        row.get(4)?,
-                        row.get(5)?,
-                        row.get(6)?,
-                    ))
-                })?
-                .collect::<Result<Vec<_>, _>>()?;
-            rows
-        };
-        let transaction = connection.transaction()?;
-        let loaded_at = Utc::now().to_rfc3339();
-        for (memory_item_id, revision_id, title, memory_type, state, context, confidence) in
-            candidates
-        {
-            let source_uris = {
-                let mut statement = transaction.prepare(
-                    "SELECT source.uri FROM memory_revision_sources link JOIN memory_sources source ON source.id=link.source_id WHERE link.revision_id=?1 AND source.project_id=?2 ORDER BY source.captured_at DESC LIMIT 8",
-                )?;
-                let values = statement
-                    .query_map(params![revision_id, swarm.project_id], |row| {
-                        row.get::<_, String>(0)
-                    })?
-                    .collect::<Result<Vec<_>, _>>()?;
-                values
-            };
-            transaction.execute(
-                "INSERT OR IGNORE INTO swarm_context_packs(id,swarm_id,task_id,agent_id,memory_item_id,revision_id,title,memory_type,memory_state,summary,context,confidence,source_uris_json,loaded_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?10,?11,?12,?13)",
-                params![Uuid::new_v4().to_string(), swarm.id, task.id, agent.id, memory_item_id, revision_id, title, memory_type, state, context, confidence, serde_json::to_string(&source_uris).unwrap_or_else(|_| "[]".into()), loaded_at],
-            )?;
-        }
-        transaction.commit()?;
-        load_memory_contexts_for_task(&connection, &swarm.id, &task.id, &agent.id)
     }
 
     pub fn rename_swarm(&self, id: &str, name: &str) -> AppResult<Swarm> {
@@ -875,7 +863,8 @@ impl DatabaseService {
                 true,
             )
         })?;
-        self.connection.lock().execute(
+        let connection = self.connection.lock();
+        connection.execute(
             "UPDATE swarm_agents SET runtime=?2,model_config_json=?3,updated_at=?4 WHERE id=?1",
             params![
                 agent_id,
@@ -883,6 +872,10 @@ impl DatabaseService {
                 serde_json::to_string(config).map_err(AppError::database)?,
                 Utc::now().to_rfc3339()
             ],
+        )?;
+        connection.execute(
+            "UPDATE swarm_runtime_sessions SET runtime=?2,updated_at=?3 WHERE agent_id=?1 AND ended_at IS NULL",
+            params![agent_id, runtime.as_str(), Utc::now().to_rfc3339()],
         )?;
         Ok(())
     }
@@ -912,6 +905,23 @@ impl DatabaseService {
             params![swarm_id, member_id, task_id, config.provider_id, config.model_id, config.reasoning_effort, fallback_reason.is_some(), fallback_reason, serde_json::to_string(config).map_err(AppError::database)?, Utc::now().to_rfc3339()],
         )?;
         Ok(())
+    }
+
+    pub fn latest_swarm_agent_run_id(
+        &self,
+        swarm_id: &str,
+        member_id: &str,
+        task_id: &str,
+    ) -> AppResult<Option<String>> {
+        self.connection
+            .lock()
+            .query_row(
+                "SELECT id FROM swarm_agent_runs WHERE swarm_id=?1 AND member_id=?2 AND task_id=?3 ORDER BY attempt DESC,created_at DESC,id DESC LIMIT 1",
+                params![swarm_id, member_id, task_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(Into::into)
     }
 
     pub fn list_swarm_agents(&self, swarm_id: &str) -> AppResult<Vec<SwarmAgent>> {
@@ -1543,9 +1553,10 @@ impl DatabaseService {
     pub fn record_swarm_evidence(&self, evidence: &SwarmEvidence) -> AppResult<()> {
         let mut connection = self.connection.lock();
         let transaction = connection.transaction()?;
+        let payload_json = bounded_evidence_payload(&evidence.payload);
         transaction.execute(
-            "INSERT INTO swarm_evidence(id,swarm_id,task_id,agent_id,criterion,evidence_type,title,summary,source_uri,payload_json,verified,created_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,'{}',?10,?11)",
-            params![evidence.id, evidence.swarm_id, evidence.task_id, evidence.agent_id, evidence.criterion, evidence.evidence_type, evidence.title, evidence.summary, evidence.source_uri, evidence.verified, evidence.created_at],
+            "INSERT INTO swarm_evidence(id,swarm_id,task_id,agent_id,criterion,evidence_type,title,summary,source_uri,payload_json,verified,created_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
+            params![evidence.id, evidence.swarm_id, evidence.task_id, evidence.agent_id, evidence.criterion, evidence.evidence_type, evidence.title, evidence.summary, evidence.source_uri, payload_json, evidence.verified, evidence.created_at],
         )?;
         if let Some(task_id) = evidence.task_id.as_deref() {
             let current: String = transaction.query_row(
@@ -2269,12 +2280,34 @@ fn load_runtime_sessions(
     Ok(rows)
 }
 
+fn empty_json_object() -> serde_json::Value {
+    serde_json::Value::Object(serde_json::Map::new())
+}
+
+/// Evidence payloads are proof metadata, not a log sink. Redact known secret shapes and keep a
+/// digest when arbitrary producer data exceeds the bounded persistence budget.
+fn bounded_evidence_payload(value: &serde_json::Value) -> String {
+    let redacted = crate::orchestration::redaction::redact_json(value);
+    let encoded = serde_json::to_vec(&redacted).unwrap_or_else(|_| b"{}".to_vec());
+    if encoded.len() <= MAX_EVIDENCE_PAYLOAD_BYTES {
+        return String::from_utf8(encoded).unwrap_or_else(|_| "{}".into());
+    }
+    serde_json::json!({
+        "version": 1,
+        "truncated": true,
+        "originalBytes": encoded.len(),
+        "outputDigest": format!("sha256:{:x}", Sha256::digest(&encoded)),
+    })
+    .to_string()
+}
+
 fn load_evidence(connection: &Connection, swarm_id: &str) -> AppResult<Vec<SwarmEvidence>> {
     let mut statement = connection.prepare(
-        "SELECT id,swarm_id,task_id,agent_id,criterion,evidence_type,title,summary,source_uri,verified,created_at FROM swarm_evidence WHERE swarm_id=?1 ORDER BY created_at DESC",
+        "SELECT id,swarm_id,task_id,agent_id,criterion,evidence_type,title,summary,source_uri,payload_json,verified,created_at FROM swarm_evidence WHERE swarm_id=?1 ORDER BY created_at DESC",
     )?;
     let rows = statement
         .query_map([swarm_id], |row| {
+            let payload: String = row.get(9)?;
             Ok(SwarmEvidence {
                 id: row.get(0)?,
                 swarm_id: row.get(1)?,
@@ -2285,8 +2318,9 @@ fn load_evidence(connection: &Connection, swarm_id: &str) -> AppResult<Vec<Swarm
                 title: row.get(6)?,
                 summary: row.get(7)?,
                 source_uri: row.get(8)?,
-                verified: row.get(9)?,
-                created_at: row.get(10)?,
+                payload: serde_json::from_str(&payload).unwrap_or_else(|_| empty_json_object()),
+                verified: row.get(10)?,
+                created_at: row.get(11)?,
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
@@ -2352,19 +2386,6 @@ fn load_memory_contexts(
         connection,
         "WHERE swarm_id=?1 ORDER BY loaded_at DESC",
         params![swarm_id],
-    )
-}
-
-fn load_memory_contexts_for_task(
-    connection: &Connection,
-    swarm_id: &str,
-    task_id: &str,
-    agent_id: &str,
-) -> AppResult<Vec<SwarmMemoryContext>> {
-    load_memory_contexts_query(
-        connection,
-        "WHERE swarm_id=?1 AND task_id=?2 AND agent_id=?3 ORDER BY loaded_at",
-        params![swarm_id, task_id, agent_id],
     )
 }
 
@@ -2535,4 +2556,188 @@ fn load_activity(connection: &Connection, swarm_id: &str) -> AppResult<SwarmActi
         tasks_done,
         tasks_running,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn seeded_swarm() -> (DatabaseService, String, String) {
+        let database = DatabaseService::in_memory().expect("open database");
+        database
+            .seed_project_workspace_for_test("p1", "w1")
+            .expect("seed project");
+        let swarm_id = "swarm-1".to_string();
+        let swarm = Swarm {
+            id: swarm_id.clone(),
+            project_id: "p1".into(),
+            project_root: "/p".into(),
+            name: "Evidence fixture".into(),
+            mission: "Preserve proof".into(),
+            lifecycle: SwarmLifecycle::Draft,
+            phase: SwarmPhase::Understanding,
+            team_preset: "quick_fix".into(),
+            max_parallel: 1,
+            instructions: String::new(),
+            progress: 0.0,
+            priority: 0,
+            archived: false,
+            decision: None,
+            summary: None,
+            review_verdict: None,
+            repository_identity: None,
+            git_state: serde_json::Value::Null,
+            safeguards: Vec::new(),
+            attachments: Vec::new(),
+            current_milestone: None,
+            revision: 0,
+            roles: Vec::new(),
+            created_at: "2026-08-18T00:00:00Z".into(),
+            updated_at: "2026-08-18T00:00:00Z".into(),
+            started_at: None,
+            completed_at: None,
+        };
+        database.insert_swarm(&swarm).expect("seed swarm");
+        database
+            .insert_swarm_tasks(
+                &swarm_id,
+                &[NewSwarmTask {
+                    title: "Evidence task".into(),
+                    role: SwarmRole::Builder,
+                    position: 0,
+                    depends_on_positions: Vec::new(),
+                    files: vec!["src/lib.rs".into()],
+                    repair_for_task_id: None,
+                }],
+            )
+            .expect("seed task");
+        let task_id = database
+            .list_swarm_tasks(&swarm_id)
+            .expect("load task")
+            .into_iter()
+            .next()
+            .expect("task exists")
+            .id;
+        (database, swarm_id, task_id)
+    }
+
+    #[test]
+    fn evidence_payload_is_redacted_bounded_and_readable_after_reload() {
+        let (database, swarm_id, task_id) = seeded_swarm();
+        let evidence_id = "evidence-rich";
+        database
+            .record_swarm_evidence(&SwarmEvidence {
+                id: evidence_id.into(),
+                swarm_id: swarm_id.clone(),
+                task_id: Some(task_id.clone()),
+                agent_id: None,
+                criterion: "Run the verification command".into(),
+                evidence_type: "test_result".into(),
+                title: "Cargo test".into(),
+                summary: "The test command passed".into(),
+                source_uri: Some("terminal:session-1".into()),
+                payload: serde_json::json!({
+                    "version": 1,
+                    "agentRunId": "run-1",
+                    "command": "cargo test --lib",
+                    "exitCode": 0,
+                    "changedPaths": ["src/lib.rs"],
+                    "testResult": { "status": "passed", "count": 4 },
+                    "secretToken": "must-not-persist",
+                }),
+                verified: true,
+                created_at: "2026-08-18T00:00:00Z".into(),
+            })
+            .expect("write rich evidence");
+
+        let detail = database
+            .get_swarm_detail(&swarm_id)
+            .expect("reload evidence detail");
+        let payload = &detail
+            .evidence
+            .iter()
+            .find(|evidence| evidence.id == evidence_id)
+            .expect("rich evidence exists")
+            .payload;
+        assert_eq!(payload["agentRunId"], "run-1");
+        assert_eq!(payload["command"], "cargo test --lib");
+        assert_eq!(payload["testResult"]["status"], "passed");
+        assert_eq!(payload["secretToken"], "[redacted]");
+
+        let oversized = serde_json::json!({ "output": "x".repeat(40_000) });
+        database
+            .record_swarm_evidence(&SwarmEvidence {
+                id: "evidence-large".into(),
+                swarm_id: swarm_id.clone(),
+                task_id: Some(task_id),
+                agent_id: None,
+                criterion: "Bound output".into(),
+                evidence_type: "bounded_output".into(),
+                title: "Large output".into(),
+                summary: "Only a digest is retained".into(),
+                source_uri: None,
+                payload: oversized,
+                verified: false,
+                created_at: "2026-08-18T00:00:01Z".into(),
+            })
+            .expect("write bounded evidence");
+        let large = database
+            .get_swarm_detail(&swarm_id)
+            .expect("reload bounded evidence")
+            .evidence
+            .into_iter()
+            .find(|evidence| evidence.id == "evidence-large")
+            .expect("bounded evidence exists");
+        assert_eq!(large.payload["truncated"], true);
+        assert!(large.payload["outputDigest"]
+            .as_str()
+            .unwrap()
+            .starts_with("sha256:"));
+    }
+
+    #[test]
+    fn legacy_empty_evidence_payload_remains_readable() {
+        let (database, swarm_id, task_id) = seeded_swarm();
+        database
+            .connection
+            .lock()
+            .execute(
+                "INSERT INTO swarm_evidence(id,swarm_id,task_id,agent_id,criterion,evidence_type,title,summary,source_uri,verified,created_at) VALUES('legacy-evidence',?1,?2,NULL,'legacy','legacy','Legacy evidence','Old row',NULL,0,'2026-08-18T00:00:00Z')",
+                params![swarm_id, task_id],
+            )
+            .expect("insert legacy evidence row");
+        let evidence = database
+            .get_swarm_detail("swarm-1")
+            .expect("load legacy evidence")
+            .evidence
+            .into_iter()
+            .find(|evidence| evidence.id == "legacy-evidence")
+            .expect("legacy evidence exists");
+        assert_eq!(evidence.payload, empty_json_object());
+    }
+
+    #[test]
+    fn persisted_task_verification_flag_drives_the_typed_policy() {
+        let (database, swarm_id, task_id) = seeded_swarm();
+        database
+            .connection
+            .lock()
+            .execute(
+                "UPDATE swarm_tasks SET verification_required=0 WHERE id=?1",
+                [task_id],
+            )
+            .expect("disable verification for research task");
+        let task = database
+            .list_swarm_tasks(&swarm_id)
+            .expect("reload task")
+            .into_iter()
+            .next()
+            .expect("task exists");
+        let policy = crate::models::vnext::VerificationPolicy::for_task(
+            task.role,
+            task.verification_required,
+        );
+        assert!(!task.verification_required);
+        assert!(policy.requirements.is_empty());
+    }
 }

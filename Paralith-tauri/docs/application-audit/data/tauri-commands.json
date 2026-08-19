@@ -1,0 +1,2295 @@
+{
+  "generated_from": "src-tauri/src/lib.rs invoke_handler x invoke() sites in src/**/*.ts(x)",
+  "total_registered": 257,
+  "total_backend_only": 13,
+  "total_broken_calls": 0,
+  "commands": [
+    {
+      "command": "accept_swarm_result",
+      "module": "swarm_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "add_swarm_builder",
+      "module": "swarm_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "apply_swarm_execution_defaults",
+      "module": "swarm_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "apply_window_chrome",
+      "module": "settings_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "archive_swarm",
+      "module": "swarm_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "assess_safe_restart",
+      "module": "update_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "attach_workspace",
+      "module": "window_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "browser_navigate",
+      "module": "browser_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "browser_reload",
+      "module": "browser_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "browser_set_bounds",
+      "module": "browser_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "browser_set_inspect",
+      "module": "browser_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "browser_set_visible",
+      "module": "browser_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "browser_set_zoom",
+      "module": "browser_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "browser_stop",
+      "module": "browser_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "cancel_repository_operation",
+      "module": "repository_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "check_for_updates",
+      "module": "update_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "claim_workspace_lease",
+      "module": "window_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "close_browser_view",
+      "module": "browser_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "close_project_session",
+      "module": "window_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "close_workspace_window",
+      "module": "window_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "code_dependencies",
+      "module": "code_commands.rs",
+      "registered": true,
+      "frontend_callers": [],
+      "status": "BACKEND-ONLY"
+    },
+    {
+      "command": "code_file_symbols",
+      "module": "code_commands.rs",
+      "registered": true,
+      "frontend_callers": [],
+      "status": "BACKEND-ONLY"
+    },
+    {
+      "command": "code_files",
+      "module": "code_commands.rs",
+      "registered": true,
+      "frontend_callers": [],
+      "status": "BACKEND-ONLY"
+    },
+    {
+      "command": "code_impact",
+      "module": "code_commands.rs",
+      "registered": true,
+      "frontend_callers": [],
+      "status": "BACKEND-ONLY"
+    },
+    {
+      "command": "code_index_state",
+      "module": "code_commands.rs",
+      "registered": true,
+      "frontend_callers": [],
+      "status": "BACKEND-ONLY"
+    },
+    {
+      "command": "code_reindex",
+      "module": "code_commands.rs",
+      "registered": true,
+      "frontend_callers": [],
+      "status": "BACKEND-ONLY"
+    },
+    {
+      "command": "code_search_symbols",
+      "module": "code_commands.rs",
+      "registered": true,
+      "frontend_callers": [],
+      "status": "BACKEND-ONLY"
+    },
+    {
+      "command": "code_symbol_detail",
+      "module": "code_commands.rs",
+      "registered": true,
+      "frontend_callers": [],
+      "status": "BACKEND-ONLY"
+    },
+    {
+      "command": "complete_workspace_handoff",
+      "module": "window_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "confirm_healthy_startup",
+      "module": "update_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "context_compile",
+      "module": "memory_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/memory/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "copy_project_entry",
+      "module": "filesystem_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "create_isolated_pane_worktree",
+      "module": "git_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "create_project_directory",
+      "module": "filesystem_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "create_project_file",
+      "module": "filesystem_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "create_swarm",
+      "module": "swarm_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "create_terminal_session",
+      "module": "terminal_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "database_adapter_support",
+      "module": "database_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/database/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "database_apply_design_operation",
+      "module": "database_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/database/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "database_approve_design",
+      "module": "database_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/database/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "database_archive_design",
+      "module": "database_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/database/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "database_build_context_pack",
+      "module": "database_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/database/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "database_compare",
+      "module": "database_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/database/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "database_create_draft",
+      "module": "database_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/database/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "database_discover_sources",
+      "module": "database_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/database/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "database_get_design",
+      "module": "database_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/database/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "database_get_layout",
+      "module": "database_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/database/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "database_get_object",
+      "module": "database_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/database/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "database_get_schema",
+      "module": "database_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/database/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "database_get_source",
+      "module": "database_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/database/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "database_implement_design",
+      "module": "database_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/database/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "database_introspect_sqlite_file",
+      "module": "database_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/database/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "database_list_designs",
+      "module": "database_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/database/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "database_list_issues",
+      "module": "database_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/database/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "database_list_migrations",
+      "module": "database_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/database/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "database_list_sources",
+      "module": "database_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/database/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "database_list_usage",
+      "module": "database_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/database/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "database_publish_canvas_state",
+      "module": "database_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/database/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "database_reject_design",
+      "module": "database_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/database/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "database_save_layout",
+      "module": "database_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/database/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "decide_repository_approval",
+      "module": "repository_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "delete_project_entry",
+      "module": "filesystem_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "delete_swarm",
+      "module": "swarm_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "delete_swarm_preset",
+      "module": "swarm_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "delete_workspace_configuration",
+      "module": "workspace_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "detach_workspace",
+      "module": "window_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "detect_agents",
+      "module": "agent_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "detect_shells",
+      "module": "agent_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "dismiss_agent_resume_session",
+      "module": "agent_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "dismiss_all_agent_resume_sessions",
+      "module": "agent_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "download_update",
+      "module": "update_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "duplicate_workspace",
+      "module": "workspace_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "evaluate_merge_readiness",
+      "module": "repository_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "execute_repository_operation",
+      "module": "repository_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "export_redacted_support_bundle",
+      "module": "diagnostics_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "export_swarm_report",
+      "module": "swarm_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "fail_workspace_handoff",
+      "module": "window_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "focus_swarm_agent_terminal",
+      "module": "swarm_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "focus_workspace_window",
+      "module": "window_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "generate_swarm_fix_task",
+      "module": "swarm_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "get_ai_usage_diagnostics",
+      "module": "usage_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "get_ai_usage_history",
+      "module": "usage_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "get_ai_usage_snapshots",
+      "module": "usage_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "get_diagnostics",
+      "module": "diagnostics_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "get_github_provider_status",
+      "module": "repository_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "get_layout_preset",
+      "module": "workspace_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "get_pane_git_review",
+      "module": "git_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "get_project",
+      "module": "project_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "get_repository_commit_detail",
+      "module": "repository_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "get_repository_diff",
+      "module": "repository_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "get_repository_history",
+      "module": "repository_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "get_repository_intelligence",
+      "module": "repository_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "get_repository_operation",
+      "module": "repository_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "get_repository_policy",
+      "module": "repository_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "get_repository_pull_request_detail",
+      "module": "repository_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "get_repository_workflow_run_detail",
+      "module": "repository_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "get_settings",
+      "module": "settings_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "get_sidebar_preferences",
+      "module": "settings_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "get_startup_status",
+      "module": "update_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "get_swarm_command_draft",
+      "module": "swarm_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "get_swarm_detail",
+      "module": "swarm_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "get_swarm_execution_defaults",
+      "module": "swarm_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "get_theme_preference",
+      "module": "settings_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "get_update_status",
+      "module": "update_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "get_workspace",
+      "module": "workspace_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "get_workspace_canvas_layout",
+      "module": "workspace_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/workspaceLayoutCommands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "get_workspace_placement",
+      "module": "window_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "get_worktree_conflict_risks",
+      "module": "repository_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "inspect_repository",
+      "module": "repository_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "install_downloaded_update",
+      "module": "update_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "install_update_on_exit",
+      "module": "update_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "knowledge_analyze_project",
+      "module": "intelligence_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/memory/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "knowledge_candidates",
+      "module": "intelligence_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/memory/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "knowledge_conflicts",
+      "module": "intelligence_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/memory/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "knowledge_decide_candidates",
+      "module": "intelligence_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/memory/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "knowledge_handoffs",
+      "module": "intelligence_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/memory/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "knowledge_health_report",
+      "module": "intelligence_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/memory/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "knowledge_parse_query",
+      "module": "intelligence_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/memory/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "knowledge_resolve_conflict",
+      "module": "intelligence_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/memory/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "knowledge_review_queue",
+      "module": "intelligence_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/memory/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "knowledge_search",
+      "module": "intelligence_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/memory/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "knowledge_semantic_health",
+      "module": "intelligence_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/memory/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "knowledge_timeline",
+      "module": "intelligence_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/memory/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "knowledge_timeline_actors",
+      "module": "intelligence_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/memory/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "knowledge_understanding",
+      "module": "intelligence_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/memory/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "list_agent_profiles",
+      "module": "agent_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "list_agent_resume_sessions",
+      "module": "agent_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "list_agent_sessions",
+      "module": "agent_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "list_live_sessions",
+      "module": "terminal_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "list_monitors",
+      "module": "window_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "list_open_projects",
+      "module": "window_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "list_project_directory",
+      "module": "filesystem_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "list_projects_overview",
+      "module": "project_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "list_recent_projects",
+      "module": "project_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "list_recent_workspaces",
+      "module": "workspace_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "list_repository_approvals",
+      "module": "repository_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "list_repository_branches",
+      "module": "repository_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "list_repository_worktree_leases",
+      "module": "repository_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "list_swarm_model_registry",
+      "module": "swarm_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "list_swarm_presets",
+      "module": "swarm_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "list_swarm_runtime_readiness",
+      "module": "swarm_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "list_swarms",
+      "module": "swarm_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "list_workspace_placements",
+      "module": "window_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "list_workspaces_for_project",
+      "module": "workspace_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "memory_analyze_impact",
+      "module": "memory_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/memory/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "memory_archive",
+      "module": "memory_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/memory/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "memory_attach_source",
+      "module": "memory_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/memory/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "memory_connections",
+      "module": "memory_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/memory/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "memory_delete_claim",
+      "module": "memory_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/memory/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "memory_delete_relation",
+      "module": "memory_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/memory/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "memory_get",
+      "module": "memory_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/memory/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "memory_graph",
+      "module": "memory_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/memory/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "memory_health",
+      "module": "memory_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/memory/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "memory_history",
+      "module": "memory_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/memory/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "memory_impact",
+      "module": "memory_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/memory/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "memory_job_cancel",
+      "module": "memory_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/memory/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "memory_jobs",
+      "module": "memory_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/memory/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "memory_list",
+      "module": "memory_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/memory/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "memory_mark_stale",
+      "module": "memory_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/memory/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "memory_revision_body",
+      "module": "memory_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/memory/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "memory_save",
+      "module": "memory_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/memory/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "memory_save_claim",
+      "module": "memory_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/memory/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "memory_save_relation",
+      "module": "memory_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/memory/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "memory_search",
+      "module": "memory_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/memory/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "memory_set_pinned",
+      "module": "memory_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/memory/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "memory_set_quality",
+      "module": "memory_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/memory/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "memory_vocabulary",
+      "module": "memory_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/memory/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "move_workspace_to_monitor",
+      "module": "window_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "open_browser_view",
+      "module": "browser_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "open_project",
+      "module": "project_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "open_project_session",
+      "module": "window_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "orchestrator_cancel_session",
+      "module": "orchestration_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/orchestrator/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "orchestrator_create_session",
+      "module": "orchestration_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/orchestrator/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "orchestrator_execute_capability",
+      "module": "orchestration_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/orchestrator/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "orchestrator_get_session",
+      "module": "orchestration_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/orchestrator/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "orchestrator_list_capabilities",
+      "module": "orchestration_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/orchestrator/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "orchestrator_list_interrupted_sessions",
+      "module": "orchestration_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/orchestrator/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "orchestrator_list_sessions",
+      "module": "orchestration_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/orchestrator/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "orchestrator_pause_session",
+      "module": "orchestration_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/orchestrator/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "orchestrator_resume_session",
+      "module": "orchestration_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/orchestrator/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "orchestrator_send_message",
+      "module": "orchestration_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/features/orchestrator/api.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "pause_swarm",
+      "module": "swarm_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "persist_workspace_window_geometry",
+      "module": "window_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "preview_swarm_launch",
+      "module": "swarm_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "read_project_file",
+      "module": "filesystem_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "reconcile_agent_resume_sessions",
+      "module": "agent_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "recover_workspace_windows",
+      "module": "window_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "refresh_ai_usage",
+      "module": "usage_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "refresh_repository_intelligence",
+      "module": "repository_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "refresh_repository_remote_projection",
+      "module": "repository_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "relocate_agent_resume_worktree",
+      "module": "agent_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "relocate_project",
+      "module": "project_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "remove_agent_resume_session",
+      "module": "agent_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "remove_layout_pane",
+      "module": "workspace_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "remove_project_from_recent",
+      "module": "project_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "remove_recent_workspace",
+      "module": "workspace_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "rename_project_entry",
+      "module": "filesystem_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "rename_swarm",
+      "module": "swarm_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "rename_workspace",
+      "module": "workspace_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "reorder_workspaces",
+      "module": "workspace_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "repair_database_metadata",
+      "module": "diagnostics_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "reset_restoration_circuit",
+      "module": "terminal_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "resize_terminal_session",
+      "module": "terminal_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "resolve_swarm_attention",
+      "module": "swarm_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "resolve_swarm_decision",
+      "module": "swarm_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "restart_after_recovery",
+      "module": "update_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "restore_pane_file",
+      "module": "git_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "restore_workspace_sessions",
+      "module": "terminal_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "resume_agent_session",
+      "module": "agent_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "resume_swarm",
+      "module": "swarm_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "retry_swarm",
+      "module": "swarm_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "retry_swarm_test",
+      "module": "swarm_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "retry_update",
+      "module": "update_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "run_health_check",
+      "module": "diagnostics_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "save_custom_shell",
+      "module": "agent_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "save_dropped_image",
+      "module": "terminal_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "save_repository_policy",
+      "module": "repository_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "save_settings",
+      "module": "settings_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "save_swarm_command_draft",
+      "module": "swarm_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "save_swarm_execution_defaults",
+      "module": "swarm_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "save_swarm_preset",
+      "module": "swarm_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "save_workspace",
+      "module": "workspace_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "save_workspace_canvas_layout",
+      "module": "workspace_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/workspaceLayoutCommands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "search_project_files",
+      "module": "filesystem_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "semantic_clear",
+      "module": "semantic_commands.rs",
+      "registered": true,
+      "frontend_callers": [],
+      "status": "BACKEND-ONLY"
+    },
+    {
+      "command": "semantic_nearest",
+      "module": "semantic_commands.rs",
+      "registered": true,
+      "frontend_callers": [],
+      "status": "BACKEND-ONLY"
+    },
+    {
+      "command": "semantic_regenerate",
+      "module": "semantic_commands.rs",
+      "registered": true,
+      "frontend_callers": [],
+      "status": "BACKEND-ONLY"
+    },
+    {
+      "command": "semantic_save_settings",
+      "module": "semantic_commands.rs",
+      "registered": true,
+      "frontend_callers": [],
+      "status": "BACKEND-ONLY"
+    },
+    {
+      "command": "semantic_status",
+      "module": "semantic_commands.rs",
+      "registered": true,
+      "frontend_callers": [],
+      "status": "BACKEND-ONLY"
+    },
+    {
+      "command": "send_swarm_message",
+      "module": "swarm_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "set_active_project",
+      "module": "window_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "set_last_active_workspace",
+      "module": "workspace_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "set_monitor_alias",
+      "module": "window_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "set_project_expanded",
+      "module": "window_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "set_project_last_active",
+      "module": "window_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "set_sidebar_preferences",
+      "module": "settings_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "set_swarm_priority",
+      "module": "swarm_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "set_theme_preference",
+      "module": "settings_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "split_layout_pane",
+      "module": "workspace_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "stage_database_backup_restore",
+      "module": "update_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "stage_pane_file",
+      "module": "git_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "start_in_safe_mode",
+      "module": "update_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "start_swarm",
+      "module": "swarm_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "stop_swarm",
+      "module": "swarm_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "suggest_workspace_name",
+      "module": "workspace_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "terminal_session_status",
+      "module": "terminal_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "terminate_terminal_session",
+      "module": "terminal_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "terminate_workspace_sessions",
+      "module": "terminal_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "unwatch_project_files",
+      "module": "filesystem_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "update_swarm_member_model_config",
+      "module": "swarm_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "usage_telemetry",
+      "module": "usage_telemetry_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "validate_custom_executable",
+      "module": "agent_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "validate_swarm_member_model_config",
+      "module": "swarm_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "validate_working_directory",
+      "module": "project_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "watch_project_files",
+      "module": "filesystem_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "write_project_file",
+      "module": "filesystem_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "command": "write_terminal_input",
+      "module": "terminal_commands.rs",
+      "registered": true,
+      "frontend_callers": [
+        "src/native/commands.ts"
+      ],
+      "status": "LIVE"
+    }
+  ]
+}

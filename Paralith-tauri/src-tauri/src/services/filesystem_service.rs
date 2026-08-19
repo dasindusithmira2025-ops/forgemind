@@ -13,8 +13,8 @@
 use crate::database::DatabaseService;
 use crate::errors::{AppError, AppResult};
 use crate::models::{
-    DirectoryEntry, DirectoryListing, FileContents, FileEncoding, FileKind, FileWriteResult,
-    FsEntryInfo, FsPath, LineEnding, ProjectFileIndex,
+    ChangeOrigin, DirectoryEntry, DirectoryListing, FileContents, FileEncoding, FileKind,
+    FileWriteResult, FsEntryInfo, FsPath, LineEnding, ProjectFileIndex,
 };
 use parking_lot::Mutex;
 use sha2::{Digest, Sha256};
@@ -68,28 +68,37 @@ const NON_SOURCE_DIRECTORIES: &[&str] = &[
 /// from an external/agent edit and avoid an event feedback loop.
 const SELF_WRITE_TTL: Duration = Duration::from_secs(2);
 
-/// Records the paths PARALITH itself just wrote so the [`FileWatchService`] can suppress the
-/// resulting filesystem events instead of echoing the editor's own saves back to it. Shared by
-/// reference between the write path and the watcher.
+/// Records the paths PARALITH itself just wrote, **and which subsystem wrote them**, so the
+/// [`FileWatchService`] can attribute a filesystem event instead of guessing from its path.
+///
+/// The origin stamp is what lets `.paralith/` stop being a blanket exclusion: a memory-mirror write
+/// and a user editing a Skill file both land under `.paralith/`, but only the first is PARALITH
+/// reacting to its own output. Shared by reference between every write path and the watcher.
 #[derive(Clone, Default)]
 pub struct SelfWriteLedger {
-    entries: Arc<Mutex<HashMap<PathBuf, Instant>>>,
+    entries: Arc<Mutex<HashMap<PathBuf, (Instant, ChangeOrigin)>>>,
 }
 
 impl SelfWriteLedger {
+    /// Stamp a write from PARALITH's own Code surface.
     pub fn mark(&self, path: &Path) {
-        self.entries
-            .lock()
-            .insert(path.to_path_buf(), Instant::now());
+        self.mark_origin(path, ChangeOrigin::User);
     }
 
-    /// Returns whether `path` was written by PARALITH within [`SELF_WRITE_TTL`], pruning expired
+    /// Stamp a write, naming the subsystem responsible.
+    pub fn mark_origin(&self, path: &Path, origin: ChangeOrigin) {
+        self.entries
+            .lock()
+            .insert(path.to_path_buf(), (Instant::now(), origin));
+    }
+
+    /// The origin of `path` if PARALITH wrote it within [`SELF_WRITE_TTL`], pruning expired
     /// entries as a side effect so the ledger cannot grow without bound.
-    pub fn recently_written(&self, path: &Path) -> bool {
+    pub fn origin_of(&self, path: &Path) -> Option<ChangeOrigin> {
         let now = Instant::now();
         let mut entries = self.entries.lock();
-        entries.retain(|_, marked| now.duration_since(*marked) < SELF_WRITE_TTL);
-        entries.contains_key(path)
+        entries.retain(|_, (marked, _)| now.duration_since(*marked) < SELF_WRITE_TTL);
+        entries.get(path).map(|(_, origin)| *origin)
     }
 }
 
@@ -107,6 +116,34 @@ impl FileSystemService {
     fn guard(&self, project_id: &str) -> AppResult<ProjectPathGuard> {
         let project = self.database.get_project(project_id)?;
         ProjectPathGuard::new(Path::new(&project.root_path))
+    }
+
+    /// Validate a caller-supplied Project-relative path and return its normalized form, without
+    /// reading the file. Used by subsystems that need to *reference* a Project file — Memory
+    /// evidence, for example — so they inherit the same guard as an actual read instead of
+    /// growing their own path handling.
+    pub fn resolve_project_relative(
+        &self,
+        project_id: &str,
+        relative_path: &str,
+    ) -> AppResult<String> {
+        let guard = self.guard(project_id)?;
+        let (normalized, _) = guard.resolve_existing(relative_path)?;
+        Ok(normalized)
+    }
+
+    /// Normalize a caller-supplied path for a subsystem that only needs to *name* a Project file,
+    /// not open it — impact analysis over a path that a commit has since deleted, for example.
+    ///
+    /// Traversal, absolute paths, NUL bytes, and drive/UNC components are rejected exactly as
+    /// they are for a read. Only the "must exist on disk" requirement is dropped, which is why
+    /// this must never be used to build a path that is subsequently opened.
+    pub fn normalize_project_relative(
+        &self,
+        project_id: &str,
+        relative_path: &str,
+    ) -> AppResult<String> {
+        self.guard(project_id)?.normalize_relative(relative_path)
     }
 
     pub fn list_directory(
@@ -247,6 +284,28 @@ impl FileSystemService {
         content: &str,
         expected_sha256: Option<&str>,
     ) -> AppResult<FileWriteResult> {
+        self.write_file_as(
+            project_id,
+            relative_path,
+            content,
+            expected_sha256,
+            ChangeOrigin::User,
+        )
+    }
+
+    /// `write_file`, naming the subsystem responsible for the write.
+    ///
+    /// The origin is stamped on the ledger and read back by the watcher, which is what lets a
+    /// memory-mirror write be suppressed from impact analysis while a user's edit to a Skill file
+    /// in the same directory is not.
+    pub fn write_file_as(
+        &self,
+        project_id: &str,
+        relative_path: &str,
+        content: &str,
+        expected_sha256: Option<&str>,
+        origin: ChangeOrigin,
+    ) -> AppResult<FileWriteResult> {
         if content.len() as u64 > MAX_TEXT_FILE_BYTES {
             return Err(file_too_large(relative_path, content.len() as u64));
         }
@@ -288,7 +347,7 @@ impl FileSystemService {
         }
         let bytes = content.as_bytes();
         atomic_write(&path, bytes)?;
-        self.ledger.mark(&path);
+        self.ledger.mark_origin(&path, origin);
         let sha256 = hex_sha256(bytes);
         let modified_ms = fs::metadata(&path).ok().and_then(|meta| modified_ms(&meta));
         Ok(FileWriteResult {
@@ -480,10 +539,12 @@ impl ProjectPathGuard {
         Ok(Self { root })
     }
 
-    /// Normalize a caller path to a forward-slash, root-relative form, rejecting traversal,
-    /// absolute paths, NUL bytes, and drive/UNC-qualified components. An empty result denotes
-    /// the Project root itself.
-    fn normalize_relative(&self, relative: &str) -> AppResult<String> {
+    /// Normalize a caller path to a forward-slash, root-relative form. Traversal (`..`), NUL
+    /// bytes, and drive- or scheme-qualified components (anything containing `:`) are *rejected*.
+    /// A leading separator is *neutralized* rather than rejected: `/etc/passwd` normalizes to
+    /// `etc/passwd`, which then resolves under the Project root like any other relative path.
+    /// An empty result denotes the Project root itself.
+    pub(crate) fn normalize_relative(&self, relative: &str) -> AppResult<String> {
         let unified = relative.trim().replace('\\', "/");
         if unified.contains('\0') {
             return Err(reject_path("The path contains an illegal character."));
@@ -985,13 +1046,15 @@ mod tests {
     }
 
     #[test]
-    fn self_write_ledger_expires_and_reports_membership() {
+    fn self_write_ledger_reports_the_origin_it_was_stamped_with() {
         let ledger = SelfWriteLedger::default();
         let path = std::env::temp_dir().join("paralith-ledger-probe.txt");
-        assert!(!ledger.recently_written(&path));
+        assert_eq!(ledger.origin_of(&path), None);
         ledger.mark(&path);
-        assert!(ledger.recently_written(&path));
-        assert!(!ledger.recently_written(Path::new("some/other/path")));
+        assert_eq!(ledger.origin_of(&path), Some(ChangeOrigin::User));
+        ledger.mark_origin(&path, ChangeOrigin::MemoryMirror);
+        assert_eq!(ledger.origin_of(&path), Some(ChangeOrigin::MemoryMirror));
+        assert_eq!(ledger.origin_of(Path::new("some/other/path")), None);
     }
 
     #[test]

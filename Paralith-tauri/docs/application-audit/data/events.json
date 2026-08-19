@@ -1,0 +1,221 @@
+{
+  "generated_from": "emit/emit_to sites and event-name constants in src-tauri/src/**/*.rs x listen() sites in src/**/*.ts(x)",
+  "total_events": 23,
+  "dead_events": 1,
+  "events": [
+    {
+      "event": "terminal-output",
+      "producer": "src-tauri/src/services/terminal_manager.rs:1089,1094",
+      "consumers": ["src/features/terminals/runtimeStore.ts"],
+      "payload": "session id, output bytes, sequence number",
+      "scope": "targeted: main window label + detached window label",
+      "purpose": "stream PTY output to the renderer for xterm",
+      "status": "LIVE"
+    },
+    {
+      "event": "terminal-status",
+      "producer": "src-tauri/src/services/terminal_manager.rs:672,673",
+      "consumers": ["src/features/terminals/runtimeStore.ts"],
+      "payload": "session status transition",
+      "scope": "targeted: main + detached",
+      "purpose": "session lifecycle state",
+      "status": "LIVE"
+    },
+    {
+      "event": "terminal-exit",
+      "producer": "src-tauri/src/services/terminal_manager.rs:674,675",
+      "consumers": ["src/features/terminals/runtimeStore.ts"],
+      "payload": "session id, exit code",
+      "scope": "targeted: main + detached",
+      "purpose": "child process exit",
+      "status": "LIVE"
+    },
+    {
+      "event": "agent-state",
+      "producer": "src-tauri/src/services/terminal_manager.rs:1330,1335",
+      "consumers": ["src/screens/WorkspaceScreen.tsx", "src/features/code-surface/surfaces/AgentsSurface.tsx", "src/features/sidebar/*"],
+      "payload": "AgentStateEvent",
+      "scope": "targeted: main + detached",
+      "purpose": "agent working/idle/waiting classification",
+      "status": "LIVE"
+    },
+    {
+      "event": "restoration-progress",
+      "producer": "src-tauri/src/services/restoration_scheduler.rs:230",
+      "consumers": ["src/screens/WorkspaceScreen.tsx"],
+      "payload": "restoration progress",
+      "scope": "main window",
+      "purpose": "session restoration feedback",
+      "status": "LIVE"
+    },
+    {
+      "event": "project-file-changed",
+      "producer": "src-tauri/src/services/file_watch_service.rs:36 (PROJECT_FILE_CHANGED_EVENT)",
+      "consumers": ["src/features/code-surface/*"],
+      "payload": "changed paths",
+      "scope": "per registered window",
+      "purpose": "external file change detection for the editor/explorer",
+      "status": "LIVE"
+    },
+    {
+      "event": "memory-knowledge-updated",
+      "producer": "src-tauri/src/models/knowledge.rs:200 (KNOWLEDGE_UPDATED_EVENT)",
+      "consumers": ["src/features/memory/api.ts"],
+      "payload": "project id",
+      "scope": "broadcast",
+      "purpose": "knowledge lifecycle wrote to the Fabric",
+      "status": "LIVE"
+    },
+    {
+      "event": "swarm-changed",
+      "producer": "src-tauri/src/services/swarm_service.rs:4802",
+      "consumers": ["src/features/swarms/swarmStore.ts"],
+      "payload": "swarm id",
+      "scope": "broadcast",
+      "purpose": "swarm state changed; consumer refetches authoritative state",
+      "status": "LIVE"
+    },
+    {
+      "event": "browser-event",
+      "producer": "src-tauri/src/services/browser_service.rs:15 (BROWSER_EVENT)",
+      "consumers": ["src/features/code-surface/browser/BrowserSurface.tsx"],
+      "payload": "navigation state or base64url inspect payload",
+      "scope": "owning window",
+      "purpose": "browser navigation + Inspect-mode bridge",
+      "status": "LIVE"
+    },
+    {
+      "event": "repository-state-changed",
+      "producer": "src-tauri/src/services/repository_service.rs",
+      "consumers": ["src/features/repository/repositoryStore.ts"],
+      "payload": "project id",
+      "scope": "broadcast",
+      "purpose": "repository status changed",
+      "status": "LIVE"
+    },
+    {
+      "event": "repository-operation-progress",
+      "producer": "src-tauri/src/services/repository_service.rs (2 sites)",
+      "consumers": ["src/features/repository/repositoryStore.ts"],
+      "payload": "operation id, progress",
+      "scope": "broadcast",
+      "purpose": "queued Git/GitHub operation progress",
+      "status": "LIVE"
+    },
+    {
+      "event": "repository-approval-required",
+      "producer": "src-tauri/src/services/repository_service.rs",
+      "consumers": ["src/features/repository/repositoryStore.ts"],
+      "payload": "approval request",
+      "scope": "broadcast",
+      "purpose": "policy gate requires a human decision",
+      "status": "LIVE"
+    },
+    {
+      "event": "repository-approval-decision",
+      "producer": "src-tauri/src/services/repository_service.rs",
+      "consumers": ["src/features/repository/repositoryStore.ts"],
+      "payload": "decision",
+      "scope": "broadcast",
+      "purpose": "approval resolved",
+      "status": "LIVE"
+    },
+    {
+      "event": "repository-sync-health",
+      "producer": "src-tauri/src/services/repository_service.rs",
+      "consumers": ["src/features/repository/repositoryStore.ts"],
+      "payload": "sync health / staleness",
+      "scope": "broadcast",
+      "purpose": "honest reporting of remote projection freshness",
+      "status": "LIVE"
+    },
+    {
+      "event": "repository-intelligence-updated",
+      "producer": "src-tauri/src/commands/repository_commands.rs:449",
+      "consumers": [],
+      "payload": "project id",
+      "scope": "broadcast",
+      "purpose": "intended to refresh the Repository Intelligence section",
+      "status": "DEAD",
+      "issue": "No listen() site anywhere in src/. The Intelligence section does not live-update."
+    },
+    {
+      "event": "orchestrator-session",
+      "producer": "src-tauri/src/orchestration/kernel.rs:39 (SESSION_EVENT)",
+      "consumers": ["src/features/orchestrator/api.ts"],
+      "payload": "session snapshot",
+      "scope": "broadcast",
+      "purpose": "orchestration session state",
+      "status": "LIVE"
+    },
+    {
+      "event": "orchestrator-event",
+      "producer": "src-tauri/src/orchestration/kernel.rs:40 (TIMELINE_EVENT)",
+      "consumers": ["src/features/orchestrator/api.ts"],
+      "payload": "timeline entry",
+      "scope": "broadcast",
+      "purpose": "orchestration timeline",
+      "status": "LIVE"
+    },
+    {
+      "event": "update-status",
+      "producer": "src-tauri/src/services/update_service.rs:27 (UPDATE_STATUS_EVENT)",
+      "consumers": ["src/features/updates/updateController.ts"],
+      "payload": "UpdateStatus",
+      "scope": "all windows (attached app handle)",
+      "purpose": "update lifecycle",
+      "status": "LIVE"
+    },
+    {
+      "event": "update-progress",
+      "producer": "src-tauri/src/services/update_service.rs:29 (UPDATE_PROGRESS_EVENT)",
+      "consumers": ["src/features/updates/updateController.ts"],
+      "payload": "bytes downloaded / total",
+      "scope": "all windows",
+      "purpose": "download progress",
+      "status": "LIVE"
+    },
+    {
+      "event": "workspace-attach-requested",
+      "producer": "src-tauri/src/commands/window_commands.rs:249",
+      "consumers": ["src/App.tsx:60"],
+      "payload": "HandoffTicket",
+      "scope": "targeted window",
+      "purpose": "detached workspace requests reattachment; main window navigates",
+      "status": "LIVE"
+    },
+    {
+      "event": "theme-changed",
+      "producer": "src-tauri/src/commands/settings_commands.rs",
+      "consumers": ["src/theme/themeStore.ts"],
+      "payload": "theme id",
+      "scope": "all windows",
+      "purpose": "keep every window's theme in sync",
+      "status": "LIVE"
+    },
+    {
+      "event": "sidebar-preferences-changed",
+      "producer": "src-tauri/src/commands/settings_commands.rs",
+      "consumers": ["src/native/events.ts"],
+      "payload": "sidebar preferences",
+      "scope": "all windows",
+      "purpose": "persisted sidebar view preferences broadcast",
+      "status": "LIVE"
+    },
+    {
+      "event": "ai-usage-changed",
+      "producer": "src-tauri/src/commands/usage_commands.rs",
+      "consumers": ["src/features/usage/aiUsageStore.ts"],
+      "payload": "usage snapshots",
+      "scope": "broadcast",
+      "purpose": "provider quota refreshed",
+      "status": "LIVE"
+    }
+  ],
+  "findings": [
+    "1 dead event: repository-intelligence-updated has no consumer.",
+    "No listener leaks found: every listen() site captures and calls its unlisten with a cancelled-guard for the unmount-before-resolve race.",
+    "Terminal events use explicit dual emit_to (main label + detached label) rather than a global broadcast.",
+    "Most non-terminal events are global broadcasts carrying only an id; consumers refetch authoritative state rather than applying deltas, so event ordering is not load-bearing."
+  ]
+}

@@ -243,6 +243,52 @@ const usageHistory = (() => {
  * Command fixtures, keyed by the Rust command name. Anything absent falls through to
  * `defaultFor`, which returns the empty shape the calling screen expects.
  */
+
+// ---- Memory (Context Fabric) ---------------------------------------------------
+// A small but *representative* knowledge base: a canonical decision with evidence and a verified
+// claim, a supported component note, and a superseded ADR - so the quality ladder, the claim
+// states, an unresolved link and a stale memory are all visible in one screenshot.
+const memorySummaries = [
+  { id: 'mem-1', projectId: project.id, slug: 'adr-14-token-rotation', title: 'ADR 14: Token Rotation', memoryType: 'decision', state: 'active', quality: 'canonical', importance: 0.9, confidence: 0.9, summary: 'Refresh tokens rotate after every use and the whole family is invalidated on reuse.', pinned: true, tags: ['auth', 'security'], workspaceId: null, branchName: null, verifiedAt: NOW, staleReason: null, revisionNumber: 4, createdAt: NOW, updatedAt: NOW },
+  { id: 'mem-2', projectId: project.id, slug: 'auth-service', title: 'Auth Service', memoryType: 'component', state: 'active', quality: 'supported', importance: 0.7, confidence: 0.6, summary: 'Owns login, refresh, and session revocation. Talks to TokenRepository only.', pinned: false, tags: ['auth'], workspaceId: null, branchName: null, verifiedAt: null, staleReason: null, revisionNumber: 2, createdAt: NOW, updatedAt: NOW },
+  { id: 'mem-3', projectId: project.id, slug: 'adr-9-static-sessions', title: 'ADR 9: Static Sessions', memoryType: 'decision', state: 'active', quality: 'superseded', importance: 0.3, confidence: 0.4, summary: 'Sessions were fixed-lifetime with no rotation. Replaced by ADR 14.', pinned: false, tags: ['auth'], workspaceId: null, branchName: null, verifiedAt: null, staleReason: 'AuthService.rotate() changed since this was verified', revisionNumber: 1, createdAt: NOW, updatedAt: NOW },
+  { id: 'mem-4', projectId: project.id, slug: 'terminal-lifecycle', title: 'Terminal Lifecycle', memoryType: 'convention', state: 'active', quality: 'working', importance: 0.5, confidence: 0.5, summary: 'Process lifetime is separate from React component lifetime. A rerender never kills a PTY.', pinned: false, tags: ['terminals'], workspaceId: null, branchName: null, verifiedAt: null, staleReason: null, revisionNumber: 1, createdAt: NOW, updatedAt: NOW },
+]
+
+const memoryDetail = {
+  ...memorySummaries[0],
+  body: '## Decision\n\nRefresh tokens rotate after every use. Reuse of a consumed token invalidates the entire token family.\n\nImplemented by [[Auth Service]] against [[Token Repository]], which does not exist as a memory yet.\n\n## Consequences\n\nSupersedes [[ADR 9 Static Sessions]].',
+  properties: [
+    { key: 'component', value: 'AuthService' },
+    { key: 'status', value: 'accepted' },
+    { key: 'decided', value: '2026-07-02' },
+  ],
+  outgoingLinks: [
+    { targetSlug: 'auth-service', targetText: 'Auth Service', targetItemId: 'mem-2', anchor: null, alias: null },
+    { targetSlug: 'token-repository', targetText: 'Token Repository', targetItemId: null, anchor: null, alias: null },
+    { targetSlug: 'adr-9-static-sessions', targetText: 'ADR 9 Static Sessions', targetItemId: 'mem-3', anchor: null, alias: null },
+  ],
+  claims: [
+    { id: 'claim-1', itemId: 'mem-1', ordinal: 0, statement: 'Refresh tokens are rotated after use.', status: 'verified', confidence: 0.95, validFrom: NOW, validUntil: null, supersededByClaimId: null, verifiedAt: NOW, sources: [{ id: 'src-1', sourceType: 'file', uri: 'file:src/auth/token.rs#L142-L188', filePath: 'src/auth/token.rs', lineStart: 142, lineEnd: 188, gitCommit: null, branchName: null, excerpt: null, capturedAt: NOW }], createdAt: NOW, updatedAt: NOW },
+    { id: 'claim-2', itemId: 'mem-1', ordinal: 1, statement: 'Refresh tokens are stored hashed, never in plaintext.', status: 'supported', confidence: 0.7, validFrom: NOW, validUntil: null, supersededByClaimId: null, verifiedAt: null, sources: [{ id: 'src-2', sourceType: 'file', uri: 'file:src/auth/store.rs#L61', filePath: 'src/auth/store.rs', lineStart: 61, lineEnd: null, gitCommit: null, branchName: null, excerpt: null, capturedAt: NOW }], createdAt: NOW, updatedAt: NOW },
+    { id: 'claim-3', itemId: 'mem-1', ordinal: 2, statement: 'Access tokens expire after 15 minutes.', status: 'contradicted', confidence: 0.4, validFrom: NOW, validUntil: null, supersededByClaimId: null, verifiedAt: null, sources: [], createdAt: NOW, updatedAt: NOW },
+  ],
+  sources: [
+    { id: 'src-1', sourceType: 'file', uri: 'file:src/auth/token.rs#L142-L188', filePath: 'src/auth/token.rs', lineStart: 142, lineEnd: 188, gitCommit: null, branchName: null, excerpt: null, capturedAt: NOW },
+    { id: 'src-2', sourceType: 'file', uri: 'file:src/auth/store.rs#L61', filePath: 'src/auth/store.rs', lineStart: 61, lineEnd: null, gitCommit: null, branchName: null, excerpt: null, capturedAt: NOW },
+    { id: 'src-3', sourceType: 'commit', uri: 'commit:91df2ab', filePath: null, lineStart: null, lineEnd: null, gitCommit: '91df2ab', branchName: 'main', excerpt: null, capturedAt: NOW },
+    { id: 'src-4', sourceType: 'command', uri: 'command:cargo test -- auth_refresh', filePath: null, lineStart: null, lineEnd: null, gitCommit: null, branchName: null, excerpt: null, capturedAt: NOW },
+  ],
+  relations: [
+    { id: 'rel-1', relationType: 'supersedes', fromItemId: 'mem-1', toItemId: 'mem-3', toSlug: 'adr-9-static-sessions', toTitle: 'ADR 9: Static Sessions', confidence: 1, createdBy: 'user', createdAt: NOW },
+    // `toSlug`/`toTitle` name the *other* end as the backend resolves it for the memory being
+    // viewed, so an inbound relation reads as its source rather than as the open memory itself.
+    { id: 'rel-2', relationType: 'implements', fromItemId: 'mem-2', toItemId: 'mem-1', toSlug: 'auth-service', toTitle: 'Auth Service', confidence: 0.9, createdBy: 'user', createdAt: NOW },
+  ],
+  revisionId: 'rev-4',
+  filePath: '.paralith/memory/adr-14-token-rotation.md',
+}
+
 export const FIXTURES: Record<string, unknown> = {
   get_startup_status: { recoveryMode: false },
   get_settings: settings,
@@ -315,6 +361,29 @@ export const FIXTURES: Record<string, unknown> = {
   ],
   set_project_last_active: null,
   get_diagnostics_snapshot: { generatedAt: NOW, entries: [] },
+  memory_list: memorySummaries,
+  memory_get: memoryDetail,
+  memory_search: memorySummaries.slice(0, 2).map((item) => ({ ...item, snippet: 'Refresh tokens rotate after every use...', score: 1, matchReason: 'lexical' })),
+  memory_connections: {
+    orphan: false,
+    backlinks: [
+      { sourceItemId: 'mem-2', sourceSlug: 'auth-service', sourceTitle: 'Auth Service', sourceType: 'component', excerpt: 'implements the rotation rule from [[ADR 14: Token Rotation]] in rotate()' },
+      { sourceItemId: 'mem-3', sourceSlug: 'adr-9-static-sessions', sourceTitle: 'ADR 9: Static Sessions', sourceType: 'decision', excerpt: 'replaced by [[ADR 14: Token Rotation]] in July' },
+    ],
+    unlinkedMentions: [
+      { sourceItemId: 'mem-4', sourceSlug: 'terminal-lifecycle', sourceTitle: 'Terminal Lifecycle', matchedText: 'ADR 14: Token Rotation', excerpt: 'unrelated to ADR 14: Token Rotation but mentions it in passing' },
+    ],
+  },
+  memory_history: [
+    { id: 'rev-4', revisionNumber: 4, title: 'ADR 14: Token Rotation', summary: 'Family invalidation added.', confidence: 0.9, extractionMethod: 'user', modelId: null, contentHash: 'd4e5', createdAt: NOW },
+    { id: 'rev-3', revisionNumber: 3, title: 'ADR 14: Token Rotation', summary: 'Hashing note added.', confidence: 0.8, extractionMethod: 'user', modelId: null, contentHash: 'c3d4', createdAt: NOW },
+    { id: 'rev-2', revisionNumber: 2, title: 'ADR 14: Token Rotation', summary: 'Consequences section.', confidence: 0.7, extractionMethod: 'user', modelId: null, contentHash: 'b2c3', createdAt: NOW },
+    { id: 'rev-1', revisionNumber: 1, title: 'ADR 14 (draft)', summary: 'Initial decision.', confidence: 0.5, extractionMethod: 'user', modelId: null, contentHash: 'a1b2', createdAt: NOW },
+  ],
+  memory_vocabulary: [
+    ['supersedes', 'contradicts', 'supports', 'depends_on', 'implements', 'documents', 'derived_from', 'related_to'],
+    ['file', 'commit', 'command', 'test', 'run', 'task', 'url', 'note'],
+  ],
 }
 
 /** The empty shape a screen expects when a command has no fixture. */

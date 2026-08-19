@@ -1,6 +1,6 @@
 import type { CSSProperties } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Activity, BarChart3, Boxes, Database, Folder, FolderGit2, MoreHorizontal, Settings } from 'lucide-react'
+import { Activity, BarChart3, Boxes, BrainCircuit, Database, Folder, FolderGit2, MoreHorizontal, Settings } from 'lucide-react'
 import { Brand } from '../../../components/ui/Brand'
 import { useSwarmStore } from '../../swarms/swarmStore'
 import { isActiveLifecycle, lifecycleLabel, lifecycleTone } from '../../swarms/swarmPresentation'
@@ -128,6 +128,11 @@ export function CollapsedSidebar({
         {actions.onOpenRepository && (
           <button type="button" aria-label="Repository" title="Repository" onClick={actions.onOpenRepository}>
             <FolderGit2 size={16} />
+          </button>
+        )}
+        {actions.onOpenMemory && (
+          <button type="button" aria-label="Memory" title="Memory" onClick={actions.onOpenMemory}>
+            <BrainCircuit size={15} />
           </button>
         )}
         {actions.onOpenDatabase && (

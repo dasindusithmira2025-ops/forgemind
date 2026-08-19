@@ -1,0 +1,827 @@
+---
+id: system.architecture-moc
+type: system
+name: architecture-moc
+status: active
+generated: true
+confidence: 1
+evidence_level: verified
+created_at: 2026-08-19T20:53:17.734Z
+updated_at: 2026-08-19T20:53:17.734Z
+sources:
+  - repository:.
+related:
+tags:
+  - paralith
+  - system
+---
+<!-- PARALITH:AUTO:START -->
+
+# Architecture MOC
+
+- [[corelith_site]] - Package manifest discovered at `corelith-site/package.json`.
+- [[corelith_web]] - Package manifest discovered at `corelith-web/package.json`.
+- [[paralith-marketing-video]] - Package manifest discovered at `marketing/paralith-video/package.json`.
+- [[paralith]] - Package manifest discovered at `Paralith-tauri/package.json`.
+- [[forgemind]] - Package manifest discovered at `Paralith-tauri/src-tauri/Cargo.toml`.
+- [[dbstudio-fixture-drizzle]] - Package manifest discovered at `Paralith-tauri/src-tauri/tests/fixtures/database_studio/drizzle/package.json`.
+- [[@repo-analytics]] - Package manifest discovered at `Paralith-tauri/src-tauri/tests/fixtures/database_studio/monorepo_shared_db/apps/analytic
+- [[@repo-api]] - Package manifest discovered at `Paralith-tauri/src-tauri/tests/fixtures/database_studio/monorepo_shared_db/apps/api/pack
+- [[@repo-worker]] - Package manifest discovered at `Paralith-tauri/src-tauri/tests/fixtures/database_studio/monorepo_shared_db/apps/worker/p
+- [[dbstudio-fixture-monorepo]] - Package manifest discovered at `Paralith-tauri/src-tauri/tests/fixtures/database_studio/monorepo_shared_db/package.json`
+- [[@repo-db]] - Package manifest discovered at `Paralith-tauri/src-tauri/tests/fixtures/database_studio/monorepo_shared_db/packages/db/p
+- [[dbstudio-fixture-multi-logical-db]] - Package manifest discovered at `Paralith-tauri/src-tauri/tests/fixtures/database_studio/multi_logical_db/package.json`.
+- [[dbstudio-fixture-prisma]] - Package manifest discovered at `Paralith-tauri/src-tauri/tests/fixtures/database_studio/prisma/package.json`.
+- [[Paralith-tauri - src-tauri - build]] - Rust module `Paralith-tauri/src-tauri/build.rs`
+- [[rust - agents - adapter]] - Rust module `Paralith-tauri/src-tauri/src/agents/adapter.rs` Defines: AgentLaunchSpec, ProviderAdapter.
+- [[rust - agents - mod]] - Rust module `Paralith-tauri/src-tauri/src/agents/mod.rs`
+- [[rust - agents - model_registry]] - Rust module `Paralith-tauri/src-tauri/src/agents/model_registry.rs` Defines: RegisteredModel.
+- [[rust - build_info]] - Rust module `Paralith-tauri/src-tauri/src/build_info.rs` Defines: BuildInfo.
+- [[rust - commands - agent_commands]] - Rust module `Paralith-tauri/src-tauri/src/commands/agent_commands.rs` exposes Tauri command(s): detect_agents, list_agen
+- [[detect_agents]] - Tauri command `detect_agents` declared in `Paralith-tauri/src-tauri/src/commands/agent_commands.rs`.
+- [[list_agent_profiles]] - Tauri command `list_agent_profiles` declared in `Paralith-tauri/src-tauri/src/commands/agent_commands.rs`.
+- [[list_agent_sessions]] - Tauri command `list_agent_sessions` declared in `Paralith-tauri/src-tauri/src/commands/agent_commands.rs`.
+- [[reconcile_agent_resume_sessions]] - Tauri command `reconcile_agent_resume_sessions` declared in `Paralith-tauri/src-tauri/src/commands/agent_commands.rs`.
+- [[list_agent_resume_sessions]] - Tauri command `list_agent_resume_sessions` declared in `Paralith-tauri/src-tauri/src/commands/agent_commands.rs`.
+- [[resume_agent_session]] - Tauri command `resume_agent_session` declared in `Paralith-tauri/src-tauri/src/commands/agent_commands.rs`.
+- [[dismiss_agent_resume_session]] - Tauri command `dismiss_agent_resume_session` declared in `Paralith-tauri/src-tauri/src/commands/agent_commands.rs`.
+- [[dismiss_all_agent_resume_sessions]] - Tauri command `dismiss_all_agent_resume_sessions` declared in `Paralith-tauri/src-tauri/src/commands/agent_commands.rs`.
+- [[remove_agent_resume_session]] - Tauri command `remove_agent_resume_session` declared in `Paralith-tauri/src-tauri/src/commands/agent_commands.rs`.
+- [[relocate_agent_resume_worktree]] - Tauri command `relocate_agent_resume_worktree` declared in `Paralith-tauri/src-tauri/src/commands/agent_commands.rs`.
+- [[detect_shells]] - Tauri command `detect_shells` declared in `Paralith-tauri/src-tauri/src/commands/agent_commands.rs`.
+- [[save_custom_shell]] - Tauri command `save_custom_shell` declared in `Paralith-tauri/src-tauri/src/commands/agent_commands.rs`.
+- [[validate_custom_executable]] - Tauri command `validate_custom_executable` declared in `Paralith-tauri/src-tauri/src/commands/agent_commands.rs`.
+- [[rust - commands - browser_commands]] - Rust module `Paralith-tauri/src-tauri/src/commands/browser_commands.rs` exposes Tauri command(s): open_browser_view, bro
+- [[open_browser_view]] - Tauri command `open_browser_view` declared in `Paralith-tauri/src-tauri/src/commands/browser_commands.rs`.
+- [[browser_navigate]] - Tauri command `browser_navigate` declared in `Paralith-tauri/src-tauri/src/commands/browser_commands.rs`.
+- [[browser_reload]] - Tauri command `browser_reload` declared in `Paralith-tauri/src-tauri/src/commands/browser_commands.rs`.
+- [[browser_stop]] - Tauri command `browser_stop` declared in `Paralith-tauri/src-tauri/src/commands/browser_commands.rs`.
+- [[browser_set_bounds]] - Tauri command `browser_set_bounds` declared in `Paralith-tauri/src-tauri/src/commands/browser_commands.rs`.
+- [[browser_set_visible]] - Tauri command `browser_set_visible` declared in `Paralith-tauri/src-tauri/src/commands/browser_commands.rs`.
+- [[browser_set_zoom]] - Tauri command `browser_set_zoom` declared in `Paralith-tauri/src-tauri/src/commands/browser_commands.rs`.
+- [[browser_set_inspect]] - Tauri command `browser_set_inspect` declared in `Paralith-tauri/src-tauri/src/commands/browser_commands.rs`.
+- [[close_browser_view]] - Tauri command `close_browser_view` declared in `Paralith-tauri/src-tauri/src/commands/browser_commands.rs`.
+- [[rust - commands - code_commands]] - Rust module `Paralith-tauri/src-tauri/src/commands/code_commands.rs`
+- [[rust - commands - database_commands]] - Rust module `Paralith-tauri/src-tauri/src/commands/database_commands.rs` exposes Tauri command(s): database_discover_sou
+- [[database_discover_sources]] - Tauri command `database_discover_sources` declared in `Paralith-tauri/src-tauri/src/commands/database_commands.rs`.
+- [[database_list_sources]] - Tauri command `database_list_sources` declared in `Paralith-tauri/src-tauri/src/commands/database_commands.rs`.
+- [[database_publish_canvas_state]] - Tauri command `database_publish_canvas_state` declared in `Paralith-tauri/src-tauri/src/commands/database_commands.rs`.
+- [[database_get_source]] - Tauri command `database_get_source` declared in `Paralith-tauri/src-tauri/src/commands/database_commands.rs`.
+- [[database_get_schema]] - Tauri command `database_get_schema` declared in `Paralith-tauri/src-tauri/src/commands/database_commands.rs`.
+- [[database_get_object]] - Tauri command `database_get_object` declared in `Paralith-tauri/src-tauri/src/commands/database_commands.rs`.
+- [[database_compare]] - Tauri command `database_compare` declared in `Paralith-tauri/src-tauri/src/commands/database_commands.rs`.
+- [[database_list_migrations]] - Tauri command `database_list_migrations` declared in `Paralith-tauri/src-tauri/src/commands/database_commands.rs`.
+- [[database_list_usage]] - Tauri command `database_list_usage` declared in `Paralith-tauri/src-tauri/src/commands/database_commands.rs`.
+- [[database_list_issues]] - Tauri command `database_list_issues` declared in `Paralith-tauri/src-tauri/src/commands/database_commands.rs`.
+- [[database_introspect_sqlite_file]] - Tauri command `database_introspect_sqlite_file` declared in `Paralith-tauri/src-tauri/src/commands/database_commands.rs`
+- [[database_create_draft]] - Tauri command `database_create_draft` declared in `Paralith-tauri/src-tauri/src/commands/database_commands.rs`.
+- [[database_list_designs]] - Tauri command `database_list_designs` declared in `Paralith-tauri/src-tauri/src/commands/database_commands.rs`.
+- [[database_get_design]] - Tauri command `database_get_design` declared in `Paralith-tauri/src-tauri/src/commands/database_commands.rs`.
+- [[database_apply_design_operation]] - Tauri command `database_apply_design_operation` declared in `Paralith-tauri/src-tauri/src/commands/database_commands.rs`
+- [[database_approve_design]] - Tauri command `database_approve_design` declared in `Paralith-tauri/src-tauri/src/commands/database_commands.rs`.
+- [[database_reject_design]] - Tauri command `database_reject_design` declared in `Paralith-tauri/src-tauri/src/commands/database_commands.rs`.
+- [[database_archive_design]] - Tauri command `database_archive_design` declared in `Paralith-tauri/src-tauri/src/commands/database_commands.rs`.
+- [[database_save_layout]] - Tauri command `database_save_layout` declared in `Paralith-tauri/src-tauri/src/commands/database_commands.rs`.
+- [[database_get_layout]] - Tauri command `database_get_layout` declared in `Paralith-tauri/src-tauri/src/commands/database_commands.rs`.
+- [[database_build_context_pack]] - Tauri command `database_build_context_pack` declared in `Paralith-tauri/src-tauri/src/commands/database_commands.rs`.
+- [[database_adapter_support]] - Tauri command `database_adapter_support` declared in `Paralith-tauri/src-tauri/src/commands/database_commands.rs`.
+- [[database_implement_design]] - Tauri command `database_implement_design` declared in `Paralith-tauri/src-tauri/src/commands/database_commands.rs`.
+- [[rust - commands - diagnostics_commands]] - Rust module `Paralith-tauri/src-tauri/src/commands/diagnostics_commands.rs` exposes Tauri command(s): get_diagnostics, r
+- [[get_diagnostics]] - Tauri command `get_diagnostics` declared in `Paralith-tauri/src-tauri/src/commands/diagnostics_commands.rs`.
+- [[run_health_check]] - Tauri command `run_health_check` declared in `Paralith-tauri/src-tauri/src/commands/diagnostics_commands.rs`.
+- [[repair_database_metadata]] - Tauri command `repair_database_metadata` declared in `Paralith-tauri/src-tauri/src/commands/diagnostics_commands.rs`.
+- [[export_redacted_support_bundle]] - Tauri command `export_redacted_support_bundle` declared in `Paralith-tauri/src-tauri/src/commands/diagnostics_commands.r
+- [[rust - commands - fabric_ipc]] - Rust module `Paralith-tauri/src-tauri/src/commands/fabric_ipc.rs` exposes Tauri command(s): fabric_memory, fabric_intell
+- [[fabric_memory]] - Tauri command `fabric_memory` declared in `Paralith-tauri/src-tauri/src/commands/fabric_ipc.rs`.
+- [[fabric_intelligence]] - Tauri command `fabric_intelligence` declared in `Paralith-tauri/src-tauri/src/commands/fabric_ipc.rs`.
+- [[fabric_code]] - Tauri command `fabric_code` declared in `Paralith-tauri/src-tauri/src/commands/fabric_ipc.rs`.
+- [[fabric_semantic]] - Tauri command `fabric_semantic` declared in `Paralith-tauri/src-tauri/src/commands/fabric_ipc.rs`.
+- [[rust - commands - fabric_scope]] - Rust module `Paralith-tauri/src-tauri/src/commands/fabric_scope.rs`
+- [[rust - commands - filesystem_commands]] - Rust module `Paralith-tauri/src-tauri/src/commands/filesystem_commands.rs` exposes Tauri command(s): list_project_direct
+- [[list_project_directory]] - Tauri command `list_project_directory` declared in `Paralith-tauri/src-tauri/src/commands/filesystem_commands.rs`.
+- [[read_project_file]] - Tauri command `read_project_file` declared in `Paralith-tauri/src-tauri/src/commands/filesystem_commands.rs`.
+- [[write_project_file]] - Tauri command `write_project_file` declared in `Paralith-tauri/src-tauri/src/commands/filesystem_commands.rs`.
+- [[create_project_file]] - Tauri command `create_project_file` declared in `Paralith-tauri/src-tauri/src/commands/filesystem_commands.rs`.
+- [[create_project_directory]] - Tauri command `create_project_directory` declared in `Paralith-tauri/src-tauri/src/commands/filesystem_commands.rs`.
+- [[rename_project_entry]] - Tauri command `rename_project_entry` declared in `Paralith-tauri/src-tauri/src/commands/filesystem_commands.rs`.
+- [[copy_project_entry]] - Tauri command `copy_project_entry` declared in `Paralith-tauri/src-tauri/src/commands/filesystem_commands.rs`.
+- [[delete_project_entry]] - Tauri command `delete_project_entry` declared in `Paralith-tauri/src-tauri/src/commands/filesystem_commands.rs`.
+- [[search_project_files]] - Tauri command `search_project_files` declared in `Paralith-tauri/src-tauri/src/commands/filesystem_commands.rs`.
+- [[watch_project_files]] - Tauri command `watch_project_files` declared in `Paralith-tauri/src-tauri/src/commands/filesystem_commands.rs`.
+- [[unwatch_project_files]] - Tauri command `unwatch_project_files` declared in `Paralith-tauri/src-tauri/src/commands/filesystem_commands.rs`.
+- [[rust - commands - git_commands]] - Rust module `Paralith-tauri/src-tauri/src/commands/git_commands.rs` exposes Tauri command(s): get_pane_git_review, stage
+- [[get_pane_git_review]] - Tauri command `get_pane_git_review` declared in `Paralith-tauri/src-tauri/src/commands/git_commands.rs`.
+- [[stage_pane_file]] - Tauri command `stage_pane_file` declared in `Paralith-tauri/src-tauri/src/commands/git_commands.rs`.
+- [[restore_pane_file]] - Tauri command `restore_pane_file` declared in `Paralith-tauri/src-tauri/src/commands/git_commands.rs`.
+- [[create_isolated_pane_worktree]] - Tauri command `create_isolated_pane_worktree` declared in `Paralith-tauri/src-tauri/src/commands/git_commands.rs`.
+- [[rust - commands - intelligence_commands]] - Rust module `Paralith-tauri/src-tauri/src/commands/intelligence_commands.rs`
+- [[rust - commands - memory_commands]] - Rust module `Paralith-tauri/src-tauri/src/commands/memory_commands.rs`
+- [[rust - commands - mod]] - Rust module `Paralith-tauri/src-tauri/src/commands/mod.rs`
+- [[rust - commands - orchestration_commands]] - Rust module `Paralith-tauri/src-tauri/src/commands/orchestration_commands.rs` exposes Tauri command(s): orchestrator_cre
+- [[orchestrator_create_session]] - Tauri command `orchestrator_create_session` declared in `Paralith-tauri/src-tauri/src/commands/orchestration_commands.rs
+- [[orchestrator_get_session]] - Tauri command `orchestrator_get_session` declared in `Paralith-tauri/src-tauri/src/commands/orchestration_commands.rs`.
+- [[orchestrator_list_sessions]] - Tauri command `orchestrator_list_sessions` declared in `Paralith-tauri/src-tauri/src/commands/orchestration_commands.rs`
+- [[orchestrator_list_interrupted_sessions]] - Tauri command `orchestrator_list_interrupted_sessions` declared in `Paralith-tauri/src-tauri/src/commands/orchestration_
+- [[orchestrator_send_message]] - Tauri command `orchestrator_send_message` declared in `Paralith-tauri/src-tauri/src/commands/orchestration_commands.rs`.
+- [[orchestrator_list_capabilities]] - Tauri command `orchestrator_list_capabilities` declared in `Paralith-tauri/src-tauri/src/commands/orchestration_commands
+- [[orchestrator_execute_capability]] - Tauri command `orchestrator_execute_capability` declared in `Paralith-tauri/src-tauri/src/commands/orchestration_command
+- [[orchestrator_pause_session]] - Tauri command `orchestrator_pause_session` declared in `Paralith-tauri/src-tauri/src/commands/orchestration_commands.rs`
+- [[orchestrator_resume_session]] - Tauri command `orchestrator_resume_session` declared in `Paralith-tauri/src-tauri/src/commands/orchestration_commands.rs
+- [[orchestrator_cancel_session]] - Tauri command `orchestrator_cancel_session` declared in `Paralith-tauri/src-tauri/src/commands/orchestration_commands.rs
+- [[rust - commands - project_commands]] - Rust module `Paralith-tauri/src-tauri/src/commands/project_commands.rs` exposes Tauri command(s): open_project, get_proj
+- [[open_project]] - Tauri command `open_project` declared in `Paralith-tauri/src-tauri/src/commands/project_commands.rs`.
+- [[get_project]] - Tauri command `get_project` declared in `Paralith-tauri/src-tauri/src/commands/project_commands.rs`.
+- [[list_recent_projects]] - Tauri command `list_recent_projects` declared in `Paralith-tauri/src-tauri/src/commands/project_commands.rs`.
+- [[list_projects_overview]] - Tauri command `list_projects_overview` declared in `Paralith-tauri/src-tauri/src/commands/project_commands.rs`.
+- [[remove_project_from_recent]] - Tauri command `remove_project_from_recent` declared in `Paralith-tauri/src-tauri/src/commands/project_commands.rs`.
+- [[relocate_project]] - Tauri command `relocate_project` declared in `Paralith-tauri/src-tauri/src/commands/project_commands.rs`.
+- [[validate_working_directory]] - Tauri command `validate_working_directory` declared in `Paralith-tauri/src-tauri/src/commands/project_commands.rs`.
+- [[rust - commands - repository_commands]] - Rust module `Paralith-tauri/src-tauri/src/commands/repository_commands.rs` exposes Tauri command(s): inspect_repository,
+- [[inspect_repository]] - Tauri command `inspect_repository` declared in `Paralith-tauri/src-tauri/src/commands/repository_commands.rs`.
+- [[list_repository_branches]] - Tauri command `list_repository_branches` declared in `Paralith-tauri/src-tauri/src/commands/repository_commands.rs`.
+- [[get_repository_diff]] - Tauri command `get_repository_diff` declared in `Paralith-tauri/src-tauri/src/commands/repository_commands.rs`.
+- [[get_repository_history]] - Tauri command `get_repository_history` declared in `Paralith-tauri/src-tauri/src/commands/repository_commands.rs`.
+- [[get_repository_commit_detail]] - Tauri command `get_repository_commit_detail` declared in `Paralith-tauri/src-tauri/src/commands/repository_commands.rs`.
+- [[execute_repository_operation]] - Tauri command `execute_repository_operation` declared in `Paralith-tauri/src-tauri/src/commands/repository_commands.rs`.
+- [[cancel_repository_operation]] - Tauri command `cancel_repository_operation` declared in `Paralith-tauri/src-tauri/src/commands/repository_commands.rs`.
+- [[get_repository_operation]] - Tauri command `get_repository_operation` declared in `Paralith-tauri/src-tauri/src/commands/repository_commands.rs`.
+- [[get_repository_policy]] - Tauri command `get_repository_policy` declared in `Paralith-tauri/src-tauri/src/commands/repository_commands.rs`.
+- [[save_repository_policy]] - Tauri command `save_repository_policy` declared in `Paralith-tauri/src-tauri/src/commands/repository_commands.rs`.
+- [[list_repository_approvals]] - Tauri command `list_repository_approvals` declared in `Paralith-tauri/src-tauri/src/commands/repository_commands.rs`.
+- [[decide_repository_approval]] - Tauri command `decide_repository_approval` declared in `Paralith-tauri/src-tauri/src/commands/repository_commands.rs`.
+- [[list_repository_worktree_leases]] - Tauri command `list_repository_worktree_leases` declared in `Paralith-tauri/src-tauri/src/commands/repository_commands.r
+- [[get_worktree_conflict_risks]] - Tauri command `get_worktree_conflict_risks` declared in `Paralith-tauri/src-tauri/src/commands/repository_commands.rs`.
+- [[get_github_provider_status]] - Tauri command `get_github_provider_status` declared in `Paralith-tauri/src-tauri/src/commands/repository_commands.rs`.
+- [[refresh_repository_remote_projection]] - Tauri command `refresh_repository_remote_projection` declared in `Paralith-tauri/src-tauri/src/commands/repository_comma
+- [[get_repository_workflow_run_detail]] - Tauri command `get_repository_workflow_run_detail` declared in `Paralith-tauri/src-tauri/src/commands/repository_command
+- [[get_repository_pull_request_detail]] - Tauri command `get_repository_pull_request_detail` declared in `Paralith-tauri/src-tauri/src/commands/repository_command
+- [[evaluate_merge_readiness]] - Tauri command `evaluate_merge_readiness` declared in `Paralith-tauri/src-tauri/src/commands/repository_commands.rs`.
+- [[refresh_repository_intelligence]] - Tauri command `refresh_repository_intelligence` declared in `Paralith-tauri/src-tauri/src/commands/repository_commands.r
+- [[get_repository_intelligence]] - Tauri command `get_repository_intelligence` declared in `Paralith-tauri/src-tauri/src/commands/repository_commands.rs`.
+- [[rust - commands - semantic_commands]] - Rust module `Paralith-tauri/src-tauri/src/commands/semantic_commands.rs` Defines: SaveEmbeddingSettingsRequest.
+- [[rust - commands - settings_commands]] - Rust module `Paralith-tauri/src-tauri/src/commands/settings_commands.rs` exposes Tauri command(s): get_settings, save_se
+- [[get_settings]] - Tauri command `get_settings` declared in `Paralith-tauri/src-tauri/src/commands/settings_commands.rs`.
+- [[save_settings]] - Tauri command `save_settings` declared in `Paralith-tauri/src-tauri/src/commands/settings_commands.rs`.
+- [[get_theme_preference]] - Tauri command `get_theme_preference` declared in `Paralith-tauri/src-tauri/src/commands/settings_commands.rs`.
+- [[set_theme_preference]] - Tauri command `set_theme_preference` declared in `Paralith-tauri/src-tauri/src/commands/settings_commands.rs`.
+- [[get_sidebar_preferences]] - Tauri command `get_sidebar_preferences` declared in `Paralith-tauri/src-tauri/src/commands/settings_commands.rs`.
+- [[set_sidebar_preferences]] - Tauri command `set_sidebar_preferences` declared in `Paralith-tauri/src-tauri/src/commands/settings_commands.rs`.
+- [[apply_window_chrome]] - Tauri command `apply_window_chrome` declared in `Paralith-tauri/src-tauri/src/commands/settings_commands.rs`.
+- [[rust - commands - swarm_commands]] - Rust module `Paralith-tauri/src-tauri/src/commands/swarm_commands.rs` exposes Tauri command(s): list_swarm_presets, list
+- [[list_swarm_presets]] - Tauri command `list_swarm_presets` declared in `Paralith-tauri/src-tauri/src/commands/swarm_commands.rs`.
+- [[list_swarm_runtime_readiness]] - Tauri command `list_swarm_runtime_readiness` declared in `Paralith-tauri/src-tauri/src/commands/swarm_commands.rs`.
+- [[list_swarm_model_registry]] - Tauri command `list_swarm_model_registry` declared in `Paralith-tauri/src-tauri/src/commands/swarm_commands.rs`.
+- [[get_swarm_execution_defaults]] - Tauri command `get_swarm_execution_defaults` declared in `Paralith-tauri/src-tauri/src/commands/swarm_commands.rs`.
+- [[save_swarm_execution_defaults]] - Tauri command `save_swarm_execution_defaults` declared in `Paralith-tauri/src-tauri/src/commands/swarm_commands.rs`.
+- [[apply_swarm_execution_defaults]] - Tauri command `apply_swarm_execution_defaults` declared in `Paralith-tauri/src-tauri/src/commands/swarm_commands.rs`.
+- [[validate_swarm_member_model_config]] - Tauri command `validate_swarm_member_model_config` declared in `Paralith-tauri/src-tauri/src/commands/swarm_commands.rs`
+- [[update_swarm_member_model_config]] - Tauri command `update_swarm_member_model_config` declared in `Paralith-tauri/src-tauri/src/commands/swarm_commands.rs`.
+- [[preview_swarm_launch]] - Tauri command `preview_swarm_launch` declared in `Paralith-tauri/src-tauri/src/commands/swarm_commands.rs`.
+- [[save_swarm_preset]] - Tauri command `save_swarm_preset` declared in `Paralith-tauri/src-tauri/src/commands/swarm_commands.rs`.
+- [[delete_swarm_preset]] - Tauri command `delete_swarm_preset` declared in `Paralith-tauri/src-tauri/src/commands/swarm_commands.rs`.
+- [[create_swarm]] - Tauri command `create_swarm` declared in `Paralith-tauri/src-tauri/src/commands/swarm_commands.rs`.
+- [[list_swarms]] - Tauri command `list_swarms` declared in `Paralith-tauri/src-tauri/src/commands/swarm_commands.rs`.
+- [[get_swarm_detail]] - Tauri command `get_swarm_detail` declared in `Paralith-tauri/src-tauri/src/commands/swarm_commands.rs`.
+- [[rename_swarm]] - Tauri command `rename_swarm` declared in `Paralith-tauri/src-tauri/src/commands/swarm_commands.rs`.
+- [[start_swarm]] - Tauri command `start_swarm` declared in `Paralith-tauri/src-tauri/src/commands/swarm_commands.rs`.
+- [[pause_swarm]] - Tauri command `pause_swarm` declared in `Paralith-tauri/src-tauri/src/commands/swarm_commands.rs`.
+- [[resume_swarm]] - Tauri command `resume_swarm` declared in `Paralith-tauri/src-tauri/src/commands/swarm_commands.rs`.
+- [[stop_swarm]] - Tauri command `stop_swarm` declared in `Paralith-tauri/src-tauri/src/commands/swarm_commands.rs`.
+- [[archive_swarm]] - Tauri command `archive_swarm` declared in `Paralith-tauri/src-tauri/src/commands/swarm_commands.rs`.
+- [[delete_swarm]] - Tauri command `delete_swarm` declared in `Paralith-tauri/src-tauri/src/commands/swarm_commands.rs`.
+- [[export_swarm_report]] - Tauri command `export_swarm_report` declared in `Paralith-tauri/src-tauri/src/commands/swarm_commands.rs`.
+- [[set_swarm_priority]] - Tauri command `set_swarm_priority` declared in `Paralith-tauri/src-tauri/src/commands/swarm_commands.rs`.
+- [[send_swarm_message]] - Tauri command `send_swarm_message` declared in `Paralith-tauri/src-tauri/src/commands/swarm_commands.rs`.
+- [[retry_swarm_test]] - Tauri command `retry_swarm_test` declared in `Paralith-tauri/src-tauri/src/commands/swarm_commands.rs`.
+- [[generate_swarm_fix_task]] - Tauri command `generate_swarm_fix_task` declared in `Paralith-tauri/src-tauri/src/commands/swarm_commands.rs`.
+- [[accept_swarm_result]] - Tauri command `accept_swarm_result` declared in `Paralith-tauri/src-tauri/src/commands/swarm_commands.rs`.
+- [[focus_swarm_agent_terminal]] - Tauri command `focus_swarm_agent_terminal` declared in `Paralith-tauri/src-tauri/src/commands/swarm_commands.rs`.
+- [[get_swarm_command_draft]] - Tauri command `get_swarm_command_draft` declared in `Paralith-tauri/src-tauri/src/commands/swarm_commands.rs`.
+- [[save_swarm_command_draft]] - Tauri command `save_swarm_command_draft` declared in `Paralith-tauri/src-tauri/src/commands/swarm_commands.rs`.
+- [[resolve_swarm_decision]] - Tauri command `resolve_swarm_decision` declared in `Paralith-tauri/src-tauri/src/commands/swarm_commands.rs`.
+- [[resolve_swarm_attention]] - Tauri command `resolve_swarm_attention` declared in `Paralith-tauri/src-tauri/src/commands/swarm_commands.rs`.
+- [[retry_swarm]] - Tauri command `retry_swarm` declared in `Paralith-tauri/src-tauri/src/commands/swarm_commands.rs`.
+- [[add_swarm_builder]] - Tauri command `add_swarm_builder` declared in `Paralith-tauri/src-tauri/src/commands/swarm_commands.rs`.
+- [[rust - commands - terminal_commands]] - Rust module `Paralith-tauri/src-tauri/src/commands/terminal_commands.rs` exposes Tauri command(s): create_terminal_sessi
+- [[create_terminal_session]] - Tauri command `create_terminal_session` declared in `Paralith-tauri/src-tauri/src/commands/terminal_commands.rs`.
+- [[write_terminal_input]] - Tauri command `write_terminal_input` declared in `Paralith-tauri/src-tauri/src/commands/terminal_commands.rs`.
+- [[resize_terminal_session]] - Tauri command `resize_terminal_session` declared in `Paralith-tauri/src-tauri/src/commands/terminal_commands.rs`.
+- [[terminate_terminal_session]] - Tauri command `terminate_terminal_session` declared in `Paralith-tauri/src-tauri/src/commands/terminal_commands.rs`.
+- [[terminate_workspace_sessions]] - Tauri command `terminate_workspace_sessions` declared in `Paralith-tauri/src-tauri/src/commands/terminal_commands.rs`.
+- [[list_live_sessions]] - Tauri command `list_live_sessions` declared in `Paralith-tauri/src-tauri/src/commands/terminal_commands.rs`.
+- [[terminal_session_status]] - Tauri command `terminal_session_status` declared in `Paralith-tauri/src-tauri/src/commands/terminal_commands.rs`.
+- [[restore_workspace_sessions]] - Tauri command `restore_workspace_sessions` declared in `Paralith-tauri/src-tauri/src/commands/terminal_commands.rs`.
+- [[reset_restoration_circuit]] - Tauri command `reset_restoration_circuit` declared in `Paralith-tauri/src-tauri/src/commands/terminal_commands.rs`.
+- [[save_dropped_image]] - Tauri command `save_dropped_image` declared in `Paralith-tauri/src-tauri/src/commands/terminal_commands.rs`.
+- [[rust - commands - update_commands]] - Rust module `Paralith-tauri/src-tauri/src/commands/update_commands.rs` exposes Tauri command(s): get_update_status, get_
+- [[get_update_status]] - Tauri command `get_update_status` declared in `Paralith-tauri/src-tauri/src/commands/update_commands.rs`.
+- [[get_startup_status]] - Tauri command `get_startup_status` declared in `Paralith-tauri/src-tauri/src/commands/update_commands.rs`.
+- [[check_for_updates]] - Tauri command `check_for_updates` declared in `Paralith-tauri/src-tauri/src/commands/update_commands.rs`.
+- [[download_update]] - Tauri command `download_update` declared in `Paralith-tauri/src-tauri/src/commands/update_commands.rs`.
+- [[assess_safe_restart]] - Tauri command `assess_safe_restart` declared in `Paralith-tauri/src-tauri/src/commands/update_commands.rs`.
+- [[install_downloaded_update]] - Tauri command `install_downloaded_update` declared in `Paralith-tauri/src-tauri/src/commands/update_commands.rs`.
+- [[install_update_on_exit]] - Tauri command `install_update_on_exit` declared in `Paralith-tauri/src-tauri/src/commands/update_commands.rs`.
+- [[retry_update]] - Tauri command `retry_update` declared in `Paralith-tauri/src-tauri/src/commands/update_commands.rs`.
+- [[confirm_healthy_startup]] - Tauri command `confirm_healthy_startup` declared in `Paralith-tauri/src-tauri/src/commands/update_commands.rs`.
+- [[stage_database_backup_restore]] - Tauri command `stage_database_backup_restore` declared in `Paralith-tauri/src-tauri/src/commands/update_commands.rs`.
+- [[start_in_safe_mode]] - Tauri command `start_in_safe_mode` declared in `Paralith-tauri/src-tauri/src/commands/update_commands.rs`.
+- [[restart_after_recovery]] - Tauri command `restart_after_recovery` declared in `Paralith-tauri/src-tauri/src/commands/update_commands.rs`.
+- [[rust - commands - usage_commands]] - Rust module `Paralith-tauri/src-tauri/src/commands/usage_commands.rs` exposes Tauri command(s): get_ai_usage_history, ge
+- [[get_ai_usage_history]] - Tauri command `get_ai_usage_history` declared in `Paralith-tauri/src-tauri/src/commands/usage_commands.rs`.
+- [[get_ai_usage_snapshots]] - Tauri command `get_ai_usage_snapshots` declared in `Paralith-tauri/src-tauri/src/commands/usage_commands.rs`.
+- [[refresh_ai_usage]] - Tauri command `refresh_ai_usage` declared in `Paralith-tauri/src-tauri/src/commands/usage_commands.rs`.
+- [[get_ai_usage_diagnostics]] - Tauri command `get_ai_usage_diagnostics` declared in `Paralith-tauri/src-tauri/src/commands/usage_commands.rs`.
+- [[rust - commands - usage_telemetry_commands]] - Rust module `Paralith-tauri/src-tauri/src/commands/usage_telemetry_commands.rs` exposes Tauri command(s): usage_telemetr
+- [[usage_telemetry]] - Tauri command `usage_telemetry` declared in `Paralith-tauri/src-tauri/src/commands/usage_telemetry_commands.rs`.
+- [[rust - commands - window_commands]] - Rust module `Paralith-tauri/src-tauri/src/commands/window_commands.rs` exposes Tauri command(s): list_open_projects, ope
+- [[list_open_projects]] - Tauri command `list_open_projects` declared in `Paralith-tauri/src-tauri/src/commands/window_commands.rs`.
+- [[open_project_session]] - Tauri command `open_project_session` declared in `Paralith-tauri/src-tauri/src/commands/window_commands.rs`.
+- [[set_active_project]] - Tauri command `set_active_project` declared in `Paralith-tauri/src-tauri/src/commands/window_commands.rs`.
+- [[close_project_session]] - Tauri command `close_project_session` declared in `Paralith-tauri/src-tauri/src/commands/window_commands.rs`.
+- [[set_project_last_active]] - Tauri command `set_project_last_active` declared in `Paralith-tauri/src-tauri/src/commands/window_commands.rs`.
+- [[set_project_expanded]] - Tauri command `set_project_expanded` declared in `Paralith-tauri/src-tauri/src/commands/window_commands.rs`.
+- [[list_workspace_placements]] - Tauri command `list_workspace_placements` declared in `Paralith-tauri/src-tauri/src/commands/window_commands.rs`.
+- [[get_workspace_placement]] - Tauri command `get_workspace_placement` declared in `Paralith-tauri/src-tauri/src/commands/window_commands.rs`.
+- [[claim_workspace_lease]] - Tauri command `claim_workspace_lease` declared in `Paralith-tauri/src-tauri/src/commands/window_commands.rs`.
+- [[detach_workspace]] - Tauri command `detach_workspace` declared in `Paralith-tauri/src-tauri/src/commands/window_commands.rs`.
+- [[attach_workspace]] - Tauri command `attach_workspace` declared in `Paralith-tauri/src-tauri/src/commands/window_commands.rs`.
+- [[complete_workspace_handoff]] - Tauri command `complete_workspace_handoff` declared in `Paralith-tauri/src-tauri/src/commands/window_commands.rs`.
+- [[fail_workspace_handoff]] - Tauri command `fail_workspace_handoff` declared in `Paralith-tauri/src-tauri/src/commands/window_commands.rs`.
+- [[focus_workspace_window]] - Tauri command `focus_workspace_window` declared in `Paralith-tauri/src-tauri/src/commands/window_commands.rs`.
+- [[close_workspace_window]] - Tauri command `close_workspace_window` declared in `Paralith-tauri/src-tauri/src/commands/window_commands.rs`.
+- [[move_workspace_to_monitor]] - Tauri command `move_workspace_to_monitor` declared in `Paralith-tauri/src-tauri/src/commands/window_commands.rs`.
+- [[persist_workspace_window_geometry]] - Tauri command `persist_workspace_window_geometry` declared in `Paralith-tauri/src-tauri/src/commands/window_commands.rs`
+- [[recover_workspace_windows]] - Tauri command `recover_workspace_windows` declared in `Paralith-tauri/src-tauri/src/commands/window_commands.rs`.
+- [[list_monitors]] - Tauri command `list_monitors` declared in `Paralith-tauri/src-tauri/src/commands/window_commands.rs`.
+- [[set_monitor_alias]] - Tauri command `set_monitor_alias` declared in `Paralith-tauri/src-tauri/src/commands/window_commands.rs`.
+- [[rust - commands - workspace_commands]] - Rust module `Paralith-tauri/src-tauri/src/commands/workspace_commands.rs` exposes Tauri command(s): get_layout_preset, s
+- [[get_layout_preset]] - Tauri command `get_layout_preset` declared in `Paralith-tauri/src-tauri/src/commands/workspace_commands.rs`.
+- [[split_layout_pane]] - Tauri command `split_layout_pane` declared in `Paralith-tauri/src-tauri/src/commands/workspace_commands.rs`.
+- [[remove_layout_pane]] - Tauri command `remove_layout_pane` declared in `Paralith-tauri/src-tauri/src/commands/workspace_commands.rs`.
+- [[save_workspace]] - Tauri command `save_workspace` declared in `Paralith-tauri/src-tauri/src/commands/workspace_commands.rs`.
+- [[get_workspace]] - Tauri command `get_workspace` declared in `Paralith-tauri/src-tauri/src/commands/workspace_commands.rs`.
+- [[get_workspace_canvas_layout]] - Tauri command `get_workspace_canvas_layout` declared in `Paralith-tauri/src-tauri/src/commands/workspace_commands.rs`.
+- [[save_workspace_canvas_layout]] - Tauri command `save_workspace_canvas_layout` declared in `Paralith-tauri/src-tauri/src/commands/workspace_commands.rs`.
+- [[list_workspaces_for_project]] - Tauri command `list_workspaces_for_project` declared in `Paralith-tauri/src-tauri/src/commands/workspace_commands.rs`.
+- [[suggest_workspace_name]] - Tauri command `suggest_workspace_name` declared in `Paralith-tauri/src-tauri/src/commands/workspace_commands.rs`.
+- [[list_recent_workspaces]] - Tauri command `list_recent_workspaces` declared in `Paralith-tauri/src-tauri/src/commands/workspace_commands.rs`.
+- [[remove_recent_workspace]] - Tauri command `remove_recent_workspace` declared in `Paralith-tauri/src-tauri/src/commands/workspace_commands.rs`.
+- [[delete_workspace_configuration]] - Tauri command `delete_workspace_configuration` declared in `Paralith-tauri/src-tauri/src/commands/workspace_commands.rs`
+- [[rename_workspace]] - Tauri command `rename_workspace` declared in `Paralith-tauri/src-tauri/src/commands/workspace_commands.rs`.
+- [[reorder_workspaces]] - Tauri command `reorder_workspaces` declared in `Paralith-tauri/src-tauri/src/commands/workspace_commands.rs`.
+- [[duplicate_workspace]] - Tauri command `duplicate_workspace` declared in `Paralith-tauri/src-tauri/src/commands/workspace_commands.rs`.
+- [[set_last_active_workspace]] - Tauri command `set_last_active_workspace` declared in `Paralith-tauri/src-tauri/src/commands/workspace_commands.rs`.
+- [[rust - database - backup]] - Rust module `Paralith-tauri/src-tauri/src/database/backup.rs` Defines: BackupFile, BackupManifest, BackupRoots, Database
+- [[rust - database - code]] - Rust module `Paralith-tauri/src-tauri/src/database/code.rs`
+- [[rust - database - database_studio]] - Rust module `Paralith-tauri/src-tauri/src/database/database_studio.rs` Defines: IssueDetail, RevisionDecision.
+- [[rust - database - embeddings]] - Rust module `Paralith-tauri/src-tauri/src/database/embeddings.rs` Defines: EmbeddingUpsert.
+- [[rust - database - graph]] - Rust module `Paralith-tauri/src-tauri/src/database/graph.rs` Defines: ContextBody, GraphRow, RawEdge, RelationEdge.
+- [[rust - database - intelligence]] - Rust module `Paralith-tauri/src-tauri/src/database/intelligence.rs`
+- [[rust - database - knowledge_jobs]] - Rust module `Paralith-tauri/src-tauri/src/database/knowledge_jobs.rs`
+- [[rust - database - legacy_migration]] - Rust module `Paralith-tauri/src-tauri/src/database/legacy_migration.rs` Defines: LegacyMigrationRoots, LegacyMigrationSt
+- [[rust - database - memory]] - Rust module `Paralith-tauri/src-tauri/src/database/memory.rs` Defines: ParsedQuery.
+- [[rust - database - migrations]] - Rust module `Paralith-tauri/src-tauri/src/database/migrations.rs` Defines: Row.
+- [[rust - database - mod]] - Rust module `Paralith-tauri/src-tauri/src/database/mod.rs` Defines: DatabaseService, PaneWorktreeRecord.
+- [[rust - database - orchestration]] - Rust module `Paralith-tauri/src-tauri/src/database/orchestration.rs`
+- [[rust - database - placement]] - Rust module `Paralith-tauri/src-tauri/src/database/placement.rs`
+- [[rust - database - repair]] - Rust module `Paralith-tauri/src-tauri/src/database/repair.rs`
+- [[rust - database - repository]] - Rust module `Paralith-tauri/src-tauri/src/database/repository.rs` Defines: NewRepositoryOperation.
+- [[rust - database - search]] - Rust module `Paralith-tauri/src-tauri/src/database/search.rs` Defines: Fixture, FlatSpec.
+- [[rust - database - swarm]] - Rust module `Paralith-tauri/src-tauri/src/database/swarm.rs` Defines: NewSwarmTask, SwarmAgentRunCompletion.
+- [[rust - database - usage]] - Rust module `Paralith-tauri/src-tauri/src/database/usage.rs`
+- [[rust - errors - app_error]] - Rust module `Paralith-tauri/src-tauri/src/errors/app_error.rs` Defines: AppError.
+- [[rust - errors - mod]] - Rust module `Paralith-tauri/src-tauri/src/errors/mod.rs`
+- [[rust - lib]] - Rust module `Paralith-tauri/src-tauri/src/lib.rs` Defines: AppState.
+- [[rust - main]] - Rust module `Paralith-tauri/src-tauri/src/main.rs`
+- [[rust - models - agent]] - Rust module `Paralith-tauri/src-tauri/src/models/agent.rs` Defines: AgentDetectionResult, AgentProfile, AgentResumeRecor
+- [[rust - models - browser]] - Rust module `Paralith-tauri/src-tauri/src/models/browser.rs` Defines: BrowserBounds.
+- [[rust - models - code]] - Rust module `Paralith-tauri/src-tauri/src/models/code.rs` Defines: CodeFileRecord, CodeImpact, CodeImport, CodeIndexRepo
+- [[rust - models - context]] - Rust module `Paralith-tauri/src-tauri/src/models/context.rs` Defines: ContextConflict, ContextDiagnostics, ContextEntry,
+- [[rust - models - database_studio]] - Rust module `Paralith-tauri/src-tauri/src/models/database_studio.rs` Defines: CheckConstraint, DatabaseAdapterCapabiliti
+- [[rust - models - diagnostics]] - Rust module `Paralith-tauri/src-tauri/src/models/diagnostics.rs` Defines: DiagnosticsSnapshot, HealthReport, ReadinessCh
+- [[rust - models - filesystem]] - Rust module `Paralith-tauri/src-tauri/src/models/filesystem.rs` Defines: DirectoryEntry, DirectoryListing, FileContents,
+- [[rust - models - git]] - Rust module `Paralith-tauri/src-tauri/src/models/git.rs` Defines: GitChangedFile, IsolatedWorktreeResult, PaneGitReview.
+- [[rust - models - graph]] - Rust module `Paralith-tauri/src-tauri/src/models/graph.rs` Defines: GraphEdge, GraphNode, GraphRequest, ImpactHit, Impac
+- [[rust - models - intelligence]] - Rust module `Paralith-tauri/src-tauri/src/models/intelligence.rs` Defines: AgentHandoff, CandidateInput, DecideCandidate
+- [[rust - models - knowledge]] - Rust module `Paralith-tauri/src-tauri/src/models/knowledge.rs` Defines: AnalyzeImpactPayload, AnalyzeProjectOutcome, Ana
+- [[rust - models - layout]] - Rust module `Paralith-tauri/src-tauri/src/models/layout.rs`
+- [[rust - models - memory]] - Rust module `Paralith-tauri/src-tauri/src/models/memory.rs` Defines: AttachSourceRequest, MemoryBacklink, MemoryClaim, M
+- [[rust - models - mod]] - Rust module `Paralith-tauri/src-tauri/src/models/mod.rs`
+- [[rust - models - placement]] - Rust module `Paralith-tauri/src-tauri/src/models/placement.rs` Defines: HandoffTicket, MonitorInfo, MonitorRecoveryRepor
+- [[rust - models - project]] - Rust module `Paralith-tauri/src-tauri/src/models/project.rs` Defines: Project, ProjectOverview.
+- [[rust - models - query]] - Rust module `Paralith-tauri/src-tauri/src/models/query.rs` Defines: FieldClause, ParsedQuery, SearchRequest, SearchRespo
+- [[rust - models - repository]] - Rust module `Paralith-tauri/src-tauri/src/models/repository.rs` Defines: ApprovalDecisionRequest, MergeReadiness, MergeR
+- [[rust - models - settings]] - Rust module `Paralith-tauri/src-tauri/src/models/settings.rs` Defines: AppSettings, SidebarPreferences.
+- [[rust - models - swarm]] - Rust module `Paralith-tauri/src-tauri/src/models/swarm.rs` Defines: CreateSwarmRequest, SavePresetRequest, Swarm, SwarmA
+- [[rust - models - terminal]] - Rust module `Paralith-tauri/src-tauri/src/models/terminal.rs` Defines: CreateTerminalRequest, StartTerminalRequest, Term
+- [[rust - models - update]] - Rust module `Paralith-tauri/src-tauri/src/models/update.rs` Defines: AvailableUpdate, RestartInputs, SafeRestartAssessme
+- [[rust - models - usage]] - Rust module `Paralith-tauri/src-tauri/src/models/usage.rs` Defines: AiUsageDiagnostics, ProviderUsageSnapshot, TokenUsag
+- [[rust - models - usage_telemetry]] - Rust module `Paralith-tauri/src-tauri/src/models/usage_telemetry.rs` Defines: ContributionDay, GithubActivitySnapshot, S
+- [[rust - models - vnext]] - Rust module `Paralith-tauri/src-tauri/src/models/vnext.rs` Defines: AgentExecutionRequest, AgentExecutionResult, Compile
+- [[rust - models - workspace]] - Rust module `Paralith-tauri/src-tauri/src/models/workspace.rs` Defines: PaneAssignment, RecentWorkspace, SaveWorkspaceCa
+- [[rust - orchestration - kernel]] - Rust module `Paralith-tauri/src-tauri/src/orchestration/kernel.rs` Defines: OrchestrationKernel, TempDir.
+- [[rust - orchestration - mod]] - Rust module `Paralith-tauri/src-tauri/src/orchestration/mod.rs`
+- [[rust - orchestration - model]] - Rust module `Paralith-tauri/src-tauri/src/orchestration/model.rs` Defines: CapabilityExecution, CapabilityOutcome, Creat
+- [[rust - orchestration - policy]] - Rust module `Paralith-tauri/src-tauri/src/orchestration/policy.rs`
+- [[rust - orchestration - redaction]] - Rust module `Paralith-tauri/src-tauri/src/orchestration/redaction.rs`
+- [[rust - orchestration - registry]] - Rust module `Paralith-tauri/src-tauri/src/orchestration/registry.rs` Defines: CapabilityDescriptor.
+- [[rust - services - agent_detector]] - Rust module `Paralith-tauri/src-tauri/src/services/agent_detector.rs` Defines: AgentDetector.
+- [[rust - services - agent_handoff]] - Rust module `Paralith-tauri/src-tauri/src/services/agent_handoff.rs`
+- [[rust - services - agent_resume]] - Rust module `Paralith-tauri/src-tauri/src/services/agent_resume.rs` Defines: AgentResumeService.
+- [[rust - services - browser_service]] - Rust module `Paralith-tauri/src-tauri/src/services/browser_service.rs` Defines: BrowserService, BrowserView.
+- [[rust - services - code_intelligence]] - Rust module `Paralith-tauri/src-tauri/src/services/code_intelligence.rs` Defines: CodeIntelligence.
+- [[rust - services - code_parser]] - Rust module `Paralith-tauri/src-tauri/src/services/code_parser.rs` Defines: Declaration, Engine, OpenContainer.
+- [[rust - services - context_compiler]] - Rust module `Paralith-tauri/src-tauri/src/services/context_compiler.rs` Defines: Candidate, ContextCompiler, Fixture, Pa
+- [[rust - services - database_studio - adapters]] - Rust module `Paralith-tauri/src-tauri/src/services/database_studio/adapters.rs` Defines: DetectionContext, ExtractionCon
+- [[rust - services - database_studio - agent_ops]] - Rust module `Paralith-tauri/src-tauri/src/services/database_studio/agent_ops.rs` Defines: ColumnInput, ColumnPatchInput,
+- [[rust - services - database_studio - context_pack]] - Rust module `Paralith-tauri/src-tauri/src/services/database_studio/context_pack.rs` Defines: ContextPackInput.
+- [[rust - services - database_studio - contracts]] - Rust module `Paralith-tauri/src-tauri/src/services/database_studio/contracts.rs` Defines: ApplyDatabaseDesignOperationRe
+- [[rust - services - database_studio - design]] - Rust module `Paralith-tauri/src-tauri/src/services/database_studio/design.rs` Defines: ActualDesignHead, CreateDesignReq
+- [[rust - services - database_studio - diff]] - Rust module `Paralith-tauri/src-tauri/src/services/database_studio/diff.rs` Defines: MatchResult.
+- [[rust - services - database_studio - discovery]] - Rust module `Paralith-tauri/src-tauri/src/services/database_studio/discovery.rs` Defines: DiscoveredLogicalDatabase, Dis
+- [[rust - services - database_studio - graph]] - Rust module `Paralith-tauri/src-tauri/src/services/database_studio/graph.rs` Defines: DiscoveredSource.
+- [[rust - services - database_studio - health]] - Rust module `Paralith-tauri/src-tauri/src/services/database_studio/health.rs` Defines: HealthIssue.
+- [[rust - services - database_studio - mod]] - Rust module `Paralith-tauri/src-tauri/src/services/database_studio/mod.rs`
+- [[rust - services - database_studio - pipeline - execute]] - Rust module `Paralith-tauri/src-tauri/src/services/database_studio/pipeline/execute.rs` Defines: ImplementationInput, Pr
+- [[rust - services - database_studio - pipeline - mod]] - Rust module `Paralith-tauri/src-tauri/src/services/database_studio/pipeline/mod.rs` Defines: AllowedCommand, AuthorizedI
+- [[rust - services - database_studio - pipeline - native]] - Rust module `Paralith-tauri/src-tauri/src/services/database_studio/pipeline/native.rs` Defines: GraphIndex.
+- [[rust - services - database_studio - runtime]] - Rust module `Paralith-tauri/src-tauri/src/services/database_studio/runtime.rs` Defines: CanvasScope, DatabaseCanvasConte
+- [[rust - services - database_studio - security]] - Rust module `Paralith-tauri/src-tauri/src/services/database_studio/security.rs`
+- [[rust - services - database_studio - sqlite_introspect]] - Rust module `Paralith-tauri/src-tauri/src/services/database_studio/sqlite_introspect.rs`
+- [[rust - services - database_studio - usage]] - Rust module `Paralith-tauri/src-tauri/src/services/database_studio/usage.rs`
+- [[rust - services - embeddings]] - Rust module `Paralith-tauri/src-tauri/src/services/embeddings.rs` Defines: DisabledProvider, EmbeddingDatum, EmbeddingHe
+- [[rust - services - filesystem_service]] - Rust module `Paralith-tauri/src-tauri/src/services/filesystem_service.rs` Defines: FileSystemService, ProjectPathGuard,
+- [[rust - services - file_watch_service]] - Rust module `Paralith-tauri/src-tauri/src/services/file_watch_service.rs` Defines: ChangeSinks, FileWatchService, Projec
+- [[rust - services - knowledge_intelligence]] - Rust module `Paralith-tauri/src-tauri/src/services/knowledge_intelligence.rs` Defines: Fixture, KnowledgeIntelligence.
+- [[rust - services - knowledge_lifecycle]] - Rust module `Paralith-tauri/src-tauri/src/services/knowledge_lifecycle.rs` Defines: Fixture, KnowledgeLifecycle.
+- [[rust - services - memory_markdown]] - Rust module `Paralith-tauri/src-tauri/src/services/memory_markdown.rs` Defines: ParsedLink, ParsedMemory.
+- [[rust - services - memory_service]] - Rust module `Paralith-tauri/src-tauri/src/services/memory_service.rs` Defines: Fixture, MemoryService.
+- [[rust - services - mod]] - Rust module `Paralith-tauri/src-tauri/src/services/mod.rs`
+- [[rust - services - process_util]] - Rust module `Paralith-tauri/src-tauri/src/services/process_util.rs`
+- [[rust - services - project_analyzer]] - Rust module `Paralith-tauri/src-tauri/src/services/project_analyzer.rs` exposes Tauri command(s): tauri_command_names, m
+- [[tauri_command_names]] - Tauri command `tauri_command_names` declared in `Paralith-tauri/src-tauri/src/services/project_analyzer.rs`.
+- [[memory_search]] - Tauri command `memory_search` declared in `Paralith-tauri/src-tauri/src/services/project_analyzer.rs`.
+- [[memory_list]] - Tauri command `memory_list` declared in `Paralith-tauri/src-tauri/src/services/project_analyzer.rs`.
+- [[rust - services - project_service]] - Rust module `Paralith-tauri/src-tauri/src/services/project_service.rs` Defines: ProjectService.
+- [[rust - services - query_engine]] - Rust module `Paralith-tauri/src-tauri/src/services/query_engine.rs` Defines: Parser, TranslatedQuery.
+- [[rust - services - repository_intelligence]] - Rust module `Paralith-tauri/src-tauri/src/services/repository_intelligence.rs` Defines: GraphBuilder, Origin, TestIndex.
+- [[rust - services - repository_service]] - Rust module `Paralith-tauri/src-tauri/src/services/repository_service.rs` Defines: CommandOutput, ParsedStatus, Reposito
+- [[rust - services - restoration_scheduler]] - Rust module `Paralith-tauri/src-tauri/src/services/restoration_scheduler.rs` Defines: RestorationScheduler.
+- [[rust - services - semantic]] - Rust module `Paralith-tauri/src-tauri/src/services/semantic.rs` Defines: SemanticIndexReport, SemanticService, SemanticS
+- [[rust - services - startup_service]] - Rust module `Paralith-tauri/src-tauri/src/services/startup_service.rs` Defines: StartupDatabase.
+- [[rust - services - swarm_service]] - Rust module `Paralith-tauri/src-tauri/src/services/swarm_service.rs` Defines: ClaudeAdapter, CodexAdapter, LostRuntime,
+- [[rust - services - terminal_manager]] - Rust module `Paralith-tauri/src-tauri/src/services/terminal_manager.rs` Defines: CreationReservation, TerminalHandle, Te
+- [[rust - services - update_service]] - Rust module `Paralith-tauri/src-tauri/src/services/update_service.rs` Defines: DownloadProgress, Runtime, StartupContext
+- [[rust - services - usage_service]] - Rust module `Paralith-tauri/src-tauri/src/services/usage_service.rs` Defines: FileCheckpoint, LiveUsageError, ParsedFile
+- [[rust - services - usage_telemetry_service]] - Rust module `Paralith-tauri/src-tauri/src/services/usage_telemetry_service.rs` Defines: UsageTelemetryService, UsageTele
+- [[rust - services - window_chrome]] - Rust module `Paralith-tauri/src-tauri/src/services/window_chrome.rs` Defines: WindowChrome.
+- [[rust - services - window_registry]] - Rust module `Paralith-tauri/src-tauri/src/services/window_registry.rs` Defines: DetachedWindow, Inner, Lease, WindowRegi
+- [[Paralith-tauri - src-tauri - tests - updater_signature]] - Rust module `Paralith-tauri/src-tauri/tests/updater_signature.rs`
+- [[corelith-site - next-env.d]] - TypeScript module `corelith-site/next-env.d.ts`
+- [[corelith-site - next.config]] - TypeScript module `corelith-site/next.config.ts`
+- [[corelith-site - src - app - api - intake - route]] - TypeScript module `corelith-site/src/app/api/intake/route.ts` defines UI component(s): POST.
+- [[corelith-site - src - app - capabilities - page]] - TypeScript module `corelith-site/src/app/capabilities/page.tsx` defines UI component(s): CapabilitiesPage.
+- [[corelith-site - src - app - capabilities - [slug] - page]] - TypeScript module `corelith-site/src/app/capabilities/[slug]/page.tsx` defines UI component(s): CapabilityPage.
+- [[corelith-site - src - app - careers - page]] - TypeScript module `corelith-site/src/app/careers/page.tsx` defines UI component(s): CareersPage.
+- [[corelith-site - src - app - company - page]] - TypeScript module `corelith-site/src/app/company/page.tsx` defines UI component(s): CompanyPage.
+- [[corelith-site - src - app - contact - page]] - TypeScript module `corelith-site/src/app/contact/page.tsx` defines UI component(s): ContactPage.
+- [[corelith-site - src - app - insights - page]] - TypeScript module `corelith-site/src/app/insights/page.tsx` defines UI component(s): InsightsPage.
+- [[corelith-site - src - app - layout]] - TypeScript module `corelith-site/src/app/layout.tsx` defines UI component(s): RootLayout.
+- [[corelith-site - src - app - not-found]] - TypeScript module `corelith-site/src/app/not-found.tsx` defines UI component(s): NotFound.
+- [[corelith-site - src - app - page]] - TypeScript module `corelith-site/src/app/page.tsx` defines UI component(s): Capabilities, ClosingCta, Hero, HomePage, Ho
+- [[corelith-site - src - app - privacy - page]] - TypeScript module `corelith-site/src/app/privacy/page.tsx` defines UI component(s): PrivacyPage.
+- [[corelith-site - src - app - products - page]] - TypeScript module `corelith-site/src/app/products/page.tsx` defines UI component(s): ProductsPage.
+- [[corelith-site - src - app - products - paralith - page]] - TypeScript module `corelith-site/src/app/products/paralith/page.tsx` defines UI component(s): ParalithPage.
+- [[corelith-site - src - app - research - page]] - TypeScript module `corelith-site/src/app/research/page.tsx` defines UI component(s): ResearchPage.
+- [[corelith-site - src - app - robots]] - TypeScript module `corelith-site/src/app/robots.ts`
+- [[corelith-site - src - app - sitemap]] - TypeScript module `corelith-site/src/app/sitemap.ts`
+- [[corelith-site - src - app - start-a-project - page]] - TypeScript module `corelith-site/src/app/start-a-project/page.tsx` defines UI component(s): StartAProjectPage.
+- [[corelith-site - src - app - terms - page]] - TypeScript module `corelith-site/src/app/terms/page.tsx` defines UI component(s): TermsPage.
+- [[corelith-site - src - app - work - page]] - TypeScript module `corelith-site/src/app/work/page.tsx` defines UI component(s): WorkPage.
+- [[corelith-site - src - app - work - [slug] - page]] - TypeScript module `corelith-site/src/app/work/[slug]/page.tsx` defines UI component(s): CaseStudyPage.
+- [[corelith-site - src - components - home - CapabilitySystem]] - TypeScript module `corelith-site/src/components/home/CapabilitySystem.tsx` defines UI component(s): CapabilitySystem, It
+- [[corelith-site - src - components - LegalBody]] - TypeScript module `corelith-site/src/components/LegalBody.tsx` defines UI component(s): LegalBody.
+- [[corelith-site - src - components - Mark]] - TypeScript module `corelith-site/src/components/Mark.tsx` defines UI component(s): Mark, Wordmark.
+- [[corelith-site - src - components - PageHead]] - TypeScript module `corelith-site/src/components/PageHead.tsx` defines UI component(s): PageHead.
+- [[corelith-site - src - components - primitives]] - TypeScript module `corelith-site/src/components/primitives.tsx` defines UI component(s): Arrow, Band, Dim, Em, EmLight,
+- [[corelith-site - src - components - ProductFilm]] - TypeScript module `corelith-site/src/components/ProductFilm.tsx` defines UI component(s): ProductFilm.
+- [[corelith-site - src - components - ProjectForm]] - TypeScript module `corelith-site/src/components/ProjectForm.tsx` defines UI component(s): ProjectForm, Row.
+- [[corelith-site - src - components - Reveal]] - TypeScript module `corelith-site/src/components/Reveal.tsx` defines UI component(s): RevealRoot.
+- [[corelith-site - src - components - SiteFooter]] - TypeScript module `corelith-site/src/components/SiteFooter.tsx` defines UI component(s): SiteFooter.
+- [[corelith-site - src - components - SiteHeader]] - TypeScript module `corelith-site/src/components/SiteHeader.tsx` defines UI component(s): MobileMenu, SiteHeader.
+- [[corelith-site - src - components - Theme]] - TypeScript module `corelith-site/src/components/Theme.tsx` defines UI component(s): MoonIcon, SunIcon, SystemIcon, Theme
+- [[corelith-site - src - components - visuals - CapabilityCore]] - TypeScript module `corelith-site/src/components/visuals/CapabilityCore.tsx` defines UI component(s): CapabilityCore, Cap
+- [[corelith-site - src - components - visuals - CorelithField]] - TypeScript module `corelith-site/src/components/visuals/CorelithField.tsx` defines UI component(s): CorelithField.
+- [[corelith-site - src - components - visuals - field]] - TypeScript module `corelith-site/src/components/visuals/field.ts` defines UI component(s): FIELD_RADIUS.
+- [[corelith-site - src - components - visuals - FieldStatic]] - TypeScript module `corelith-site/src/components/visuals/FieldStatic.tsx` defines UI component(s): FieldStatic.
+- [[corelith-site - src - components - visuals - graph]] - TypeScript module `corelith-site/src/components/visuals/graph.ts` defines UI component(s): NODE_COUNT.
+- [[corelith-site - src - components - visuals - palette]] - TypeScript module `corelith-site/src/components/visuals/palette.ts`
+- [[corelith-site - src - components - visuals - process]] - TypeScript module `corelith-site/src/components/visuals/process.ts` defines UI component(s): PROCESS_H, PROCESS_W.
+- [[corelith-site - src - components - visuals - ProcessSystem]] - TypeScript module `corelith-site/src/components/visuals/ProcessSystem.tsx` defines UI component(s): ProcessSystem.
+- [[corelith-site - src - components - visuals - rand]] - TypeScript module `corelith-site/src/components/visuals/rand.ts`
+- [[corelith-site - src - components - visuals - ResearchTraces]] - TypeScript module `corelith-site/src/components/visuals/ResearchTraces.tsx` defines UI component(s): ResearchTraces.
+- [[corelith-site - src - components - visuals - scenes - dot]] - TypeScript module `corelith-site/src/components/visuals/scenes/dot.ts`
+- [[corelith-site - src - components - visuals - scenes - FieldScene]] - TypeScript module `corelith-site/src/components/visuals/scenes/FieldScene.tsx` defines UI component(s): FieldObject, Fie
+- [[corelith-site - src - components - visuals - scenes - GraphScene]] - TypeScript module `corelith-site/src/components/visuals/scenes/GraphScene.tsx` defines UI component(s): CapabilityCore,
+- [[corelith-site - src - components - visuals - scenes - points]] - TypeScript module `corelith-site/src/components/visuals/scenes/points.ts`
+- [[corelith-site - src - components - visuals - Stage]] - TypeScript module `corelith-site/src/components/visuals/Stage.tsx` defines UI component(s): Environment, Lighting, Stage
+- [[corelith-site - src - content - capabilities]] - TypeScript module `corelith-site/src/content/capabilities.ts`
+- [[corelith-site - src - content - company]] - TypeScript module `corelith-site/src/content/company.ts`
+- [[corelith-site - src - content - products]] - TypeScript module `corelith-site/src/content/products.ts`
+- [[corelith-site - src - content - site]] - TypeScript module `corelith-site/src/content/site.ts`
+- [[corelith-site - src - content - work]] - TypeScript module `corelith-site/src/content/work.ts`
+- [[corelith-site - src - lib - intake]] - TypeScript module `corelith-site/src/lib/intake.ts` defines UI component(s): MAX_INTAKE_BYTES.
+- [[corelith-web - next-env.d]] - TypeScript module `corelith-web/next-env.d.ts`
+- [[corelith-web - next.config]] - TypeScript module `corelith-web/next.config.ts`
+- [[corelith-web - src - app - api - contact - route]] - TypeScript module `corelith-web/src/app/api/contact/route.ts` defines UI component(s): POST.
+- [[corelith-web - src - app - careers - page]] - TypeScript module `corelith-web/src/app/careers/page.tsx` defines UI component(s): CareersPage.
+- [[corelith-web - src - app - company - page]] - TypeScript module `corelith-web/src/app/company/page.tsx` defines UI component(s): CompanyPage.
+- [[corelith-web - src - app - contact - page]] - TypeScript module `corelith-web/src/app/contact/page.tsx` defines UI component(s): ContactPage.
+- [[corelith-web - src - app - layout]] - TypeScript module `corelith-web/src/app/layout.tsx` defines UI component(s): RootLayout.
+- [[corelith-web - src - app - page]] - TypeScript module `corelith-web/src/app/page.tsx` defines UI component(s): HomePage.
+- [[corelith-web - src - app - products - paralith - page]] - TypeScript module `corelith-web/src/app/products/paralith/page.tsx` defines UI component(s): ParalithPage.
+- [[corelith-web - src - app - security - page]] - TypeScript module `corelith-web/src/app/security/page.tsx` defines UI component(s): SecurityPage.
+- [[corelith-web - src - app - technology - page]] - TypeScript module `corelith-web/src/app/technology/page.tsx` defines UI component(s): TechnologyPage.
+- [[corelith-web - src - components - BrandLogo]] - TypeScript module `corelith-web/src/components/BrandLogo.tsx` defines UI component(s): BrandLogo.
+- [[corelith-web - src - components - CapabilitiesGrid]] - TypeScript module `corelith-web/src/components/CapabilitiesGrid.tsx` defines UI component(s): CapabilitiesGrid.
+- [[corelith-web - src - components - ContactForm]] - TypeScript module `corelith-web/src/components/ContactForm.tsx` defines UI component(s): ContactForm.
+- [[corelith-web - src - components - DownloadSelector]] - TypeScript module `corelith-web/src/components/DownloadSelector.tsx` defines UI component(s): DownloadSelector.
+- [[corelith-web - src - components - Editorial]] - TypeScript module `corelith-web/src/components/Editorial.tsx` defines UI component(s): Band, ClosingBand, Colophon, Meta
+- [[corelith-web - src - components - FAQAccordion]] - TypeScript module `corelith-web/src/components/FAQAccordion.tsx` defines UI component(s): FAQAccordion.
+- [[corelith-web - src - components - Footer]] - TypeScript module `corelith-web/src/components/Footer.tsx` defines UI component(s): Footer.
+- [[corelith-web - src - components - Header]] - TypeScript module `corelith-web/src/components/Header.tsx` defines UI component(s): Header.
+- [[corelith-web - src - components - ParalithLaunchFilm]] - TypeScript module `corelith-web/src/components/ParalithLaunchFilm.tsx` defines UI component(s): ParalithLaunchFilm.
+- [[corelith-web - src - components - PrinciplesGrid]] - TypeScript module `corelith-web/src/components/PrinciplesGrid.tsx` defines UI component(s): PrinciplesGrid.
+- [[corelith-web - src - components - ProductStatusBadge]] - TypeScript module `corelith-web/src/components/ProductStatusBadge.tsx` defines UI component(s): ProductStatusBadge.
+- [[corelith-web - src - components - TechDiagram]] - TypeScript module `corelith-web/src/components/TechDiagram.tsx` defines UI component(s): TechDiagram.
+- [[corelith-web - src - config - site]] - TypeScript module `corelith-web/src/config/site.ts`
+- [[corelith-web - src - data - careers]] - TypeScript module `corelith-web/src/data/careers.ts`
+- [[corelith-web - src - data - company]] - TypeScript module `corelith-web/src/data/company.ts`
+- [[corelith-web - src - data - navigation]] - TypeScript module `corelith-web/src/data/navigation.ts`
+- [[corelith-web - src - data - products]] - TypeScript module `corelith-web/src/data/products.ts`
+- [[corelith-web - src - data - security]] - TypeScript module `corelith-web/src/data/security.ts`
+- [[corelith-web - src - lib - utils]] - TypeScript module `corelith-web/src/lib/utils.ts`
+- [[corelith-web - src - types - index]] - TypeScript module `corelith-web/src/types/index.ts`
+- [[marketing - paralith-video - remotion.config]] - TypeScript module `marketing/paralith-video/remotion.config.ts`
+- [[marketing - paralith-video - src - components - AudioBed]] - TypeScript module `marketing/paralith-video/src/components/AudioBed.tsx`
+- [[marketing - paralith-video - src - components - BrandMark]] - TypeScript module `marketing/paralith-video/src/components/BrandMark.tsx`
+- [[marketing - paralith-video - src - components - CaptionTrack]] - TypeScript module `marketing/paralith-video/src/components/CaptionTrack.tsx`
+- [[marketing - paralith-video - src - components - CursorPath]] - TypeScript module `marketing/paralith-video/src/components/CursorPath.tsx`
+- [[marketing - paralith-video - src - components - ProductUI]] - TypeScript module `marketing/paralith-video/src/components/ProductUI.tsx`
+- [[marketing - paralith-video - src - components - ProductWindow]] - TypeScript module `marketing/paralith-video/src/components/ProductWindow.tsx`
+- [[marketing - paralith-video - src - components - SceneFrame]] - TypeScript module `marketing/paralith-video/src/components/SceneFrame.tsx`
+- [[marketing - paralith-video - src - components - Typography]] - TypeScript module `marketing/paralith-video/src/components/Typography.tsx`
+- [[marketing - paralith-video - src - compositions - Film]] - TypeScript module `marketing/paralith-video/src/compositions/Film.tsx`
+- [[marketing - paralith-video - src - compositions - Poster]] - TypeScript module `marketing/paralith-video/src/compositions/Poster.tsx`
+- [[marketing - paralith-video - src - data - copy]] - TypeScript module `marketing/paralith-video/src/data/copy.ts` defines UI component(s): COPY, TEASER_COPY, TRAILER_COPY.
+- [[marketing - paralith-video - src - data - timing]] - TypeScript module `marketing/paralith-video/src/data/timing.ts` defines UI component(s): FPS, HERO_FRAMES, HERO_STARTS,
+- [[marketing - paralith-video - src - font-data]] - TypeScript module `marketing/paralith-video/src/font-data.ts` defines UI component(s): GEIST_WOFF2.
+- [[marketing - paralith-video - src - fonts]] - TypeScript module `marketing/paralith-video/src/fonts.ts`
+- [[marketing - paralith-video - src - index]] - TypeScript module `marketing/paralith-video/src/index.ts`
+- [[marketing - paralith-video - src - Root]] - TypeScript module `marketing/paralith-video/src/Root.tsx`
+- [[marketing - paralith-video - src - scenes - Alignment]] - TypeScript module `marketing/paralith-video/src/scenes/Alignment.tsx`
+- [[marketing - paralith-video - src - scenes - Decision]] - TypeScript module `marketing/paralith-video/src/scenes/Decision.tsx`
+- [[marketing - paralith-video - src - scenes - Direction]] - TypeScript module `marketing/paralith-video/src/scenes/Direction.tsx`
+- [[marketing - paralith-video - src - scenes - Fragmentation]] - TypeScript module `marketing/paralith-video/src/scenes/Fragmentation.tsx`
+- [[marketing - paralith-video - src - scenes - Parallel]] - TypeScript module `marketing/paralith-video/src/scenes/Parallel.tsx`
+- [[marketing - paralith-video - src - scenes - Pressure]] - TypeScript module `marketing/paralith-video/src/scenes/Pressure.tsx`
+- [[marketing - paralith-video - src - scenes - Record]] - TypeScript module `marketing/paralith-video/src/scenes/Record.tsx`
+- [[marketing - paralith-video - src - scenes - Repository]] - TypeScript module `marketing/paralith-video/src/scenes/Repository.tsx`
+- [[marketing - paralith-video - src - scenes - types]] - TypeScript module `marketing/paralith-video/src/scenes/types.ts`
+- [[marketing - paralith-video - src - scenes - Workspace]] - TypeScript module `marketing/paralith-video/src/scenes/Workspace.tsx`
+- [[marketing - paralith-video - src - styles - tokens]] - TypeScript module `marketing/paralith-video/src/styles/tokens.ts`
+- [[marketing - paralith-video - src - utils - layout]] - TypeScript module `marketing/paralith-video/src/utils/layout.ts`
+- [[marketing - paralith-video - src - utils - motion]] - TypeScript module `marketing/paralith-video/src/utils/motion.ts`
+- [[ui - App]] - TypeScript module `Paralith-tauri/src/App.tsx` defines UI component(s): App, StartupWorkspaceRedirect, WorkspaceHandoffL
+- [[ui - components - shell - AppShell]] - TypeScript module `Paralith-tauri/src/components/shell/AppShell.tsx` defines UI component(s): AppShell.
+- [[ui - components - terminal - PaneMenu]] - TypeScript module `Paralith-tauri/src/components/terminal/PaneMenu.tsx` defines UI component(s): PaneMenu.
+- [[ui - components - terminal - terminalActions]] - TypeScript module `Paralith-tauri/src/components/terminal/terminalActions.ts`
+- [[ui - components - terminal - TerminalPane]] - TypeScript module `Paralith-tauri/src/components/terminal/TerminalPane.tsx` defines UI component(s): TerminalPane.
+- [[ui - components - ui - Brand]] - TypeScript module `Paralith-tauri/src/components/ui/Brand.tsx` defines UI component(s): Brand.
+- [[ui - components - ui - Button]] - TypeScript module `Paralith-tauri/src/components/ui/Button.tsx` defines UI component(s): Button.
+- [[ui - components - ui - ErrorBoundary]] - TypeScript module `Paralith-tauri/src/components/ui/ErrorBoundary.tsx`
+- [[ui - components - ui - ErrorNotice]] - TypeScript module `Paralith-tauri/src/components/ui/ErrorNotice.tsx` defines UI component(s): ErrorNotice.
+- [[ui - components - ui - Modal]] - TypeScript module `Paralith-tauri/src/components/ui/Modal.tsx` defines UI component(s): Modal.
+- [[ui - components - ui - TextPromptDialog]] - TypeScript module `Paralith-tauri/src/components/ui/TextPromptDialog.tsx` defines UI component(s): TextPromptDialog.
+- [[ui - features - agent-resume - AgentResumeCenter.test]] - TypeScript module `Paralith-tauri/src/features/agent-resume/AgentResumeCenter.test.tsx`
+- [[ui - features - agent-resume - AgentResumeCenter]] - TypeScript module `Paralith-tauri/src/features/agent-resume/AgentResumeCenter.tsx` defines UI component(s): AgentResumeC
+- [[ui - features - agent-resume - events]] - TypeScript module `Paralith-tauri/src/features/agent-resume/events.ts` defines UI component(s): OPEN_AGENT_RESUME_CENTER
+- [[ui - features - code-surface - browser - browserInspectBridge.test]] - TypeScript module `Paralith-tauri/src/features/code-surface/browser/browserInspectBridge.test.ts`
+- [[ui - features - code-surface - browser - browserInspectBridge]] - TypeScript module `Paralith-tauri/src/features/code-surface/browser/browserInspectBridge.ts` defines UI component(s): MA
+- [[ui - features - code-surface - browser - browserSessionStore.test]] - TypeScript module `Paralith-tauri/src/features/code-surface/browser/browserSessionStore.test.ts`
+- [[ui - features - code-surface - browser - browserSessionStore]] - TypeScript module `Paralith-tauri/src/features/code-surface/browser/browserSessionStore.ts` defines UI component(s): MAX
+- [[ui - features - code-surface - browser - BrowserSurface.test]] - TypeScript module `Paralith-tauri/src/features/code-surface/browser/BrowserSurface.test.tsx`
+- [[ui - features - code-surface - browser - BrowserSurface]] - TypeScript module `Paralith-tauri/src/features/code-surface/browser/BrowserSurface.tsx` defines UI component(s): Browser
+- [[ui - features - code-surface - browser - browserUrl.test]] - TypeScript module `Paralith-tauri/src/features/code-surface/browser/browserUrl.test.ts`
+- [[ui - features - code-surface - browser - browserUrl]] - TypeScript module `Paralith-tauri/src/features/code-surface/browser/browserUrl.ts` defines UI component(s): ALLOWED_BROW
+- [[ui - features - code-surface - browser - inspectContext.test]] - TypeScript module `Paralith-tauri/src/features/code-surface/browser/inspectContext.test.ts`
+- [[ui - features - code-surface - browser - inspectContext]] - TypeScript module `Paralith-tauri/src/features/code-surface/browser/inspectContext.ts` defines UI component(s): INSPECT_
+- [[ui - features - code-surface - CodeSurface.test]] - TypeScript module `Paralith-tauri/src/features/code-surface/CodeSurface.test.tsx`
+- [[ui - features - code-surface - CodeSurface]] - TypeScript module `Paralith-tauri/src/features/code-surface/CodeSurface.tsx` defines UI component(s): Breadcrumbs, CodeS
+- [[ui - features - code-surface - editorStore.test]] - TypeScript module `Paralith-tauri/src/features/code-surface/editorStore.test.ts`
+- [[ui - features - code-surface - editorStore]] - TypeScript module `Paralith-tauri/src/features/code-surface/editorStore.ts`
+- [[ui - features - code-surface - EditorTabs]] - TypeScript module `Paralith-tauri/src/features/code-surface/EditorTabs.tsx` defines UI component(s): EditorTabs, TabButt
+- [[ui - features - code-surface - explorerStore]] - TypeScript module `Paralith-tauri/src/features/code-surface/explorerStore.ts`
+- [[ui - features - code-surface - FileExplorer.test]] - TypeScript module `Paralith-tauri/src/features/code-surface/FileExplorer.test.tsx`
+- [[ui - features - code-surface - FileExplorer]] - TypeScript module `Paralith-tauri/src/features/code-surface/FileExplorer.tsx` defines UI component(s): ExplorerMenu, Fil
+- [[ui - features - code-surface - fileIcons]] - TypeScript module `Paralith-tauri/src/features/code-surface/fileIcons.tsx`
+- [[ui - features - code-surface - fuzzy.test]] - TypeScript module `Paralith-tauri/src/features/code-surface/fuzzy.test.ts`
+- [[ui - features - code-surface - fuzzy]] - TypeScript module `Paralith-tauri/src/features/code-surface/fuzzy.ts`
+- [[ui - features - code-surface - MonacoEditorPane]] - TypeScript module `Paralith-tauri/src/features/code-surface/MonacoEditorPane.tsx` defines UI component(s): DiffOverlay,
+- [[ui - features - code-surface - QuickOpen]] - TypeScript module `Paralith-tauri/src/features/code-surface/QuickOpen.tsx` defines UI component(s): QuickOpen.
+- [[ui - features - code-surface - SurfaceEmptyState]] - TypeScript module `Paralith-tauri/src/features/code-surface/SurfaceEmptyState.tsx` defines UI component(s): SurfaceEmpty
+- [[ui - features - code-surface - surfaceRegistry]] - TypeScript module `Paralith-tauri/src/features/code-surface/surfaceRegistry.ts`
+- [[ui - features - code-surface - surfaces - AgentsSurface.test]] - TypeScript module `Paralith-tauri/src/features/code-surface/surfaces/AgentsSurface.test.tsx`
+- [[ui - features - code-surface - surfaces - AgentsSurface]] - TypeScript module `Paralith-tauri/src/features/code-surface/surfaces/AgentsSurface.tsx` defines UI component(s): AgentsS
+- [[ui - features - code-surface - surfaces - DiffSurface]] - TypeScript module `Paralith-tauri/src/features/code-surface/surfaces/DiffSurface.tsx` defines UI component(s): DiffSurfa
+- [[ui - features - code-surface - SurfaceTabBar.test]] - TypeScript module `Paralith-tauri/src/features/code-surface/SurfaceTabBar.test.tsx`
+- [[ui - features - code-surface - SurfaceTabBar]] - TypeScript module `Paralith-tauri/src/features/code-surface/SurfaceTabBar.tsx` defines UI component(s): SurfaceTabBar.
+- [[ui - features - code-surface - workspacePanelStore.test]] - TypeScript module `Paralith-tauri/src/features/code-surface/workspacePanelStore.test.ts`
+- [[ui - features - code-surface - workspacePanelStore]] - TypeScript module `Paralith-tauri/src/features/code-surface/workspacePanelStore.ts`
+- [[ui - features - code-surface - WorkspaceToolPanel]] - TypeScript module `Paralith-tauri/src/features/code-surface/WorkspaceToolPanel.tsx` defines UI component(s): WorkspaceTo
+- [[ui - features - database - api]] - TypeScript module `Paralith-tauri/src/features/database/api.ts`
+- [[ui - features - database - components - canvas - canvasSelectors.test]] - TypeScript module `Paralith-tauri/src/features/database/components/canvas/canvasSelectors.test.ts`
+- [[ui - features - database - components - canvas - canvasSelectors]] - TypeScript module `Paralith-tauri/src/features/database/components/canvas/canvasSelectors.ts`
+- [[ui - features - database - components - canvas - databaseCanvasStore]] - TypeScript module `Paralith-tauri/src/features/database/components/canvas/databaseCanvasStore.ts`
+- [[ui - features - database - components - canvas - framing.test]] - TypeScript module `Paralith-tauri/src/features/database/components/canvas/framing.test.ts`
+- [[ui - features - database - components - canvas - largeSchema.bench.test]] - TypeScript module `Paralith-tauri/src/features/database/components/canvas/largeSchema.bench.test.ts`
+- [[ui - features - database - components - canvas - largeSchemaFixture]] - TypeScript module `Paralith-tauri/src/features/database/components/canvas/largeSchemaFixture.ts` defines UI component(s)
+- [[ui - features - database - components - canvas - layoutClient]] - TypeScript module `Paralith-tauri/src/features/database/components/canvas/layoutClient.ts`
+- [[ui - features - database - components - canvas - layoutCore.test]] - TypeScript module `Paralith-tauri/src/features/database/components/canvas/layoutCore.test.ts`
+- [[ui - features - database - components - canvas - layoutCore]] - TypeScript module `Paralith-tauri/src/features/database/components/canvas/layoutCore.ts`
+- [[ui - features - database - components - canvas - layoutWorker]] - TypeScript module `Paralith-tauri/src/features/database/components/canvas/layoutWorker.ts`
+- [[ui - features - database - components - canvas - nodeMetrics]] - TypeScript module `Paralith-tauri/src/features/database/components/canvas/nodeMetrics.ts` defines UI component(s): COMPA
+- [[ui - features - database - components - canvas - SchemaCanvas.test]] - TypeScript module `Paralith-tauri/src/features/database/components/canvas/SchemaCanvas.test.tsx`
+- [[ui - features - database - components - canvas - SchemaCanvas]] - TypeScript module `Paralith-tauri/src/features/database/components/canvas/SchemaCanvas.tsx` defines UI component(s): Sch
+- [[ui - features - database - components - canvas - TableNode]] - TypeScript module `Paralith-tauri/src/features/database/components/canvas/TableNode.tsx` defines UI component(s): Domain
+- [[ui - features - database - components - DatabaseSidebar.test]] - TypeScript module `Paralith-tauri/src/features/database/components/DatabaseSidebar.test.tsx`
+- [[ui - features - database - components - DatabaseSidebar]] - TypeScript module `Paralith-tauri/src/features/database/components/DatabaseSidebar.tsx` defines UI component(s): Databas
+- [[ui - features - database - components - DatabaseStudio.test]] - TypeScript module `Paralith-tauri/src/features/database/components/DatabaseStudio.test.tsx`
+- [[ui - features - database - components - DatabaseStudio]] - TypeScript module `Paralith-tauri/src/features/database/components/DatabaseStudio.tsx` defines UI component(s): Database
+- [[ui - features - database - components - InspectorPanel.test]] - TypeScript module `Paralith-tauri/src/features/database/components/InspectorPanel.test.tsx`
+- [[ui - features - database - components - InspectorPanel]] - TypeScript module `Paralith-tauri/src/features/database/components/InspectorPanel.tsx` defines UI component(s): ColumnsT
+- [[ui - features - database - components - SectionError]] - TypeScript module `Paralith-tauri/src/features/database/components/SectionError.tsx` defines UI component(s): SectionErr
+- [[ui - features - database - components - sections - ChangesSection.test]] - TypeScript module `Paralith-tauri/src/features/database/components/sections/ChangesSection.test.tsx`
+- [[ui - features - database - components - sections - ChangesSection]] - TypeScript module `Paralith-tauri/src/features/database/components/sections/ChangesSection.tsx` defines UI component(s):
+- [[ui - features - database - components - sections - ConnectionsSection.test]] - TypeScript module `Paralith-tauri/src/features/database/components/sections/ConnectionsSection.test.tsx`
+- [[ui - features - database - components - sections - ConnectionsSection]] - TypeScript module `Paralith-tauri/src/features/database/components/sections/ConnectionsSection.tsx` defines UI component
+- [[ui - features - database - components - sections - DiagramSection.test]] - TypeScript module `Paralith-tauri/src/features/database/components/sections/DiagramSection.test.tsx`
+- [[ui - features - database - components - sections - DiagramSection]] - TypeScript module `Paralith-tauri/src/features/database/components/sections/DiagramSection.tsx` defines UI component(s):
+- [[ui - features - database - components - sections - explorerHierarchy]] - TypeScript module `Paralith-tauri/src/features/database/components/sections/explorerHierarchy.ts`
+- [[ui - features - database - components - sections - ExplorerSection.test]] - TypeScript module `Paralith-tauri/src/features/database/components/sections/ExplorerSection.test.tsx`
+- [[ui - features - database - components - sections - ExplorerSection]] - TypeScript module `Paralith-tauri/src/features/database/components/sections/ExplorerSection.tsx` defines UI component(s)
+- [[ui - features - database - components - sections - HealthSection.test]] - TypeScript module `Paralith-tauri/src/features/database/components/sections/HealthSection.test.tsx`
+- [[ui - features - database - components - sections - HealthSection]] - TypeScript module `Paralith-tauri/src/features/database/components/sections/HealthSection.tsx` defines UI component(s):
+- [[ui - features - database - components - sections - layerAvailability]] - TypeScript module `Paralith-tauri/src/features/database/components/sections/layerAvailability.ts`
+- [[ui - features - database - components - sections - LayerUnavailableNotice]] - TypeScript module `Paralith-tauri/src/features/database/components/sections/LayerUnavailableNotice.tsx` defines UI compo
+- [[ui - features - database - components - sections - MigrationsSection.test]] - TypeScript module `Paralith-tauri/src/features/database/components/sections/MigrationsSection.test.tsx`
+- [[ui - features - database - components - sections - MigrationsSection]] - TypeScript module `Paralith-tauri/src/features/database/components/sections/MigrationsSection.tsx` defines UI component(
+- [[ui - features - database - components - sections - OverviewSection.test]] - TypeScript module `Paralith-tauri/src/features/database/components/sections/OverviewSection.test.tsx`
+- [[ui - features - database - components - sections - OverviewSection]] - TypeScript module `Paralith-tauri/src/features/database/components/sections/OverviewSection.tsx` defines UI component(s)
+- [[ui - features - database - components - StatusBadge]] - TypeScript module `Paralith-tauri/src/features/database/components/StatusBadge.tsx` defines UI component(s): StatusBadge
+- [[ui - features - database - crossSurfaceNavigation.test]] - TypeScript module `Paralith-tauri/src/features/database/crossSurfaceNavigation.test.ts`
+- [[ui - features - database - databaseDesignOperations.test]] - TypeScript module `Paralith-tauri/src/features/database/databaseDesignOperations.test.ts`
+- [[ui - features - database - databaseDesignOperations]] - TypeScript module `Paralith-tauri/src/features/database/databaseDesignOperations.ts`
+- [[ui - features - database - databaseNav]] - TypeScript module `Paralith-tauri/src/features/database/databaseNav.ts`
+- [[ui - features - database - databaseSelectors]] - TypeScript module `Paralith-tauri/src/features/database/databaseSelectors.ts`
+- [[ui - features - database - databaseSourceVisibility.test]] - TypeScript module `Paralith-tauri/src/features/database/databaseSourceVisibility.test.ts`
+- [[ui - features - database - databaseStore.test]] - TypeScript module `Paralith-tauri/src/features/database/databaseStore.test.ts`
+- [[ui - features - database - databaseStore]] - TypeScript module `Paralith-tauri/src/features/database/databaseStore.ts`
+- [[ui - features - database - databaseTypes]] - TypeScript module `Paralith-tauri/src/features/database/databaseTypes.ts`
+- [[ui - features - database - relationSemantics]] - TypeScript module `Paralith-tauri/src/features/database/relationSemantics.ts`
+- [[ui - features - memory - api.test]] - TypeScript module `Paralith-tauri/src/features/memory/api.test.ts`
+- [[ui - features - memory - api]] - TypeScript module `Paralith-tauri/src/features/memory/api.ts`
+- [[ui - features - memory - components - MemoryActivity.test]] - TypeScript module `Paralith-tauri/src/features/memory/components/MemoryActivity.test.tsx`
+- [[ui - features - memory - components - MemoryActivity]] - TypeScript module `Paralith-tauri/src/features/memory/components/MemoryActivity.tsx` defines UI component(s): JobRow, Me
+- [[ui - features - memory - components - MemoryContext.test]] - TypeScript module `Paralith-tauri/src/features/memory/components/MemoryContext.test.tsx`
+- [[ui - features - memory - components - MemoryContext]] - TypeScript module `Paralith-tauri/src/features/memory/components/MemoryContext.tsx` defines UI component(s): EntryRow, M
+- [[ui - features - memory - components - MemoryEditor]] - TypeScript module `Paralith-tauri/src/features/memory/components/MemoryEditor.tsx` defines UI component(s): MemoryEditor
+- [[ui - features - memory - components - MemoryGraph.test]] - TypeScript module `Paralith-tauri/src/features/memory/components/MemoryGraph.test.tsx`
+- [[ui - features - memory - components - MemoryGraph]] - TypeScript module `Paralith-tauri/src/features/memory/components/MemoryGraph.tsx` defines UI component(s): MemoryGraph.
+- [[ui - features - memory - components - MemoryInspector.test]] - TypeScript module `Paralith-tauri/src/features/memory/components/MemoryInspector.test.tsx`
+- [[ui - features - memory - components - MemoryInspector]] - TypeScript module `Paralith-tauri/src/features/memory/components/MemoryInspector.tsx` defines UI component(s): ClaimComp
+- [[ui - features - memory - components - MemoryList]] - TypeScript module `Paralith-tauri/src/features/memory/components/MemoryList.tsx` defines UI component(s): MemoryList, Me
+- [[ui - features - memory - components - MemoryOverview.test]] - TypeScript module `Paralith-tauri/src/features/memory/components/MemoryOverview.test.tsx`
+- [[ui - features - memory - components - MemoryOverview]] - TypeScript module `Paralith-tauri/src/features/memory/components/MemoryOverview.tsx` defines UI component(s): FactRow, G
+- [[ui - features - memory - components - MemoryReview.test]] - TypeScript module `Paralith-tauri/src/features/memory/components/MemoryReview.test.tsx`
+- [[ui - features - memory - components - MemoryReview]] - TypeScript module `Paralith-tauri/src/features/memory/components/MemoryReview.tsx` defines UI component(s): CandidateRow
+- [[ui - features - memory - components - MemorySearch.test]] - TypeScript module `Paralith-tauri/src/features/memory/components/MemorySearch.test.tsx`
+- [[ui - features - memory - components - MemorySearch]] - TypeScript module `Paralith-tauri/src/features/memory/components/MemorySearch.tsx` defines UI component(s): MemorySearch
+- [[ui - features - memory - components - MemoryTimeline.test]] - TypeScript module `Paralith-tauri/src/features/memory/components/MemoryTimeline.test.tsx`
+- [[ui - features - memory - components - MemoryTimeline]] - TypeScript module `Paralith-tauri/src/features/memory/components/MemoryTimeline.tsx` defines UI component(s): MemoryTime
+- [[ui - features - memory - components - MemoryWorkspace.test]] - TypeScript module `Paralith-tauri/src/features/memory/components/MemoryWorkspace.test.tsx` defines UI component(s): View
+- [[ui - features - memory - components - MemoryWorkspace]] - TypeScript module `Paralith-tauri/src/features/memory/components/MemoryWorkspace.tsx` defines UI component(s): MemoryVie
+- [[ui - features - memory - intelligenceStore]] - TypeScript module `Paralith-tauri/src/features/memory/intelligenceStore.ts`
+- [[ui - features - memory - intelligenceTypes]] - TypeScript module `Paralith-tauri/src/features/memory/intelligenceTypes.ts`
+- [[ui - features - memory - memoryGraphLayout]] - TypeScript module `Paralith-tauri/src/features/memory/memoryGraphLayout.ts` defines UI component(s): VIEW_SIZE.
+- [[ui - features - memory - memoryPresentation.test]] - TypeScript module `Paralith-tauri/src/features/memory/memoryPresentation.test.ts`
+- [[ui - features - memory - memoryPresentation]] - TypeScript module `Paralith-tauri/src/features/memory/memoryPresentation.ts`
+- [[ui - features - memory - memoryStore.test]] - TypeScript module `Paralith-tauri/src/features/memory/memoryStore.test.ts`
+- [[ui - features - memory - memoryStore]] - TypeScript module `Paralith-tauri/src/features/memory/memoryStore.ts` defines UI component(s): NEW_DRAFT_KEY.
+- [[ui - features - memory - memoryTypes]] - TypeScript module `Paralith-tauri/src/features/memory/memoryTypes.ts` defines UI component(s): MEMORY_TYPES.
+- [[ui - features - orchestrator - api]] - TypeScript module `Paralith-tauri/src/features/orchestrator/api.ts`
+- [[ui - features - orchestrator - OrchestratorLauncher.test]] - TypeScript module `Paralith-tauri/src/features/orchestrator/OrchestratorLauncher.test.tsx`
+- [[ui - features - orchestrator - OrchestratorLauncher]] - TypeScript module `Paralith-tauri/src/features/orchestrator/OrchestratorLauncher.tsx` defines UI component(s): ActivityF
+- [[ui - features - orchestrator - store.test]] - TypeScript module `Paralith-tauri/src/features/orchestrator/store.test.ts`
+- [[ui - features - orchestrator - store]] - TypeScript module `Paralith-tauri/src/features/orchestrator/store.ts`
+- [[ui - features - orchestrator - types]] - TypeScript module `Paralith-tauri/src/features/orchestrator/types.ts`
+- [[ui - features - repository - components - ActionsSection]] - TypeScript module `Paralith-tauri/src/features/repository/components/ActionsSection.tsx` defines UI component(s): Action
+- [[ui - features - repository - components - AgentActionDialog]] - TypeScript module `Paralith-tauri/src/features/repository/components/AgentActionDialog.tsx` defines UI component(s): Age
+- [[ui - features - repository - components - BranchesSection]] - TypeScript module `Paralith-tauri/src/features/repository/components/BranchesSection.tsx` defines UI component(s): Branc
+- [[ui - features - repository - components - ChangesSection]] - TypeScript module `Paralith-tauri/src/features/repository/components/ChangesSection.tsx` defines UI component(s): Change
+- [[ui - features - repository - components - ConnectedPlaceholder]] - TypeScript module `Paralith-tauri/src/features/repository/components/ConnectedPlaceholder.tsx` defines UI component(s):
+- [[ui - features - repository - components - ContextRail]] - TypeScript module `Paralith-tauri/src/features/repository/components/ContextRail.tsx` defines UI component(s): ContextRa
+- [[ui - features - repository - components - CreateBranchDialog]] - TypeScript module `Paralith-tauri/src/features/repository/components/CreateBranchDialog.tsx` defines UI component(s): Cr
+- [[ui - features - repository - components - DiffViewer]] - TypeScript module `Paralith-tauri/src/features/repository/components/DiffViewer.tsx` defines UI component(s): DiffViewer
+- [[ui - features - repository - components - HistorySection]] - TypeScript module `Paralith-tauri/src/features/repository/components/HistorySection.tsx` defines UI component(s): Commit
+- [[ui - features - repository - components - IntelligenceSection]] - TypeScript module `Paralith-tauri/src/features/repository/components/IntelligenceSection.tsx` defines UI component(s): I
+- [[ui - features - repository - components - MergeGate]] - TypeScript module `Paralith-tauri/src/features/repository/components/MergeGate.tsx` defines UI component(s): MergeGate.
+- [[ui - features - repository - components - OperationLedger]] - TypeScript module `Paralith-tauri/src/features/repository/components/OperationLedger.tsx` defines UI component(s): Ledge
+- [[ui - features - repository - components - OverviewSection]] - TypeScript module `Paralith-tauri/src/features/repository/components/OverviewSection.tsx` defines UI component(s): Overv
+- [[ui - features - repository - components - PullRequestsSection]] - TypeScript module `Paralith-tauri/src/features/repository/components/PullRequestsSection.tsx` defines UI component(s): P
+- [[ui - features - repository - components - RemoteListSections]] - TypeScript module `Paralith-tauri/src/features/repository/components/RemoteListSections.tsx` defines UI component(s): Di
+- [[ui - features - repository - components - RepositoryHeader]] - TypeScript module `Paralith-tauri/src/features/repository/components/RepositoryHeader.tsx` defines UI component(s): Repo
+- [[ui - features - repository - components - RepositorySidebar]] - TypeScript module `Paralith-tauri/src/features/repository/components/RepositorySidebar.tsx` defines UI component(s): Fil
+- [[ui - features - repository - components - RepositoryStatStrip]] - TypeScript module `Paralith-tauri/src/features/repository/components/RepositoryStatStrip.tsx` defines UI component(s): R
+- [[ui - features - repository - components - StatusBadge]] - TypeScript module `Paralith-tauri/src/features/repository/components/StatusBadge.tsx` defines UI component(s): StatusBad
+- [[ui - features - repository - history.test]] - TypeScript module `Paralith-tauri/src/features/repository/history.test.tsx`
+- [[ui - features - repository - intelligence.test]] - TypeScript module `Paralith-tauri/src/features/repository/intelligence.test.tsx`
+- [[ui - features - repository - RepositoryCommandCenter.test]] - TypeScript module `Paralith-tauri/src/features/repository/RepositoryCommandCenter.test.tsx`
+- [[ui - features - repository - RepositoryCommandCenter]] - TypeScript module `Paralith-tauri/src/features/repository/RepositoryCommandCenter.tsx` defines UI component(s): Reposito
+- [[ui - features - repository - repositoryNav.test]] - TypeScript module `Paralith-tauri/src/features/repository/repositoryNav.test.ts`
+- [[ui - features - repository - repositoryNav]] - TypeScript module `Paralith-tauri/src/features/repository/repositoryNav.ts`
+- [[ui - features - repository - repositorySelectors.test]] - TypeScript module `Paralith-tauri/src/features/repository/repositorySelectors.test.ts`
+- [[ui - features - repository - repositorySelectors]] - TypeScript module `Paralith-tauri/src/features/repository/repositorySelectors.ts`
+- [[ui - features - repository - repositoryStore.test]] - TypeScript module `Paralith-tauri/src/features/repository/repositoryStore.test.ts`
+- [[ui - features - repository - repositoryStore]] - TypeScript module `Paralith-tauri/src/features/repository/repositoryStore.ts`
+- [[ui - features - repository - repositoryTypes]] - TypeScript module `Paralith-tauri/src/features/repository/repositoryTypes.ts`
+- [[ui - features - sidebar - components - CollapsedSidebar]] - TypeScript module `Paralith-tauri/src/features/sidebar/components/CollapsedSidebar.tsx` defines UI component(s): Collaps
+- [[ui - features - sidebar - components - DiagnosticsDrawer]] - TypeScript module `Paralith-tauri/src/features/sidebar/components/DiagnosticsDrawer.tsx` defines UI component(s): Diagno
+- [[ui - features - sidebar - components - ForgeSpaceSidebar]] - TypeScript module `Paralith-tauri/src/features/sidebar/components/ForgeSpaceSidebar.tsx` defines UI component(s): ForgeS
+- [[ui - features - sidebar - components - ProjectPopover]] - TypeScript module `Paralith-tauri/src/features/sidebar/components/ProjectPopover.tsx` defines UI component(s): ProjectPo
+- [[ui - features - sidebar - components - SidebarFilter]] - TypeScript module `Paralith-tauri/src/features/sidebar/components/SidebarFilter.tsx` defines UI component(s): SidebarFil
+- [[ui - features - sidebar - components - SidebarGroup]] - TypeScript module `Paralith-tauri/src/features/sidebar/components/SidebarGroup.tsx` defines UI component(s): SidebarGrou
+- [[ui - features - sidebar - components - SidebarHeader]] - TypeScript module `Paralith-tauri/src/features/sidebar/components/SidebarHeader.tsx` defines UI component(s): SidebarHea
+- [[ui - features - sidebar - components - SidebarResizeHandle]] - TypeScript module `Paralith-tauri/src/features/sidebar/components/SidebarResizeHandle.tsx` defines UI component(s): Side
+- [[ui - features - sidebar - components - SidebarStatusArea.test]] - TypeScript module `Paralith-tauri/src/features/sidebar/components/SidebarStatusArea.test.tsx`
+- [[ui - features - sidebar - components - SidebarStatusArea]] - TypeScript module `Paralith-tauri/src/features/sidebar/components/SidebarStatusArea.tsx` defines UI component(s): Collap
+- [[ui - features - sidebar - components - WorkspaceContextMenu]] - TypeScript module `Paralith-tauri/src/features/sidebar/components/WorkspaceContextMenu.tsx` defines UI component(s): Wor
+- [[ui - features - sidebar - components - WorkspaceListSection]] - TypeScript module `Paralith-tauri/src/features/sidebar/components/WorkspaceListSection.tsx` defines UI component(s): Fla
+- [[ui - features - sidebar - components - WorkspaceRow]] - TypeScript module `Paralith-tauri/src/features/sidebar/components/WorkspaceRow.tsx` defines UI component(s): WorkspaceRo
+- [[ui - features - sidebar - components - WorkspaceRuntimeIndicator]] - TypeScript module `Paralith-tauri/src/features/sidebar/components/WorkspaceRuntimeIndicator.tsx` defines UI component(s)
+- [[ui - features - sidebar - components - WorkspaceSectionHeader]] - TypeScript module `Paralith-tauri/src/features/sidebar/components/WorkspaceSectionHeader.tsx` defines UI component(s): S
+- [[ui - features - sidebar - components - WorkspacesOtherMonitorsSection]] - TypeScript module `Paralith-tauri/src/features/sidebar/components/WorkspacesOtherMonitorsSection.tsx` defines UI compone
+- [[ui - features - sidebar - sidebarAgentStatus.test]] - TypeScript module `Paralith-tauri/src/features/sidebar/sidebarAgentStatus.test.ts`
+- [[ui - features - sidebar - sidebarAgentStatus]] - TypeScript module `Paralith-tauri/src/features/sidebar/sidebarAgentStatus.ts` defines UI component(s): WORKING_STATE_STA
+- [[ui - features - sidebar - sidebarAttention.test]] - TypeScript module `Paralith-tauri/src/features/sidebar/sidebarAttention.test.ts`
+- [[ui - features - sidebar - sidebarAttention]] - TypeScript module `Paralith-tauri/src/features/sidebar/sidebarAttention.ts`
+- [[ui - features - sidebar - sidebarIndex.test]] - TypeScript module `Paralith-tauri/src/features/sidebar/sidebarIndex.test.ts`
+- [[ui - features - sidebar - sidebarIndex]] - TypeScript module `Paralith-tauri/src/features/sidebar/sidebarIndex.ts`
+- [[ui - features - sidebar - sidebarModel.test]] - TypeScript module `Paralith-tauri/src/features/sidebar/sidebarModel.test.ts`
+- [[ui - features - sidebar - sidebarModel]] - TypeScript module `Paralith-tauri/src/features/sidebar/sidebarModel.ts` defines UI component(s): MIN_ROWS_FOR_FILTER.
+- [[ui - features - sidebar - sidebarPreferences]] - TypeScript module `Paralith-tauri/src/features/sidebar/sidebarPreferences.ts` defines UI component(s): SIDEBAR_COLLAPSED
+- [[ui - features - sidebar - sidebarRuntimeStore]] - TypeScript module `Paralith-tauri/src/features/sidebar/sidebarRuntimeStore.ts`
+- [[ui - features - sidebar - sidebarSelectors.test]] - TypeScript module `Paralith-tauri/src/features/sidebar/sidebarSelectors.test.ts`
+- [[ui - features - sidebar - sidebarSelectors]] - TypeScript module `Paralith-tauri/src/features/sidebar/sidebarSelectors.ts`
+- [[ui - features - sidebar - sidebarStore.test]] - TypeScript module `Paralith-tauri/src/features/sidebar/sidebarStore.test.ts`
+- [[ui - features - sidebar - sidebarStore]] - TypeScript module `Paralith-tauri/src/features/sidebar/sidebarStore.ts`
+- [[ui - features - sidebar - sidebarTypes]] - TypeScript module `Paralith-tauri/src/features/sidebar/sidebarTypes.ts`
+- [[ui - features - sidebar - workspaceIdentity.test]] - TypeScript module `Paralith-tauri/src/features/sidebar/workspaceIdentity.test.ts`
+- [[ui - features - sidebar - workspaceIdentity]] - TypeScript module `Paralith-tauri/src/features/sidebar/workspaceIdentity.ts`
+- [[ui - features - swarms - RolePoolEditor]] - TypeScript module `Paralith-tauri/src/features/swarms/RolePoolEditor.tsx` defines UI component(s): RoleCard, RolePoolEdi
+- [[ui - features - swarms - SwarmCreatePanel.test]] - TypeScript module `Paralith-tauri/src/features/swarms/SwarmCreatePanel.test.tsx`
+- [[ui - features - swarms - SwarmCreatePanel]] - TypeScript module `Paralith-tauri/src/features/swarms/SwarmCreatePanel.tsx` defines UI component(s): SwarmCreatePanel.
+- [[ui - features - swarms - SwarmOverview.test]] - TypeScript module `Paralith-tauri/src/features/swarms/SwarmOverview.test.tsx`
+- [[ui - features - swarms - SwarmOverview]] - TypeScript module `Paralith-tauri/src/features/swarms/SwarmOverview.tsx` defines UI component(s): ActivityView, AgentCan
+- [[ui - features - swarms - swarmPresentation]] - TypeScript module `Paralith-tauri/src/features/swarms/swarmPresentation.ts`
+- [[ui - features - swarms - SwarmRowMenu]] - TypeScript module `Paralith-tauri/src/features/swarms/SwarmRowMenu.tsx` defines UI component(s): SwarmRowMenu.
+- [[ui - features - swarms - SwarmsSidebarSection.test]] - TypeScript module `Paralith-tauri/src/features/swarms/SwarmsSidebarSection.test.tsx`
+- [[ui - features - swarms - SwarmsSidebarSection]] - TypeScript module `Paralith-tauri/src/features/swarms/SwarmsSidebarSection.tsx` defines UI component(s): SwarmSidebarRow
+- [[ui - features - swarms - swarmStore.test]] - TypeScript module `Paralith-tauri/src/features/swarms/swarmStore.test.ts`
+- [[ui - features - swarms - swarmStore]] - TypeScript module `Paralith-tauri/src/features/swarms/swarmStore.ts`
+- [[ui - features - swarms - SwarmWorkspace]] - TypeScript module `Paralith-tauri/src/features/swarms/SwarmWorkspace.tsx` defines UI component(s): SwarmWorkspace.
+- [[ui - features - terminals - runtimeStore.test]] - TypeScript module `Paralith-tauri/src/features/terminals/runtimeStore.test.ts`
+- [[ui - features - terminals - runtimeStore]] - TypeScript module `Paralith-tauri/src/features/terminals/runtimeStore.ts`
+- [[ui - features - terminals - terminalImageInput]] - TypeScript module `Paralith-tauri/src/features/terminals/terminalImageInput.ts`
+- [[ui - features - updates - updateController.test]] - TypeScript module `Paralith-tauri/src/features/updates/updateController.test.ts`
+- [[ui - features - updates - updateController]] - TypeScript module `Paralith-tauri/src/features/updates/updateController.ts`
+- [[ui - features - updates - UpdateNotification.test]] - TypeScript module `Paralith-tauri/src/features/updates/UpdateNotification.test.tsx`
+- [[ui - features - updates - UpdateNotification]] - TypeScript module `Paralith-tauri/src/features/updates/UpdateNotification.tsx` defines UI component(s): UpdateNotificati
+- [[ui - features - usage - AiUsageStatusBar.test]] - TypeScript module `Paralith-tauri/src/features/usage/AiUsageStatusBar.test.tsx`
+- [[ui - features - usage - AiUsageStatusBar]] - TypeScript module `Paralith-tauri/src/features/usage/AiUsageStatusBar.tsx` defines UI component(s): AiUsageStatusBar, Pr
+- [[ui - features - usage - aiUsageStore]] - TypeScript module `Paralith-tauri/src/features/usage/aiUsageStore.ts`
+- [[ui - features - usage - components - DailyUsageChart]] - TypeScript module `Paralith-tauri/src/features/usage/components/DailyUsageChart.tsx` defines UI component(s): DailyUsage
+- [[ui - features - usage - components - RawCostSummary.test]] - TypeScript module `Paralith-tauri/src/features/usage/components/RawCostSummary.test.tsx`
+- [[ui - features - usage - components - RawCostSummary]] - TypeScript module `Paralith-tauri/src/features/usage/components/RawCostSummary.tsx` defines UI component(s): RawCostSumm
+- [[ui - features - usage - components - UsageBreakdown]] - TypeScript module `Paralith-tauri/src/features/usage/components/UsageBreakdown.tsx` defines UI component(s): UsageBreakd
+- [[ui - features - usage - components - UsageInstrument.test]] - TypeScript module `Paralith-tauri/src/features/usage/components/UsageInstrument.test.tsx`
+- [[ui - features - usage - components - UsageInstrument]] - TypeScript module `Paralith-tauri/src/features/usage/components/UsageInstrument.tsx` defines UI component(s): ActivitySt
+- [[ui - features - usage - components - UsageMetricStrip]] - TypeScript module `Paralith-tauri/src/features/usage/components/UsageMetricStrip.tsx` defines UI component(s): Metric, U
+- [[ui - features - usage - components - UsagePage.test]] - TypeScript module `Paralith-tauri/src/features/usage/components/UsagePage.test.tsx`
+- [[ui - features - usage - components - UsagePage]] - TypeScript module `Paralith-tauri/src/features/usage/components/UsagePage.tsx` defines UI component(s): UsagePage.
+- [[ui - features - usage - components - UsageSegmented]] - TypeScript module `Paralith-tauri/src/features/usage/components/UsageSegmented.tsx` defines UI component(s): UsageSegmen
+- [[ui - features - usage - usageAnalytics.test]] - TypeScript module `Paralith-tauri/src/features/usage/usageAnalytics.test.ts`
+- [[ui - features - usage - usageAnalytics]] - TypeScript module `Paralith-tauri/src/features/usage/usageAnalytics.ts` defines UI component(s): USAGE_PERIODS.
+- [[ui - features - usage - usageCost.test]] - TypeScript module `Paralith-tauri/src/features/usage/usageCost.test.ts`
+- [[ui - features - usage - usageCost]] - TypeScript module `Paralith-tauri/src/features/usage/usageCost.ts`
+- [[ui - features - usage - usageFormat]] - TypeScript module `Paralith-tauri/src/features/usage/usageFormat.ts` defines UI component(s): UNKNOWN.
+- [[ui - features - usage - usageHistoryStore]] - TypeScript module `Paralith-tauri/src/features/usage/usageHistoryStore.ts`
+- [[ui - features - usage - usagePopoverPlacement]] - TypeScript module `Paralith-tauri/src/features/usage/usagePopoverPlacement.ts` defines UI component(s): POPOVER_WIDTH, V
+- [[ui - features - usage - usagePricing]] - TypeScript module `Paralith-tauri/src/features/usage/usagePricing.ts`
+- [[ui - features - usage - usageTelemetryStore]] - TypeScript module `Paralith-tauri/src/features/usage/usageTelemetryStore.ts`
+- [[ui - features - workspace-canvas - canvasConstants]] - TypeScript module `Paralith-tauri/src/features/workspace-canvas/canvasConstants.ts` defines UI component(s): CANVAS_CONS
+- [[ui - features - workspace-canvas - canvasPersistence.test]] - TypeScript module `Paralith-tauri/src/features/workspace-canvas/canvasPersistence.test.ts`
+- [[ui - features - workspace-canvas - canvasPersistence]] - TypeScript module `Paralith-tauri/src/features/workspace-canvas/canvasPersistence.ts`
+- [[ui - features - workspace-canvas - canvasSelectors]] - TypeScript module `Paralith-tauri/src/features/workspace-canvas/canvasSelectors.ts`
+- [[ui - features - workspace-canvas - canvasStore.test]] - TypeScript module `Paralith-tauri/src/features/workspace-canvas/canvasStore.test.ts`
+- [[ui - features - workspace-canvas - canvasStore]] - TypeScript module `Paralith-tauri/src/features/workspace-canvas/canvasStore.ts`
+- [[ui - features - workspace-canvas - canvasTypes]] - TypeScript module `Paralith-tauri/src/features/workspace-canvas/canvasTypes.ts`
+- [[ui - features - workspace-canvas - components - DockingOverlayLayer]] - TypeScript module `Paralith-tauri/src/features/workspace-canvas/components/DockingOverlayLayer.tsx` defines UI component
+- [[ui - features - workspace-canvas - components - SplitResizeHandleLayer]] - TypeScript module `Paralith-tauri/src/features/workspace-canvas/components/SplitResizeHandleLayer.tsx` defines UI compon
+- [[ui - features - workspace-canvas - components - TerminalPaneWindow]] - TypeScript module `Paralith-tauri/src/features/workspace-canvas/components/TerminalPaneWindow.tsx` defines UI component(
+- [[ui - features - workspace-canvas - components - WorkspaceCanvas]] - TypeScript module `Paralith-tauri/src/features/workspace-canvas/components/WorkspaceCanvas.tsx` defines UI component(s):
+- [[ui - features - workspace-canvas - dragController]] - TypeScript module `Paralith-tauri/src/features/workspace-canvas/dragController.ts`
+- [[ui - features - workspace-canvas - geometryEngine.test]] - TypeScript module `Paralith-tauri/src/features/workspace-canvas/geometryEngine.test.ts`
+- [[ui - features - workspace-canvas - geometryEngine]] - TypeScript module `Paralith-tauri/src/features/workspace-canvas/geometryEngine.ts` defines UI component(s): SPLIT_HANDLE
+- [[ui - features - workspace-canvas - layoutOperations.test]] - TypeScript module `Paralith-tauri/src/features/workspace-canvas/layoutOperations.test.ts`
+- [[ui - features - workspace-canvas - layoutOperations]] - TypeScript module `Paralith-tauri/src/features/workspace-canvas/layoutOperations.ts`
+- [[ui - features - workspace-canvas - resizeController.test]] - TypeScript module `Paralith-tauri/src/features/workspace-canvas/resizeController.test.ts`
+- [[ui - features - workspace-canvas - resizeController]] - TypeScript module `Paralith-tauri/src/features/workspace-canvas/resizeController.ts`
+- [[ui - features - workspace-canvas - snapResolver.test]] - TypeScript module `Paralith-tauri/src/features/workspace-canvas/snapResolver.test.ts`
+- [[ui - features - workspace-canvas - snapResolver]] - TypeScript module `Paralith-tauri/src/features/workspace-canvas/snapResolver.ts`
+- [[ui - features - workspace-setup - agentRegistry]] - TypeScript module `Paralith-tauri/src/features/workspace-setup/agentRegistry.ts` defines UI component(s): SHELL_ID_PREFI
+- [[ui - features - workspace-setup - allocationCompiler.test]] - TypeScript module `Paralith-tauri/src/features/workspace-setup/allocationCompiler.test.ts`
+- [[ui - features - workspace-setup - allocationCompiler]] - TypeScript module `Paralith-tauri/src/features/workspace-setup/allocationCompiler.ts`
+- [[ui - features - workspace-setup - draftPersistence]] - TypeScript module `Paralith-tauri/src/features/workspace-setup/draftPersistence.ts`
+- [[ui - features - workspace-setup - presetMigration.test]] - TypeScript module `Paralith-tauri/src/features/workspace-setup/presetMigration.test.ts`
+- [[ui - features - workspace-setup - presetMigration]] - TypeScript module `Paralith-tauri/src/features/workspace-setup/presetMigration.ts` defines UI component(s): SETUP_PRESET
+- [[ui - features - workspace-setup - setupStore]] - TypeScript module `Paralith-tauri/src/features/workspace-setup/setupStore.ts`
+- [[ui - features - workspace-setup - setupTypes]] - TypeScript module `Paralith-tauri/src/features/workspace-setup/setupTypes.ts` defines UI component(s): SETUP_DRAFT_VERSI
+- [[ui - features - workspace-windows - closePolicy.test]] - TypeScript module `Paralith-tauri/src/features/workspace-windows/closePolicy.test.ts`
+- [[ui - features - workspace-windows - closePolicy]] - TypeScript module `Paralith-tauri/src/features/workspace-windows/closePolicy.ts`
+- [[ui - features - workspace-windows - handoffController]] - TypeScript module `Paralith-tauri/src/features/workspace-windows/handoffController.ts`
+- [[ui - features - workspace-windows - MonitorRecoveryWatcher]] - TypeScript module `Paralith-tauri/src/features/workspace-windows/MonitorRecoveryWatcher.tsx` defines UI component(s): Mo
+- [[ui - features - workspace-windows - placementSelectors]] - TypeScript module `Paralith-tauri/src/features/workspace-windows/placementSelectors.ts`
+- [[ui - features - workspace-windows - recoverySelectors]] - TypeScript module `Paralith-tauri/src/features/workspace-windows/recoverySelectors.ts`
+- [[ui - features - workspace-windows - windowIntent]] - TypeScript module `Paralith-tauri/src/features/workspace-windows/windowIntent.ts`
+- [[ui - features - workspace-windows - workspaceWindows.test]] - TypeScript module `Paralith-tauri/src/features/workspace-windows/workspaceWindows.test.ts`
+- [[ui - main]] - TypeScript module `Paralith-tauri/src/main.tsx`
+- [[ui - native - commands]] - TypeScript module `Paralith-tauri/src/native/commands.ts`
+- [[ui - native - events]] - TypeScript module `Paralith-tauri/src/native/events.ts`
+- [[ui - native - types]] - TypeScript module `Paralith-tauri/src/native/types.ts`
+- [[ui - native - windowContext]] - TypeScript module `Paralith-tauri/src/native/windowContext.ts`
+- [[ui - native - workspaceLayoutCommands]] - TypeScript module `Paralith-tauri/src/native/workspaceLayoutCommands.ts`
+- [[ui - screens - DatabaseScreen]] - TypeScript module `Paralith-tauri/src/screens/DatabaseScreen.tsx` defines UI component(s): DatabaseScreen.
+- [[ui - screens - DetachedWorkspaceWindow]] - TypeScript module `Paralith-tauri/src/screens/DetachedWorkspaceWindow.tsx` defines UI component(s): DetachedWorkspaceWin
+- [[ui - screens - MemoryScreen]] - TypeScript module `Paralith-tauri/src/screens/MemoryScreen.tsx` defines UI component(s): MemoryScreen.
+- [[ui - screens - ProjectLauncher.test]] - TypeScript module `Paralith-tauri/src/screens/ProjectLauncher.test.tsx` defines UI component(s): Location.
+- [[ui - screens - ProjectLauncher]] - TypeScript module `Paralith-tauri/src/screens/ProjectLauncher.tsx` defines UI component(s): ProjectLauncher.
+- [[ui - screens - RecoveryScreen]] - TypeScript module `Paralith-tauri/src/screens/RecoveryScreen.tsx` defines UI component(s): RecoveryScreen.
+- [[ui - screens - RepositoryScreen]] - TypeScript module `Paralith-tauri/src/screens/RepositoryScreen.tsx` defines UI component(s): RepositoryScreen.
+- [[ui - screens - SettingsScreen]] - TypeScript module `Paralith-tauri/src/screens/SettingsScreen.tsx` defines UI component(s): SettingRow, SettingsScreen, S
+- [[ui - screens - SwarmsScreen]] - TypeScript module `Paralith-tauri/src/screens/SwarmsScreen.tsx` defines UI component(s): SwarmsScreen.
+- [[ui - screens - UsageScreen]] - TypeScript module `Paralith-tauri/src/screens/UsageScreen.tsx` defines UI component(s): UsageScreen.
+- [[ui - screens - WorkspaceScreen.test]] - TypeScript module `Paralith-tauri/src/screens/WorkspaceScreen.test.tsx`
+- [[ui - screens - WorkspaceScreen]] - TypeScript module `Paralith-tauri/src/screens/WorkspaceScreen.tsx` defines UI component(s): WorkspaceScreen.
+- [[ui - screens - WorkspaceSetup.test]] - TypeScript module `Paralith-tauri/src/screens/WorkspaceSetup.test.tsx`
+- [[ui - screens - WorkspaceSetup]] - TypeScript module `Paralith-tauri/src/screens/WorkspaceSetup.tsx` defines UI component(s): AgentRow, AgentsFooter, Agent
+- [[ui - shared - layout.test]] - TypeScript module `Paralith-tauri/src/shared/layout.test.ts`
+- [[ui - shared - layout]] - TypeScript module `Paralith-tauri/src/shared/layout.ts`
+- [[ui - stores - activeContext.test]] - TypeScript module `Paralith-tauri/src/stores/activeContext.test.ts`
+- [[ui - stores - activeContext]] - TypeScript module `Paralith-tauri/src/stores/activeContext.ts`
+- [[ui - stores - appStore.test]] - TypeScript module `Paralith-tauri/src/stores/appStore.test.ts`
+- [[ui - stores - appStore]] - TypeScript module `Paralith-tauri/src/stores/appStore.ts`
+- [[ui - stores - nativeOverlay]] - TypeScript module `Paralith-tauri/src/stores/nativeOverlay.ts`
+- [[ui - stores - sessionStore.test]] - TypeScript module `Paralith-tauri/src/stores/sessionStore.test.ts`
+- [[ui - stores - sessionStore]] - TypeScript module `Paralith-tauri/src/stores/sessionStore.ts`
+- [[ui - test - setup]] - TypeScript module `Paralith-tauri/src/test/setup.ts`
+- [[ui - theme - applyTheme]] - TypeScript module `Paralith-tauri/src/theme/applyTheme.ts` defines UI component(s): STORAGE_KEYS, TOKEN_REVISION.
+- [[ui - theme - registry]] - TypeScript module `Paralith-tauri/src/theme/registry.ts`
+- [[ui - theme - system]] - TypeScript module `Paralith-tauri/src/theme/system.ts`
+- [[ui - theme - theme.test]] - TypeScript module `Paralith-tauri/src/theme/theme.test.ts`
+- [[ui - theme - ThemeGallery]] - TypeScript module `Paralith-tauri/src/theme/ThemeGallery.tsx` defines UI component(s): ThemeGallery, ThemePreview.
+- [[ui - theme - themes]] - TypeScript module `Paralith-tauri/src/theme/themes.ts`
+- [[ui - theme - themeStore.test]] - TypeScript module `Paralith-tauri/src/theme/themeStore.test.ts`
+- [[ui - theme - themeStore]] - TypeScript module `Paralith-tauri/src/theme/themeStore.ts`
+- [[ui - theme - tokens]] - TypeScript module `Paralith-tauri/src/theme/tokens.ts`
+- [[Paralith-tauri - src-tauri - tests - fixtures - database_studio - drizzle - drizzle.config]] - TypeScript module `Paralith-tauri/src-tauri/tests/fixtures/database_studio/drizzle/drizzle.config.ts`
+- [[Paralith-tauri - src-tauri - tests - fixtures - database_studio - drizzle - src - db - schema]] - TypeScript module `Paralith-tauri/src-tauri/tests/fixtures/database_studio/drizzle/src/db/schema.ts`
+- [[Paralith-tauri - src-tauri - tests - fixtures - database_studio - monorepo_shared_db - apps - api - src - index]] - TypeScript module `Paralith-tauri/src-tauri/tests/fixtures/database_studio/monorepo_shared_db/apps/api/src/index.ts`
+- [[Paralith-tauri - src-tauri - tests - fixtures - database_studio - monorepo_shared_db - apps - worker - src - jobs]] - TypeScript module `Paralith-tauri/src-tauri/tests/fixtures/database_studio/monorepo_shared_db/apps/worker/src/jobs.ts`
+- [[Paralith-tauri - src-tauri - tests - fixtures - database_studio - monorepo_shared_db - packages - db - src - index]] - TypeScript module `Paralith-tauri/src-tauri/tests/fixtures/database_studio/monorepo_shared_db/packages/db/src/index.ts`
+- [[Paralith-tauri - visual - fixtures]] - TypeScript module `Paralith-tauri/visual/fixtures.ts`
+- [[Paralith-tauri - visual - main]] - TypeScript module `Paralith-tauri/visual/main.tsx` defines UI component(s): Index.
+- [[Paralith-tauri - visual - Primitives]] - TypeScript module `Paralith-tauri/visual/Primitives.tsx` defines UI component(s): Primitives, Row, Section.
+- [[Paralith-tauri - visual - stub-core]] - TypeScript module `Paralith-tauri/visual/stub-core.ts`
+- [[Paralith-tauri - visual - stub-event]] - TypeScript module `Paralith-tauri/visual/stub-event.ts` defines UI component(s): TauriEvent.
+- [[Paralith-tauri - visual - stub-plugins]] - TypeScript module `Paralith-tauri/visual/stub-plugins.ts`
+- [[Paralith-tauri - visual - stub-window]] - TypeScript module `Paralith-tauri/visual/stub-window.ts` defines UI component(s): Webview, Window.
+- [[Paralith-tauri - vite.config]] - TypeScript module `Paralith-tauri/vite.config.ts`
+- [[Paralith-tauri - vite.visual.config]] - TypeScript module `Paralith-tauri/vite.visual.config.ts`
+- [[Validate]] - GitHub Actions workflow from `.github/workflows/ci.yml`.
+- [[Release Stable]] - GitHub Actions workflow from `.github/workflows/release-stable.yml`.
+- [[Validate corelith-site]] - GitHub Actions workflow from `.github/workflows/site-ci.yml`.
+- [[Validate product film]] - GitHub Actions workflow from `.github/workflows/video-ci.yml`.
+- [[Validate website]] - GitHub Actions workflow from `.github/workflows/web-ci.yml`.
+
+<!-- PARALITH:AUTO:END -->

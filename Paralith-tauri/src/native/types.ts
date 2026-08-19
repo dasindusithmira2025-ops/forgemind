@@ -188,6 +188,42 @@ export interface ProviderUsageSnapshot { provider: UsageProvider; collectedAt: s
 export interface UsageDailyRow { date: string; provider: UsageProvider; model?: string; tokens: TokenUsageSummary }
 export interface AiUsageDiagnostics { provider: UsageProvider; filesSeen: number; filesReused: number; filesScanned: number; elapsedMs: number; status: UsageSnapshotStatus; diagnosticCode?: string }
 
+export type TelemetryState = 'ready' | 'stale' | 'unavailable' | 'unauthenticated' | 'error'
+export type TelemetryConfidence = 'confirmed' | 'estimated'
+export interface SystemTelemetrySnapshot {
+  sampledAt: string
+  cpuPercent?: number
+  memoryUsedBytes?: number
+  memoryTotalBytes?: number
+  diskUsedBytes?: number
+  diskTotalBytes?: number
+  state: TelemetryState
+  confidence: TelemetryConfidence
+  diagnosticMessage?: string
+}
+export interface ContributionDay { date: string; count: number }
+export interface GithubActivitySnapshot {
+  fetchedAt?: string
+  sourceUpdatedAt?: string
+  login?: string
+  name?: string
+  repositories?: number
+  totalContributions?: number
+  activeDays?: number
+  averageContributionsPerActiveDay?: number
+  bestDay?: ContributionDay
+  contributions: ContributionDay[]
+  state: TelemetryState
+  confidence: TelemetryConfidence
+  diagnosticCode?: string
+  diagnosticMessage?: string
+}
+export interface UsageTelemetrySnapshot {
+  system: SystemTelemetrySnapshot
+  github: GithubActivitySnapshot
+  lastSuccessfulRefresh?: string
+}
+
 export interface RestorationProgress {
   workspaceId: string
   paneId: string
@@ -1014,7 +1050,7 @@ export interface SwarmRuntimeSession {
 }
 export interface SwarmEvidence {
   id: string; swarmId: string; taskId?: string | null; agentId?: string | null; criterion: string
-  evidenceType: string; title: string; summary: string; sourceUri?: string | null; verified: boolean; createdAt: string
+  evidenceType: string; title: string; summary: string; sourceUri?: string | null; payload: Record<string, unknown>; verified: boolean; createdAt: string
 }
 export interface SwarmTestRecord {
   id: string; swarmId: string; taskId?: string | null; agentId?: string | null; name: string

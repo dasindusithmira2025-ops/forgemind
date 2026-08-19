@@ -472,7 +472,7 @@ impl DatabaseService {
         let valid_task = task_id.and_then(|id| {
             self.connection
                 .lock()
-                .query_row("SELECT id FROM mission_tasks WHERE id=?1", [id], |row| {
+                .query_row("SELECT id FROM swarm_tasks WHERE id=?1", [id], |row| {
                     row.get::<_, String>(0)
                 })
                 .optional()
@@ -1065,5 +1065,68 @@ mod tests {
             )
             .expect("index-state row keyed by the literal project id");
         assert_eq!((node_count, edge_count), (1, 1));
+    }
+
+    #[test]
+    fn repository_audit_retains_live_task_provenance_and_rejects_legacy_ids() {
+        let db = provisioned_db();
+        db.seed_project_workspace_for_test("p1", "w1")
+            .expect("seed project");
+        db.connection
+            .lock()
+            .execute(
+                "INSERT INTO swarms(id,project_id,project_root,name,mission,lifecycle,phase,team_preset,max_parallel,instructions,progress,priority,archived,created_at,updated_at,repository_identity,git_state_json,safeguards_json,attachments_json) VALUES('swarm-1','p1','/p','Swarm','Mission','draft','understanding','quick_fix',1,'',0,0,0,'t','t',NULL,'{}','[]','[]')",
+                [],
+            )
+            .expect("seed live swarm");
+        db.insert_swarm_tasks(
+            "swarm-1",
+            &[crate::database::swarm::NewSwarmTask {
+                title: "Live task".into(),
+                role: crate::models::swarm::SwarmRole::Builder,
+                position: 0,
+                depends_on_positions: Vec::new(),
+                files: Vec::new(),
+                repair_for_task_id: None,
+            }],
+        )
+        .expect("seed live task");
+        let task_id = db
+            .list_swarm_tasks("swarm-1")
+            .expect("load live task")
+            .into_iter()
+            .next()
+            .expect("task exists")
+            .id;
+
+        db.append_repository_audit(
+            Some(&task_id),
+            "status",
+            "succeeded",
+            "live task audit",
+            &json!({ "source": "test" }),
+        )
+        .expect("write task audit");
+        db.append_repository_audit(None, "status", "succeeded", "project audit", &json!({}))
+            .expect("write project audit");
+        db.append_repository_audit(
+            Some("legacy-mission-task"),
+            "status",
+            "succeeded",
+            "legacy audit",
+            &json!({}),
+        )
+        .expect("write legacy-shaped audit");
+
+        let connection = db.connection.lock();
+        let mut statement = connection
+            .prepare("SELECT task_id FROM audit_events ORDER BY rowid")
+            .expect("prepare audit query");
+        let task_ids = statement
+            .query_map([], |row| row.get::<_, Option<String>>(0))
+            .expect("read audit task ids")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("collect audit task ids");
+        assert_eq!(task_ids, vec![Some(task_id), None, None]);
     }
 }

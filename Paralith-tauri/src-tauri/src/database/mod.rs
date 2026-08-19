@@ -1,11 +1,18 @@
 pub mod backup;
+pub(crate) mod code;
 pub(crate) mod database_studio;
+pub(crate) mod embeddings;
+pub(crate) mod graph;
+pub(crate) mod intelligence;
+pub(crate) mod knowledge_jobs;
 pub mod legacy_migration;
+pub(crate) mod memory;
 pub mod migrations;
 pub(crate) mod orchestration;
 mod placement;
 mod repair;
 mod repository;
+pub(crate) mod search;
 pub(crate) mod swarm;
 mod usage;
 

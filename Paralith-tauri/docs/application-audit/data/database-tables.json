@@ -1,0 +1,1011 @@
+{
+  "generated_from": "migrations.rs CREATE TABLE (comment lines excluded) x SQL-context refs in src-tauri/src/**/*.rs",
+  "schema_version": 34,
+  "create_table_statements": 148,
+  "persistent_tables": 147,
+  "orphans": 44,
+  "tables": [
+    {
+      "table": "acceptance_criteria",
+      "sql_referenced_in": [],
+      "status": "ORPHAN"
+    },
+    {
+      "table": "agent_detections",
+      "sql_referenced_in": [],
+      "status": "ORPHAN"
+    },
+    {
+      "table": "agent_profiles",
+      "sql_referenced_in": [
+        "database/mod.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "agent_sessions",
+      "sql_referenced_in": [
+        "database/mod.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "ai_usage_daily",
+      "sql_referenced_in": [
+        "database/usage.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "ai_usage_file_checkpoints",
+      "sql_referenced_in": [
+        "database/usage.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "ai_usage_snapshots",
+      "sql_referenced_in": [
+        "database/usage.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "app_settings",
+      "sql_referenced_in": [
+        "database/mod.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "audit_events",
+      "sql_referenced_in": [
+        "database/repository.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "base_views",
+      "sql_referenced_in": [],
+      "status": "ORPHAN"
+    },
+    {
+      "table": "bases",
+      "sql_referenced_in": [],
+      "status": "ORPHAN"
+    },
+    {
+      "table": "canvas_edges",
+      "sql_referenced_in": [],
+      "status": "ORPHAN"
+    },
+    {
+      "table": "canvas_nodes",
+      "sql_referenced_in": [],
+      "status": "ORPHAN"
+    },
+    {
+      "table": "canvases",
+      "sql_referenced_in": [],
+      "status": "ORPHAN"
+    },
+    {
+      "table": "code_files",
+      "sql_referenced_in": [
+        "database/code.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "code_imports",
+      "sql_referenced_in": [
+        "database/code.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "code_index_state",
+      "sql_referenced_in": [
+        "database/code.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "code_references",
+      "sql_referenced_in": [
+        "database/code.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "code_symbols",
+      "sql_referenced_in": [
+        "database/code.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "database_design_operations",
+      "sql_referenced_in": [
+        "database/database_studio.rs",
+        "services/database_studio/design.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "database_design_revisions",
+      "sql_referenced_in": [
+        "database/database_studio.rs",
+        "services/database_studio/design.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "database_designs",
+      "sql_referenced_in": [
+        "database/database_studio.rs",
+        "services/database_studio/design.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "database_diffs",
+      "sql_referenced_in": [],
+      "status": "ORPHAN"
+    },
+    {
+      "table": "database_edges",
+      "sql_referenced_in": [
+        "database/database_studio.rs",
+        "services/database_studio/design.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "database_issues",
+      "sql_referenced_in": [
+        "database/database_studio.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "database_layouts",
+      "sql_referenced_in": [
+        "database/database_studio.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "database_object_provenance",
+      "sql_referenced_in": [
+        "database/database_studio.rs",
+        "services/database_studio/design.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "database_objects",
+      "sql_referenced_in": [
+        "database/database_studio.rs",
+        "services/database_studio/design.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "database_snapshots",
+      "sql_referenced_in": [
+        "database/database_studio.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "database_source_evidence",
+      "sql_referenced_in": [
+        "database/database_studio.rs",
+        "services/database_studio/security.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "database_sources",
+      "sql_referenced_in": [
+        "database/database_studio.rs",
+        "services/database_studio/design.rs",
+        "services/database_studio/security.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "database_usage_refs",
+      "sql_referenced_in": [
+        "database/database_studio.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "evidence_records",
+      "sql_referenced_in": [],
+      "status": "ORPHAN"
+    },
+    {
+      "table": "knowledge_branch_merges",
+      "sql_referenced_in": [],
+      "status": "ORPHAN"
+    },
+    {
+      "table": "knowledge_candidate_evidence",
+      "sql_referenced_in": [
+        "database/intelligence.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "knowledge_candidates",
+      "sql_referenced_in": [
+        "database/intelligence.rs",
+        "services/query_engine.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "knowledge_conflicts",
+      "sql_referenced_in": [
+        "database/intelligence.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "knowledge_context_cache",
+      "sql_referenced_in": [
+        "database/intelligence.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "knowledge_embeddings",
+      "sql_referenced_in": [
+        "database/embeddings.rs",
+        "database/intelligence.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "knowledge_entities",
+      "sql_referenced_in": [
+        "database/intelligence.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "knowledge_entity_aliases",
+      "sql_referenced_in": [
+        "database/intelligence.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "knowledge_fact_evidence",
+      "sql_referenced_in": [
+        "database/intelligence.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "knowledge_handoffs",
+      "sql_referenced_in": [
+        "database/intelligence.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "knowledge_project_facts",
+      "sql_referenced_in": [
+        "database/intelligence.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "knowledge_timeline",
+      "sql_referenced_in": [
+        "database/intelligence.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "knowledge_understanding",
+      "sql_referenced_in": [
+        "database/intelligence.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "mcp_audit",
+      "sql_referenced_in": [],
+      "status": "ORPHAN"
+    },
+    {
+      "table": "mcp_clients",
+      "sql_referenced_in": [],
+      "status": "ORPHAN"
+    },
+    {
+      "table": "mcp_permissions",
+      "sql_referenced_in": [],
+      "status": "ORPHAN"
+    },
+    {
+      "table": "mcp_server_state",
+      "sql_referenced_in": [],
+      "status": "ORPHAN"
+    },
+    {
+      "table": "mcp_tasks",
+      "sql_referenced_in": [],
+      "status": "ORPHAN"
+    },
+    {
+      "table": "memory_chunks",
+      "sql_referenced_in": [
+        "database/memory.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "memory_claim_sources",
+      "sql_referenced_in": [
+        "database/graph.rs",
+        "database/memory.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "memory_claims",
+      "sql_referenced_in": [
+        "database/graph.rs",
+        "database/intelligence.rs",
+        "database/memory.rs",
+        "database/search.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "memory_events",
+      "sql_referenced_in": [],
+      "status": "ORPHAN"
+    },
+    {
+      "table": "memory_items",
+      "sql_referenced_in": [
+        "database/code.rs",
+        "database/embeddings.rs",
+        "database/graph.rs",
+        "database/intelligence.rs",
+        "database/memory.rs",
+        "database/search.rs",
+        "database/swarm.rs",
+        "services/query_engine.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "memory_jobs",
+      "sql_referenced_in": [
+        "database/intelligence.rs",
+        "database/knowledge_jobs.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "memory_links",
+      "sql_referenced_in": [
+        "database/graph.rs",
+        "database/memory.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "memory_properties",
+      "sql_referenced_in": [
+        "database/graph.rs",
+        "database/memory.rs",
+        "services/query_engine.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "memory_relations",
+      "sql_referenced_in": [
+        "database/graph.rs",
+        "database/intelligence.rs",
+        "database/memory.rs",
+        "services/query_engine.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "memory_revision_sources",
+      "sql_referenced_in": [
+        "database/code.rs",
+        "database/graph.rs",
+        "database/intelligence.rs",
+        "database/memory.rs",
+        "database/swarm.rs",
+        "services/query_engine.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "memory_revisions",
+      "sql_referenced_in": [
+        "database/graph.rs",
+        "database/memory.rs",
+        "database/search.rs",
+        "database/swarm.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "memory_settings",
+      "sql_referenced_in": [
+        "database/embeddings.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "memory_sources",
+      "sql_referenced_in": [
+        "database/code.rs",
+        "database/graph.rs",
+        "database/intelligence.rs",
+        "database/memory.rs",
+        "database/swarm.rs",
+        "services/query_engine.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "memory_tags",
+      "sql_referenced_in": [
+        "database/graph.rs",
+        "database/memory.rs",
+        "services/query_engine.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "metadata_quarantine",
+      "sql_referenced_in": [
+        "database/mod.rs",
+        "database/repair.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "migration_repair_history",
+      "sql_referenced_in": [
+        "database/repair.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "mission_sessions",
+      "sql_referenced_in": [],
+      "status": "ORPHAN"
+    },
+    {
+      "table": "mission_tasks",
+      "sql_referenced_in": [
+        "database/repository.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "missions",
+      "sql_referenced_in": [],
+      "status": "ORPHAN"
+    },
+    {
+      "table": "monitor_aliases",
+      "sql_referenced_in": [
+        "database/placement.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "open_project_sessions",
+      "sql_referenced_in": [
+        "database/placement.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "orchestration_capability_executions",
+      "sql_referenced_in": [
+        "database/orchestration.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "orchestration_events",
+      "sql_referenced_in": [
+        "database/orchestration.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "orchestration_sessions",
+      "sql_referenced_in": [
+        "database/orchestration.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "orchestration_turns",
+      "sql_referenced_in": [
+        "database/orchestration.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "pane_worktrees",
+      "sql_referenced_in": [
+        "database/mod.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "project_context_suggestions",
+      "sql_referenced_in": [],
+      "status": "ORPHAN"
+    },
+    {
+      "table": "project_contexts",
+      "sql_referenced_in": [],
+      "status": "ORPHAN"
+    },
+    {
+      "table": "projects",
+      "sql_referenced_in": [
+        "database/mod.rs",
+        "database/placement.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "recovery_states",
+      "sql_referenced_in": [],
+      "status": "ORPHAN"
+    },
+    {
+      "table": "repository_approvals",
+      "sql_referenced_in": [
+        "database/repository.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "repository_connections",
+      "sql_referenced_in": [
+        "database/repository.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "repository_graph_edges",
+      "sql_referenced_in": [
+        "database/repository.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "repository_graph_index_state",
+      "sql_referenced_in": [
+        "database/repository.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "repository_graph_nodes",
+      "sql_referenced_in": [
+        "database/repository.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "repository_graph_snapshots",
+      "sql_referenced_in": [
+        "database/repository.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "repository_operations",
+      "sql_referenced_in": [
+        "database/repository.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "repository_policies",
+      "sql_referenced_in": [
+        "database/repository.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "repository_provider_accounts",
+      "sql_referenced_in": [],
+      "status": "ORPHAN"
+    },
+    {
+      "table": "repository_provider_installations",
+      "sql_referenced_in": [],
+      "status": "ORPHAN"
+    },
+    {
+      "table": "repository_recovery_checkpoints",
+      "sql_referenced_in": [],
+      "status": "ORPHAN"
+    },
+    {
+      "table": "repository_remote_cache",
+      "sql_referenced_in": [
+        "database/repository.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "repository_sync_cursors",
+      "sql_referenced_in": [
+        "database/repository.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "repository_webhook_deliveries",
+      "sql_referenced_in": [],
+      "status": "ORPHAN"
+    },
+    {
+      "table": "repository_worktree_leases",
+      "sql_referenced_in": [
+        "database/repository.rs",
+        "database/swarm.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "schema_migrations",
+      "sql_referenced_in": [
+        "services/update_service.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "shell_profiles",
+      "sql_referenced_in": [
+        "database/mod.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "skill_activations",
+      "sql_referenced_in": [],
+      "status": "ORPHAN"
+    },
+    {
+      "table": "skills",
+      "sql_referenced_in": [],
+      "status": "ORPHAN"
+    },
+    {
+      "table": "swarm_agent_runs",
+      "sql_referenced_in": [
+        "database/swarm.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "swarm_agents",
+      "sql_referenced_in": [
+        "database/swarm.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "swarm_attention_requests",
+      "sql_referenced_in": [
+        "database/swarm.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "swarm_canvas_connections",
+      "sql_referenced_in": [
+        "database/swarm.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "swarm_command_drafts",
+      "sql_referenced_in": [
+        "database/swarm.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "swarm_context_packs",
+      "sql_referenced_in": [
+        "database/swarm.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "swarm_decisions",
+      "sql_referenced_in": [
+        "database/swarm.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "swarm_events",
+      "sql_referenced_in": [
+        "database/swarm.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "swarm_evidence",
+      "sql_referenced_in": [
+        "database/swarm.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "swarm_execution_defaults",
+      "sql_referenced_in": [
+        "database/swarm.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "swarm_file_ownership",
+      "sql_referenced_in": [
+        "database/swarm.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "swarm_lifecycle_history",
+      "sql_referenced_in": [
+        "database/swarm.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "swarm_messages",
+      "sql_referenced_in": [
+        "database/swarm.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "swarm_presets",
+      "sql_referenced_in": [
+        "database/swarm.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "swarm_recovery_states",
+      "sql_referenced_in": [
+        "database/swarm.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "swarm_reviews",
+      "sql_referenced_in": [
+        "database/swarm.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "swarm_role_allocations",
+      "sql_referenced_in": [
+        "database/swarm.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "swarm_roles",
+      "sql_referenced_in": [
+        "database/swarm.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "swarm_runs",
+      "sql_referenced_in": [
+        "database/swarm.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "swarm_runtime_event_receipts",
+      "sql_referenced_in": [
+        "database/swarm.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "swarm_runtime_sessions",
+      "sql_referenced_in": [
+        "database/swarm.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "swarm_task_deps",
+      "sql_referenced_in": [
+        "database/swarm.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "swarm_tasks",
+      "sql_referenced_in": [
+        "database/swarm.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "swarm_test_records",
+      "sql_referenced_in": [
+        "database/swarm.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "swarm_worktrees",
+      "sql_referenced_in": [
+        "database/swarm.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "swarms",
+      "sql_referenced_in": [
+        "database/mod.rs",
+        "database/swarm.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "task_acceptance_criteria",
+      "sql_referenced_in": [],
+      "status": "ORPHAN"
+    },
+    {
+      "table": "task_dependencies",
+      "sql_referenced_in": [],
+      "status": "ORPHAN"
+    },
+    {
+      "table": "task_events",
+      "sql_referenced_in": [],
+      "status": "ORPHAN"
+    },
+    {
+      "table": "terminal_sessions",
+      "sql_referenced_in": [
+        "database/mod.rs",
+        "database/repair.rs",
+        "database/repository.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "terminal_sessions_rebuilt",
+      "sql_referenced_in": [],
+      "status": "MIGRATION-SCRATCH"
+    },
+    {
+      "table": "usage_alert_prefs",
+      "sql_referenced_in": [],
+      "status": "ORPHAN"
+    },
+    {
+      "table": "usage_alerts",
+      "sql_referenced_in": [],
+      "status": "ORPHAN"
+    },
+    {
+      "table": "usage_events",
+      "sql_referenced_in": [],
+      "status": "ORPHAN"
+    },
+    {
+      "table": "usage_limit_events",
+      "sql_referenced_in": [],
+      "status": "ORPHAN"
+    },
+    {
+      "table": "usage_profiles",
+      "sql_referenced_in": [],
+      "status": "ORPHAN"
+    },
+    {
+      "table": "usage_providers",
+      "sql_referenced_in": [],
+      "status": "ORPHAN"
+    },
+    {
+      "table": "usage_reset_observations",
+      "sql_referenced_in": [],
+      "status": "ORPHAN"
+    },
+    {
+      "table": "usage_snapshots",
+      "sql_referenced_in": [],
+      "status": "ORPHAN"
+    },
+    {
+      "table": "usage_windows",
+      "sql_referenced_in": [],
+      "status": "ORPHAN"
+    },
+    {
+      "table": "verification_checks",
+      "sql_referenced_in": [],
+      "status": "ORPHAN"
+    },
+    {
+      "table": "verification_profiles",
+      "sql_referenced_in": [],
+      "status": "ORPHAN"
+    },
+    {
+      "table": "verification_results",
+      "sql_referenced_in": [],
+      "status": "ORPHAN"
+    },
+    {
+      "table": "workspace_events",
+      "sql_referenced_in": [],
+      "status": "ORPHAN"
+    },
+    {
+      "table": "workspace_panes",
+      "sql_referenced_in": [
+        "database/mod.rs",
+        "database/placement.rs",
+        "database/repair.rs",
+        "database/swarm.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "workspace_placements",
+      "sql_referenced_in": [
+        "database/placement.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "workspaces",
+      "sql_referenced_in": [
+        "database/mod.rs",
+        "database/placement.rs",
+        "database/repair.rs",
+        "database/swarm.rs"
+      ],
+      "status": "LIVE"
+    },
+    {
+      "table": "worktrees",
+      "sql_referenced_in": [],
+      "status": "ORPHAN"
+    }
+  ]
+}

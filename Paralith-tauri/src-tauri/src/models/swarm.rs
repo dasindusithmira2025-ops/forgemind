@@ -1019,8 +1019,16 @@ pub struct SwarmEvidence {
     pub title: String,
     pub summary: String,
     pub source_uri: Option<String>,
+    /// Bounded, redacted structured proof. Older rows deserialize as an empty object because the
+    /// column predates the live evidence contract.
+    #[serde(default = "empty_json_object")]
+    pub payload: serde_json::Value,
     pub verified: bool,
     pub created_at: String,
+}
+
+fn empty_json_object() -> serde_json::Value {
+    serde_json::Value::Object(serde_json::Map::new())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -1,6 +1,7 @@
 import { RefreshCw } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { DailyUsageChart, type ChartMetric } from './DailyUsageChart'
+import { UsageInstrument } from './UsageInstrument'
 import { RawCostSummary } from './RawCostSummary'
 import { UsageBreakdown, type BreakdownMode } from './UsageBreakdown'
 import { UsageMetricStrip } from './UsageMetricStrip'
@@ -8,6 +9,7 @@ import { UsageSegmented } from './UsageSegmented'
 import { useAiUsage } from '../aiUsageStore'
 import { buildUsageAnalytics, USAGE_PERIODS, type UsagePeriod } from '../usageAnalytics'
 import { useUsageHistory } from '../usageHistoryStore'
+import { usageTelemetryStore, useUsageTelemetry } from '../usageTelemetryStore'
 import { formatRange } from '../usageFormat'
 
 const PERIOD_OPTIONS = USAGE_PERIODS.map((period) => ({ value: period, label: `${period} days` }))
@@ -22,12 +24,15 @@ const PERIOD_OPTIONS = USAGE_PERIODS.map((period) => ({ value: period, label: `$
 export function UsagePage() {
   const { rows, period, setPeriod, isLoading, isRefreshing, error, refresh } = useUsageHistory()
   const { snapshots } = useAiUsage()
+  const { snapshot: telemetry, isRefreshing: isTelemetryRefreshing } = useUsageTelemetry()
   const [metric, setMetric] = useState<ChartMetric>('cost')
   const [breakdown, setBreakdown] = useState<BreakdownMode>('model')
 
   // Every derived view of the period comes from one computation, so the chart, strip and table
   // can never disagree about the same interval.
   const analytics = useMemo(() => buildUsageAnalytics(rows, period), [rows, period])
+  const pageRefreshing = isRefreshing || isTelemetryRefreshing
+  const refreshAll = () => { void Promise.allSettled([refresh(), usageTelemetryStore.refresh(true)]) }
 
   return (
     <div className="usage-page">
@@ -45,9 +50,9 @@ export function UsagePage() {
             <button
               type="button"
               className="usage-refresh"
-              aria-label="Refresh usage"
-              onClick={refresh}
-              disabled={isRefreshing}
+              aria-label="Refresh usage and telemetry"
+              onClick={refreshAll}
+              disabled={pageRefreshing}
             >
               <RefreshCw size={13} className={isRefreshing ? 'is-spinning' : undefined} aria-hidden />
             </button>
@@ -55,13 +60,24 @@ export function UsagePage() {
         </header>
 
         <p className="usage-live-region" role="status" aria-live="polite">
-          {isRefreshing ? 'Refreshing usage' : isLoading ? 'Loading usage' : ''}
+          {pageRefreshing ? 'Refreshing usage and telemetry' : isLoading ? 'Loading usage' : ''}
         </p>
 
         {error && <p className="usage-error">{error}</p>}
 
         {/* The layout is never replaced by a loading or empty state: a page that collapses on
             refresh makes the reader re-find every number they were already looking at. */}
+        <UsageInstrument
+          snapshots={snapshots}
+          telemetry={telemetry}
+          isRefreshing={pageRefreshing}
+          onRefreshAI={refresh}
+          onRefreshGitHub={() => { void usageTelemetryStore.refresh(true) }}
+          onRefreshAll={refreshAll}
+        />
+
+        <div className="usage-history-heading"><span className="usage-label">RECORDED CONSUMPTION</span><span>{formatRange(analytics.from, analytics.to)} · local transcript evidence</span></div>
+
         <div className="usage-top">
           <RawCostSummary
             totalCost={analytics.totalCost}

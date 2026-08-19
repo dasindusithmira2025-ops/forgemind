@@ -662,6 +662,37 @@ mod tests {
     }
 
     #[test]
+    fn workspace_caller_must_match_the_owned_workspace_window() {
+        let registry = registry();
+        seed(&registry, "p1", "w1");
+        seed(&registry, "p2", "w2");
+
+        assert_eq!(
+            registry
+                .validate_workspace_caller("w1", "ws-w2", false)
+                .unwrap_err()
+                .code,
+            "workspace_caller_mismatch"
+        );
+        assert_eq!(
+            registry
+                .validate_workspace_caller("w1", "ws-w1", false)
+                .unwrap_err()
+                .code,
+            "workspace_not_owned"
+        );
+        let ticket = registry
+            .begin_handoff("w1", &detached_label("w1"), PlacementMode::Detached)
+            .unwrap();
+        registry
+            .commit_handoff(&ticket.operation_id, None, None, None, false, false)
+            .unwrap();
+        assert!(registry
+            .validate_workspace_caller("w1", "ws-w1", false)
+            .is_ok());
+    }
+
+    #[test]
     fn handoff_detach_then_commit_moves_placement_and_lease() {
         let registry = registry();
         seed(&registry, "p1", "w1");

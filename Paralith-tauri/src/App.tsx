@@ -25,6 +25,7 @@ const WorkspaceScreen = lazy(() => import('./screens/WorkspaceScreen').then((mod
 const SettingsScreen = lazy(() => import('./screens/SettingsScreen').then((module) => ({ default: module.SettingsScreen })))
 const RepositoryScreen = lazy(() => import('./screens/RepositoryScreen').then((module) => ({ default: module.RepositoryScreen })))
 const DatabaseScreen = lazy(() => import('./screens/DatabaseScreen').then((module) => ({ default: module.DatabaseScreen })))
+const MemoryScreen = lazy(() => import('./screens/MemoryScreen').then((module) => ({ default: module.MemoryScreen })))
 const UsageScreen = lazy(() => import('./screens/UsageScreen').then((module) => ({ default: module.UsageScreen })))
 const SwarmsScreen = lazy(() => import('./screens/SwarmsScreen').then((module) => ({ default: module.SwarmsScreen })))
 const DetachedWorkspaceWindow = lazy(() => import('./screens/DetachedWorkspaceWindow').then((module) => ({ default: module.DetachedWorkspaceWindow })))
@@ -154,6 +155,7 @@ export default function App() {
         <Route path="/workspace/:workspaceId" element={<WorkspaceScreen />} />
         <Route path="/repository/:projectId" element={<RepositoryScreen />} />
         <Route path="/database/:projectId" element={<DatabaseScreen />} />
+        <Route path="/memory/:projectId" element={<MemoryScreen />} />
         <Route path="/swarms/:projectId" element={<SwarmsScreen />} />
         <Route path="/swarms/:projectId/:swarmId" element={<SwarmsScreen />} />
         <Route path="/usage" element={<UsageScreen />} />

@@ -1,0 +1,187 @@
+{
+  "generated_from": "thread::spawn / thread::Builder sites in src-tauri/src, setInterval sites in src/, and the knowledge job queue model",
+  "application_lifetime_threads": 3,
+  "per_terminal_session_threads": 5,
+  "durable_job_kinds": 4,
+  "polling_loops": 10,
+  "threads": [
+    {
+      "id": "swarm-scheduler",
+      "kind": "application-lifetime thread",
+      "owner": "services/swarm_service.rs:1784",
+      "started": "SwarmService::new() during Tauri setup()",
+      "cadence": "900 ms loop",
+      "work": "tick_all_schedulable() -> per-swarm tick() under a per-swarm operation lock, respecting global_active_limit",
+      "stop": "scheduler_running AtomicBool",
+      "fault_tolerance": "a failed tick logs a warning and continues; it never kills the thread",
+      "side_effects": ["spawns agent PTYs", "writes swarm_* tables", "emits swarm-changed", "enqueues ExtractHandoff jobs"],
+      "status": "LIVE"
+    },
+    {
+      "id": "knowledge-lifecycle-worker",
+      "kind": "application-lifetime thread",
+      "owner": "services/knowledge_lifecycle.rs:129-136",
+      "started": "KnowledgeLifecycle::start() during setup(), SKIPPED in recovery mode",
+      "cadence": "condvar-driven, with a MAX_IDLE backstop sleep",
+      "work": "drains memory_jobs; runs AnalyzeImpact, AnalyzeProject, ProcessCandidates, ExtractHandoff",
+      "stop": "flag",
+      "design_note": "Starts at boot rather than on project open so a job left 'retrying' by a crash is picked up even if that Project is never reopened.",
+      "side_effects": ["memory_mark_stale", "knowledge_candidates", "knowledge_conflicts", "emits memory-knowledge-updated"],
+      "status": "LIVE"
+    },
+    {
+      "id": "file-watch-dispatcher",
+      "kind": "application-lifetime thread",
+      "owner": "services/file_watch_service.rs:223",
+      "started": "FileWatchService::new() during setup()",
+      "cadence": "event-driven (notify 6.1)",
+      "work": "fan out filesystem events to KnowledgeLifecycle, CodeIntelligence and DatabaseStudioRuntime; suppress self-writes via SelfWriteLedger",
+      "stop": "per-window forget_window on window destroy",
+      "design_note": "One watcher per project feeding three subsystems, rather than three watchers.",
+      "status": "LIVE"
+    },
+    {
+      "id": "forgemind-agent-identity-<session>",
+      "kind": "per-terminal-session thread",
+      "owner": "services/terminal_manager.rs:411",
+      "cadence": "up to 80 polls",
+      "work": "discover the provider CLI's own session id for later resume",
+      "stop": "self-terminates after its poll budget",
+      "status": "LIVE"
+    },
+    {
+      "id": "forgemind-output-pipeline-<session>",
+      "kind": "per-terminal-session thread",
+      "owner": "services/terminal_manager.rs:506",
+      "cadence": "blocking recv() on a bounded sync_channel (OUTPUT_QUEUE_DEPTH)",
+      "work": "drain the output channel and emit terminal-output to the main and detached window labels",
+      "backpressure": "channel saturation increments dropped_output_bytes rather than growing unbounded",
+      "status": "LIVE"
+    },
+    {
+      "id": "forgemind-pty-output-<session>",
+      "kind": "per-terminal-session thread",
+      "owner": "services/terminal_manager.rs:554",
+      "cadence": "blocking read on the PTY master",
+      "work": "read OUTPUT_BUFFER_SIZE chunks; accumulate machine-protocol pending bytes",
+      "status": "LIVE"
+    },
+    {
+      "id": "forgemind-pty-exit-<session>",
+      "kind": "per-terminal-session thread",
+      "owner": "services/terminal_manager.rs:625",
+      "cadence": "100 ms poll (try_wait)",
+      "work": "detect child exit and emit terminal-exit with the exit code",
+      "status": "LIVE",
+      "note": "A polling loop per session; consolidation candidate."
+    },
+    {
+      "id": "forgemind-agent-state-<session>",
+      "kind": "per-terminal-session thread",
+      "owner": "services/terminal_manager.rs:712",
+      "cadence": "5 s poll",
+      "work": "classify the agent as working/idle/waiting from an output signal buffer; emit agent-state",
+      "stop": "breaks when cancelled or status != running",
+      "status": "LIVE",
+      "note": "Heuristic; accuracy not verifiable statically."
+    },
+    {
+      "id": "process stdout/stderr readers",
+      "kind": "transient (2 per external process)",
+      "owner": "services/repository_service.rs:2946-2947",
+      "work": "read_bounded from git/gh",
+      "status": "LIVE"
+    },
+    {
+      "id": "agent detection probes",
+      "kind": "transient scoped threads",
+      "owner": "services/agent_detector.rs:111",
+      "work": "parallel probe of claude/codex/opencode with version parsing",
+      "status": "LIVE"
+    },
+    {
+      "id": "codex app-server reader",
+      "kind": "transient",
+      "owner": "services/usage_service.rs:883",
+      "work": "read JSON responses from the codex app-server child",
+      "status": "LIVE"
+    },
+    {
+      "id": "terminate worker",
+      "kind": "transient",
+      "owner": "services/terminal_manager.rs:941",
+      "work": "asynchronous session teardown so closing never blocks the UI thread",
+      "status": "LIVE"
+    }
+  ],
+  "durable_jobs": [
+    {
+      "kind": "AnalyzeImpact",
+      "queue_table": "memory_jobs",
+      "trigger": "file change -> FileWatchService -> handle_changed_paths -> is_knowledge_relevant",
+      "dedup_key": "one pending job per project",
+      "bounds": "MAX_PATHS_PER_JOB",
+      "pipeline": "impact report -> staleness_decision() (pure: no db, no clock, no model) -> memory_mark_stale -> emit memory-knowledge-updated",
+      "status": "LIVE"
+    },
+    {
+      "kind": "AnalyzeProject",
+      "queue_table": "memory_jobs",
+      "trigger": "manifest/shape-changing path changed, or explicit knowledge_analyze_project",
+      "dedup_key": "one pending job per project",
+      "pipeline": "project_analyzer deterministic walk -> knowledge_project_facts + knowledge_understanding",
+      "design_note": "Only shape-changing paths re-trigger it; a source-file save does not.",
+      "status": "LIVE"
+    },
+    {
+      "kind": "ProcessCandidates",
+      "queue_table": "memory_jobs",
+      "trigger": "candidates enqueued",
+      "dedup_key": "one pending job; the handler drains a bounded slice and re-enqueues itself while work remains",
+      "pipeline": "entity resolution -> dedupe -> conflict detection -> policy -> auto-promote OR review queue",
+      "status": "LIVE"
+    },
+    {
+      "kind": "ExtractHandoff",
+      "queue_table": "memory_jobs",
+      "trigger": "swarm agent run finishes (swarm_service.rs:4311)",
+      "dedup_key": "extract_handoff:<id>",
+      "pipeline": "agent_handoff::candidates_from_handoff -> knowledge_candidates",
+      "status": "LIVE",
+      "issue": "Fires only for Swarm runs. Terminal-pane agent sessions produce no handoff."
+    }
+  ],
+  "polling": [
+    { "where": "src-tauri services/swarm_service.rs:1798", "interval_ms": 900, "purpose": "swarm scheduler tick" },
+    { "where": "src-tauri services/terminal_manager.rs (exit watcher)", "interval_ms": 100, "purpose": "child exit detection", "per": "session" },
+    { "where": "src-tauri services/terminal_manager.rs:713", "interval_ms": 5000, "purpose": "agent state classification", "per": "session" },
+    { "where": "src-tauri services/repository_service.rs:2975", "interval_ms": 25, "purpose": "git/gh process wait + cancellation + timeout check", "note": "wait-timeout crate is already a dependency and would be cheaper" },
+    { "where": "src-tauri services/swarm_service.rs:1096", "interval_ms": 100, "purpose": "scheduler-adjacent wait" },
+    { "where": "src/App.tsx:119", "interval_ms": 2700000, "purpose": "update check (45 min), primary window only, gated on automaticUpdateChecks and a healthy non-recovery startup" },
+    { "where": "src/features/repository/RepositoryCommandCenter.tsx:90", "interval_ms": 120000, "purpose": "remote projection refresh, guarded on projectId still matching" },
+    { "where": "src/features/usage/AiUsageStatusBar.tsx:90", "interval_ms": 30000, "purpose": "reset-countdown clock tick (UI only)" },
+    { "where": "src/features/usage/components/UsageInstrument.tsx:51", "interval_ms": 30000, "purpose": "clock tick (UI only)" },
+    { "where": "src/features/workspace-windows/MonitorRecoveryWatcher.tsx:52", "interval_ms": "configurable", "purpose": "off-screen window recovery sweep" }
+  ],
+  "automatic_at_startup": [
+    "legacy profile migration (com.forgemind.workspace -> com.corelith.paralith)",
+    "apply_staged_restore (pending database backup restore)",
+    "migration preflight + pre-migration backup",
+    "schema migration to v34",
+    "repair_metadata with quarantine",
+    "repository interrupted-operation inspection (detect only, no resume)",
+    "window registry hydration from persisted placements",
+    "detached workspace window rebuild",
+    "update health check",
+    "knowledge lifecycle worker start",
+    "swarm scheduler start",
+    "optional last-workspace redirect (hash-empty only)",
+    "optional update check"
+  ],
+  "gaps": [
+    "No scheduled maintenance: no VACUUM, log pruning, cache eviction or orphan-row cleanup.",
+    "Semantic index is never regenerated automatically and has no manual trigger reachable from the UI.",
+    "Interrupted repository operations are detected but never resumed; repository_recovery_checkpoints is never written.",
+    "No panic hook: a panicking background thread dies silently (the swarm scheduler is individually protected; others are not)."
+  ]
+}
