@@ -1,0 +1,152 @@
+{
+  "generated_from": "src/App.tsx Routes + screen components + feature nav definitions",
+  "router": "HashRouter (react-router-dom 7.18.2)",
+  "total_routes": 11,
+  "unreachable_routes": 0,
+  "routes": [
+    {
+      "path": "/",
+      "screen": "src/screens/ProjectLauncher.tsx",
+      "purpose": "Open or choose a Project; recent projects; entry to Settings",
+      "params": [],
+      "reached_from": ["application start", "explicit navigation from the workspace sidebar"],
+      "tauri_commands": ["list_recent_projects", "list_projects_overview", "open_project", "remove_project_from_recent", "relocate_project", "validate_working_directory", "list_recent_workspaces"],
+      "status": "COMPLETE"
+    },
+    {
+      "path": "/setup/:projectId",
+      "screen": "src/screens/WorkspaceSetup.tsx",
+      "purpose": "New-workspace wizard: layout, pane count, agent allocation, startup command",
+      "params": ["projectId"],
+      "reached_from": ["ProjectLauncher when a project has no workspaces"],
+      "tauri_commands": ["get_layout_preset", "detect_agents", "detect_shells", "save_workspace", "suggest_workspace_name", "split_layout_pane", "remove_layout_pane"],
+      "status": "COMPLETE"
+    },
+    {
+      "path": "/workspace/:workspaceId/configure",
+      "screen": "src/screens/WorkspaceSetup.tsx",
+      "purpose": "Reconfigure an existing workspace (same component as /setup)",
+      "params": ["workspaceId"],
+      "reached_from": ["workspace context menu"],
+      "tauri_commands": ["get_workspace", "save_workspace"],
+      "status": "COMPLETE"
+    },
+    {
+      "path": "/workspace/:workspaceId",
+      "screen": "src/screens/WorkspaceScreen.tsx",
+      "purpose": "Primary product surface: sidebar + terminal canvas + docked tool panel + status bar",
+      "params": ["workspaceId"],
+      "reached_from": ["startup redirect", "sidebar", "setup completion", "workspace-attach-requested event"],
+      "tauri_commands": ["~60 across terminal, workspace, window, git, sidebar, usage and canvas families"],
+      "surfaces": ["Files", "Browser", "Diff", "Agents"],
+      "shortcuts": ["Ctrl+,", "Ctrl+Shift+G"],
+      "status": "COMPLETE"
+    },
+    {
+      "path": "/repository/:projectId",
+      "screen": "src/screens/RepositoryScreen.tsx",
+      "purpose": "Repository Command Center — Git and GitHub",
+      "params": ["projectId"],
+      "reached_from": ["workspace sidebar", "DiffSurface 'open full Repository'", "Ctrl+Shift+G"],
+      "sections": ["overview", "changes", "history", "intelligence", "branches", "pull-requests", "actions", "issues", "releases", "security"],
+      "saved_views": ["needs-attention", "mine", "drafts", "failed-ci", "awaiting-review", "agent-worktrees"],
+      "tauri_commands": ["inspect_repository", "list_repository_branches", "get_repository_diff", "get_repository_history", "get_repository_commit_detail", "execute_repository_operation", "cancel_repository_operation", "get_repository_operation", "get_repository_policy", "save_repository_policy", "list_repository_approvals", "decide_repository_approval", "list_repository_worktree_leases", "get_worktree_conflict_risks", "get_github_provider_status", "refresh_repository_remote_projection", "get_repository_workflow_run_detail", "get_repository_pull_request_detail", "refresh_repository_intelligence", "get_repository_intelligence", "evaluate_merge_readiness"],
+      "status": "COMPLETE"
+    },
+    {
+      "path": "/database/:projectId",
+      "screen": "src/screens/DatabaseScreen.tsx",
+      "purpose": "Database Studio — schema discovery, ER canvas, drift, design and repository-native migration authoring",
+      "params": ["projectId"],
+      "reached_from": ["workspace sidebar"],
+      "sections": ["overview", "diagram", "explorer", "migrations", "changes", "health", "connections"],
+      "tauri_commands": ["database_discover_sources", "database_list_sources", "database_get_source", "database_get_schema", "database_get_object", "database_compare", "database_list_migrations", "database_list_usage", "database_list_issues", "database_introspect_sqlite_file", "database_create_draft", "database_list_designs", "database_get_design", "database_apply_design_operation", "database_approve_design", "database_reject_design", "database_archive_design", "database_save_layout", "database_get_layout", "database_build_context_pack", "database_adapter_support", "database_implement_design", "database_publish_canvas_state"],
+      "status": "COMPLETE"
+    },
+    {
+      "path": "/memory/:projectId",
+      "screen": "src/screens/MemoryScreen.tsx",
+      "purpose": "Memory / Context Fabric workspace",
+      "params": ["projectId"],
+      "reached_from": ["workspace sidebar"],
+      "views": ["overview", "document", "graph", "timeline", "activity", "review", "search", "context"],
+      "tauri_commands": ["memory_list", "memory_get", "memory_search", "memory_connections", "memory_history", "memory_revision_body", "memory_save", "memory_set_quality", "memory_set_pinned", "memory_archive", "memory_save_claim", "memory_delete_claim", "memory_attach_source", "memory_save_relation", "memory_delete_relation", "memory_graph", "memory_impact", "memory_health", "memory_mark_stale", "memory_vocabulary", "memory_jobs", "memory_job_cancel", "memory_analyze_impact", "context_compile", "knowledge_understanding", "knowledge_analyze_project", "knowledge_review_queue", "knowledge_decide_candidates", "knowledge_resolve_conflict", "knowledge_conflicts", "knowledge_candidates", "knowledge_timeline", "knowledge_timeline_actors", "knowledge_handoffs", "knowledge_search", "knowledge_parse_query", "knowledge_semantic_health", "knowledge_health_report"],
+      "status": "COMPLETE",
+      "note": "The only consumer of context_compile in the entire product. Agents do not use it."
+    },
+    {
+      "path": "/swarms/:projectId",
+      "screen": "src/screens/SwarmsScreen.tsx",
+      "purpose": "Swarm list for a Project",
+      "params": ["projectId"],
+      "reached_from": ["workspace sidebar", "CollapsedSidebar.tsx:119"],
+      "tauri_commands": ["list_swarms", "list_swarm_presets", "list_swarm_runtime_readiness", "create_swarm", "preview_swarm_launch"],
+      "status": "COMPLETE"
+    },
+    {
+      "path": "/swarms/:projectId/:swarmId",
+      "screen": "src/screens/SwarmsScreen.tsx",
+      "purpose": "Swarm detail: agents, tasks, evidence, reviews, attention, messages",
+      "params": ["projectId", "swarmId"],
+      "reached_from": ["swarm list"],
+      "tauri_commands": ["get_swarm_detail", "start_swarm", "pause_swarm", "resume_swarm", "stop_swarm", "archive_swarm", "delete_swarm", "rename_swarm", "export_swarm_report", "set_swarm_priority", "focus_swarm_agent_terminal", "send_swarm_message", "retry_swarm_test", "generate_swarm_fix_task", "get_swarm_command_draft", "save_swarm_command_draft", "accept_swarm_result", "resolve_swarm_decision", "resolve_swarm_attention", "retry_swarm", "add_swarm_builder"],
+      "status": "COMPLETE"
+    },
+    {
+      "path": "/usage",
+      "screen": "src/screens/UsageScreen.tsx",
+      "purpose": "Claude and Codex usage analytics",
+      "params": [],
+      "reached_from": ["workspace sidebar", "usage status bar popover"],
+      "tauri_commands": ["get_ai_usage_snapshots", "get_ai_usage_history", "refresh_ai_usage", "get_ai_usage_diagnostics", "get_usage_telemetry", "sample_usage_telemetry", "refresh_usage_telemetry"],
+      "status": "COMPLETE"
+    },
+    {
+      "path": "/settings",
+      "screen": "src/screens/SettingsScreen.tsx",
+      "purpose": "39 application settings, theme selection, update controls",
+      "params": [],
+      "reached_from": ["ProjectLauncher", "workspace sidebar", "setup wizard agent row", "Ctrl+,"],
+      "tauri_commands": ["get_settings", "save_settings", "get_theme_preference", "set_theme_preference", "get_sidebar_preferences", "set_sidebar_preferences", "detect_shells", "save_custom_shell", "validate_custom_executable", "get_update_status", "check_for_updates", "download_update", "install_downloaded_update", "install_update_on_exit", "get_diagnostics", "run_health_check", "export_redacted_support_bundle", "repair_database_metadata"],
+      "status": "COMPLETE"
+    },
+    {
+      "path": "*",
+      "screen": "Navigate to / (replace)",
+      "purpose": "catch-all redirect",
+      "params": [],
+      "status": "COMPLETE"
+    }
+  ],
+  "non_routed_shells": [
+    {
+      "shell": "RecoveryScreen",
+      "trigger": "startup.recoveryMode === true",
+      "purpose": "safe mode, database backup restore, retry update",
+      "note": "The router never mounts in this state.",
+      "status": "COMPLETE"
+    },
+    {
+      "shell": "DetachedWorkspaceWindow",
+      "trigger": "window label matches ws-<workspaceId>",
+      "purpose": "compact single-workspace shell for a detached OS window",
+      "note": "No launcher, no global sidebar, no router.",
+      "status": "COMPLETE"
+    }
+  ],
+  "global_overlays": [
+    { "overlay": "OrchestratorLauncher", "mounted_in": "App.tsx", "status": "PROTOTYPE" },
+    { "overlay": "AgentResumeCenter", "mounted_in": "App.tsx", "trigger": "openAgentResumeCenter custom DOM event", "status": "COMPLETE" },
+    { "overlay": "UpdateNotification", "mounted_in": "App.tsx", "status": "COMPLETE" },
+    { "overlay": "What's new aside", "mounted_in": "App.tsx:168", "trigger": "healthy post-update startup", "status": "COMPLETE" },
+    { "overlay": "MonitorRecoveryWatcher", "mounted_in": "WorkspaceScreen", "status": "COMPLETE", "note": "headless polling sweep" }
+  ],
+  "developer_surface": {
+    "name": "visual harness",
+    "command": "npm run visual",
+    "url": "http://localhost:1421/visual/index.html",
+    "surfaces": ["primitives", "launcher", "workspace", "setup", "settings", "repository", "database", "memory", "swarms"],
+    "params": ["surface", "theme", "scale", "density"],
+    "shipped": false
+  }
+}

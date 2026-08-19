@@ -18,13 +18,17 @@
 use crate::database::swarm::{NewSwarmTask, SwarmAgentRunCompletion};
 use crate::database::DatabaseService;
 use crate::errors::{AppError, AppResult};
+use crate::models::context::{ContextPredecessor, ContextRepositoryState, ContextRequest};
 use crate::models::swarm::*;
+use crate::models::vnext::{CompiledContextPack, VerificationPolicy, VerificationRequirementKind};
 use crate::models::{
     AgentProvider, Project, RepositoryActor, RepositoryActorKind, RepositoryOperation,
     RepositoryOperationContext, RepositoryOperationRequest, RepositoryOperationStatus,
     RepositoryWorktreeLease,
 };
-use crate::services::{AgentDetector, RepositoryService, TerminalManager};
+use crate::services::{
+    AgentDetector, ContextCompiler, KnowledgeLifecycle, RepositoryService, TerminalManager,
+};
 use chrono::Utc;
 use parking_lot::Mutex;
 use sha2::{Digest, Sha256};
@@ -173,7 +177,7 @@ pub trait ProviderRuntimeAdapter: Send + Sync {
         agent: &SwarmAgent,
         mission: &str,
         instructions: &[String],
-        memories: &[SwarmMemoryContext],
+        context: &CompiledContextPack,
         resume_session_id: Option<&str>,
     ) -> Vec<String>;
 }
@@ -192,7 +196,7 @@ impl ProviderRuntimeAdapter for ClaudeAdapter {
         agent: &SwarmAgent,
         mission: &str,
         instructions: &[String],
-        memories: &[SwarmMemoryContext],
+        context: &CompiledContextPack,
         resume_session_id: Option<&str>,
     ) -> Vec<String> {
         let permission_mode = if agent.role.may_write_code() {
@@ -215,7 +219,7 @@ impl ProviderRuntimeAdapter for ClaudeAdapter {
             // `--allowedTools` is variadic in Claude's CLI. Keep the positional prompt before
             // that option or the parser consumes the mission as another tool pattern and exits
             // with `Input must be provided`.
-            runtime_instruction(scope, task, agent, mission, instructions, memories),
+            runtime_instruction(scope, task, agent, mission, instructions, context),
             "--permission-mode".into(),
             permission_mode.into(),
         ];
@@ -253,7 +257,7 @@ impl ProviderRuntimeAdapter for CodexAdapter {
         agent: &SwarmAgent,
         mission: &str,
         instructions: &[String],
-        memories: &[SwarmMemoryContext],
+        context: &CompiledContextPack,
         resume_session_id: Option<&str>,
     ) -> Vec<String> {
         let sandbox = if agent.role.may_write_code() {
@@ -261,7 +265,7 @@ impl ProviderRuntimeAdapter for CodexAdapter {
         } else {
             "read-only"
         };
-        let prompt = runtime_instruction(scope, task, agent, mission, instructions, memories);
+        let prompt = runtime_instruction(scope, task, agent, mission, instructions, context);
         // Approval, sandbox and working-directory controls are top-level Codex options. Placing
         // them after `exec` is rejected by current CLIs before a thread can start.
         let mut arguments = vec![
@@ -302,6 +306,7 @@ pub struct ProductionAgentRuntime {
     detector: Arc<AgentDetector>,
     terminals: TerminalManager,
     repository: Arc<RepositoryService>,
+    context: ContextCompiler,
 }
 
 impl ProductionAgentRuntime {
@@ -310,12 +315,14 @@ impl ProductionAgentRuntime {
         detector: Arc<AgentDetector>,
         terminals: TerminalManager,
         repository: Arc<RepositoryService>,
+        context: ContextCompiler,
     ) -> Self {
         Self {
             database,
             detector,
             terminals,
             repository,
+            context,
         }
     }
 
@@ -329,6 +336,67 @@ impl ProductionAgentRuntime {
                 false,
             )),
         }
+    }
+
+    /// Repair old persisted workers that were created before Auto resolution was persisted. New
+    /// workers are resolved by `SwarmService::spawn_agents`; this seam is the restart-safe guard
+    /// that prevents a legacy Auto value from reaching provider execution or event normalization.
+    fn resolve_agent_runtime(&self, agent: &SwarmAgent) -> AppResult<SwarmAgent> {
+        if agent.runtime != SwarmRuntimeKind::Auto {
+            return Ok(agent.clone());
+        }
+        let readiness = [
+            (SwarmRuntimeKind::Claude, AgentProvider::Claude),
+            (SwarmRuntimeKind::Codex, AgentProvider::Codex),
+        ]
+        .into_iter()
+        .map(|(runtime, provider)| {
+            let detection = self.detector.detect(provider.clone(), None, false);
+            let authenticated = detection
+                .executable_path
+                .as_deref()
+                .filter(|_| detection.available)
+                .map(|path| self.detector.authenticated(provider, Path::new(path)).0)
+                .unwrap_or(false);
+            SwarmRuntimeReadiness {
+                runtime,
+                installed: detection.available,
+                authenticated,
+                available: detection.available && authenticated,
+                version: detection.version,
+                message: detection
+                    .error_message
+                    .unwrap_or_else(|| "Runtime unavailable.".into()),
+            }
+        })
+        .collect::<Vec<_>>();
+        let runtime = resolve_auto_runtime(agent.role, Some(&readiness))?;
+        let config = if agent.model_config.provider_id == runtime.as_str()
+            && crate::agents::model_registry::find(
+                &agent.model_config.provider_id,
+                &agent.model_config.model_id,
+            )
+            .is_some()
+        {
+            agent.model_config.clone()
+        } else {
+            crate::agents::model_registry::default_for(runtime.as_str()).ok_or_else(|| {
+                AppError::new(
+                    "swarm_runtime_unavailable",
+                    format!(
+                        "No default model is registered for {}.",
+                        runtime_label(runtime)
+                    ),
+                    false,
+                )
+            })?
+        };
+        self.database
+            .update_swarm_agent_model_config(&agent.id, &config)?;
+        let mut resolved = agent.clone();
+        resolved.runtime = runtime;
+        resolved.model_config = config;
+        Ok(resolved)
     }
 
     fn record_runtime_event(
@@ -568,7 +636,7 @@ impl ProductionAgentRuntime {
                         "swarm: {}",
                         truncate_summary(&task.title, 58).replace(['\r', '\n'], " ")
                     ),
-                    paths,
+                    paths: paths.clone(),
                 },
             },
             |_| {},
@@ -589,6 +657,10 @@ impl ProductionAgentRuntime {
             .and_then(serde_json::Value::as_str)
             .unwrap_or(&snapshot.head_sha)
             .to_string();
+        let agent_run_id = self
+            .database
+            .latest_swarm_agent_run_id(&swarm.id, &agent.id, &task.id)?
+            .unwrap_or_else(|| agent.id.clone());
         self.database
             .set_swarm_worktree_state(&record.id, "committed")?;
         self.database.record_swarm_evidence(&SwarmEvidence {
@@ -604,6 +676,15 @@ impl ProductionAgentRuntime {
                 snapshot.files.len()
             ),
             source_uri: Some(format!("git:{commit_sha}")),
+            payload: serde_json::json!({
+                "version": 1,
+                "agentRunId": agent_run_id,
+                "producer": agent.id.clone(),
+                "taskId": task.id.clone(),
+                "commitSha": commit_sha.clone(),
+                "changedPaths": paths.clone(),
+                "verificationState": "verified"
+            }),
             verified: true,
             created_at: Utc::now().to_rfc3339(),
         })
@@ -783,13 +864,26 @@ impl AgentRuntime for ProductionAgentRuntime {
         task: &SwarmTask,
         agent: &SwarmAgent,
     ) -> AppResult<RuntimeStep> {
+        let was_auto = agent.runtime == SwarmRuntimeKind::Auto;
+        let resolved_agent = self.resolve_agent_runtime(agent)?;
+        if was_auto {
+            self.database.record_swarm_agent_run_resolution(
+                &resolved_agent.swarm_id,
+                &resolved_agent.id,
+                &task.id,
+                &resolved_agent.model_config,
+                None,
+            )?;
+        }
+        let agent = &resolved_agent;
         if let Some(session_id) = agent.terminal_session_id.as_deref() {
             let active_runtime = self
                 .database
                 .swarm_agent_session_runtime(&agent.id, session_id)?
+                .filter(|runtime| *runtime != SwarmRuntimeKind::Auto)
                 .unwrap_or(agent.runtime);
             if let Ok(session) = self.terminals.session_status(session_id) {
-                let events = normalize_runtime_events(active_runtime, &session.output_tail);
+                let events = normalize_runtime_events(active_runtime, &session.output_tail)?;
                 let provider_finished = events
                     .iter()
                     .any(|event| matches!(event.kind.as_str(), "completed" | "failed"));
@@ -817,7 +911,7 @@ impl AgentRuntime for ProductionAgentRuntime {
                 .entity(session_id));
             };
             if session.ended_at.is_none() {
-                let events = normalize_runtime_events(active_runtime, &session.output_tail);
+                let events = normalize_runtime_events(active_runtime, &session.output_tail)?;
                 self.persist_runtime_events(
                     agent,
                     task,
@@ -838,7 +932,7 @@ impl AgentRuntime for ProductionAgentRuntime {
                 )
                 .entity(&agent.id));
             }
-            let runtime_events = normalize_runtime_events(active_runtime, &session.output_tail);
+            let runtime_events = normalize_runtime_events(active_runtime, &session.output_tail)?;
             let structured = !runtime_events.is_empty();
             let provider_completed = runtime_events.iter().any(|event| event.kind == "completed");
             let provider_failed = runtime_events.iter().any(|event| event.kind == "failed");
@@ -885,6 +979,10 @@ impl AgentRuntime for ProductionAgentRuntime {
                 })
                 .transpose()?;
             let evidence_id = Uuid::new_v4().to_string();
+            let agent_run_id = self
+                .database
+                .latest_swarm_agent_run_id(&agent.swarm_id, &agent.id, &task.id)?
+                .unwrap_or_else(|| agent.id.clone());
             self.database.record_swarm_evidence(&SwarmEvidence {
                 id: evidence_id.clone(),
                 swarm_id: agent.swarm_id.clone(),
@@ -903,6 +1001,15 @@ impl AgentRuntime for ProductionAgentRuntime {
                     .log_path
                     .clone()
                     .or_else(|| Some(format!("terminal:{}", session.id))),
+                payload: runtime_evidence_payload(
+                    &agent_run_id,
+                    agent,
+                    task,
+                    &runtime_events,
+                    session.exit_code,
+                    &session.output_tail,
+                    succeeded,
+                ),
                 verified: succeeded,
                 created_at: Utc::now().to_rfc3339(),
             })?;
@@ -1023,9 +1130,125 @@ impl AgentRuntime for ProductionAgentRuntime {
             .take(20)
             .map(|message| message.body.clone())
             .collect();
-        let memories = self
+        let agent_run_id = self
             .database
-            .ensure_swarm_context_pack(&swarm, task, agent)?;
+            .latest_swarm_agent_run_id(&agent.swarm_id, &agent.id, &task.id)?
+            .ok_or_else(|| {
+                AppError::new(
+                    "swarm_agent_run_missing",
+                    "The task attempt has no AgentRun identity for context provenance.",
+                    false,
+                )
+                .entity(&task.id)
+            })?;
+        let repository = self
+            .repository
+            .inspect(
+                &scope.project_id,
+                Some(&swarm.project_root),
+                Some(&working_directory),
+            )
+            .ok()
+            .map(|snapshot| ContextRepositoryState {
+                branch: snapshot.branch,
+                worktree: Some(snapshot.worktree_path),
+                head_sha: Some(snapshot.head_sha),
+                changed_files: snapshot
+                    .files
+                    .into_iter()
+                    .map(|file| file.path)
+                    .take(80)
+                    .collect(),
+            });
+        let predecessors = task
+            .depends_on
+            .iter()
+            .filter_map(|dependency_id| {
+                let dependency = detail.tasks.iter().find(|item| item.id == *dependency_id)?;
+                let evidence = detail
+                    .evidence
+                    .iter()
+                    .filter(|item| {
+                        item.task_id.as_deref() == Some(dependency.id.as_str()) && item.verified
+                    })
+                    .map(|item| item.id.clone())
+                    .collect::<Vec<_>>();
+                Some(ContextPredecessor {
+                    task_id: dependency.id.clone(),
+                    title: dependency.title.clone(),
+                    status: dependency.status.as_str().into(),
+                    summary: dependency.result.clone(),
+                    commit_sha: detail
+                        .agent_runs
+                        .iter()
+                        .filter(|run| run.task_id.as_deref() == Some(dependency.id.as_str()))
+                        .find_map(|run| {
+                            run.structured_result
+                                .as_ref()
+                                .and_then(|value| value.get("commitSha"))
+                                .and_then(serde_json::Value::as_str)
+                                .map(str::to_owned)
+                        }),
+                    changed_files: detail
+                        .agent_runs
+                        .iter()
+                        .filter(|run| run.task_id.as_deref() == Some(dependency.id.as_str()))
+                        .flat_map(|run| run.files_changed.clone())
+                        .take(40)
+                        .collect::<HashSet<_>>()
+                        .into_iter()
+                        .collect(),
+                    evidence_ids: evidence,
+                    verified: dependency.status == SwarmTaskStatus::Completed,
+                })
+            })
+            .collect();
+        let verification_policy =
+            VerificationPolicy::for_task(task.role, task.verification_required);
+        let context_request = ContextRequest {
+            project_id: scope.project_id.clone(),
+            task: task.title.clone(),
+            focus_files: task.files.clone(),
+            budget: Some(agent.model_config.context_strategy.clone()),
+            role: Some(task.role.as_str().into()),
+            branch_name: repository.as_ref().and_then(|state| state.branch.clone()),
+            semantic: Some(true),
+            task_id: Some(task.id.clone()),
+            mission: Some(swarm.mission.clone()),
+            task_description: None,
+            agent_id: Some(agent.id.clone()),
+            agent_run_id: Some(agent_run_id.clone()),
+            provider: Some(execution_agent.model_config.provider_id.clone()),
+            model: Some(execution_agent.model_config.model_id.clone()),
+            reasoning_effort: Some(execution_agent.model_config.reasoning_effort.clone()),
+            worktree: execution_agent.worktree.clone(),
+            working_directory: Some(working_directory.clone()),
+            acceptance_requirements: Vec::new(),
+            verification_policy: Some(verification_policy),
+            operator_instructions: instructions.clone(),
+            predecessors,
+            repository,
+            ..ContextRequest::default()
+        };
+        let pack = self.context.compile_cached(&context_request)?;
+        let compiled_context = CompiledContextPack {
+            id: Uuid::new_v4().to_string(),
+            project_id: scope.project_id.clone(),
+            task_id: task.id.clone(),
+            agent_run_id,
+            compiler_version: pack.compiler_version.clone(),
+            created_at: pack.compiled_at.clone(),
+            pack,
+        };
+        compiled_context.validate_scope().map_err(|message| {
+            AppError::new("context_scope_invalid", message, false).entity(&task.id)
+        })?;
+        self.database.persist_swarm_compiled_context_pack(
+            &swarm.id,
+            &agent.id,
+            &context_request,
+            &compiled_context,
+        )?;
         let resume_session_id = self.database.latest_swarm_provider_session_id(&agent.id)?;
         let args = adapter.arguments(
             &runtime_scope,
@@ -1033,7 +1256,7 @@ impl AgentRuntime for ProductionAgentRuntime {
             &execution_agent,
             &swarm.mission,
             &instructions,
-            &memories,
+            &compiled_context,
             resume_session_id.as_deref(),
         );
         let instruction_hash = format!(
@@ -1145,7 +1368,14 @@ struct NormalizedRuntimeEvent {
 fn normalize_runtime_events(
     runtime: SwarmRuntimeKind,
     output: &[u8],
-) -> Vec<NormalizedRuntimeEvent> {
+) -> AppResult<Vec<NormalizedRuntimeEvent>> {
+    if runtime == SwarmRuntimeKind::Auto {
+        return Err(AppError::new(
+            "swarm_runtime_unresolved",
+            "Provider event normalization requires a resolved runtime.",
+            false,
+        ));
+    }
     let mut events = Vec::new();
     let mut claude_tools: HashMap<String, (String, serde_json::Value)> = HashMap::new();
     for candidate in structured_json_records(output) {
@@ -1162,7 +1392,7 @@ fn normalize_runtime_events(
             SwarmRuntimeKind::Claude => {
                 normalize_claude_event(event_type, &value, &mut events, &mut claude_tools)
             }
-            SwarmRuntimeKind::Auto => {}
+            SwarmRuntimeKind::Auto => unreachable!("Auto was rejected before normalization"),
         }
         if events.len() > first_new_event {
             let line_hash = format!("{:x}", Sha256::digest(candidate.as_bytes()));
@@ -1171,7 +1401,7 @@ fn normalize_runtime_events(
             }
         }
     }
-    events
+    Ok(events)
 }
 
 /// Recover provider JSONL from a terminal transcript without treating arbitrary terminal text as
@@ -1296,6 +1526,71 @@ fn normalized_event_paths(value: &serde_json::Value) -> Vec<String> {
     paths.sort();
     paths.dedup();
     paths
+}
+
+/// Build the durable proof payload from bounded runtime observations. The terminal transcript is
+/// represented by a digest; command and test metadata are copied only from whitelisted normalized
+/// events, so evidence cannot become an uncontrolled output archive.
+fn runtime_evidence_payload(
+    agent_run_id: &str,
+    agent: &SwarmAgent,
+    task: &SwarmTask,
+    events: &[NormalizedRuntimeEvent],
+    exit_code: Option<i32>,
+    output: &[u8],
+    succeeded: bool,
+) -> serde_json::Value {
+    let command_result = events.iter().find(|event| {
+        event.kind == "command_completed"
+            && event
+                .metadata
+                .get("command")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(is_test_command)
+    });
+    let command = command_result.and_then(|event| {
+        event
+            .metadata
+            .get("command")
+            .and_then(serde_json::Value::as_str)
+            .map(|value| truncate_summary(value, 500))
+    });
+    let test_exit_code = command_result.and_then(|event| {
+        event
+            .metadata
+            .get("exit_code")
+            .or_else(|| event.metadata.get("exitCode"))
+            .and_then(serde_json::Value::as_i64)
+            .and_then(|value| i32::try_from(value).ok())
+    });
+    let mut changed_paths = events
+        .iter()
+        .take(128)
+        .flat_map(|event| normalized_event_paths(&event.metadata))
+        .map(|path| truncate_summary(&path, 500))
+        .collect::<Vec<_>>();
+    changed_paths.sort();
+    changed_paths.dedup();
+    serde_json::json!({
+        "version": 1,
+        "agentRunId": agent_run_id,
+        "producer": agent.id,
+        "provider": runtime_label(agent.runtime),
+        "taskId": task.id,
+        "title": task.title,
+        "evidenceType": "terminal_trace",
+        "exitCode": exit_code,
+        "outputDigest": format!("sha256:{:x}", Sha256::digest(output)),
+        "boundedOutputBytes": output.len(),
+        "changedPaths": changed_paths,
+        "command": command,
+        "testResult": command_result.map(|_| serde_json::json!({
+            "status": if test_exit_code == Some(0) { "passed" } else { "failed" },
+            "exitCode": test_exit_code
+        })),
+        "eventCount": events.len(),
+        "verificationState": if succeeded { "verified" } else { "failed" }
+    })
 }
 
 fn provider_session_id(runtime: SwarmRuntimeKind, value: &serde_json::Value) -> Option<&str> {
@@ -1642,7 +1937,7 @@ fn runtime_instruction(
     agent: &SwarmAgent,
     mission: &str,
     instructions: &[String],
-    memories: &[SwarmMemoryContext],
+    context: &CompiledContextPack,
 ) -> String {
     let mut prompt = format!(
         "You are {name}, the {role} assigned to task: {task}.\n\nSwarm mission:\n{mission}\n\nWork only inside the canonical project root {root}. You are already running in that directory: invoke each verification command directly and do not prepend cd, combine it with other operations, pipe it, or redirect it. Follow repository instructions and existing approval policy. Do not push or perform remote Git operations. Produce real changes and verification appropriate to this task. Report blockers truthfully and finish only when the assigned task is verified.",
@@ -1660,13 +1955,33 @@ fn runtime_instruction(
             prompt.push('\n');
         }
     }
-    if !memories.is_empty() {
-        prompt.push_str("\n\nProject Memory context (provenance is persisted by Paralith; verify against the repository before relying on stale facts):\n");
-        for memory in memories {
+    for section in &context.pack.sections {
+        if section.entries.is_empty() {
+            continue;
+        }
+        prompt.push_str("\n\n");
+        prompt.push_str(&section.label);
+        prompt.push_str(":\n");
+        for entry in &section.entries {
             prompt.push_str("- ");
-            prompt.push_str(&memory.title);
+            prompt.push_str(&entry.title);
+            prompt.push_str(" [");
+            prompt.push_str(&entry.source_type);
+            if entry.stale {
+                prompt.push_str(", stale");
+            }
+            prompt.push_str("]: ");
+            prompt.push_str(&truncate_summary(&entry.text, 900));
+            prompt.push('\n');
+        }
+    }
+    if !context.pack.handoffs.is_empty() {
+        prompt.push_str("\n\nRECENT HANDOFFS:\n");
+        for handoff in &context.pack.handoffs {
+            prompt.push_str("- ");
+            prompt.push_str(&handoff.task);
             prompt.push_str(": ");
-            prompt.push_str(&truncate_summary(&memory.context, 900));
+            prompt.push_str(&truncate_summary(&handoff.text, 700));
             prompt.push('\n');
         }
     }
@@ -1708,6 +2023,10 @@ fn validate_attachment_paths(project_root: &str, attachments: &[String]) -> AppR
 struct SwarmInner {
     database: Arc<DatabaseService>,
     app_handle: Option<AppHandle>,
+    /// Where a finished agent run's structured handoff is recorded. `None` in tests and headless
+    /// builds: a Swarm must still run without the knowledge worker, and a missing lifecycle means
+    /// no handoff is written rather than a Swarm that cannot start.
+    knowledge: Option<KnowledgeLifecycle>,
     runtime: Arc<dyn AgentRuntime>,
     /// Detects whether the concrete agent runtimes (Claude/Codex) an allocation names are actually
     /// installable/launchable. Used only to gate launch — presets may be saved with an
@@ -1736,16 +2055,20 @@ impl SwarmService {
         terminals: TerminalManager,
         repository: Arc<RepositoryService>,
         app_handle: AppHandle,
+        knowledge: KnowledgeLifecycle,
+        context: ContextCompiler,
     ) -> Self {
         let service = Self {
             inner: Arc::new(SwarmInner {
                 database: database.clone(),
                 app_handle: Some(app_handle),
+                knowledge: Some(knowledge),
                 runtime: Arc::new(ProductionAgentRuntime::new(
                     database,
                     detector.clone(),
                     terminals,
                     repository,
+                    context,
                 )),
                 detector: Some(detector),
                 global_active_limit: 8,
@@ -1765,6 +2088,7 @@ impl SwarmService {
             inner: Arc::new(SwarmInner {
                 database,
                 app_handle: None,
+                knowledge: None,
                 runtime,
                 detector: None,
                 global_active_limit: 8,
@@ -3999,6 +4323,13 @@ impl SwarmService {
                         title: format!("{} deterministic review trace", agent.display_name),
                         summary: result_summary.clone(),
                         source_uri: Some(format!("sim://task/{task_id}")),
+                        payload: serde_json::json!({
+                            "version": 1,
+                            "producer": agent.id.clone(),
+                            "taskId": task_id.clone(),
+                            "verificationState": "verified",
+                            "testResult": { "status": "passed", "summary": result_summary }
+                        }),
                         verified: true,
                         created_at: Utc::now().to_rfc3339(),
                     })?;
@@ -4041,6 +4372,7 @@ impl SwarmService {
                     }
                 }
             }
+            self.record_knowledge_handoff(swarm_id, &task_id, agent);
             self.record_completion_handoff(swarm_id, &task_id, agent, &result_summary)?;
             self.event(
                 swarm_id,
@@ -4126,6 +4458,9 @@ impl SwarmService {
                 None,
                 Some("Retry and repair budget exhausted"),
             )?;
+            // A run that failed for good is knowledge too: the next agent needs to know what was
+            // tried and why it did not work, which is exactly what is otherwise lost.
+            self.record_knowledge_handoff(swarm_id, &task_id, agent);
             self.db().release_swarm_task_file_ownership(&task_id)?;
             self.event(
                 swarm_id,
@@ -4201,12 +4536,8 @@ impl SwarmService {
         agent: &SwarmAgent,
     ) -> AppResult<Option<String>> {
         let detail = self.db().get_swarm_detail(swarm_id)?;
-        let task_requires_test = task.role == SwarmRole::Integrator
-            || (task.role == SwarmRole::Builder && {
-                let title = task.title.to_ascii_lowercase();
-                title.contains("test") || title.contains("verify") || title.contains("regression")
-            });
-        if task_requires_test
+        let policy = VerificationPolicy::for_task(task.role, task.verification_required);
+        if policy.requires(VerificationRequirementKind::TestExecution)
             && !detail.tests.iter().any(|test| {
                 test.task_id.as_deref() == Some(task.id.as_str()) && test.status == "passed"
             })
@@ -4216,7 +4547,9 @@ impl SwarmService {
                 task.title
             )));
         }
-        if task.role == SwarmRole::Reviewer {
+        if task.role == SwarmRole::Reviewer
+            && policy.requires(VerificationRequirementKind::IndependentReview)
+        {
             if !detail.tests.iter().any(|test| {
                 test.task_id.as_deref() == Some(task.id.as_str()) && test.status == "passed"
             }) {
@@ -4233,7 +4566,7 @@ impl SwarmService {
                 ));
             }
         }
-        if task.role == SwarmRole::Scout
+        if policy.requires(VerificationRequirementKind::RepositoryStateEvidence)
             && !detail.events.iter().any(|event| {
                 event.task_id.as_deref() == Some(task.id.as_str())
                     && event.agent_id.as_deref() == Some(agent.id.as_str())
@@ -4244,7 +4577,8 @@ impl SwarmService {
                 "Scout ended without persisted repository-read evidence".into(),
             ));
         }
-        if matches!(task.role, SwarmRole::Builder | SwarmRole::Debugger)
+        if task.verification_required
+            && matches!(task.role, SwarmRole::Builder | SwarmRole::Debugger)
             && !detail.events.iter().any(|event| {
                 event.task_id.as_deref() == Some(task.id.as_str())
                     && event.agent_id.as_deref() == Some(agent.id.as_str())
@@ -4260,6 +4594,54 @@ impl SwarmService {
             )));
         }
         Ok(None)
+    }
+
+    /// Record what a finished agent run did, as durable project knowledge evidence.
+    ///
+    /// Distinct from [`Self::record_completion_handoff`], which routes work to the *next role
+    /// inside this Swarm*. This one leaves a structured record the Context Fabric can learn from,
+    /// so the knowledge outlives the Swarm that produced it.
+    ///
+    /// Best-effort throughout: a Swarm must never fail because knowledge capture did. Every
+    /// failure here is logged and swallowed.
+    fn record_knowledge_handoff(&self, swarm_id: &str, task_id: &str, agent: &SwarmAgent) {
+        let Some(knowledge) = &self.inner.knowledge else {
+            return;
+        };
+        let Ok(detail) = self.db().get_swarm_detail(swarm_id) else {
+            return;
+        };
+        // The run row is the source of truth for what happened; without it there is nothing
+        // honest to write, so nothing is written.
+        let Some(run) = detail
+            .agent_runs
+            .iter()
+            .filter(|run| run.member_id == agent.id && run.task_id.as_deref() == Some(task_id))
+            .max_by(|left, right| left.created_at.cmp(&right.created_at))
+        else {
+            return;
+        };
+        let task = detail.tasks.iter().find(|task| task.id == task_id);
+        // Branch and worktree live on the isolation record, not the task, and a task that ran in
+        // the main tree simply has neither — reported as absent rather than defaulted to the
+        // Swarm's branch, which would attribute the work to the wrong tree.
+        let worktree = self
+            .db()
+            .list_swarm_worktrees(swarm_id)
+            .unwrap_or_default()
+            .into_iter()
+            .find(|record| record.task_id == task_id);
+        let handoff = crate::services::agent_handoff::from_agent_run(
+            &detail.swarm.project_id,
+            run,
+            &detail.swarm.mission,
+            task.map(|task| task.title.as_str()).unwrap_or_default(),
+            worktree.as_ref().map(|record| record.branch.as_str()),
+            worktree.as_ref().map(|record| record.root_path.as_str()),
+        );
+        if let Err(error) = knowledge.record_handoff(&handoff) {
+            log::debug!("agent handoff not recorded: {}", error.message);
+        }
     }
 
     fn record_completion_handoff(
@@ -4491,6 +4873,7 @@ impl SwarmService {
         allocation_id: Option<&str>,
         model_config: Option<SwarmMemberModelConfig>,
     ) -> AppResult<()> {
+        let requested_runtime = runtime;
         // Resolve `auto` to a concrete provider deterministically: Reviewer independence favours
         // Codex, everything else favours Claude. Any explicit runtime is honoured as-is.
         let resolved = if runtime == SwarmRuntimeKind::Auto {
@@ -4509,14 +4892,28 @@ impl SwarmService {
         let display_name = format!("{} {ordinal}", role_identity_label(role));
         let project_root = self.db().get_swarm(swarm_id)?.project_root;
         let now = Utc::now().to_rfc3339();
+        let effective_config = match model_config {
+            Some(config) if requested_runtime != SwarmRuntimeKind::Auto => config,
+            Some(config) if config.provider_id == resolved.as_str() => config,
+            _ => {
+                crate::agents::model_registry::default_for(resolved.as_str()).ok_or_else(|| {
+                    AppError::new(
+                        "swarm_runtime_unavailable",
+                        format!(
+                            "No default model is registered for {}.",
+                            runtime_label(resolved)
+                        ),
+                        false,
+                    )
+                })?
+            }
+        };
         self.db().insert_swarm_agent(&SwarmAgent {
             id: Uuid::new_v4().to_string(),
             swarm_id: swarm_id.to_string(),
             role,
             runtime: resolved,
-            model_config: model_config.unwrap_or_else(|| {
-                crate::agents::model_registry::unvalidated_for(resolved.as_str())
-            }),
+            model_config: effective_config,
             allocation_id: allocation_id.map(str::to_string),
             display_name,
             status: SwarmAgentStatus::Idle,
@@ -5147,6 +5544,59 @@ fn decompose(swarm: &Swarm) -> Vec<NewSwarmTask> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn empty_compiled_context() -> CompiledContextPack {
+        CompiledContextPack {
+            id: "pack".into(),
+            project_id: "project".into(),
+            task_id: "task".into(),
+            agent_run_id: "run".into(),
+            compiler_version: "2".into(),
+            created_at: "2026-08-18T00:00:00Z".into(),
+            pack: crate::models::context::ContextPack {
+                project_id: "project".into(),
+                task: "task".into(),
+                budget_tokens: 3_000,
+                used_tokens: 1,
+                sections: vec![crate::models::context::ContextSection {
+                    kind: crate::models::context::ContextSectionKind::Code,
+                    label: "CODE".into(),
+                    entries: vec![crate::models::context::ContextEntry {
+                        item_id: "symbol-auth".into(),
+                        title: "Symbol AuthRedirect".into(),
+                        memory_type: "code".into(),
+                        quality: crate::models::memory::MemoryQuality::Observed,
+                        section: crate::models::context::ContextSectionKind::Code,
+                        text: "AuthRedirect at src/auth.ts:10-20".into(),
+                        tokens: 10,
+                        score: 2.0,
+                        stale: false,
+                        reasons: vec![crate::models::context::ContextReason {
+                            source: "code_graph".into(),
+                            detail: "direct file scope".into(),
+                            weight: 2.0,
+                        }],
+                        source_type: "code_graph".into(),
+                        source_id: Some("src/auth.ts".into()),
+                        revision_id: None,
+                        confidence: Some(0.8),
+                        source_uris: vec!["src/auth.ts".into()],
+                        truncated: false,
+                    }],
+                }],
+                rejected: Vec::new(),
+                conflicts: Vec::new(),
+                candidates_considered: 0,
+                elapsed_ms: 0,
+                compiled_at: "2026-08-18T00:00:00Z".into(),
+                handoffs: Vec::new(),
+                cached: false,
+                semantic_used: false,
+                compiler_version: "2".into(),
+                diagnostics: Default::default(),
+            },
+        }
+    }
 
     fn seed_project(database: &DatabaseService) -> String {
         let now = Utc::now().to_rfc3339();
@@ -6277,13 +6727,17 @@ mod tests {
 
     #[test]
     fn provider_json_requires_a_recognized_structured_event() {
+        assert!(normalize_runtime_events(SwarmRuntimeKind::Auto, b"{}").is_err());
         assert!(
-            normalize_runtime_events(SwarmRuntimeKind::Codex, b"{}\n{\"answer\":42}").is_empty()
+            normalize_runtime_events(SwarmRuntimeKind::Codex, b"{}\n{\"answer\":42}")
+                .unwrap()
+                .is_empty()
         );
         let codex = normalize_runtime_events(
             SwarmRuntimeKind::Codex,
             b"{\"type\":\"thread.started\",\"thread_id\":\"thread-1\"}\n{\"type\":\"item.completed\",\"item\":{\"type\":\"file_change\",\"changes\":[{\"path\":\"src/lib.rs\"}]}}",
-        );
+        )
+        .unwrap();
         assert_eq!(codex.len(), 2);
         assert_ne!(codex[0].key, codex[1].key);
         assert_eq!(
@@ -6292,6 +6746,7 @@ mod tests {
                 SwarmRuntimeKind::Codex,
                 b"{\"type\":\"thread.started\",\"thread_id\":\"thread-1\"}\n{\"type\":\"item.completed\",\"item\":{\"type\":\"file_change\",\"changes\":[{\"path\":\"src/lib.rs\"}]}}",
             )
+            .unwrap()
             .iter()
             .map(|event| &event.key)
             .collect::<Vec<_>>()
@@ -6308,7 +6763,8 @@ mod tests {
         let claude = normalize_runtime_events(
             SwarmRuntimeKind::Claude,
             b"{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"claude-1\"}\n{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Edit\",\"input\":{\"file_path\":\"src/main.rs\"}}]}}",
-        );
+        )
+        .unwrap();
         assert_eq!(
             claude
                 .iter()
@@ -6324,7 +6780,8 @@ mod tests {
         let resized_claude = normalize_runtime_events(
             SwarmRuntimeKind::Claude,
             b"\x1b[K\x1b]0;claude\x07{\"type\":\"result\",\"subtype\":\"success\",\r\n\x1b[45;147H\"is_error\":false,\"session_id\":\"claude-resized\"}\r\n",
-        );
+        )
+        .unwrap();
         assert_eq!(resized_claude.len(), 1);
         assert_eq!(resized_claude[0].kind, "completed");
         assert_eq!(
@@ -6334,7 +6791,8 @@ mod tests {
         let approval_blocked = normalize_runtime_events(
             SwarmRuntimeKind::Claude,
             br#"{"type":"result","subtype":"success","is_error":false,"permission_denials":[{"tool_name":"PowerShell","tool_input":{"command":"npm test"}}]}"#,
-        );
+        )
+        .unwrap();
         assert!(approval_blocked
             .iter()
             .any(|event| event.kind == "waiting_for_approval"));
@@ -6342,7 +6800,8 @@ mod tests {
             SwarmRuntimeKind::Claude,
             br#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"tool-1","name":"PowerShell","input":{"command":"npm test"}}]}}
 {"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tool-1","content":"4 passed","is_error":false}]}}"#,
-        );
+        )
+        .unwrap();
         let completed_test = claude_test
             .iter()
             .find(|event| event.kind == "command_completed")
@@ -6362,6 +6821,64 @@ mod tests {
         assert!(!database
             .claim_swarm_runtime_event("terminal-1", &claude[0].key)
             .unwrap());
+    }
+
+    #[test]
+    fn auto_runtime_resolution_is_deterministic_and_requires_availability() {
+        let ready = vec![
+            SwarmRuntimeReadiness {
+                runtime: SwarmRuntimeKind::Claude,
+                installed: true,
+                authenticated: true,
+                available: true,
+                version: None,
+                message: "ready".into(),
+            },
+            SwarmRuntimeReadiness {
+                runtime: SwarmRuntimeKind::Codex,
+                installed: true,
+                authenticated: true,
+                available: true,
+                version: None,
+                message: "ready".into(),
+            },
+        ];
+        assert_eq!(
+            resolve_auto_runtime(SwarmRole::Builder, Some(&ready)).unwrap(),
+            SwarmRuntimeKind::Claude
+        );
+        assert_eq!(
+            resolve_auto_runtime(SwarmRole::Reviewer, Some(&ready)).unwrap(),
+            SwarmRuntimeKind::Codex
+        );
+
+        let unavailable = ready
+            .into_iter()
+            .map(|mut item| {
+                item.available = false;
+                item.authenticated = false;
+                item
+            })
+            .collect::<Vec<_>>();
+        let error = resolve_auto_runtime(SwarmRole::Builder, Some(&unavailable)).unwrap_err();
+        assert_eq!(error.code, "swarm_runtime_unavailable");
+    }
+
+    #[test]
+    fn verification_policy_uses_typed_task_properties_not_title_words() {
+        let ordinary = VerificationPolicy::for_task(SwarmRole::Builder, true);
+        let renamed = VerificationPolicy::for_task(SwarmRole::Builder, true);
+        assert_eq!(ordinary, renamed);
+        assert!(ordinary.requires(VerificationRequirementKind::TestExecution));
+        assert!(VerificationPolicy::for_task(SwarmRole::Builder, false)
+            .requirements
+            .is_empty());
+        assert!(VerificationPolicy::for_task(SwarmRole::Reviewer, true)
+            .requires(VerificationRequirementKind::IndependentReview));
+        assert!(VerificationPolicy::for_task(SwarmRole::Integrator, true)
+            .requires(VerificationRequirementKind::IntegrationVerification));
+        assert!(VerificationPolicy::for_task(SwarmRole::Scout, true)
+            .requires(VerificationRequirementKind::RepositoryStateEvidence));
     }
 
     #[test]
@@ -6451,13 +6968,14 @@ mod tests {
             created_at: String::new(),
             updated_at: String::new(),
         };
+        let context = empty_compiled_context();
         let claude = ClaudeAdapter.arguments(
             &scope,
             &task,
             &agent,
             "Inspect the project",
             &[],
-            &[],
+            &context,
             Some("session-1"),
         );
         assert!(claude
@@ -6467,6 +6985,9 @@ mod tests {
             .windows(2)
             .any(|pair| pair == ["--resume", "session-1"]));
         assert!(claude.iter().any(|argument| argument == "--allowedTools"));
+        assert!(claude
+            .iter()
+            .any(|argument| argument.contains("Symbol AuthRedirect [code_graph]")));
         assert!(claude
             .iter()
             .any(|argument| argument == "--disallowedTools"));
@@ -6483,7 +7004,7 @@ mod tests {
             },
             "Implement the project change",
             &[],
-            &[],
+            &context,
             None,
         );
         let prompt_index = writer_arguments
@@ -6505,7 +7026,7 @@ mod tests {
             },
             "Inspect the project",
             &[],
-            &[],
+            &context,
             Some("thread-1"),
         );
         assert!(codex
@@ -6589,46 +7110,54 @@ mod tests {
     }
 
     #[test]
-    fn context_packs_load_only_memory_from_the_owning_project() {
-        let (service, database, project) = service_with(Arc::new(SimAdapter::default()));
-        let own_memory = database
-            .seed_project_memory_for_test(&project, "Paralith review procedure")
-            .unwrap();
-        let mut other = database.get_project(&project).unwrap();
-        other.id = Uuid::new_v4().to_string();
-        other.name = "other".into();
-        other.canonical_root_path = format!("other-{}", Uuid::new_v4());
-        database.upsert_project(&other).unwrap();
-        let foreign_memory = database
-            .seed_project_memory_for_test(&other.id, "Private other-project procedure")
-            .unwrap();
-
+    fn compiled_context_provenance_round_trips_for_the_exact_agent_run() {
+        let (service, database, project) = service_with(Arc::new(SimAdapter::new(0.2)));
         let swarm = create(&service, &project, "quick_fix");
         service.start_swarm(&project, &swarm.id).unwrap();
-        let agent = database
-            .list_swarm_agents(&swarm.id)
+        service.tick(&swarm.id).unwrap();
+        let detail = database.get_swarm_detail(&swarm.id).unwrap();
+        let run = detail
+            .agent_runs
+            .iter()
+            .find(|run| run.task_id.is_some())
+            .unwrap();
+        let task_id = run.task_id.clone().unwrap();
+        let mut compiled = empty_compiled_context();
+        compiled.id = Uuid::new_v4().to_string();
+        compiled.project_id = project.clone();
+        compiled.task_id = task_id.clone();
+        compiled.agent_run_id = run.id.clone();
+        compiled.pack.project_id = project.clone();
+        compiled.pack.task = detail
+            .tasks
+            .iter()
+            .find(|task| task.id == task_id)
             .unwrap()
-            .into_iter()
-            .find(|agent| agent.role == SwarmRole::Builder)
+            .title
+            .clone();
+        let request = ContextRequest {
+            project_id: project,
+            task: compiled.pack.task.clone(),
+            task_id: Some(task_id),
+            agent_id: Some(run.member_id.clone()),
+            agent_run_id: Some(run.id.clone()),
+            ..Default::default()
+        };
+
+        database
+            .persist_swarm_compiled_context_pack(&swarm.id, &run.member_id, &request, &compiled)
             .unwrap();
-        let task = database
-            .list_swarm_tasks(&swarm.id)
+        let stored = database
+            .swarm_compiled_context_pack(&run.id)
             .unwrap()
-            .into_iter()
-            .find(|task| task.role == SwarmRole::Builder)
             .unwrap();
-        let contexts = database
-            .ensure_swarm_context_pack(&swarm, &task, &agent)
-            .unwrap();
-        assert!(contexts
-            .iter()
-            .any(|context| context.memory_item_id == own_memory));
-        assert!(contexts
-            .iter()
-            .all(|context| context.memory_item_id != foreign_memory));
-        assert!(contexts
-            .iter()
-            .all(|context| !context.source_uris.is_empty()));
+        assert_eq!(stored.id, compiled.id);
+        assert_eq!(stored.agent_run_id, run.id);
+        assert_eq!(stored.pack.sections[0].entries[0].source_type, "code_graph");
+        assert_eq!(
+            stored.pack.sections[0].entries[0].source_uris,
+            vec!["src/auth.ts"]
+        );
     }
 
     #[test]

@@ -1,0 +1,189 @@
+---
+id: system.bugs-and-risks-moc
+type: system
+name: bugs-and-risks-moc
+status: active
+generated: true
+confidence: 1
+evidence_level: verified
+created_at: 2026-08-19T20:53:17.734Z
+updated_at: 2026-08-19T20:53:17.734Z
+sources:
+  - repository:.
+related:
+tags:
+  - paralith
+  - system
+---
+<!-- PARALITH:AUTO:START -->
+
+# Bugs and Risks MOC
+
+- [[Risk signals in design-taste-frontend - SKILL.md]] - 1 risk signal(s) detected in `.agents/skills/design-taste-frontend/SKILL.md`: TODO.
+- [[Risk signals in full-output-enforcement - SKILL.md]] - 1 risk signal(s) detected in `.agents/skills/full-output-enforcement/SKILL.md`: TODO.
+- [[Risk signals in . - AGENTS.md]] - 1 risk signal(s) detected in `AGENTS.md`: TODO.
+- [[Risk signals in application-audit - 00-EXECUTIVE-SUMMARY.md]] - 2 risk signal(s) detected in `Paralith-tauri/docs/application-audit/00-EXECUTIVE-SUMMARY.md`: FIXME, TODO.
+- [[Risk signals in application-audit - 09-INFRASTRUCTURE-AND-UPDATES.md]] - 2 risk signal(s) detected in `Paralith-tauri/docs/application-audit/09-INFRASTRUCTURE-AND-UPDATES.md`: FIXME, TODO.
+- [[Risk signals in application-audit - 10-SECURITY-RELIABILITY-PERFORMANCE.md]] - 1 risk signal(s) detected in `Paralith-tauri/docs/application-audit/10-SECURITY-RELIABILITY-PERFORMANCE.md`: unwrap(.
+- [[Risk signals in application-audit - 12-TECHNICAL-DEBT.md]] - 3 risk signal(s) detected in `Paralith-tauri/docs/application-audit/12-TECHNICAL-DEBT.md`: FIXME, TODO, unwrap(.
+- [[Risk signals in application-audit - 15-STRATEGIC-READINESS.md]] - 3 risk signal(s) detected in `Paralith-tauri/docs/application-audit/15-STRATEGIC-READINESS.md`: FIXME, TODO, unwrap(.
+- [[Risk signals in application-audit - README.md]] - 3 risk signal(s) detected in `Paralith-tauri/docs/application-audit/README.md`: FIXME, TODO, unwrap(.
+- [[Risk signals in release - github-artifacts-publisher.test.mjs]] - 1 risk signal(s) detected in `Paralith-tauri/scripts/release/github-artifacts-publisher.test.mjs`: expect(.
+- [[Risk signals in release - mirror-publisher.test.mjs]] - 1 risk signal(s) detected in `Paralith-tauri/scripts/release/mirror-publisher.test.mjs`: expect(.
+- [[Risk signals in release - render-tauri-config.test.mjs]] - 1 risk signal(s) detected in `Paralith-tauri/scripts/release/render-tauri-config.test.mjs`: expect(.
+- [[Risk signals in release - update-distribution.test.mjs]] - 1 risk signal(s) detected in `Paralith-tauri/scripts/release/update-distribution.test.mjs`: expect(.
+- [[Risk signals in release - verify-published-manifest.test.mjs]] - 1 risk signal(s) detected in `Paralith-tauri/scripts/release/verify-published-manifest.test.mjs`: expect(.
+- [[Risk signals in vault - scanner.mjs]] - 3 risk signal(s) detected in `Paralith-tauri/scripts/vault/scanner.mjs`: FIXME, panic!, TODO.
+- [[Risk signals in agent-resume - AgentResumeCenter.test.tsx]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/agent-resume/AgentResumeCenter.test.tsx`: expect(.
+- [[Risk signals in browser - browserInspectBridge.test.ts]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/code-surface/browser/browserInspectBridge.test.ts`: expect(.
+- [[Risk signals in browser - browserSessionStore.test.ts]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/code-surface/browser/browserSessionStore.test.ts`: expect(.
+- [[Risk signals in browser - BrowserSurface.test.tsx]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/code-surface/browser/BrowserSurface.test.tsx`: expect(.
+- [[Risk signals in browser - browserUrl.test.ts]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/code-surface/browser/browserUrl.test.ts`: expect(.
+- [[Risk signals in browser - inspectContext.test.ts]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/code-surface/browser/inspectContext.test.ts`: expect(.
+- [[Risk signals in code-surface - CodeSurface.test.tsx]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/code-surface/CodeSurface.test.tsx`: expect(.
+- [[Risk signals in code-surface - editorStore.test.ts]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/code-surface/editorStore.test.ts`: expect(.
+- [[Risk signals in code-surface - FileExplorer.test.tsx]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/code-surface/FileExplorer.test.tsx`: expect(.
+- [[Risk signals in code-surface - fuzzy.test.ts]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/code-surface/fuzzy.test.ts`: expect(.
+- [[Risk signals in surfaces - AgentsSurface.test.tsx]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/code-surface/surfaces/AgentsSurface.test.tsx`: expect(.
+- [[Risk signals in code-surface - SurfaceTabBar.test.tsx]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/code-surface/SurfaceTabBar.test.tsx`: expect(.
+- [[Risk signals in code-surface - workspacePanelStore.test.ts]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/code-surface/workspacePanelStore.test.ts`: expect(.
+- [[Risk signals in canvas - canvasSelectors.test.ts]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/database/components/canvas/canvasSelectors.test.ts`: expect(.
+- [[Risk signals in canvas - framing.test.ts]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/database/components/canvas/framing.test.ts`: expect(.
+- [[Risk signals in canvas - largeSchema.bench.test.ts]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/database/components/canvas/largeSchema.bench.test.ts`: expect(
+- [[Risk signals in canvas - layoutCore.test.ts]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/database/components/canvas/layoutCore.test.ts`: expect(.
+- [[Risk signals in canvas - SchemaCanvas.test.tsx]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/database/components/canvas/SchemaCanvas.test.tsx`: expect(.
+- [[Risk signals in components - DatabaseSidebar.test.tsx]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/database/components/DatabaseSidebar.test.tsx`: expect(.
+- [[Risk signals in components - DatabaseStudio.test.tsx]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/database/components/DatabaseStudio.test.tsx`: expect(.
+- [[Risk signals in components - InspectorPanel.test.tsx]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/database/components/InspectorPanel.test.tsx`: expect(.
+- [[Risk signals in sections - ChangesSection.test.tsx]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/database/components/sections/ChangesSection.test.tsx`: expect(
+- [[Risk signals in sections - ConnectionsSection.test.tsx]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/database/components/sections/ConnectionsSection.test.tsx`: exp
+- [[Risk signals in sections - DiagramSection.test.tsx]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/database/components/sections/DiagramSection.test.tsx`: expect(
+- [[Risk signals in sections - ExplorerSection.test.tsx]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/database/components/sections/ExplorerSection.test.tsx`: expect
+- [[Risk signals in sections - HealthSection.test.tsx]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/database/components/sections/HealthSection.test.tsx`: expect(.
+- [[Risk signals in sections - MigrationsSection.test.tsx]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/database/components/sections/MigrationsSection.test.tsx`: expe
+- [[Risk signals in sections - OverviewSection.test.tsx]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/database/components/sections/OverviewSection.test.tsx`: expect
+- [[Risk signals in database - crossSurfaceNavigation.test.ts]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/database/crossSurfaceNavigation.test.ts`: expect(.
+- [[Risk signals in database - databaseDesignOperations.test.ts]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/database/databaseDesignOperations.test.ts`: expect(.
+- [[Risk signals in database - databaseSourceVisibility.test.ts]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/database/databaseSourceVisibility.test.ts`: expect(.
+- [[Risk signals in database - databaseStore.test.ts]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/database/databaseStore.test.ts`: expect(.
+- [[Risk signals in memory - api.test.ts]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/memory/api.test.ts`: expect(.
+- [[Risk signals in components - MemoryActivity.test.tsx]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/memory/components/MemoryActivity.test.tsx`: expect(.
+- [[Risk signals in components - MemoryContext.test.tsx]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/memory/components/MemoryContext.test.tsx`: expect(.
+- [[Risk signals in components - MemoryGraph.test.tsx]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/memory/components/MemoryGraph.test.tsx`: expect(.
+- [[Risk signals in components - MemoryInspector.test.tsx]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/memory/components/MemoryInspector.test.tsx`: expect(.
+- [[Risk signals in components - MemoryOverview.test.tsx]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/memory/components/MemoryOverview.test.tsx`: expect(.
+- [[Risk signals in components - MemoryReview.test.tsx]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/memory/components/MemoryReview.test.tsx`: expect(.
+- [[Risk signals in components - MemorySearch.test.tsx]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/memory/components/MemorySearch.test.tsx`: expect(.
+- [[Risk signals in components - MemoryTimeline.test.tsx]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/memory/components/MemoryTimeline.test.tsx`: expect(.
+- [[Risk signals in components - MemoryWorkspace.test.tsx]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/memory/components/MemoryWorkspace.test.tsx`: expect(.
+- [[Risk signals in memory - memoryPresentation.test.ts]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/memory/memoryPresentation.test.ts`: expect(.
+- [[Risk signals in memory - memoryStore.test.ts]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/memory/memoryStore.test.ts`: expect(.
+- [[Risk signals in orchestrator - OrchestratorLauncher.test.tsx]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/orchestrator/OrchestratorLauncher.test.tsx`: expect(.
+- [[Risk signals in orchestrator - store.test.ts]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/orchestrator/store.test.ts`: expect(.
+- [[Risk signals in repository - history.test.tsx]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/repository/history.test.tsx`: expect(.
+- [[Risk signals in repository - intelligence.test.tsx]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/repository/intelligence.test.tsx`: expect(.
+- [[Risk signals in repository - RepositoryCommandCenter.test.tsx]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/repository/RepositoryCommandCenter.test.tsx`: expect(.
+- [[Risk signals in repository - repositoryNav.test.ts]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/repository/repositoryNav.test.ts`: expect(.
+- [[Risk signals in repository - repositorySelectors.test.ts]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/repository/repositorySelectors.test.ts`: expect(.
+- [[Risk signals in repository - repositoryStore.test.ts]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/repository/repositoryStore.test.ts`: expect(.
+- [[Risk signals in components - SidebarStatusArea.test.tsx]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/sidebar/components/SidebarStatusArea.test.tsx`: expect(.
+- [[Risk signals in sidebar - sidebarAgentStatus.test.ts]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/sidebar/sidebarAgentStatus.test.ts`: expect(.
+- [[Risk signals in sidebar - sidebarAttention.test.ts]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/sidebar/sidebarAttention.test.ts`: expect(.
+- [[Risk signals in sidebar - sidebarIndex.test.ts]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/sidebar/sidebarIndex.test.ts`: expect(.
+- [[Risk signals in sidebar - sidebarModel.test.ts]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/sidebar/sidebarModel.test.ts`: expect(.
+- [[Risk signals in sidebar - sidebarSelectors.test.ts]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/sidebar/sidebarSelectors.test.ts`: expect(.
+- [[Risk signals in sidebar - sidebarStore.test.ts]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/sidebar/sidebarStore.test.ts`: expect(.
+- [[Risk signals in sidebar - workspaceIdentity.test.ts]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/sidebar/workspaceIdentity.test.ts`: expect(.
+- [[Risk signals in swarms - SwarmCreatePanel.test.tsx]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/swarms/SwarmCreatePanel.test.tsx`: expect(.
+- [[Risk signals in swarms - SwarmOverview.test.tsx]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/swarms/SwarmOverview.test.tsx`: expect(.
+- [[Risk signals in swarms - SwarmsSidebarSection.test.tsx]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/swarms/SwarmsSidebarSection.test.tsx`: expect(.
+- [[Risk signals in swarms - swarmStore.test.ts]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/swarms/swarmStore.test.ts`: expect(.
+- [[Risk signals in terminals - runtimeStore.test.ts]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/terminals/runtimeStore.test.ts`: expect(.
+- [[Risk signals in updates - updateController.test.ts]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/updates/updateController.test.ts`: expect(.
+- [[Risk signals in updates - UpdateNotification.test.tsx]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/updates/UpdateNotification.test.tsx`: expect(.
+- [[Risk signals in usage - AiUsageStatusBar.test.tsx]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/usage/AiUsageStatusBar.test.tsx`: expect(.
+- [[Risk signals in components - RawCostSummary.test.tsx]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/usage/components/RawCostSummary.test.tsx`: expect(.
+- [[Risk signals in components - UsageInstrument.test.tsx]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/usage/components/UsageInstrument.test.tsx`: expect(.
+- [[Risk signals in components - UsagePage.test.tsx]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/usage/components/UsagePage.test.tsx`: expect(.
+- [[Risk signals in usage - usageAnalytics.test.ts]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/usage/usageAnalytics.test.ts`: expect(.
+- [[Risk signals in usage - usageCost.test.ts]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/usage/usageCost.test.ts`: expect(.
+- [[Risk signals in workspace-canvas - canvasPersistence.test.ts]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/workspace-canvas/canvasPersistence.test.ts`: expect(.
+- [[Risk signals in workspace-canvas - canvasStore.test.ts]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/workspace-canvas/canvasStore.test.ts`: expect(.
+- [[Risk signals in workspace-canvas - geometryEngine.test.ts]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/workspace-canvas/geometryEngine.test.ts`: expect(.
+- [[Risk signals in workspace-canvas - layoutOperations.test.ts]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/workspace-canvas/layoutOperations.test.ts`: expect(.
+- [[Risk signals in workspace-canvas - resizeController.test.ts]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/workspace-canvas/resizeController.test.ts`: expect(.
+- [[Risk signals in workspace-canvas - snapResolver.test.ts]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/workspace-canvas/snapResolver.test.ts`: expect(.
+- [[Risk signals in workspace-setup - allocationCompiler.test.ts]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/workspace-setup/allocationCompiler.test.ts`: expect(.
+- [[Risk signals in workspace-setup - presetMigration.test.ts]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/workspace-setup/presetMigration.test.ts`: expect(.
+- [[Risk signals in workspace-windows - closePolicy.test.ts]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/workspace-windows/closePolicy.test.ts`: expect(.
+- [[Risk signals in workspace-windows - workspaceWindows.test.ts]] - 1 risk signal(s) detected in `Paralith-tauri/src/features/workspace-windows/workspaceWindows.test.ts`: expect(.
+- [[Risk signals in screens - ProjectLauncher.test.tsx]] - 1 risk signal(s) detected in `Paralith-tauri/src/screens/ProjectLauncher.test.tsx`: expect(.
+- [[Risk signals in screens - WorkspaceScreen.test.tsx]] - 1 risk signal(s) detected in `Paralith-tauri/src/screens/WorkspaceScreen.test.tsx`: expect(.
+- [[Risk signals in screens - WorkspaceSetup.test.tsx]] - 1 risk signal(s) detected in `Paralith-tauri/src/screens/WorkspaceSetup.test.tsx`: expect(.
+- [[Risk signals in shared - layout.test.ts]] - 1 risk signal(s) detected in `Paralith-tauri/src/shared/layout.test.ts`: expect(.
+- [[Risk signals in stores - activeContext.test.ts]] - 1 risk signal(s) detected in `Paralith-tauri/src/stores/activeContext.test.ts`: expect(.
+- [[Risk signals in stores - appStore.test.ts]] - 1 risk signal(s) detected in `Paralith-tauri/src/stores/appStore.test.ts`: expect(.
+- [[Risk signals in stores - sessionStore.test.ts]] - 1 risk signal(s) detected in `Paralith-tauri/src/stores/sessionStore.test.ts`: expect(.
+- [[Risk signals in theme - theme.test.ts]] - 1 risk signal(s) detected in `Paralith-tauri/src/theme/theme.test.ts`: expect(.
+- [[Risk signals in theme - themeStore.test.ts]] - 1 risk signal(s) detected in `Paralith-tauri/src/theme/themeStore.test.ts`: expect(.
+- [[Risk signals in src-tauri - build.rs]] - 1 risk signal(s) detected in `Paralith-tauri/src-tauri/build.rs`: panic!.
+- [[Risk signals in agents - adapter.rs]] - 1 risk signal(s) detected in `Paralith-tauri/src-tauri/src/agents/adapter.rs`: unwrap(.
+- [[Risk signals in agents - model_registry.rs]] - 1 risk signal(s) detected in `Paralith-tauri/src-tauri/src/agents/model_registry.rs`: unwrap(.
+- [[Risk signals in src - build_info.rs]] - 1 risk signal(s) detected in `Paralith-tauri/src-tauri/src/build_info.rs`: unwrap(.
+- [[Risk signals in commands - fabric_ipc.rs]] - 1 risk signal(s) detected in `Paralith-tauri/src-tauri/src/commands/fabric_ipc.rs`: unwrap(.
+- [[Risk signals in commands - git_commands.rs]] - 1 risk signal(s) detected in `Paralith-tauri/src-tauri/src/commands/git_commands.rs`: unwrap(.
+- [[Risk signals in commands - window_commands.rs]] - 1 risk signal(s) detected in `Paralith-tauri/src-tauri/src/commands/window_commands.rs`: unsafe {.
+- [[Risk signals in commands - workspace_commands.rs]] - 1 risk signal(s) detected in `Paralith-tauri/src-tauri/src/commands/workspace_commands.rs`: unwrap(.
+- [[Risk signals in database - backup.rs]] - 1 risk signal(s) detected in `Paralith-tauri/src-tauri/src/database/backup.rs`: unwrap(.
+- [[Risk signals in database - knowledge_jobs.rs]] - 2 risk signal(s) detected in `Paralith-tauri/src-tauri/src/database/knowledge_jobs.rs`: expect(, unwrap(.
+- [[Risk signals in database - legacy_migration.rs]] - 1 risk signal(s) detected in `Paralith-tauri/src-tauri/src/database/legacy_migration.rs`: unwrap(.
+- [[Risk signals in database - migrations.rs]] - 2 risk signal(s) detected in `Paralith-tauri/src-tauri/src/database/migrations.rs`: expect(, unwrap(.
+- [[Risk signals in database - mod.rs]] - 1 risk signal(s) detected in `Paralith-tauri/src-tauri/src/database/mod.rs`: unwrap(.
+- [[Risk signals in database - orchestration.rs]] - 1 risk signal(s) detected in `Paralith-tauri/src-tauri/src/database/orchestration.rs`: unwrap(.
+- [[Risk signals in database - placement.rs]] - 1 risk signal(s) detected in `Paralith-tauri/src-tauri/src/database/placement.rs`: unwrap(.
+- [[Risk signals in database - repository.rs]] - 2 risk signal(s) detected in `Paralith-tauri/src-tauri/src/database/repository.rs`: expect(, unwrap(.
+- [[Risk signals in database - search.rs]] - 1 risk signal(s) detected in `Paralith-tauri/src-tauri/src/database/search.rs`: unwrap(.
+- [[Risk signals in database - swarm.rs]] - 2 risk signal(s) detected in `Paralith-tauri/src-tauri/src/database/swarm.rs`: expect(, unwrap(.
+- [[Risk signals in database - usage.rs]] - 1 risk signal(s) detected in `Paralith-tauri/src-tauri/src/database/usage.rs`: unwrap(.
+- [[Risk signals in models - layout.rs]] - 1 risk signal(s) detected in `Paralith-tauri/src-tauri/src/models/layout.rs`: unwrap(.
+- [[Risk signals in models - query.rs]] - 2 risk signal(s) detected in `Paralith-tauri/src-tauri/src/models/query.rs`: expect(, unwrap(.
+- [[Risk signals in models - repository.rs]] - 1 risk signal(s) detected in `Paralith-tauri/src-tauri/src/models/repository.rs`: unwrap(.
+- [[Risk signals in models - settings.rs]] - 1 risk signal(s) detected in `Paralith-tauri/src-tauri/src/models/settings.rs`: expect(.
+- [[Risk signals in models - vnext.rs]] - 1 risk signal(s) detected in `Paralith-tauri/src-tauri/src/models/vnext.rs`: expect(.
+- [[Risk signals in orchestration - kernel.rs]] - 1 risk signal(s) detected in `Paralith-tauri/src-tauri/src/orchestration/kernel.rs`: unwrap(.
+- [[Risk signals in orchestration - registry.rs]] - 1 risk signal(s) detected in `Paralith-tauri/src-tauri/src/orchestration/registry.rs`: unwrap(.
+- [[Risk signals in services - agent_handoff.rs]] - 1 risk signal(s) detected in `Paralith-tauri/src-tauri/src/services/agent_handoff.rs`: expect(.
+- [[Risk signals in services - agent_resume.rs]] - 1 risk signal(s) detected in `Paralith-tauri/src-tauri/src/services/agent_resume.rs`: unwrap(.
+- [[Risk signals in services - browser_service.rs]] - 1 risk signal(s) detected in `Paralith-tauri/src-tauri/src/services/browser_service.rs`: unwrap(.
+- [[Risk signals in services - code_intelligence.rs]] - 1 risk signal(s) detected in `Paralith-tauri/src-tauri/src/services/code_intelligence.rs`: expect(.
+- [[Risk signals in services - code_parser.rs]] - 1 risk signal(s) detected in `Paralith-tauri/src-tauri/src/services/code_parser.rs`: expect(.
+- [[Risk signals in services - context_compiler.rs]] - 2 risk signal(s) detected in `Paralith-tauri/src-tauri/src/services/context_compiler.rs`: expect(, unwrap(.
+- [[Risk signals in database_studio - adapters.rs]] - 3 risk signal(s) detected in `Paralith-tauri/src-tauri/src/services/database_studio/adapters.rs`: expect(, panic!, unwra
+- [[Risk signals in database_studio - design.rs]] - 1 risk signal(s) detected in `Paralith-tauri/src-tauri/src/services/database_studio/design.rs`: unwrap(.
+- [[Risk signals in database_studio - diff.rs]] - 1 risk signal(s) detected in `Paralith-tauri/src-tauri/src/services/database_studio/diff.rs`: unwrap(.
+- [[Risk signals in database_studio - discovery.rs]] - 1 risk signal(s) detected in `Paralith-tauri/src-tauri/src/services/database_studio/discovery.rs`: unwrap(.
+- [[Risk signals in database_studio - graph.rs]] - 1 risk signal(s) detected in `Paralith-tauri/src-tauri/src/services/database_studio/graph.rs`: unwrap(.
+- [[Risk signals in database_studio - health.rs]] - 1 risk signal(s) detected in `Paralith-tauri/src-tauri/src/services/database_studio/health.rs`: expect(.
+- [[Risk signals in pipeline - mod.rs]] - 1 risk signal(s) detected in `Paralith-tauri/src-tauri/src/services/database_studio/pipeline/mod.rs`: unwrap(.
+- [[Risk signals in database_studio - runtime.rs]] - 1 risk signal(s) detected in `Paralith-tauri/src-tauri/src/services/database_studio/runtime.rs`: unwrap(.
+- [[Risk signals in database_studio - security.rs]] - 1 risk signal(s) detected in `Paralith-tauri/src-tauri/src/services/database_studio/security.rs`: unwrap(.
+- [[Risk signals in database_studio - sqlite_introspect.rs]] - 1 risk signal(s) detected in `Paralith-tauri/src-tauri/src/services/database_studio/sqlite_introspect.rs`: unwrap(.
+- [[Risk signals in database_studio - usage.rs]] - 1 risk signal(s) detected in `Paralith-tauri/src-tauri/src/services/database_studio/usage.rs`: unwrap(.
+- [[Risk signals in services - embeddings.rs]] - 1 risk signal(s) detected in `Paralith-tauri/src-tauri/src/services/embeddings.rs`: expect(.
+- [[Risk signals in services - filesystem_service.rs]] - 1 risk signal(s) detected in `Paralith-tauri/src-tauri/src/services/filesystem_service.rs`: unwrap(.
+- [[Risk signals in services - knowledge_intelligence.rs]] - 2 risk signal(s) detected in `Paralith-tauri/src-tauri/src/services/knowledge_intelligence.rs`: expect(, unwrap(.
+- [[Risk signals in services - knowledge_lifecycle.rs]] - 2 risk signal(s) detected in `Paralith-tauri/src-tauri/src/services/knowledge_lifecycle.rs`: expect(, unwrap(.
+- [[Risk signals in services - memory_service.rs]] - 2 risk signal(s) detected in `Paralith-tauri/src-tauri/src/services/memory_service.rs`: expect(, unwrap(.
+- [[Risk signals in services - project_analyzer.rs]] - 1 risk signal(s) detected in `Paralith-tauri/src-tauri/src/services/project_analyzer.rs`: unwrap(.
+- [[Risk signals in services - project_service.rs]] - 1 risk signal(s) detected in `Paralith-tauri/src-tauri/src/services/project_service.rs`: unwrap(.
+- [[Risk signals in services - query_engine.rs]] - 1 risk signal(s) detected in `Paralith-tauri/src-tauri/src/services/query_engine.rs`: panic!.
+- [[Risk signals in services - repository_service.rs]] - 1 risk signal(s) detected in `Paralith-tauri/src-tauri/src/services/repository_service.rs`: unwrap(.
+- [[Risk signals in services - swarm_service.rs]] - 2 risk signal(s) detected in `Paralith-tauri/src-tauri/src/services/swarm_service.rs`: expect(, unwrap(.
+- [[Risk signals in services - terminal_manager.rs]] - 3 risk signal(s) detected in `Paralith-tauri/src-tauri/src/services/terminal_manager.rs`: expect(, panic!, unwrap(.
+- [[Risk signals in services - update_service.rs]] - 1 risk signal(s) detected in `Paralith-tauri/src-tauri/src/services/update_service.rs`: unwrap(.
+- [[Risk signals in services - usage_service.rs]] - 1 risk signal(s) detected in `Paralith-tauri/src-tauri/src/services/usage_service.rs`: unwrap(.
+- [[Risk signals in services - window_chrome.rs]] - 1 risk signal(s) detected in `Paralith-tauri/src-tauri/src/services/window_chrome.rs`: unsafe {.
+- [[Risk signals in services - window_registry.rs]] - 1 risk signal(s) detected in `Paralith-tauri/src-tauri/src/services/window_registry.rs`: unwrap(.
+- [[Risk signals in tests - updater_signature.rs]] - 1 risk signal(s) detected in `Paralith-tauri/src-tauri/tests/updater_signature.rs`: unwrap(.
+
+<!-- PARALITH:AUTO:END -->

@@ -60,6 +60,13 @@ graphify-out
 tmp/
 media/exports/
 
+# Obsidian project-intelligence vault: portable generated notes are tracked deliberately, while
+# incremental caches and machine-specific workspace state stay local.
+Paralith-Vault/00-System/.cache/
+Paralith-Vault/.obsidian/workspace*.json
+Paralith-Vault/.obsidian/cache/
+Paralith-Vault/.trash/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

@@ -1001,6 +1001,7 @@ export function WorkspaceScreen() {
     onOpenSettings: () => navigate('/settings'),
     onOpenRepository: () => { if (project) navigate(`/repository/${project.id}`) },
     onOpenDatabase: () => { if (project) navigate(`/database/${project.id}`) },
+    onOpenMemory: () => { if (project) navigate(`/memory/${project.id}`) },
     onOpenUsage: () => navigate('/usage'),
     onToggleCollapse: toggleCollapse,
     onResizeCommit: commitSidebarWidth,

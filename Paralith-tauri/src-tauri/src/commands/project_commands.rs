@@ -40,7 +40,17 @@ pub fn open_project(
 ) -> AppResult<Project> {
     crate::require_main_window(&window)?;
     let project = ProjectService::inspect(&path)?;
-    state.database.upsert_project(&project)
+    let stored = state.database.upsert_project(&project)?;
+    // Opening a Project is when Paralith should learn what it is. The request only *queues* a job —
+    // the walk happens on the knowledge worker — so opening stays instant, and a pending analysis
+    // absorbs a repeat open rather than stacking a second walk behind it.
+    if let Err(error) = state
+        .knowledge
+        .request_project_analysis(&stored.id, "project open")
+    {
+        log::debug!("project analysis not queued: {}", error.message);
+    }
+    Ok(stored)
 }
 
 #[tauri::command]

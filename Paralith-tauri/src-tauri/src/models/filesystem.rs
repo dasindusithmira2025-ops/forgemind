@@ -117,8 +117,7 @@ pub struct ProjectFileIndex {
     pub truncated: bool,
 }
 
-/// The kind of change the watcher observed. Deliberately does not attribute a source (user,
-/// agent, git) — attribution is a later slice with its own evidence model.
+/// The kind of change the watcher observed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FileChangeKind {
@@ -127,11 +126,55 @@ pub enum FileChangeKind {
     Deleted,
 }
 
+/// Who caused a change.
+///
+/// This replaces a path blacklist with a fact. `.paralith/` used to be excluded wholesale from
+/// knowledge analysis, because the Markdown memory mirror lives there and a memory save must not
+/// invalidate memories. That blacklist was a *path* test standing in for an *origin* test, and it
+/// stopped being correct the moment `.paralith/` also held Skills, Bases, and Canvases — artifacts
+/// a user genuinely edits, whose changes genuinely should reach the Context Fabric.
+///
+/// Origin is recorded at the write, not inferred at the read: [`crate::services::SelfWriteLedger`]
+/// stamps every PARALITH-originated write, and the watcher reads the stamp back. A change with no
+/// stamp is [`ChangeOrigin::Filesystem`] — an external editor, a `git checkout`, or an agent
+/// process writing directly — which is exactly the set that should be analyzed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChangeOrigin {
+    /// A person editing through PARALITH's own Code surface.
+    User,
+    /// Not stamped by PARALITH: an external editor, a VCS operation, or an agent's own process.
+    #[default]
+    Filesystem,
+    /// A write PARALITH made on an agent's behalf, such as an MCP tool call.
+    Agent,
+    /// The Markdown memory mirror writing itself. The one origin that must never reach impact
+    /// analysis, because it *is* the output of the knowledge it would invalidate.
+    MemoryMirror,
+    Skill,
+    Canvas,
+    Base,
+    Import,
+    /// PARALITH internals that are not one of the above.
+    System,
+}
+
+impl ChangeOrigin {
+    /// Whether PARALITH itself produced this write.
+    ///
+    /// A self-write is never reported to the Code surface as an external change, and never enters
+    /// knowledge impact analysis: both would be the application reacting to its own output.
+    pub fn is_self_write(self) -> bool {
+        !matches!(self, Self::Filesystem)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectFileChange {
     pub relative_path: String,
     pub kind: FileChangeKind,
+    pub origin: ChangeOrigin,
 }
 
 /// A debounced, coalesced batch of filesystem changes for one Project, delivered to every

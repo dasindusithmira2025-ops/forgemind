@@ -1,0 +1,525 @@
+---
+id: system.generated-files-registry
+type: system
+name: generated-files-registry
+status: active
+generated: true
+confidence: 1
+evidence_level: verified
+created_at: 2026-08-19T20:53:17.734Z
+updated_at: 2026-08-19T20:53:17.734Z
+sources:
+  - repository:.
+related:
+tags:
+  - paralith
+  - system
+---
+<!-- PARALITH:AUTO:START -->
+
+# Generated Files Registry
+
+These files are owned by the vault generator. Human annotations outside the auto region are preserved.
+
+- `01-Project/Project Overview.md` -> `project.paralith`
+- `04-Features/Active/Agent Resume.md` -> `feature.agent-resume`
+- `04-Features/Active/Code Surface.md` -> `feature.code-surface`
+- `04-Features/Active/Database.md` -> `feature.database`
+- `04-Features/Active/Memory.md` -> `feature.memory`
+- `04-Features/Active/Orchestrator.md` -> `feature.orchestrator`
+- `04-Features/Active/Repository.md` -> `feature.repository`
+- `04-Features/Active/Sidebar.md` -> `feature.sidebar`
+- `04-Features/Active/Swarms.md` -> `feature.swarms`
+- `04-Features/Active/Terminals.md` -> `feature.terminals`
+- `04-Features/Active/Updates.md` -> `feature.updates`
+- `04-Features/Active/Usage.md` -> `feature.usage`
+- `04-Features/Active/Workspace Canvas.md` -> `feature.workspace-canvas`
+- `04-Features/Active/Workspace Setup.md` -> `feature.workspace-setup`
+- `04-Features/Active/Workspace Windows.md` -> `feature.workspace-windows`
+- `03-Codebase/Modules/corelith_site.md` -> `module.de92b294dde7a559`
+- `03-Codebase/Dependencies/@react-three-fiber.md` -> `dependency.@react-three/fiber`
+- `03-Codebase/Dependencies/clsx.md` -> `dependency.clsx`
+- `03-Codebase/Dependencies/next.md` -> `dependency.next`
+- `03-Codebase/Dependencies/react.md` -> `dependency.react`
+- `03-Codebase/Dependencies/react-dom.md` -> `dependency.react-dom`
+- `03-Codebase/Dependencies/three.md` -> `dependency.three`
+- `03-Codebase/Dependencies/zod.md` -> `dependency.zod`
+- `03-Codebase/Dependencies/@tailwindcss-postcss.md` -> `dependency.@tailwindcss/postcss`
+- `03-Codebase/Dependencies/@types-node.md` -> `dependency.@types/node`
+- `03-Codebase/Dependencies/@types-react.md` -> `dependency.@types/react`
+- `03-Codebase/Dependencies/@types-react-dom.md` -> `dependency.@types/react-dom`
+- `03-Codebase/Dependencies/@types-three.md` -> `dependency.@types/three`
+- `03-Codebase/Dependencies/eslint.md` -> `dependency.eslint`
+- `03-Codebase/Dependencies/eslint-config-next.md` -> `dependency.eslint-config-next`
+- `03-Codebase/Dependencies/tailwindcss.md` -> `dependency.tailwindcss`
+- `03-Codebase/Dependencies/typescript.md` -> `dependency.typescript`
+- `03-Codebase/Modules/corelith_web.md` -> `module.d1a09b824605233a`
+- `03-Codebase/Dependencies/lucide-react.md` -> `dependency.lucide-react`
+- `03-Codebase/Dependencies/tailwind-merge.md` -> `dependency.tailwind-merge`
+- `03-Codebase/Modules/paralith-marketing-video.md` -> `module.7c60b1083bb7c2c8`
+- `03-Codebase/Dependencies/@remotion-cli.md` -> `dependency.@remotion/cli`
+- `03-Codebase/Dependencies/remotion.md` -> `dependency.remotion`
+- `03-Codebase/Modules/paralith.md` -> `module.790f5c5a73350052`
+- `03-Codebase/Dependencies/@monaco-editor-react.md` -> `dependency.@monaco-editor/react`
+- `03-Codebase/Dependencies/@tauri-apps-api.md` -> `dependency.@tauri-apps/api`
+- `03-Codebase/Dependencies/@tauri-apps-plugin-dialog.md` -> `dependency.@tauri-apps/plugin-dialog`
+- `03-Codebase/Dependencies/@tauri-apps-plugin-fs.md` -> `dependency.@tauri-apps/plugin-fs`
+- `03-Codebase/Dependencies/@tauri-apps-plugin-opener.md` -> `dependency.@tauri-apps/plugin-opener`
+- `03-Codebase/Dependencies/@xterm-addon-fit.md` -> `dependency.@xterm/addon-fit`
+- `03-Codebase/Dependencies/@xterm-addon-search.md` -> `dependency.@xterm/addon-search`
+- `03-Codebase/Dependencies/@xterm-addon-web-links.md` -> `dependency.@xterm/addon-web-links`
+- `03-Codebase/Dependencies/@xterm-xterm.md` -> `dependency.@xterm/xterm`
+- `03-Codebase/Dependencies/monaco-editor.md` -> `dependency.monaco-editor`
+- `03-Codebase/Dependencies/react-resizable-panels.md` -> `dependency.react-resizable-panels`
+- `03-Codebase/Dependencies/react-router-dom.md` -> `dependency.react-router-dom`
+- `03-Codebase/Dependencies/zustand.md` -> `dependency.zustand`
+- `03-Codebase/Dependencies/@tauri-apps-cli.md` -> `dependency.@tauri-apps/cli`
+- `03-Codebase/Dependencies/@testing-library-jest-dom.md` -> `dependency.@testing-library/jest-dom`
+- `03-Codebase/Dependencies/@testing-library-react.md` -> `dependency.@testing-library/react`
+- `03-Codebase/Dependencies/@testing-library-user-event.md` -> `dependency.@testing-library/user-event`
+- `03-Codebase/Dependencies/@vitejs-plugin-react.md` -> `dependency.@vitejs/plugin-react`
+- `03-Codebase/Dependencies/@vitest-coverage-v8.md` -> `dependency.@vitest/coverage-v8`
+- `03-Codebase/Dependencies/eslint-plugin-testing-library.md` -> `dependency.eslint-plugin-testing-library`
+- `03-Codebase/Dependencies/jsdom.md` -> `dependency.jsdom`
+- `03-Codebase/Dependencies/oxlint.md` -> `dependency.oxlint`
+- `03-Codebase/Dependencies/vite.md` -> `dependency.vite`
+- `03-Codebase/Dependencies/vitest.md` -> `dependency.vitest`
+- `03-Codebase/Modules/forgemind.md` -> `module.84fb3494aa9cedf5`
+- `03-Codebase/Dependencies/serde_json.md` -> `dependency.serde_json`
+- `03-Codebase/Dependencies/serde.md` -> `dependency.serde`
+- `03-Codebase/Dependencies/log.md` -> `dependency.log`
+- `03-Codebase/Dependencies/notify.md` -> `dependency.notify`
+- `03-Codebase/Dependencies/tauri.md` -> `dependency.tauri`
+- `03-Codebase/Dependencies/tauri-plugin-log.md` -> `dependency.tauri-plugin-log`
+- `03-Codebase/Dependencies/async-trait.md` -> `dependency.async-trait`
+- `03-Codebase/Dependencies/base64.md` -> `dependency.base64`
+- `03-Codebase/Dependencies/chrono.md` -> `dependency.chrono`
+- `03-Codebase/Dependencies/parking_lot.md` -> `dependency.parking_lot`
+- `03-Codebase/Dependencies/portable-pty.md` -> `dependency.portable-pty`
+- `03-Codebase/Dependencies/reqwest.md` -> `dependency.reqwest`
+- `03-Codebase/Dependencies/rusqlite.md` -> `dependency.rusqlite`
+- `03-Codebase/Dependencies/semver.md` -> `dependency.semver`
+- `03-Codebase/Dependencies/sha2.md` -> `dependency.sha2`
+- `03-Codebase/Dependencies/sysinfo.md` -> `dependency.sysinfo`
+- `03-Codebase/Dependencies/thiserror.md` -> `dependency.thiserror`
+- `03-Codebase/Dependencies/tokio.md` -> `dependency.tokio`
+- `03-Codebase/Dependencies/uuid.md` -> `dependency.uuid`
+- `03-Codebase/Dependencies/wait-timeout.md` -> `dependency.wait-timeout`
+- `03-Codebase/Dependencies/which.md` -> `dependency.which`
+- `03-Codebase/Dependencies/tauri-plugin-dialog.md` -> `dependency.tauri-plugin-dialog`
+- `03-Codebase/Dependencies/tauri-plugin-opener.md` -> `dependency.tauri-plugin-opener`
+- `03-Codebase/Dependencies/url.md` -> `dependency.url`
+- `03-Codebase/Modules/dbstudio-fixture-drizzle.md` -> `module.3003e9f6822af4f0`
+- `03-Codebase/Dependencies/drizzle-orm.md` -> `dependency.drizzle-orm`
+- `03-Codebase/Dependencies/pg.md` -> `dependency.pg`
+- `03-Codebase/Dependencies/drizzle-kit.md` -> `dependency.drizzle-kit`
+- `03-Codebase/Modules/@repo-analytics.md` -> `module.807ddec5d4999a87`
+- `03-Codebase/Modules/@repo-api.md` -> `module.965f7d12a0096348`
+- `03-Codebase/Dependencies/@repo-db.md` -> `dependency.@repo/db`
+- `03-Codebase/Modules/@repo-worker.md` -> `module.5bdc3b619cd15a48`
+- `03-Codebase/Modules/dbstudio-fixture-monorepo.md` -> `module.2064864359e3376a`
+- `03-Codebase/Dependencies/pnpm.md` -> `dependency.pnpm`
+- `03-Codebase/Modules/@repo-db.md` -> `module.df0d0c4d82b0367c`
+- `03-Codebase/Dependencies/@prisma-client.md` -> `dependency.@prisma/client`
+- `03-Codebase/Dependencies/prisma.md` -> `dependency.prisma`
+- `03-Codebase/Modules/dbstudio-fixture-multi-logical-db.md` -> `module.066afdef87eb3172`
+- `03-Codebase/Dependencies/mysql2.md` -> `dependency.mysql2`
+- `03-Codebase/Modules/dbstudio-fixture-prisma.md` -> `module.ae3762f3fbf6d944`
+- `03-Codebase/Modules/Paralith-tauri - src-tauri - build.md` -> `module.d7fb97bb452631a4`
+- `03-Codebase/Modules/rust - agents - adapter.md` -> `module.7530f9066e278045`
+- `03-Codebase/Modules/rust - agents - mod.md` -> `module.9453709f18a62438`
+- `03-Codebase/Modules/rust - agents - model_registry.md` -> `module.0c9e7d1dd9d47321`
+- `03-Codebase/Modules/rust - build_info.md` -> `module.0bcb49ed64ebe51a`
+- `03-Codebase/Modules/rust - commands - agent_commands.md` -> `module.50c9bef95a963573`
+- `03-Codebase/Commands/detect_agents.md` -> `command.detect_agents`
+- `03-Codebase/Commands/list_agent_profiles.md` -> `command.list_agent_profiles`
+- `03-Codebase/Commands/list_agent_sessions.md` -> `command.list_agent_sessions`
+- `03-Codebase/Commands/reconcile_agent_resume_sessions.md` -> `command.reconcile_agent_resume_sessions`
+- `03-Codebase/Commands/list_agent_resume_sessions.md` -> `command.list_agent_resume_sessions`
+- `03-Codebase/Commands/resume_agent_session.md` -> `command.resume_agent_session`
+- `03-Codebase/Commands/dismiss_agent_resume_session.md` -> `command.dismiss_agent_resume_session`
+- `03-Codebase/Commands/dismiss_all_agent_resume_sessions.md` -> `command.dismiss_all_agent_resume_sessions`
+- `03-Codebase/Commands/remove_agent_resume_session.md` -> `command.remove_agent_resume_session`
+- `03-Codebase/Commands/relocate_agent_resume_worktree.md` -> `command.relocate_agent_resume_worktree`
+- `03-Codebase/Commands/detect_shells.md` -> `command.detect_shells`
+- `03-Codebase/Commands/save_custom_shell.md` -> `command.save_custom_shell`
+- `03-Codebase/Commands/validate_custom_executable.md` -> `command.validate_custom_executable`
+- `03-Codebase/Modules/rust - commands - browser_commands.md` -> `module.cb5dc51c1e9f560c`
+- `03-Codebase/Commands/open_browser_view.md` -> `command.open_browser_view`
+- `03-Codebase/Commands/browser_navigate.md` -> `command.browser_navigate`
+- `03-Codebase/Commands/browser_reload.md` -> `command.browser_reload`
+- `03-Codebase/Commands/browser_stop.md` -> `command.browser_stop`
+- `03-Codebase/Commands/browser_set_bounds.md` -> `command.browser_set_bounds`
+- `03-Codebase/Commands/browser_set_visible.md` -> `command.browser_set_visible`
+- `03-Codebase/Commands/browser_set_zoom.md` -> `command.browser_set_zoom`
+- `03-Codebase/Commands/browser_set_inspect.md` -> `command.browser_set_inspect`
+- `03-Codebase/Commands/close_browser_view.md` -> `command.close_browser_view`
+- `03-Codebase/Modules/rust - commands - code_commands.md` -> `module.51440a6eef487ade`
+- `03-Codebase/Modules/rust - commands - database_commands.md` -> `module.c9280959d7f06e1a`
+- `03-Codebase/Commands/database_discover_sources.md` -> `command.database_discover_sources`
+- `03-Codebase/Commands/database_list_sources.md` -> `command.database_list_sources`
+- `03-Codebase/Commands/database_publish_canvas_state.md` -> `command.database_publish_canvas_state`
+- `03-Codebase/Commands/database_get_source.md` -> `command.database_get_source`
+- `03-Codebase/Commands/database_get_schema.md` -> `command.database_get_schema`
+- `03-Codebase/Commands/database_get_object.md` -> `command.database_get_object`
+- `03-Codebase/Commands/database_compare.md` -> `command.database_compare`
+- `03-Codebase/Commands/database_list_migrations.md` -> `command.database_list_migrations`
+- `03-Codebase/Commands/database_list_usage.md` -> `command.database_list_usage`
+- `03-Codebase/Commands/database_list_issues.md` -> `command.database_list_issues`
+- `03-Codebase/Commands/database_introspect_sqlite_file.md` -> `command.database_introspect_sqlite_file`
+- `03-Codebase/Commands/database_create_draft.md` -> `command.database_create_draft`
+- `03-Codebase/Commands/database_list_designs.md` -> `command.database_list_designs`
+- `03-Codebase/Commands/database_get_design.md` -> `command.database_get_design`
+- `03-Codebase/Commands/database_apply_design_operation.md` -> `command.database_apply_design_operation`
+- `03-Codebase/Commands/database_approve_design.md` -> `command.database_approve_design`
+- `03-Codebase/Commands/database_reject_design.md` -> `command.database_reject_design`
+- `03-Codebase/Commands/database_archive_design.md` -> `command.database_archive_design`
+- `03-Codebase/Commands/database_save_layout.md` -> `command.database_save_layout`
+- `03-Codebase/Commands/database_get_layout.md` -> `command.database_get_layout`
+- `03-Codebase/Commands/database_build_context_pack.md` -> `command.database_build_context_pack`
+- `03-Codebase/Commands/database_adapter_support.md` -> `command.database_adapter_support`
+- `03-Codebase/Commands/database_implement_design.md` -> `command.database_implement_design`
+- `03-Codebase/Modules/rust - commands - diagnostics_commands.md` -> `module.5b60046b9fe435c6`
+- `03-Codebase/Commands/get_diagnostics.md` -> `command.get_diagnostics`
+- `03-Codebase/Commands/run_health_check.md` -> `command.run_health_check`
+- `03-Codebase/Commands/repair_database_metadata.md` -> `command.repair_database_metadata`
+- `03-Codebase/Commands/export_redacted_support_bundle.md` -> `command.export_redacted_support_bundle`
+- `03-Codebase/Modules/rust - commands - fabric_ipc.md` -> `module.7fc4839014de7563`
+- `03-Codebase/Commands/fabric_memory.md` -> `command.fabric_memory`
+- `03-Codebase/Commands/fabric_intelligence.md` -> `command.fabric_intelligence`
+- `03-Codebase/Commands/fabric_code.md` -> `command.fabric_code`
+- `03-Codebase/Commands/fabric_semantic.md` -> `command.fabric_semantic`
+- `03-Codebase/Modules/rust - commands - fabric_scope.md` -> `module.b9bec77432b3db32`
+- `03-Codebase/Modules/rust - commands - filesystem_commands.md` -> `module.e1d06a1633c8ca40`
+- `03-Codebase/Commands/list_project_directory.md` -> `command.list_project_directory`
+- `03-Codebase/Commands/read_project_file.md` -> `command.read_project_file`
+- `03-Codebase/Commands/write_project_file.md` -> `command.write_project_file`
+- `03-Codebase/Commands/create_project_file.md` -> `command.create_project_file`
+- `03-Codebase/Commands/create_project_directory.md` -> `command.create_project_directory`
+- `03-Codebase/Commands/rename_project_entry.md` -> `command.rename_project_entry`
+- `03-Codebase/Commands/copy_project_entry.md` -> `command.copy_project_entry`
+- `03-Codebase/Commands/delete_project_entry.md` -> `command.delete_project_entry`
+- `03-Codebase/Commands/search_project_files.md` -> `command.search_project_files`
+- `03-Codebase/Commands/watch_project_files.md` -> `command.watch_project_files`
+- `03-Codebase/Commands/unwatch_project_files.md` -> `command.unwatch_project_files`
+- `03-Codebase/Modules/rust - commands - git_commands.md` -> `module.ed604d4d24ddb7bd`
+- `03-Codebase/Commands/get_pane_git_review.md` -> `command.get_pane_git_review`
+- `03-Codebase/Commands/stage_pane_file.md` -> `command.stage_pane_file`
+- `03-Codebase/Commands/restore_pane_file.md` -> `command.restore_pane_file`
+- `03-Codebase/Commands/create_isolated_pane_worktree.md` -> `command.create_isolated_pane_worktree`
+- `03-Codebase/Modules/rust - commands - intelligence_commands.md` -> `module.6c0c83257c0fe281`
+- `03-Codebase/Modules/rust - commands - memory_commands.md` -> `module.b012eed75231f12b`
+- `03-Codebase/Modules/rust - commands - mod.md` -> `module.62eedef1cbe46ddc`
+- `03-Codebase/Modules/rust - commands - orchestration_commands.md` -> `module.02b1068c9a368565`
+- `03-Codebase/Commands/orchestrator_create_session.md` -> `command.orchestrator_create_session`
+- `03-Codebase/Commands/orchestrator_get_session.md` -> `command.orchestrator_get_session`
+- `03-Codebase/Commands/orchestrator_list_sessions.md` -> `command.orchestrator_list_sessions`
+- `03-Codebase/Commands/orchestrator_list_interrupted_sessions.md` -> `command.orchestrator_list_interrupted_sessions`
+- `03-Codebase/Commands/orchestrator_send_message.md` -> `command.orchestrator_send_message`
+- `03-Codebase/Commands/orchestrator_list_capabilities.md` -> `command.orchestrator_list_capabilities`
+- `03-Codebase/Commands/orchestrator_execute_capability.md` -> `command.orchestrator_execute_capability`
+- `03-Codebase/Commands/orchestrator_pause_session.md` -> `command.orchestrator_pause_session`
+- `03-Codebase/Commands/orchestrator_resume_session.md` -> `command.orchestrator_resume_session`
+- `03-Codebase/Commands/orchestrator_cancel_session.md` -> `command.orchestrator_cancel_session`
+- `03-Codebase/Modules/rust - commands - project_commands.md` -> `module.021d598cbd05263a`
+- `03-Codebase/Commands/open_project.md` -> `command.open_project`
+- `03-Codebase/Commands/get_project.md` -> `command.get_project`
+- `03-Codebase/Commands/list_recent_projects.md` -> `command.list_recent_projects`
+- `03-Codebase/Commands/list_projects_overview.md` -> `command.list_projects_overview`
+- `03-Codebase/Commands/remove_project_from_recent.md` -> `command.remove_project_from_recent`
+- `03-Codebase/Commands/relocate_project.md` -> `command.relocate_project`
+- `03-Codebase/Commands/validate_working_directory.md` -> `command.validate_working_directory`
+- `03-Codebase/Modules/rust - commands - repository_commands.md` -> `module.1d7b76e0625ac7e1`
+- `03-Codebase/Commands/inspect_repository.md` -> `command.inspect_repository`
+- `03-Codebase/Commands/list_repository_branches.md` -> `command.list_repository_branches`
+- `03-Codebase/Commands/get_repository_diff.md` -> `command.get_repository_diff`
+- `03-Codebase/Commands/get_repository_history.md` -> `command.get_repository_history`
+- `03-Codebase/Commands/get_repository_commit_detail.md` -> `command.get_repository_commit_detail`
+- `03-Codebase/Commands/execute_repository_operation.md` -> `command.execute_repository_operation`
+- `03-Codebase/Commands/cancel_repository_operation.md` -> `command.cancel_repository_operation`
+- `03-Codebase/Commands/get_repository_operation.md` -> `command.get_repository_operation`
+- `03-Codebase/Commands/get_repository_policy.md` -> `command.get_repository_policy`
+- `03-Codebase/Commands/save_repository_policy.md` -> `command.save_repository_policy`
+- `03-Codebase/Commands/list_repository_approvals.md` -> `command.list_repository_approvals`
+- `03-Codebase/Commands/decide_repository_approval.md` -> `command.decide_repository_approval`
+- `03-Codebase/Commands/list_repository_worktree_leases.md` -> `command.list_repository_worktree_leases`
+- `03-Codebase/Commands/get_worktree_conflict_risks.md` -> `command.get_worktree_conflict_risks`
+- `03-Codebase/Commands/get_github_provider_status.md` -> `command.get_github_provider_status`
+- `03-Codebase/Commands/refresh_repository_remote_projection.md` -> `command.refresh_repository_remote_projection`
+- `03-Codebase/Commands/get_repository_workflow_run_detail.md` -> `command.get_repository_workflow_run_detail`
+- `03-Codebase/Commands/get_repository_pull_request_detail.md` -> `command.get_repository_pull_request_detail`
+- `03-Codebase/Commands/evaluate_merge_readiness.md` -> `command.evaluate_merge_readiness`
+- `03-Codebase/Commands/refresh_repository_intelligence.md` -> `command.refresh_repository_intelligence`
+- `03-Codebase/Commands/get_repository_intelligence.md` -> `command.get_repository_intelligence`
+- `03-Codebase/Modules/rust - commands - semantic_commands.md` -> `module.100e8f2831b5977c`
+- `03-Codebase/Modules/rust - commands - settings_commands.md` -> `module.9366e38dd18c3ad3`
+- `03-Codebase/Commands/get_settings.md` -> `command.get_settings`
+- `03-Codebase/Commands/save_settings.md` -> `command.save_settings`
+- `03-Codebase/Commands/get_theme_preference.md` -> `command.get_theme_preference`
+- `03-Codebase/Commands/set_theme_preference.md` -> `command.set_theme_preference`
+- `03-Codebase/Commands/get_sidebar_preferences.md` -> `command.get_sidebar_preferences`
+- `03-Codebase/Commands/set_sidebar_preferences.md` -> `command.set_sidebar_preferences`
+- `03-Codebase/Commands/apply_window_chrome.md` -> `command.apply_window_chrome`
+- `03-Codebase/Modules/rust - commands - swarm_commands.md` -> `module.15bb23a7b8169911`
+- `03-Codebase/Commands/list_swarm_presets.md` -> `command.list_swarm_presets`
+- `03-Codebase/Commands/list_swarm_runtime_readiness.md` -> `command.list_swarm_runtime_readiness`
+- `03-Codebase/Commands/list_swarm_model_registry.md` -> `command.list_swarm_model_registry`
+- `03-Codebase/Commands/get_swarm_execution_defaults.md` -> `command.get_swarm_execution_defaults`
+- `03-Codebase/Commands/save_swarm_execution_defaults.md` -> `command.save_swarm_execution_defaults`
+- `03-Codebase/Commands/apply_swarm_execution_defaults.md` -> `command.apply_swarm_execution_defaults`
+- `03-Codebase/Commands/validate_swarm_member_model_config.md` -> `command.validate_swarm_member_model_config`
+- `03-Codebase/Commands/update_swarm_member_model_config.md` -> `command.update_swarm_member_model_config`
+- `03-Codebase/Commands/preview_swarm_launch.md` -> `command.preview_swarm_launch`
+- `03-Codebase/Commands/save_swarm_preset.md` -> `command.save_swarm_preset`
+- `03-Codebase/Commands/delete_swarm_preset.md` -> `command.delete_swarm_preset`
+- `03-Codebase/Commands/create_swarm.md` -> `command.create_swarm`
+- `03-Codebase/Commands/list_swarms.md` -> `command.list_swarms`
+- `03-Codebase/Commands/get_swarm_detail.md` -> `command.get_swarm_detail`
+- `03-Codebase/Commands/rename_swarm.md` -> `command.rename_swarm`
+- `03-Codebase/Commands/start_swarm.md` -> `command.start_swarm`
+- `03-Codebase/Commands/pause_swarm.md` -> `command.pause_swarm`
+- `03-Codebase/Commands/resume_swarm.md` -> `command.resume_swarm`
+- `03-Codebase/Commands/stop_swarm.md` -> `command.stop_swarm`
+- `03-Codebase/Commands/archive_swarm.md` -> `command.archive_swarm`
+- `03-Codebase/Commands/delete_swarm.md` -> `command.delete_swarm`
+- `03-Codebase/Commands/export_swarm_report.md` -> `command.export_swarm_report`
+- `03-Codebase/Commands/set_swarm_priority.md` -> `command.set_swarm_priority`
+- `03-Codebase/Commands/send_swarm_message.md` -> `command.send_swarm_message`
+- `03-Codebase/Commands/retry_swarm_test.md` -> `command.retry_swarm_test`
+- `03-Codebase/Commands/generate_swarm_fix_task.md` -> `command.generate_swarm_fix_task`
+- `03-Codebase/Commands/accept_swarm_result.md` -> `command.accept_swarm_result`
+- `03-Codebase/Commands/focus_swarm_agent_terminal.md` -> `command.focus_swarm_agent_terminal`
+- `03-Codebase/Commands/get_swarm_command_draft.md` -> `command.get_swarm_command_draft`
+- `03-Codebase/Commands/save_swarm_command_draft.md` -> `command.save_swarm_command_draft`
+- `03-Codebase/Commands/resolve_swarm_decision.md` -> `command.resolve_swarm_decision`
+- `03-Codebase/Commands/resolve_swarm_attention.md` -> `command.resolve_swarm_attention`
+- `03-Codebase/Commands/retry_swarm.md` -> `command.retry_swarm`
+- `03-Codebase/Commands/add_swarm_builder.md` -> `command.add_swarm_builder`
+- `03-Codebase/Modules/rust - commands - terminal_commands.md` -> `module.bc11f5871d8ec2b7`
+- `03-Codebase/Commands/create_terminal_session.md` -> `command.create_terminal_session`
+- `03-Codebase/Commands/write_terminal_input.md` -> `command.write_terminal_input`
+- `03-Codebase/Commands/resize_terminal_session.md` -> `command.resize_terminal_session`
+- `03-Codebase/Commands/terminate_terminal_session.md` -> `command.terminate_terminal_session`
+- `03-Codebase/Commands/terminate_workspace_sessions.md` -> `command.terminate_workspace_sessions`
+- `03-Codebase/Commands/list_live_sessions.md` -> `command.list_live_sessions`
+- `03-Codebase/Commands/terminal_session_status.md` -> `command.terminal_session_status`
+- `03-Codebase/Commands/restore_workspace_sessions.md` -> `command.restore_workspace_sessions`
+- `03-Codebase/Commands/reset_restoration_circuit.md` -> `command.reset_restoration_circuit`
+- `03-Codebase/Commands/save_dropped_image.md` -> `command.save_dropped_image`
+- `03-Codebase/Modules/rust - commands - update_commands.md` -> `module.db2d474580dcebb3`
+- `03-Codebase/Commands/get_update_status.md` -> `command.get_update_status`
+- `03-Codebase/Commands/get_startup_status.md` -> `command.get_startup_status`
+- `03-Codebase/Commands/check_for_updates.md` -> `command.check_for_updates`
+- `03-Codebase/Commands/download_update.md` -> `command.download_update`
+- `03-Codebase/Commands/assess_safe_restart.md` -> `command.assess_safe_restart`
+- `03-Codebase/Commands/install_downloaded_update.md` -> `command.install_downloaded_update`
+- `03-Codebase/Commands/install_update_on_exit.md` -> `command.install_update_on_exit`
+- `03-Codebase/Commands/retry_update.md` -> `command.retry_update`
+- `03-Codebase/Commands/confirm_healthy_startup.md` -> `command.confirm_healthy_startup`
+- `03-Codebase/Commands/stage_database_backup_restore.md` -> `command.stage_database_backup_restore`
+- `03-Codebase/Commands/start_in_safe_mode.md` -> `command.start_in_safe_mode`
+- `03-Codebase/Commands/restart_after_recovery.md` -> `command.restart_after_recovery`
+- `03-Codebase/Modules/rust - commands - usage_commands.md` -> `module.df6172d28fb22e7e`
+- `03-Codebase/Commands/get_ai_usage_history.md` -> `command.get_ai_usage_history`
+- `03-Codebase/Commands/get_ai_usage_snapshots.md` -> `command.get_ai_usage_snapshots`
+- `03-Codebase/Commands/refresh_ai_usage.md` -> `command.refresh_ai_usage`
+- `03-Codebase/Commands/get_ai_usage_diagnostics.md` -> `command.get_ai_usage_diagnostics`
+- `03-Codebase/Modules/rust - commands - usage_telemetry_commands.md` -> `module.690647c7561e03da`
+- `03-Codebase/Commands/usage_telemetry.md` -> `command.usage_telemetry`
+- `03-Codebase/Modules/rust - commands - window_commands.md` -> `module.eb0aa394d02af3cd`
+- `03-Codebase/Commands/list_open_projects.md` -> `command.list_open_projects`
+- `03-Codebase/Commands/open_project_session.md` -> `command.open_project_session`
+- `03-Codebase/Commands/set_active_project.md` -> `command.set_active_project`
+- `03-Codebase/Commands/close_project_session.md` -> `command.close_project_session`
+- `03-Codebase/Commands/set_project_last_active.md` -> `command.set_project_last_active`
+- `03-Codebase/Commands/set_project_expanded.md` -> `command.set_project_expanded`
+- `03-Codebase/Commands/list_workspace_placements.md` -> `command.list_workspace_placements`
+- `03-Codebase/Commands/get_workspace_placement.md` -> `command.get_workspace_placement`
+- `03-Codebase/Commands/claim_workspace_lease.md` -> `command.claim_workspace_lease`
+- `03-Codebase/Commands/detach_workspace.md` -> `command.detach_workspace`
+- `03-Codebase/Commands/attach_workspace.md` -> `command.attach_workspace`
+- `03-Codebase/Commands/complete_workspace_handoff.md` -> `command.complete_workspace_handoff`
+- `03-Codebase/Commands/fail_workspace_handoff.md` -> `command.fail_workspace_handoff`
+- `03-Codebase/Commands/focus_workspace_window.md` -> `command.focus_workspace_window`
+- `03-Codebase/Commands/close_workspace_window.md` -> `command.close_workspace_window`
+- `03-Codebase/Commands/move_workspace_to_monitor.md` -> `command.move_workspace_to_monitor`
+- `03-Codebase/Commands/persist_workspace_window_geometry.md` -> `command.persist_workspace_window_geometry`
+- `03-Codebase/Commands/recover_workspace_windows.md` -> `command.recover_workspace_windows`
+- `03-Codebase/Commands/list_monitors.md` -> `command.list_monitors`
+- `03-Codebase/Commands/set_monitor_alias.md` -> `command.set_monitor_alias`
+- `03-Codebase/Modules/rust - commands - workspace_commands.md` -> `module.00c2a6864cb6ba82`
+- `03-Codebase/Commands/get_layout_preset.md` -> `command.get_layout_preset`
+- `03-Codebase/Commands/split_layout_pane.md` -> `command.split_layout_pane`
+- `03-Codebase/Commands/remove_layout_pane.md` -> `command.remove_layout_pane`
+- `03-Codebase/Commands/save_workspace.md` -> `command.save_workspace`
+- `03-Codebase/Commands/get_workspace.md` -> `command.get_workspace`
+- `03-Codebase/Commands/get_workspace_canvas_layout.md` -> `command.get_workspace_canvas_layout`
+- `03-Codebase/Commands/save_workspace_canvas_layout.md` -> `command.save_workspace_canvas_layout`
+- `03-Codebase/Commands/list_workspaces_for_project.md` -> `command.list_workspaces_for_project`
+- `03-Codebase/Commands/suggest_workspace_name.md` -> `command.suggest_workspace_name`
+- `03-Codebase/Commands/list_recent_workspaces.md` -> `command.list_recent_workspaces`
+- `03-Codebase/Commands/remove_recent_workspace.md` -> `command.remove_recent_workspace`
+- `03-Codebase/Commands/delete_workspace_configuration.md` -> `command.delete_workspace_configuration`
+- `03-Codebase/Commands/rename_workspace.md` -> `command.rename_workspace`
+- `03-Codebase/Commands/reorder_workspaces.md` -> `command.reorder_workspaces`
+- `03-Codebase/Commands/duplicate_workspace.md` -> `command.duplicate_workspace`
+- `03-Codebase/Commands/set_last_active_workspace.md` -> `command.set_last_active_workspace`
+- `03-Codebase/Modules/rust - database - backup.md` -> `module.60b1253d1c0a4f39`
+- `03-Codebase/Modules/rust - database - code.md` -> `module.86602dc806cc3718`
+- `03-Codebase/Modules/rust - database - database_studio.md` -> `module.0200b563cfd35be2`
+- `03-Codebase/Modules/rust - database - embeddings.md` -> `module.4d4d402456971cc5`
+- `03-Codebase/Modules/rust - database - graph.md` -> `module.9b49a96055854b0d`
+- `03-Codebase/Modules/rust - database - intelligence.md` -> `module.cf9e62664d68e988`
+- `03-Codebase/Modules/rust - database - knowledge_jobs.md` -> `module.9f951bd07b936681`
+- `03-Codebase/Modules/rust - database - legacy_migration.md` -> `module.b565ebd6d5faf24e`
+- `03-Codebase/Modules/rust - database - memory.md` -> `module.fc9189582f89d62a`
+- `03-Codebase/Modules/rust - database - migrations.md` -> `module.d96a3ad1d4ee6058`
+- `03-Codebase/Modules/rust - database - mod.md` -> `module.a0513e0ec39a7d67`
+- `03-Codebase/Modules/rust - database - orchestration.md` -> `module.47318df267c7a071`
+- `03-Codebase/Modules/rust - database - placement.md` -> `module.d3a0f930d6b6df31`
+- `03-Codebase/Modules/rust - database - repair.md` -> `module.9dbd4bbf216af02c`
+- `03-Codebase/Modules/rust - database - repository.md` -> `module.acd22d87faf8fec2`
+- `03-Codebase/Modules/rust - database - search.md` -> `module.7046abd1af8857cd`
+- `03-Codebase/Modules/rust - database - swarm.md` -> `module.d264472671c5656f`
+- `03-Codebase/Modules/rust - database - usage.md` -> `module.5bc61a928fb3b098`
+- `03-Codebase/Modules/rust - errors - app_error.md` -> `module.fb63681d441f1fe8`
+- `03-Codebase/Modules/rust - errors - mod.md` -> `module.09162bb96d4c6011`
+- `03-Codebase/Modules/rust - lib.md` -> `module.639d731fb9416612`
+- `03-Codebase/Modules/rust - main.md` -> `module.f2df8f0403bd9691`
+- `03-Codebase/Modules/rust - models - agent.md` -> `module.f893a62595279bb4`
+- `03-Codebase/Modules/rust - models - browser.md` -> `module.19ad75945ce89985`
+- `03-Codebase/Modules/rust - models - code.md` -> `module.6b38e1ddbdf40aba`
+- `03-Codebase/Modules/rust - models - context.md` -> `module.97b75f2630cc8020`
+- `03-Codebase/Modules/rust - models - database_studio.md` -> `module.811c07bf83578338`
+- `03-Codebase/Modules/rust - models - diagnostics.md` -> `module.1329e826fc21836f`
+- `03-Codebase/Modules/rust - models - filesystem.md` -> `module.d7be5b32f0c3c3cd`
+- `03-Codebase/Modules/rust - models - git.md` -> `module.66474711f01ac8bc`
+- `03-Codebase/Modules/rust - models - graph.md` -> `module.2594b14c7173c1c5`
+- `03-Codebase/Modules/rust - models - intelligence.md` -> `module.f915bda3ad3d8359`
+- `03-Codebase/Modules/rust - models - knowledge.md` -> `module.09ecd896b59dfe7f`
+- `03-Codebase/Modules/rust - models - layout.md` -> `module.93792a6dbd2868b9`
+- `03-Codebase/Modules/rust - models - memory.md` -> `module.ce4de4698423bc05`
+- `03-Codebase/Modules/rust - models - mod.md` -> `module.75c716309010c8d2`
+- `03-Codebase/Modules/rust - models - placement.md` -> `module.48ee02361cbad4e1`
+- `03-Codebase/Modules/rust - models - project.md` -> `module.e9668b10f20ca4ae`
+- `03-Codebase/Modules/rust - models - query.md` -> `module.9b2620c4a14352b1`
+- `03-Codebase/Modules/rust - models - repository.md` -> `module.a570d3efd4252d93`
+- `03-Codebase/Modules/rust - models - settings.md` -> `module.367a0e9355c70ebe`
+- `03-Codebase/Modules/rust - models - swarm.md` -> `module.c1d940c496afee97`
+- `03-Codebase/Modules/rust - models - terminal.md` -> `module.27414d1851683b7d`
+- `03-Codebase/Modules/rust - models - update.md` -> `module.3567b2b108ab306f`
+- `03-Codebase/Modules/rust - models - usage.md` -> `module.c9f23d5d32c79447`
+- `03-Codebase/Modules/rust - models - usage_telemetry.md` -> `module.0ccee6a91a2e7b6e`
+- `03-Codebase/Modules/rust - models - vnext.md` -> `module.047efa1b7aefe4eb`
+- `03-Codebase/Modules/rust - models - workspace.md` -> `module.9d39d6698414e06e`
+- `03-Codebase/Modules/rust - orchestration - kernel.md` -> `module.6d9e2d50c4f2d6d8`
+- `03-Codebase/Modules/rust - orchestration - mod.md` -> `module.86c625a7e9cea5df`
+- `03-Codebase/Modules/rust - orchestration - model.md` -> `module.25af975548dde86c`
+- `03-Codebase/Modules/rust - orchestration - policy.md` -> `module.a2cf4b8ecf928280`
+- `03-Codebase/Modules/rust - orchestration - redaction.md` -> `module.7065e1da665485e6`
+- `03-Codebase/Modules/rust - orchestration - registry.md` -> `module.6e153847ea9db787`
+- `03-Codebase/Modules/rust - services - agent_detector.md` -> `module.f64b8ed0a27c0a0e`
+- `03-Codebase/Modules/rust - services - agent_handoff.md` -> `module.0fdbcd79b02728ab`
+- `03-Codebase/Modules/rust - services - agent_resume.md` -> `module.148cea994f2dd8a9`
+- `03-Codebase/Modules/rust - services - browser_service.md` -> `module.9589cee127b899da`
+- `03-Codebase/Modules/rust - services - code_intelligence.md` -> `module.3e5db0b6716e2965`
+- `03-Codebase/Modules/rust - services - code_parser.md` -> `module.fd7d3e4dc581d8c1`
+- `03-Codebase/Modules/rust - services - context_compiler.md` -> `module.ac930245b616c288`
+- `03-Codebase/Modules/rust - services - database_studio - adapters.md` -> `module.d8982a81459a1839`
+- `03-Codebase/Modules/rust - services - database_studio - agent_ops.md` -> `module.9157fa091a0e502c`
+- `03-Codebase/Modules/rust - services - database_studio - context_pack.md` -> `module.801eddee3611d3a8`
+- `03-Codebase/Modules/rust - services - database_studio - contracts.md` -> `module.9213af9a6aef814d`
+- `03-Codebase/Modules/rust - services - database_studio - design.md` -> `module.2fb513fd0152995d`
+- `03-Codebase/Modules/rust - services - database_studio - diff.md` -> `module.f9cea374793888e6`
+- `03-Codebase/Modules/rust - services - database_studio - discovery.md` -> `module.f7d903330f4e221e`
+- `03-Codebase/Modules/rust - services - database_studio - graph.md` -> `module.1b8b931dec354f12`
+- `03-Codebase/Modules/rust - services - database_studio - health.md` -> `module.ac76fefbc6c02ce0`
+- `03-Codebase/Modules/rust - services - database_studio - mod.md` -> `module.eb0fb50bb3d50c00`
+- `03-Codebase/Modules/rust - services - database_studio - pipeline - execute.md` -> `module.3987ae070ea36cb1`
+- `03-Codebase/Modules/rust - services - database_studio - pipeline - mod.md` -> `module.b4059003d999bf54`
+- `03-Codebase/Modules/rust - services - database_studio - pipeline - native.md` -> `module.7f41d40b1d27e43c`
+- `03-Codebase/Modules/rust - services - database_studio - runtime.md` -> `module.4536290453bd7774`
+- `03-Codebase/Modules/rust - services - database_studio - security.md` -> `module.1c8587265b07524a`
+- `03-Codebase/Modules/rust - services - database_studio - sqlite_introspect.md` -> `module.f93f1e3d53f3f5b9`
+- `03-Codebase/Modules/rust - services - database_studio - usage.md` -> `module.8f64e1756443dc51`
+- `03-Codebase/Modules/rust - services - embeddings.md` -> `module.b42b5af862f7b73a`
+- `03-Codebase/Modules/rust - services - filesystem_service.md` -> `module.b2cc1e5fcee4932c`
+- `03-Codebase/Modules/rust - services - file_watch_service.md` -> `module.b8cccd02181d5db3`
+- `03-Codebase/Modules/rust - services - knowledge_intelligence.md` -> `module.6e4742006307f5fa`
+- `03-Codebase/Modules/rust - services - knowledge_lifecycle.md` -> `module.7813721ac9b32161`
+- `03-Codebase/Modules/rust - services - memory_markdown.md` -> `module.91e1ca5815872263`
+- `03-Codebase/Modules/rust - services - memory_service.md` -> `module.54b4284afbb2d6e5`
+- `03-Codebase/Modules/rust - services - mod.md` -> `module.b5e1f92e60ace15c`
+- `03-Codebase/Modules/rust - services - process_util.md` -> `module.3f58ea28fd078e91`
+- `03-Codebase/Modules/rust - services - project_analyzer.md` -> `module.caf0c1426a9a87c3`
+- `03-Codebase/Commands/tauri_command_names.md` -> `command.tauri_command_names`
+- `03-Codebase/Commands/memory_search.md` -> `command.memory_search`
+- `03-Codebase/Commands/memory_list.md` -> `command.memory_list`
+- `03-Codebase/Modules/rust - services - project_service.md` -> `module.f2b85da004bb440a`
+- `03-Codebase/Modules/rust - services - query_engine.md` -> `module.b0ece76aa3adba3f`
+- `03-Codebase/Modules/rust - services - repository_intelligence.md` -> `module.b93bf3161c45fa34`
+- `03-Codebase/Modules/rust - services - repository_service.md` -> `module.d6c7930b415367f3`
+- `03-Codebase/Modules/rust - services - restoration_scheduler.md` -> `module.ed50a6255dd17942`
+- `03-Codebase/Modules/rust - services - semantic.md` -> `module.1271df3132f45937`
+- `03-Codebase/Modules/rust - services - startup_service.md` -> `module.04012797d69ec26d`
+- `03-Codebase/Modules/rust - services - swarm_service.md` -> `module.f948cd6a591afbb2`
+- `03-Codebase/Modules/rust - services - terminal_manager.md` -> `module.4c30ec2b4cfd0c42`
+- `03-Codebase/Modules/rust - services - update_service.md` -> `module.5986ae41fbaa9924`
+- `03-Codebase/Modules/rust - services - usage_service.md` -> `module.785df843549158d7`
+- `03-Codebase/Modules/rust - services - usage_telemetry_service.md` -> `module.b2fb3767d4ba8d6d`
+- `03-Codebase/Modules/rust - services - window_chrome.md` -> `module.599a248f79f6dc7c`
+- `03-Codebase/Modules/rust - services - window_registry.md` -> `module.a9f4f7fa700eea50`
+- `03-Codebase/Modules/Paralith-tauri - src-tauri - tests - updater_signature.md` -> `module.388b937ea128a562`
+- `03-Codebase/Modules/corelith-site - next-env.d.md` -> `module.a76d0f57c67b4c1f`
+- `03-Codebase/Modules/corelith-site - next.config.md` -> `module.d99becf843b585e5`
+- `03-Codebase/Modules/corelith-site - src - app - api - intake - route.md` -> `module.d16bf7cb968cef21`
+- `09-UI-UX/Components/POST.md` -> `component.POST`
+- `03-Codebase/Modules/corelith-site - src - app - capabilities - page.md` -> `module.70b1d8e7e288e056`
+- `09-UI-UX/Components/CapabilitiesPage.md` -> `component.CapabilitiesPage`
+- `03-Codebase/Modules/corelith-site - src - app - capabilities - [slug] - page.md` -> `module.ebae08149f09e02e`
+- `09-UI-UX/Components/CapabilityPage.md` -> `component.CapabilityPage`
+- `03-Codebase/Modules/corelith-site - src - app - careers - page.md` -> `module.69bcf0e9c9de1f73`
+- `09-UI-UX/Components/CareersPage.md` -> `component.CareersPage`
+- `03-Codebase/Modules/corelith-site - src - app - company - page.md` -> `module.1072e21564b44dfd`
+- `09-UI-UX/Components/CompanyPage.md` -> `component.CompanyPage`
+- `03-Codebase/Modules/corelith-site - src - app - contact - page.md` -> `module.9dcb8012bb3ade01`
+- `09-UI-UX/Components/ContactPage.md` -> `component.ContactPage`
+- `03-Codebase/Modules/corelith-site - src - app - insights - page.md` -> `module.f6892e6bfceb029e`
+- `09-UI-UX/Components/InsightsPage.md` -> `component.InsightsPage`
+- `03-Codebase/Modules/corelith-site - src - app - layout.md` -> `module.928b796ea7414886`
+- `09-UI-UX/Components/RootLayout.md` -> `component.RootLayout`
+- `03-Codebase/Modules/corelith-site - src - app - not-found.md` -> `module.411cd22102cf203d`
+- `09-UI-UX/Components/NotFound.md` -> `component.NotFound`
+- `03-Codebase/Modules/corelith-site - src - app - page.md` -> `module.98b38136587e58c2`
+- `09-UI-UX/Components/Capabilities.md` -> `component.Capabilities`
+- `09-UI-UX/Components/ClosingCta.md` -> `component.ClosingCta`
+- `09-UI-UX/Components/Hero.md` -> `component.Hero`
+- `09-UI-UX/Components/HomePage.md` -> `component.HomePage`
+- `09-UI-UX/Components/HowWeBuild.md` -> `component.HowWeBuild`
+- `09-UI-UX/Components/Principles.md` -> `component.Principles`
+- `09-UI-UX/Components/Products.md` -> `component.Products`
+- `09-UI-UX/Components/Research.md` -> `component.Research`
+- `09-UI-UX/Components/SelectedWork.md` -> `component.SelectedWork`
+- `09-UI-UX/Components/Services.md` -> `component.Services`
+- `09-UI-UX/Components/Statement.md` -> `component.Statement`
+- `03-Codebase/Modules/corelith-site - src - app - privacy - page.md` -> `module.f5b77e14280c8a16`
+- `09-UI-UX/Components/PrivacyPage.md` -> `component.PrivacyPage`
+- `03-Codebase/Modules/corelith-site - src - app - products - page.md` -> `module.da10b6b56e42396d`
+- `09-UI-UX/Components/ProductsPage.md` -> `component.ProductsPage`
+- `03-Codebase/Modules/corelith-site - src - app - products - paralith - page.md` -> `module.91ed302cfc7c7c54`
+- `09-UI-UX/Components/ParalithPage.md` -> `component.ParalithPage`
+- `03-Codebase/Modules/corelith-site - src - app - research - page.md` -> `module.44211b9712a27a4f`
+- `09-UI-UX/Components/ResearchPage.md` -> `component.ResearchPage`
+- `03-Codebase/Modules/corelith-site - src - app - robots.md` -> `module.358e2bc40936b237`
+- `03-Codebase/Modules/corelith-site - src - app - sitemap.md` -> `module.f00c8d8eaf50996c`
+- `03-Codebase/Modules/corelith-site - src - app - start-a-project - page.md` -> `module.308ef5052901705b`
+- `09-UI-UX/Components/StartAProjectPage.md` -> `component.StartAProjectPage`
+- `03-Codebase/Modules/corelith-site - src - app - terms - page.md` -> `module.67ef433d14d28703`
+- `09-UI-UX/Components/TermsPage.md` -> `component.TermsPage`
+- `03-Codebase/Modules/corelith-site - src - app - work - page.md` -> `module.9b972707f21f10b5`
+- `09-UI-UX/Components/WorkPage.md` -> `component.WorkPage`
+- `03-Codebase/Modules/corelith-site - src - app - work - [slug] - page.md` -> `module.50724bf5021fe25a`
+- `09-UI-UX/Components/CaseStudyPage.md` -> `component.CaseStudyPage`
+- `03-Codebase/Modules/corelith-site - src - components - home - CapabilitySystem.md` -> `module.de6124820c9ede7b`
+
+<!-- PARALITH:AUTO:END -->

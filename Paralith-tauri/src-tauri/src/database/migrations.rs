@@ -1,7 +1,7 @@
 use crate::errors::{AppError, AppResult};
 use rusqlite::{params, Connection};
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 30;
+pub const CURRENT_SCHEMA_VERSION: i64 = 36;
 
 const MIGRATION_1: &str = r#"
 CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
@@ -916,6 +916,38 @@ pub fn apply(connection: &Connection) -> AppResult<()> {
     if current < 30 || !table_exists(connection, "ai_usage_daily")? {
         migrate_v30(connection)?;
     }
+    if current < 31
+        || !table_exists(connection, "memory_links")?
+        || !table_exists(connection, "memory_claims")?
+        || !column_exists(connection, "memory_items", "quality")?
+    {
+        migrate_v31(connection)?;
+    }
+    if current < 32 || !table_exists(connection, "memory_jobs")? {
+        migrate_v32(connection)?;
+    }
+    if current < 33
+        || !table_exists(connection, "knowledge_candidates")?
+        || !table_exists(connection, "knowledge_entities")?
+        || !table_exists(connection, "knowledge_timeline")?
+    {
+        migrate_v33(connection)?;
+    }
+    if current < 34
+        || !table_exists(connection, "code_symbols")?
+        || !table_exists(connection, "bases")?
+        || !table_exists(connection, "canvases")?
+        || !table_exists(connection, "skills")?
+        || !table_exists(connection, "mcp_clients")?
+    {
+        migrate_v34(connection)?;
+    }
+    if current < 35 {
+        migrate_v35(connection)?;
+    }
+    if current < 36 || !table_exists(connection, "swarm_compiled_context_packs")? {
+        migrate_v36(connection)?;
+    }
     Ok(())
 }
 
@@ -926,6 +958,7 @@ pub fn requires_migration(connection: &Connection) -> AppResult<bool> {
     Ok(current < CURRENT_SCHEMA_VERSION
         || !table_exists(connection, "missions")?
         || !table_exists(connection, "memory_items")?
+        || !table_exists(connection, "memory_jobs")?
         || !table_exists(connection, "open_project_sessions")?
         || !table_exists(connection, "workspace_placements")?
         || !table_exists(connection, "usage_snapshots")?
@@ -969,7 +1002,34 @@ pub fn requires_migration(connection: &Connection) -> AppResult<bool> {
         || !table_exists(connection, "database_sources")?
         || !column_exists(connection, "agent_sessions", "recovery_status")?
         || !column_exists(connection, "agent_sessions", "worktree_path")?
-        || !column_exists(connection, "database_sources", "relevance")?)
+        || !column_exists(connection, "database_sources", "relevance")?
+        || !table_exists(connection, "memory_links")?
+        || !table_exists(connection, "memory_claims")?
+        || !table_exists(connection, "memory_relations")?
+        || !column_exists(connection, "memory_items", "quality")?
+        || !table_exists(connection, "knowledge_candidates")?
+        || !table_exists(connection, "knowledge_entities")?
+        || !table_exists(connection, "knowledge_conflicts")?
+        || !table_exists(connection, "knowledge_handoffs")?
+        || !table_exists(connection, "knowledge_timeline")?
+        || !table_exists(connection, "knowledge_project_facts")?
+        || !table_exists(connection, "code_files")?
+        || !table_exists(connection, "code_symbols")?
+        || !table_exists(connection, "code_references")?
+        || !table_exists(connection, "code_imports")?
+        || !table_exists(connection, "bases")?
+        || !table_exists(connection, "base_views")?
+        || !table_exists(connection, "canvases")?
+        || !table_exists(connection, "canvas_nodes")?
+        || !table_exists(connection, "canvas_edges")?
+        || !table_exists(connection, "skills")?
+        || !table_exists(connection, "skill_activations")?
+        || !table_exists(connection, "mcp_clients")?
+        || !table_exists(connection, "mcp_permissions")?
+        || !table_exists(connection, "mcp_audit")?
+        || !table_exists(connection, "mcp_tasks")?
+        || !table_exists(connection, "knowledge_branch_merges")?
+        || !table_exists(connection, "swarm_compiled_context_packs")?)
 }
 
 fn migrate_v24(connection: &Connection) -> AppResult<()> {
@@ -1231,6 +1291,804 @@ COMMIT;
 "#,
         )
         .map_err(AppError::database)
+}
+
+/// Context Fabric foundation. The v8 Memory core — items, immutable revisions, sources, chunks,
+/// and the FTS index — is kept exactly as it is; this migration only adds the layers that were
+/// missing above it:
+///
+/// * `memory_links` is the wikilink graph. A link stores the *slug it points at*, never a
+///   resolved item id, so backlinks are a join against `memory_items.dedup_key` at query time.
+///   That removes every re-resolution path: creating, renaming, or deleting a target cannot
+///   leave a stale edge behind, and a link to a memory that does not exist yet is an ordinary
+///   unresolved row rather than a broken foreign key.
+/// * `memory_tags` / `memory_properties` carry Markdown frontmatter as queryable rows instead of
+///   an opaque blob, so a Base view can filter on them. `project_id` is denormalized onto both
+///   for the same reason `memory_chunks` already carries it: project-scoped reads must not need
+///   a join to be indexed.
+/// * `memory_claims` decomposes a document into individually verifiable statements, each with its
+///   own temporal validity and provenance, so one fact can go stale or be contradicted without
+///   invalidating the memory that contains it. Claim provenance reuses `memory_sources` rather
+///   than introducing a second evidence table.
+/// * `memory_relations` is the typed knowledge edge (`supersedes`, `contradicts`, `implements`,
+///   …) carrying its own confidence and provenance. It is deliberately separate from
+///   `memory_links`: a wikilink is what an author typed, a relation is what the system asserts.
+///
+/// The `memory_items` additions record knowledge quality rather than mere existence: `quality`
+/// is the promotion ladder (working → canonical), `verified_at` is when the claim set was last
+/// confirmed against evidence, and `stale_reason` is set when a watched source changes. Nothing
+/// here deletes or rewrites existing Memory rows.
+fn migrate_v31(connection: &Connection) -> AppResult<()> {
+    connection
+        .execute_batch("BEGIN IMMEDIATE;")
+        .map_err(AppError::database)?;
+    let result = (|| {
+        connection.execute_batch(
+            r#"
+CREATE TABLE IF NOT EXISTS memory_links(
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  source_item_id TEXT NOT NULL REFERENCES memory_items(id) ON DELETE CASCADE,
+  target_slug TEXT NOT NULL,
+  target_text TEXT NOT NULL,
+  anchor TEXT,
+  alias TEXT,
+  ordinal INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_memory_links_target ON memory_links(project_id, target_slug);
+CREATE INDEX IF NOT EXISTS idx_memory_links_source ON memory_links(source_item_id, ordinal);
+
+CREATE TABLE IF NOT EXISTS memory_tags(
+  item_id TEXT NOT NULL REFERENCES memory_items(id) ON DELETE CASCADE,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  tag TEXT NOT NULL,
+  PRIMARY KEY(item_id, tag)
+);
+CREATE INDEX IF NOT EXISTS idx_memory_tags_project ON memory_tags(project_id, tag);
+
+CREATE TABLE IF NOT EXISTS memory_properties(
+  item_id TEXT NOT NULL REFERENCES memory_items(id) ON DELETE CASCADE,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  key TEXT NOT NULL,
+  value TEXT NOT NULL,
+  ordinal INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY(item_id, key, ordinal)
+);
+CREATE INDEX IF NOT EXISTS idx_memory_properties_project ON memory_properties(project_id, key, value);
+
+CREATE TABLE IF NOT EXISTS memory_claims(
+  id TEXT PRIMARY KEY,
+  item_id TEXT NOT NULL REFERENCES memory_items(id) ON DELETE CASCADE,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  ordinal INTEGER NOT NULL DEFAULT 0,
+  statement TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'open',
+  confidence REAL NOT NULL DEFAULT 0.5,
+  valid_from TEXT,
+  valid_until TEXT,
+  superseded_by_claim_id TEXT REFERENCES memory_claims(id) ON DELETE SET NULL,
+  verified_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_memory_claims_item ON memory_claims(item_id, ordinal);
+CREATE INDEX IF NOT EXISTS idx_memory_claims_project ON memory_claims(project_id, status);
+
+CREATE TABLE IF NOT EXISTS memory_claim_sources(
+  claim_id TEXT NOT NULL REFERENCES memory_claims(id) ON DELETE CASCADE,
+  source_id TEXT NOT NULL REFERENCES memory_sources(id) ON DELETE CASCADE,
+  PRIMARY KEY(claim_id, source_id)
+);
+
+CREATE TABLE IF NOT EXISTS memory_relations(
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  from_item_id TEXT NOT NULL REFERENCES memory_items(id) ON DELETE CASCADE,
+  to_item_id TEXT NOT NULL REFERENCES memory_items(id) ON DELETE CASCADE,
+  relation_type TEXT NOT NULL,
+  confidence REAL NOT NULL DEFAULT 1.0,
+  source_id TEXT REFERENCES memory_sources(id) ON DELETE SET NULL,
+  created_by TEXT NOT NULL DEFAULT 'user',
+  created_at TEXT NOT NULL,
+  UNIQUE(from_item_id, to_item_id, relation_type)
+);
+CREATE INDEX IF NOT EXISTS idx_memory_relations_from ON memory_relations(project_id, from_item_id);
+CREATE INDEX IF NOT EXISTS idx_memory_relations_to ON memory_relations(project_id, to_item_id);
+"#,
+        )?;
+        add_column_if_missing(
+            connection,
+            "memory_items",
+            "quality",
+            "TEXT NOT NULL DEFAULT 'working'",
+        )?;
+        add_column_if_missing(
+            connection,
+            "memory_items",
+            "importance",
+            "REAL NOT NULL DEFAULT 0.5",
+        )?;
+        add_column_if_missing(connection, "memory_items", "verified_at", "TEXT")?;
+        add_column_if_missing(connection, "memory_items", "stale_reason", "TEXT")?;
+        record_migration(connection, 31)
+    })();
+    finish_migration_transaction(connection, result, 31)
+}
+
+/// v32 — the knowledge job queue that closes the change → impact → staleness loop.
+///
+/// Impact analysis and `memory_mark_stale` already existed at both ends; nothing connected them,
+/// so freshness was a manual act. This table is the connection, and it is a *table* rather than an
+/// in-memory channel for two reasons:
+///
+/// * a repository change that arrives while the app is closing must still be analyzed on the next
+///   launch, otherwise knowledge silently drifts out of date exactly when a large change lands;
+/// * an automatic write to knowledge has to be auditable. The row records what triggered it, what
+///   it decided, and what it deliberately skipped, so "why is this memory stale?" has an answer
+///   that is not "the system decided".
+///
+/// The partial unique index on `dedup_key` is the coalescing mechanism: while a job for the same
+/// logical work is still claimable, a second enqueue merges into it instead of queueing duplicate
+/// analysis. A save-on-every-keystroke burst therefore produces one pending job, not hundreds.
+/// Terminal rows are excluded from the index so the same key can be enqueued again later.
+fn migrate_v32(connection: &Connection) -> AppResult<()> {
+    connection
+        .execute_batch("BEGIN IMMEDIATE;")
+        .map_err(AppError::database)?;
+    let result = (|| {
+        connection
+            .execute_batch(
+                r#"
+CREATE TABLE IF NOT EXISTS memory_jobs(
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'queued',
+  payload TEXT NOT NULL DEFAULT '{}',
+  attempts INTEGER NOT NULL DEFAULT 0,
+  max_attempts INTEGER NOT NULL DEFAULT 3,
+  dedup_key TEXT,
+  result TEXT,
+  error TEXT,
+  created_at TEXT NOT NULL,
+  started_at TEXT,
+  finished_at TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_jobs_dedup
+  ON memory_jobs(project_id, dedup_key)
+  WHERE dedup_key IS NOT NULL AND status IN ('queued','retrying');
+CREATE INDEX IF NOT EXISTS idx_memory_jobs_claim
+  ON memory_jobs(status, created_at);
+CREATE INDEX IF NOT EXISTS idx_memory_jobs_project
+  ON memory_jobs(project_id, created_at DESC);
+"#,
+            )
+            .map_err(AppError::database)?;
+        // A job left `running` by a crash is not complete and not failed — it never finished. It
+        // is returned to the queue so the analysis actually happens, with its attempt already
+        // counted so a job that reliably crashes the worker still exhausts its retries.
+        connection
+            .execute_batch(
+                "UPDATE memory_jobs SET status='retrying', started_at=NULL WHERE status='running';",
+            )
+            .map_err(AppError::database)?;
+        record_migration(connection, 32)
+    })();
+    finish_migration_transaction(connection, result, 32)
+}
+
+/// v33 — the automated knowledge intelligence layer.
+///
+/// v32 closed the loop that *invalidates* knowledge. This one adds the half that *learns* it, and
+/// every table here exists because collapsing it into an existing one would lose a distinction the
+/// product depends on:
+///
+/// * `knowledge_project_facts` / `knowledge_fact_evidence` hold what the deterministic Project
+///   Analyzer detected, normalized by dimension rather than stored as one JSON blob, so the
+///   Overview can group them and the query engine can filter on them. Evidence is a separate table
+///   because a fact usually rests on more than one file and an unsupported fact must be impossible
+///   to represent.
+/// * `knowledge_entities` / `knowledge_entity_aliases` are canonical subjects. Without them
+///   `AuthService`, `auth_service`, and `Authentication Service` become three subjects and every
+///   contradiction between them goes undetected. `normalized_name` is the equality key; the unique
+///   index on it is what stops two extractors creating the same entity twice.
+/// * `knowledge_candidates` is the extraction staging area. It is deliberately *not*
+///   `memory_items`: a candidate is what the system noticed, and promoting every observation
+///   straight to Memory is how a knowledge base fills with unreviewed assertions. `dedup_hash` is
+///   uniquely indexed per Project so re-running an extractor is idempotent.
+/// * `knowledge_conflicts` records contradictions as first-class rows with a resolution, rather
+///   than only as a `contradicts` relation. A relation says two things disagree; a conflict row
+///   also carries which property they disagree about, how the system classified the disagreement,
+///   and what a reviewer decided — none of which fits on an edge.
+/// * `knowledge_handoffs` stores what an agent run actually did, generated from real artifacts.
+/// * `knowledge_timeline` is the knowledge history feed. It is separate from `memory_jobs` on
+///   purpose: Activity is operational, Timeline is epistemic, and merging them buries a decision
+///   under job retries.
+/// * `knowledge_context_cache` memoizes Context Packs against a composite revision, and
+///   `knowledge_embeddings` holds optional derived vectors — both are rebuildable caches, never a
+///   source of truth, which is why neither is referenced by anything else.
+///
+/// Nothing here rewrites or deletes an existing Memory row.
+fn migrate_v33(connection: &Connection) -> AppResult<()> {
+    connection
+        .execute_batch("BEGIN IMMEDIATE;")
+        .map_err(AppError::database)?;
+    let result = (|| {
+        connection.execute_batch(
+            r#"
+CREATE TABLE IF NOT EXISTS knowledge_project_facts(
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  dimension TEXT NOT NULL,
+  value TEXT NOT NULL,
+  detail TEXT,
+  confidence REAL NOT NULL DEFAULT 0.5,
+  revision INTEGER NOT NULL DEFAULT 1,
+  generated_at TEXT NOT NULL,
+  UNIQUE(project_id, dimension, value)
+);
+CREATE INDEX IF NOT EXISTS idx_knowledge_facts_project
+  ON knowledge_project_facts(project_id, dimension);
+
+CREATE TABLE IF NOT EXISTS knowledge_fact_evidence(
+  fact_id TEXT NOT NULL REFERENCES knowledge_project_facts(id) ON DELETE CASCADE,
+  path TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  excerpt TEXT,
+  PRIMARY KEY(fact_id, path, kind)
+);
+
+CREATE TABLE IF NOT EXISTS knowledge_understanding(
+  project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+  revision INTEGER NOT NULL DEFAULT 0,
+  files_scanned INTEGER NOT NULL DEFAULT 0,
+  generated_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS knowledge_entities(
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL,
+  canonical_name TEXT NOT NULL,
+  normalized_name TEXT NOT NULL,
+  source_identity TEXT,
+  external_ref TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(project_id, kind, normalized_name)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_knowledge_entities_identity
+  ON knowledge_entities(project_id, source_identity)
+  WHERE source_identity IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS knowledge_entity_aliases(
+  entity_id TEXT NOT NULL REFERENCES knowledge_entities(id) ON DELETE CASCADE,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  alias TEXT NOT NULL,
+  normalized_alias TEXT NOT NULL,
+  PRIMARY KEY(entity_id, normalized_alias)
+);
+CREATE INDEX IF NOT EXISTS idx_knowledge_aliases_lookup
+  ON knowledge_entity_aliases(project_id, normalized_alias);
+
+CREATE TABLE IF NOT EXISTS knowledge_candidates(
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL,
+  subject TEXT NOT NULL,
+  predicate TEXT NOT NULL,
+  object TEXT NOT NULL,
+  statement TEXT NOT NULL,
+  suggested_memory_type TEXT NOT NULL DEFAULT 'note',
+  confidence REAL NOT NULL DEFAULT 0.5,
+  origin TEXT NOT NULL DEFAULT 'deterministic',
+  risk_class TEXT NOT NULL DEFAULT 'routine',
+  status TEXT NOT NULL DEFAULT 'pending',
+  entity_id TEXT REFERENCES knowledge_entities(id) ON DELETE SET NULL,
+  item_id TEXT REFERENCES memory_items(id) ON DELETE SET NULL,
+  branch_name TEXT,
+  created_by TEXT NOT NULL DEFAULT 'system',
+  dedup_hash TEXT NOT NULL,
+  decision_reason TEXT,
+  created_at TEXT NOT NULL,
+  decided_at TEXT,
+  UNIQUE(project_id, dedup_hash)
+);
+CREATE INDEX IF NOT EXISTS idx_knowledge_candidates_open
+  ON knowledge_candidates(project_id, status, risk_class, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_knowledge_candidates_subject
+  ON knowledge_candidates(project_id, entity_id, predicate);
+
+CREATE TABLE IF NOT EXISTS knowledge_candidate_evidence(
+  candidate_id TEXT NOT NULL REFERENCES knowledge_candidates(id) ON DELETE CASCADE,
+  path TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  excerpt TEXT,
+  PRIMARY KEY(candidate_id, path, kind)
+);
+
+CREATE TABLE IF NOT EXISTS knowledge_conflicts(
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  subject_entity_id TEXT REFERENCES knowledge_entities(id) ON DELETE SET NULL,
+  subject TEXT NOT NULL DEFAULT '',
+  predicate TEXT NOT NULL DEFAULT '',
+  left_item_id TEXT REFERENCES memory_items(id) ON DELETE CASCADE,
+  left_claim_id TEXT REFERENCES memory_claims(id) ON DELETE SET NULL,
+  left_label TEXT NOT NULL DEFAULT '',
+  left_value TEXT NOT NULL DEFAULT '',
+  right_item_id TEXT REFERENCES memory_items(id) ON DELETE CASCADE,
+  right_claim_id TEXT REFERENCES memory_claims(id) ON DELETE SET NULL,
+  right_label TEXT NOT NULL DEFAULT '',
+  right_value TEXT NOT NULL DEFAULT '',
+  classification TEXT NOT NULL DEFAULT 'unknown',
+  confidence REAL NOT NULL DEFAULT 0.5,
+  status TEXT NOT NULL DEFAULT 'open',
+  resolution TEXT,
+  detail TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  resolved_at TEXT,
+  UNIQUE(project_id, left_item_id, right_item_id, predicate)
+);
+CREATE INDEX IF NOT EXISTS idx_knowledge_conflicts_open
+  ON knowledge_conflicts(project_id, status, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS knowledge_handoffs(
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  run_id TEXT,
+  swarm_id TEXT,
+  task_id TEXT,
+  agent TEXT NOT NULL DEFAULT '',
+  model TEXT,
+  goal TEXT NOT NULL DEFAULT '',
+  task TEXT NOT NULL DEFAULT '',
+  outcome TEXT NOT NULL DEFAULT '',
+  branch_name TEXT,
+  worktree_path TEXT,
+  commit_sha TEXT,
+  payload TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_knowledge_handoffs_run
+  ON knowledge_handoffs(project_id, run_id) WHERE run_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_knowledge_handoffs_recent
+  ON knowledge_handoffs(project_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS knowledge_timeline(
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  at TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  summary TEXT NOT NULL,
+  detail TEXT,
+  actor TEXT NOT NULL DEFAULT 'system',
+  item_id TEXT REFERENCES memory_items(id) ON DELETE CASCADE,
+  entity_id TEXT REFERENCES knowledge_entities(id) ON DELETE SET NULL,
+  memory_type TEXT,
+  branch_name TEXT,
+  task_id TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_knowledge_timeline_recent
+  ON knowledge_timeline(project_id, at DESC);
+CREATE INDEX IF NOT EXISTS idx_knowledge_timeline_item
+  ON knowledge_timeline(project_id, item_id, at DESC);
+
+CREATE TABLE IF NOT EXISTS knowledge_context_cache(
+  cache_key TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  pack TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_knowledge_cache_project
+  ON knowledge_context_cache(project_id, created_at);
+
+CREATE TABLE IF NOT EXISTS knowledge_embeddings(
+  owner_kind TEXT NOT NULL,
+  owner_id TEXT NOT NULL,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  provider TEXT NOT NULL,
+  model TEXT NOT NULL,
+  dimensions INTEGER NOT NULL,
+  vector BLOB NOT NULL,
+  source_revision TEXT NOT NULL DEFAULT '',
+  generated_at TEXT NOT NULL,
+  PRIMARY KEY(owner_kind, owner_id, provider, model)
+);
+CREATE INDEX IF NOT EXISTS idx_knowledge_embeddings_project
+  ON knowledge_embeddings(project_id, provider, model);
+"#,
+        )?;
+        record_migration(connection, 33)
+    })();
+    finish_migration_transaction(connection, result, 33)
+}
+
+/// v34 — the remaining Context Fabric surfaces: the code graph, Bases, Canvas, Skills, the MCP
+/// capability fabric, and branch knowledge reconciliation.
+///
+/// These arrive in one migration because they are one feature. Splitting them would produce six
+/// versions that are never independently reachable — no build ships with Bases but without the
+/// code graph — and every one of those intermediate states would need its own repair branch in
+/// `ensure_schema`.
+///
+/// Three structural decisions are worth naming:
+///
+/// * **Code index rows are derived, never canonical.** `code_files`, `code_symbols`,
+///   `code_imports`, and `code_references` are rebuildable from the working tree in full. Nothing
+///   references them by foreign key from a canonical table, so dropping the whole index costs one
+///   reindex and loses no knowledge. Symbol identity is a content-addressed hash of
+///   (project, path, kind, container, name), which is what lets a reference resolve across a
+///   reindex without a rewrite pass.
+/// * **Canvas nodes store a semantic reference, not a copied title.** `ref_kind`/`ref_id` name the
+///   entity; `label` is a cache for rendering. A node that points at a memory keeps pointing at it
+///   after the memory is renamed, and an agent reading the Canvas gets the entity id rather than a
+///   string it would have to guess at.
+/// * **MCP permissions are rows, not settings.** A capability grant is per client and per
+///   capability, checked in Rust on every call. The renderer never carries the decision.
+fn migrate_v34(connection: &Connection) -> AppResult<()> {
+    connection
+        .execute_batch("BEGIN IMMEDIATE;")
+        .map_err(AppError::database)?;
+    let result = (|| {
+        connection.execute_batch(
+            r#"
+CREATE TABLE IF NOT EXISTS code_files(
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  path TEXT NOT NULL,
+  language TEXT NOT NULL,
+  module TEXT,
+  content_hash TEXT NOT NULL,
+  size_bytes INTEGER NOT NULL DEFAULT 0,
+  line_count INTEGER NOT NULL DEFAULT 0,
+  parser TEXT NOT NULL DEFAULT 'deterministic',
+  indexed_at TEXT NOT NULL,
+  UNIQUE(project_id, path)
+);
+CREATE INDEX IF NOT EXISTS idx_code_files_language ON code_files(project_id, language);
+
+CREATE TABLE IF NOT EXISTS code_symbols(
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  file_id TEXT NOT NULL REFERENCES code_files(id) ON DELETE CASCADE,
+  path TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  name TEXT NOT NULL,
+  container TEXT,
+  signature TEXT,
+  doc TEXT,
+  start_line INTEGER NOT NULL DEFAULT 1,
+  end_line INTEGER NOT NULL DEFAULT 1,
+  exported INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_code_symbols_name ON code_symbols(project_id, name);
+CREATE INDEX IF NOT EXISTS idx_code_symbols_file ON code_symbols(file_id, start_line);
+CREATE INDEX IF NOT EXISTS idx_code_symbols_path ON code_symbols(project_id, path);
+
+CREATE TABLE IF NOT EXISTS code_imports(
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  file_id TEXT NOT NULL REFERENCES code_files(id) ON DELETE CASCADE,
+  path TEXT NOT NULL,
+  specifier TEXT NOT NULL,
+  resolved_path TEXT,
+  external INTEGER NOT NULL DEFAULT 0,
+  symbols TEXT NOT NULL DEFAULT '',
+  line INTEGER NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS idx_code_imports_file ON code_imports(file_id);
+CREATE INDEX IF NOT EXISTS idx_code_imports_resolved ON code_imports(project_id, resolved_path);
+
+CREATE TABLE IF NOT EXISTS code_references(
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  file_id TEXT NOT NULL REFERENCES code_files(id) ON DELETE CASCADE,
+  path TEXT NOT NULL,
+  symbol_name TEXT NOT NULL,
+  target_symbol_id TEXT,
+  from_symbol_id TEXT,
+  kind TEXT NOT NULL DEFAULT 'reference',
+  line INTEGER NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS idx_code_refs_target ON code_references(project_id, target_symbol_id);
+CREATE INDEX IF NOT EXISTS idx_code_refs_name ON code_references(project_id, symbol_name);
+CREATE INDEX IF NOT EXISTS idx_code_refs_from ON code_references(from_symbol_id);
+CREATE INDEX IF NOT EXISTS idx_code_refs_file ON code_references(file_id);
+
+CREATE TABLE IF NOT EXISTS code_index_state(
+  project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+  files_indexed INTEGER NOT NULL DEFAULT 0,
+  symbols_indexed INTEGER NOT NULL DEFAULT 0,
+  references_indexed INTEGER NOT NULL DEFAULT 0,
+  revision INTEGER NOT NULL DEFAULT 0,
+  truncated INTEGER NOT NULL DEFAULT 0,
+  indexed_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS bases(
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  slug TEXT NOT NULL,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  domain TEXT NOT NULL DEFAULT 'memory',
+  query TEXT NOT NULL DEFAULT '',
+  builtin INTEGER NOT NULL DEFAULT 0,
+  position INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(project_id, slug)
+);
+CREATE INDEX IF NOT EXISTS idx_bases_project ON bases(project_id, position);
+
+CREATE TABLE IF NOT EXISTS base_views(
+  id TEXT PRIMARY KEY,
+  base_id TEXT NOT NULL REFERENCES bases(id) ON DELETE CASCADE,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'table',
+  query TEXT NOT NULL DEFAULT '',
+  columns TEXT NOT NULL DEFAULT '[]',
+  sort_field TEXT,
+  sort_descending INTEGER NOT NULL DEFAULT 1,
+  group_field TEXT,
+  page_size INTEGER NOT NULL DEFAULT 50,
+  is_default INTEGER NOT NULL DEFAULT 0,
+  position INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_base_views_base ON base_views(base_id, position);
+
+CREATE TABLE IF NOT EXISTS canvases(
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  revision INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_canvases_project ON canvases(project_id, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS canvas_nodes(
+  id TEXT PRIMARY KEY,
+  canvas_id TEXT NOT NULL REFERENCES canvases(id) ON DELETE CASCADE,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL,
+  ref_kind TEXT,
+  ref_id TEXT,
+  label TEXT NOT NULL DEFAULT '',
+  body TEXT NOT NULL DEFAULT '',
+  x REAL NOT NULL DEFAULT 0,
+  y REAL NOT NULL DEFAULT 0,
+  width REAL NOT NULL DEFAULT 240,
+  height REAL NOT NULL DEFAULT 120,
+  color TEXT,
+  parent_id TEXT,
+  metadata TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_canvas_nodes_canvas ON canvas_nodes(canvas_id);
+CREATE INDEX IF NOT EXISTS idx_canvas_nodes_ref ON canvas_nodes(project_id, ref_kind, ref_id);
+
+CREATE TABLE IF NOT EXISTS canvas_edges(
+  id TEXT PRIMARY KEY,
+  canvas_id TEXT NOT NULL REFERENCES canvases(id) ON DELETE CASCADE,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  from_node TEXT NOT NULL REFERENCES canvas_nodes(id) ON DELETE CASCADE,
+  to_node TEXT NOT NULL REFERENCES canvas_nodes(id) ON DELETE CASCADE,
+  from_side TEXT,
+  to_side TEXT,
+  label TEXT NOT NULL DEFAULT '',
+  semantic TEXT NOT NULL DEFAULT 'relates_to',
+  color TEXT,
+  created_at TEXT NOT NULL,
+  UNIQUE(canvas_id, from_node, to_node, semantic)
+);
+CREATE INDEX IF NOT EXISTS idx_canvas_edges_canvas ON canvas_edges(canvas_id);
+
+CREATE TABLE IF NOT EXISTS skills(
+  id TEXT PRIMARY KEY,
+  project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
+  slug TEXT NOT NULL,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  version TEXT NOT NULL DEFAULT '1.0.0',
+  author TEXT NOT NULL DEFAULT '',
+  tags TEXT NOT NULL DEFAULT '[]',
+  instructions TEXT NOT NULL DEFAULT '',
+  capabilities TEXT NOT NULL DEFAULT '[]',
+  permissions TEXT NOT NULL DEFAULT '[]',
+  resources TEXT NOT NULL DEFAULT '[]',
+  scripts TEXT NOT NULL DEFAULT '[]',
+  input_contract TEXT NOT NULL DEFAULT '',
+  output_contract TEXT NOT NULL DEFAULT '',
+  trust TEXT NOT NULL DEFAULT 'user_trusted',
+  activation TEXT NOT NULL DEFAULT 'manual',
+  origin TEXT NOT NULL DEFAULT 'user',
+  source_path TEXT,
+  builtin_revision INTEGER NOT NULL DEFAULT 0,
+  usage_count INTEGER NOT NULL DEFAULT 0,
+  last_used_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_skills_project_slug
+  ON skills(project_id, slug) WHERE project_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_skills_global_slug
+  ON skills(slug) WHERE project_id IS NULL;
+
+CREATE TABLE IF NOT EXISTS skill_activations(
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  skill_id TEXT NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+  target_kind TEXT NOT NULL,
+  target_id TEXT NOT NULL,
+  activated_at TEXT NOT NULL,
+  activated_by TEXT NOT NULL DEFAULT 'user',
+  UNIQUE(project_id, skill_id, target_kind, target_id)
+);
+CREATE INDEX IF NOT EXISTS idx_skill_activations_target
+  ON skill_activations(project_id, target_kind, target_id);
+
+CREATE TABLE IF NOT EXISTS mcp_clients(
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'custom',
+  token_hash TEXT NOT NULL,
+  project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  last_seen_at TEXT,
+  UNIQUE(token_hash)
+);
+
+CREATE TABLE IF NOT EXISTS mcp_permissions(
+  client_id TEXT NOT NULL REFERENCES mcp_clients(id) ON DELETE CASCADE,
+  capability TEXT NOT NULL,
+  granted INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY(client_id, capability)
+);
+
+CREATE TABLE IF NOT EXISTS mcp_audit(
+  id TEXT PRIMARY KEY,
+  at TEXT NOT NULL,
+  client_id TEXT,
+  client_name TEXT NOT NULL DEFAULT '',
+  project_id TEXT,
+  workspace_id TEXT,
+  agent TEXT,
+  tool TEXT NOT NULL,
+  capability TEXT NOT NULL DEFAULT '',
+  permission_result TEXT NOT NULL DEFAULT 'not_required',
+  status TEXT NOT NULL DEFAULT 'ok',
+  duration_ms INTEGER NOT NULL DEFAULT 0,
+  task_id TEXT,
+  agent_run_id TEXT,
+  detail TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_mcp_audit_recent ON mcp_audit(at DESC);
+
+CREATE TABLE IF NOT EXISTS mcp_tasks(
+  id TEXT PRIMARY KEY,
+  project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
+  client_id TEXT,
+  tool TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'working',
+  arguments TEXT NOT NULL DEFAULT '{}',
+  status_message TEXT NOT NULL DEFAULT '',
+  result TEXT,
+  error TEXT,
+  ttl_ms INTEGER NOT NULL DEFAULT 3600000,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_mcp_tasks_project ON mcp_tasks(project_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS mcp_server_state(
+  id INTEGER PRIMARY KEY CHECK(id = 1),
+  enabled INTEGER NOT NULL DEFAULT 0,
+  port INTEGER NOT NULL DEFAULT 8788,
+  bind_host TEXT NOT NULL DEFAULT '127.0.0.1',
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS knowledge_branch_merges(
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  source_branch TEXT NOT NULL,
+  target_branch TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  promoted INTEGER NOT NULL DEFAULT 0,
+  conflicted INTEGER NOT NULL DEFAULT 0,
+  report TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL,
+  resolved_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_branch_merges_project
+  ON knowledge_branch_merges(project_id, created_at DESC);
+"#,
+        )?;
+        record_migration(connection, 34)
+    })();
+    finish_migration_transaction(connection, result, 34)
+}
+
+/// Move audit provenance out of the retired Mission foreign-key domain. The columns remain
+/// intentionally loose: an audit event may be created outside a task, and the live task identity
+/// is currently the Swarm task id. Rebuilding the table preserves every historical row while
+/// allowing repository operations to retain a valid live task id without resurrecting Mission
+/// persistence or coupling future Task migrations to this append-only audit log.
+fn migrate_v35(connection: &Connection) -> AppResult<()> {
+    connection
+        .execute_batch("BEGIN IMMEDIATE;")
+        .map_err(AppError::database)?;
+    let result = (|| {
+        connection
+            .execute_batch(
+                r#"
+CREATE TABLE audit_events_v35(
+  id TEXT PRIMARY KEY,
+  mission_id TEXT,
+  task_id TEXT,
+  action TEXT NOT NULL,
+  status TEXT NOT NULL,
+  detail TEXT NOT NULL,
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL
+);
+INSERT INTO audit_events_v35(id,mission_id,task_id,action,status,detail,metadata_json,created_at)
+  SELECT id,mission_id,task_id,action,status,detail,metadata_json,created_at FROM audit_events;
+DROP TABLE audit_events;
+ALTER TABLE audit_events_v35 RENAME TO audit_events;
+"#,
+            )
+            .map_err(AppError::database)?;
+        record_migration(connection, 35)
+    })();
+    finish_migration_transaction(connection, result, 35)
+}
+
+/// Immutable, attempt-scoped ContextCompiler output. The v18 projection remains untouched for
+/// historical compatibility; new launches write only this canonical pack-level provenance.
+fn migrate_v36(connection: &Connection) -> AppResult<()> {
+    connection
+        .execute_batch("BEGIN IMMEDIATE;")
+        .map_err(AppError::database)?;
+    let result = (|| {
+        connection
+            .execute_batch(
+                r#"
+CREATE TABLE IF NOT EXISTS swarm_compiled_context_packs(
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  swarm_id TEXT NOT NULL REFERENCES swarms(id) ON DELETE CASCADE,
+  task_id TEXT NOT NULL REFERENCES swarm_tasks(id) ON DELETE CASCADE,
+  agent_id TEXT NOT NULL REFERENCES swarm_agents(id) ON DELETE CASCADE,
+  agent_run_id TEXT NOT NULL REFERENCES swarm_agent_runs(id) ON DELETE RESTRICT,
+  compiler_version TEXT NOT NULL,
+  request_fingerprint TEXT NOT NULL,
+  budget_tokens INTEGER NOT NULL,
+  used_tokens INTEGER NOT NULL,
+  semantic_status TEXT NOT NULL,
+  pack_json TEXT NOT NULL,
+  diagnostics_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE(agent_run_id)
+);
+CREATE INDEX IF NOT EXISTS idx_swarm_compiled_context_task
+  ON swarm_compiled_context_packs(swarm_id,task_id,created_at DESC);
+"#,
+            )
+            .map_err(AppError::database)?;
+        record_migration(connection, 36)
+    })();
+    finish_migration_transaction(connection, result, 36)
 }
 
 fn table_exists(connection: &Connection, table: &str) -> AppResult<bool> {
@@ -3659,6 +4517,86 @@ PRAGMA user_version=26;
         );
     }
 
+    /// A Project that predates the Context Fabric must keep every memory it already had, and
+    /// must come up with the new layers attached rather than requiring a re-import.
+    #[test]
+    fn v31_adds_the_context_fabric_without_touching_existing_memory() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", true)
+            .unwrap();
+        apply(&connection).unwrap();
+        connection.execute("INSERT INTO projects(id,name,root_path,canonical_root_path,major_languages_json,is_git_repository,has_package_json,has_lockfile,created_at,updated_at,last_opened_at) VALUES('p','Demo','C:/repo','C:/repo','[]',1,0,0,'t','t','t')",[]).unwrap();
+        connection.execute("INSERT INTO memory_items(id,project_id,memory_type,dedup_key,title,current_revision_id,created_at,updated_at) VALUES('m','p','decision','adr-14','ADR 14','rev','t','t')",[]).unwrap();
+        connection.execute("INSERT INTO memory_revisions(id,item_id,revision_number,title,body,summary,observed_at,content_hash,created_at) VALUES('rev','m',1,'ADR 14','Tokens rotate.','Tokens rotate.','t','h','t')",[]).unwrap();
+
+        // Rewind to the pre-Context-Fabric shape a shipped 0.4.12 database actually has.
+        connection
+            .execute_batch(
+                "DROP TABLE memory_relations;
+                 DROP TABLE memory_claim_sources;
+                 DROP TABLE memory_claims;
+                 DROP TABLE memory_properties;
+                 DROP TABLE memory_tags;
+                 DROP TABLE memory_links;
+                 DELETE FROM schema_migrations WHERE version=31;
+                 PRAGMA user_version=30;",
+            )
+            .unwrap();
+        // The added columns cannot be dropped portably; `requires_migration` keys on the tables.
+        assert!(requires_migration(&connection).unwrap());
+
+        apply(&connection).unwrap();
+
+        let (title, body): (String, String) = connection
+            .query_row(
+                "SELECT i.title, r.body FROM memory_items i JOIN memory_revisions r ON r.id=i.current_revision_id WHERE i.id='m'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(title, "ADR 14");
+        assert_eq!(body, "Tokens rotate.");
+        // Pre-existing rows are backfilled with the default quality rather than left NULL.
+        let quality: String = connection
+            .query_row("SELECT quality FROM memory_items WHERE id='m'", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(quality, "working");
+        for table in [
+            "memory_links",
+            "memory_tags",
+            "memory_properties",
+            "memory_claims",
+            "memory_claim_sources",
+            "memory_relations",
+        ] {
+            assert!(table_exists(&connection, table).unwrap(), "{table} missing");
+        }
+        assert_eq!(
+            connection
+                .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            CURRENT_SCHEMA_VERSION
+        );
+        assert!(!requires_migration(&connection).unwrap());
+    }
+
+    /// Re-running the migration on an already-current database must be a no-op, which is what
+    /// makes the partial-build recovery path in `apply` safe.
+    #[test]
+    fn v31_is_idempotent() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", true)
+            .unwrap();
+        apply(&connection).unwrap();
+        migrate_v31(&connection).unwrap();
+        migrate_v31(&connection).unwrap();
+        assert!(!requires_migration(&connection).unwrap());
+    }
+
     #[test]
     fn v13_preserves_active_pane_worktrees_as_authoritative_leases() {
         let connection = Connection::open_in_memory().unwrap();
@@ -4185,5 +5123,77 @@ PRAGMA user_version=26;
         );
         assert!(table_exists(&connection, "database_sources").unwrap());
         assert!(!requires_migration(&connection).unwrap());
+    }
+
+    #[test]
+    fn v35_rebuilds_audit_events_without_losing_historical_rows() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", true)
+            .unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL); CREATE TABLE missions(id TEXT PRIMARY KEY); CREATE TABLE mission_tasks(id TEXT PRIMARY KEY); CREATE TABLE audit_events(id TEXT PRIMARY KEY, mission_id TEXT REFERENCES missions(id) ON DELETE SET NULL, task_id TEXT REFERENCES mission_tasks(id) ON DELETE SET NULL, action TEXT NOT NULL, status TEXT NOT NULL, detail TEXT NOT NULL, metadata_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL);",
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO audit_events(id,mission_id,task_id,action,status,detail,metadata_json,created_at) VALUES('old-audit',NULL,NULL,'read','succeeded','preserve','{}','t')",
+                [],
+            )
+            .unwrap();
+        connection.pragma_update(None, "user_version", 34).unwrap();
+
+        migrate_v35(&connection).unwrap();
+
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT detail FROM audit_events WHERE id='old-audit'",
+                    [],
+                    |row| row.get::<_, String>(0)
+                )
+                .unwrap(),
+            "preserve"
+        );
+        let foreign_key_count: i64 = connection
+            .query_row(
+                "SELECT count(*) FROM pragma_foreign_key_list('audit_events')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(foreign_key_count, 0);
+    }
+
+    #[test]
+    fn v36_adds_attempt_scoped_context_provenance_without_touching_v18_rows() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", true)
+            .unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL); CREATE TABLE projects(id TEXT PRIMARY KEY); CREATE TABLE swarms(id TEXT PRIMARY KEY); CREATE TABLE swarm_tasks(id TEXT PRIMARY KEY); CREATE TABLE swarm_agents(id TEXT PRIMARY KEY); CREATE TABLE swarm_agent_runs(id TEXT PRIMARY KEY); CREATE TABLE swarm_context_packs(id TEXT PRIMARY KEY); INSERT INTO swarm_context_packs VALUES('historical'); PRAGMA user_version=35;",
+            )
+            .unwrap();
+
+        migrate_v36(&connection).unwrap();
+
+        assert!(table_exists(&connection, "swarm_compiled_context_packs").unwrap());
+        assert_eq!(
+            connection
+                .query_row("SELECT count(*) FROM swarm_context_packs", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            connection
+                .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            36
+        );
     }
 }

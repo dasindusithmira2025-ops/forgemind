@@ -1,0 +1,223 @@
+---
+id: system.feature-dependencies
+type: system
+name: feature-dependencies
+status: active
+generated: true
+confidence: 1
+evidence_level: verified
+created_at: 2026-08-19T20:53:17.734Z
+updated_at: 2026-08-19T20:53:17.734Z
+sources:
+  - repository:.
+related:
+tags:
+  - paralith
+  - system
+---
+<!-- PARALITH:AUTO:START -->
+
+# Feature Dependencies
+
+- [[corelith_site]] depends_on [[@react-three-fiber]]
+- [[corelith_site]] depends_on [[clsx]]
+- [[corelith_site]] depends_on [[next]]
+- [[corelith_site]] depends_on [[react]]
+- [[corelith_site]] depends_on [[react-dom]]
+- [[corelith_site]] depends_on [[three]]
+- [[corelith_site]] depends_on [[zod]]
+- [[corelith_site]] depends_on [[@tailwindcss-postcss]]
+- [[corelith_site]] depends_on [[@types-node]]
+- [[corelith_site]] depends_on [[@types-react]]
+- [[corelith_site]] depends_on [[@types-react-dom]]
+- [[corelith_site]] depends_on [[@types-three]]
+- [[corelith_site]] depends_on [[eslint]]
+- [[corelith_site]] depends_on [[eslint-config-next]]
+- [[corelith_site]] depends_on [[tailwindcss]]
+- [[corelith_site]] depends_on [[typescript]]
+- [[corelith_web]] depends_on [[clsx]]
+- [[corelith_web]] depends_on [[lucide-react]]
+- [[corelith_web]] depends_on [[next]]
+- [[corelith_web]] depends_on [[react]]
+- [[corelith_web]] depends_on [[react-dom]]
+- [[corelith_web]] depends_on [[tailwind-merge]]
+- [[corelith_web]] depends_on [[zod]]
+- [[corelith_web]] depends_on [[@tailwindcss-postcss]]
+- [[corelith_web]] depends_on [[@types-node]]
+- [[corelith_web]] depends_on [[@types-react]]
+- [[corelith_web]] depends_on [[@types-react-dom]]
+- [[corelith_web]] depends_on [[eslint]]
+- [[corelith_web]] depends_on [[eslint-config-next]]
+- [[corelith_web]] depends_on [[tailwindcss]]
+- [[corelith_web]] depends_on [[typescript]]
+- [[paralith-marketing-video]] depends_on [[@remotion-cli]]
+- [[paralith-marketing-video]] depends_on [[react]]
+- [[paralith-marketing-video]] depends_on [[react-dom]]
+- [[paralith-marketing-video]] depends_on [[remotion]]
+- [[paralith-marketing-video]] depends_on [[@types-react]]
+- [[paralith-marketing-video]] depends_on [[@types-react-dom]]
+- [[paralith-marketing-video]] depends_on [[typescript]]
+- [[paralith]] depends_on [[@monaco-editor-react]]
+- [[paralith]] depends_on [[@tauri-apps-api]]
+- [[paralith]] depends_on [[@tauri-apps-plugin-dialog]]
+- [[paralith]] depends_on [[@tauri-apps-plugin-fs]]
+- [[paralith]] depends_on [[@tauri-apps-plugin-opener]]
+- [[paralith]] depends_on [[@xterm-addon-fit]]
+- [[paralith]] depends_on [[@xterm-addon-search]]
+- [[paralith]] depends_on [[@xterm-addon-web-links]]
+- [[paralith]] depends_on [[@xterm-xterm]]
+- [[paralith]] depends_on [[lucide-react]]
+- [[paralith]] depends_on [[monaco-editor]]
+- [[paralith]] depends_on [[react]]
+- [[paralith]] depends_on [[react-dom]]
+- [[paralith]] depends_on [[react-resizable-panels]]
+- [[paralith]] depends_on [[react-router-dom]]
+- [[paralith]] depends_on [[zustand]]
+- [[paralith]] depends_on [[@tauri-apps-cli]]
+- [[paralith]] depends_on [[@testing-library-jest-dom]]
+- [[paralith]] depends_on [[@testing-library-react]]
+- [[paralith]] depends_on [[@testing-library-user-event]]
+- [[paralith]] depends_on [[@types-node]]
+- [[paralith]] depends_on [[@types-react]]
+- [[paralith]] depends_on [[@types-react-dom]]
+- [[paralith]] depends_on [[@vitejs-plugin-react]]
+- [[paralith]] depends_on [[@vitest-coverage-v8]]
+- [[paralith]] depends_on [[eslint-plugin-testing-library]]
+- [[paralith]] depends_on [[jsdom]]
+- [[paralith]] depends_on [[oxlint]]
+- [[paralith]] depends_on [[typescript]]
+- [[paralith]] depends_on [[vite]]
+- [[paralith]] depends_on [[vitest]]
+- [[forgemind]] depends_on [[serde_json]]
+- [[forgemind]] depends_on [[serde]]
+- [[forgemind]] depends_on [[log]]
+- [[forgemind]] depends_on [[notify]]
+- [[forgemind]] depends_on [[tauri]]
+- [[forgemind]] depends_on [[tauri-plugin-log]]
+- [[forgemind]] depends_on [[async-trait]]
+- [[forgemind]] depends_on [[base64]]
+- [[forgemind]] depends_on [[chrono]]
+- [[forgemind]] depends_on [[parking_lot]]
+- [[forgemind]] depends_on [[portable-pty]]
+- [[forgemind]] depends_on [[reqwest]]
+- [[forgemind]] depends_on [[rusqlite]]
+- [[forgemind]] depends_on [[semver]]
+- [[forgemind]] depends_on [[sha2]]
+- [[forgemind]] depends_on [[sysinfo]]
+- [[forgemind]] depends_on [[thiserror]]
+- [[forgemind]] depends_on [[tokio]]
+- [[forgemind]] depends_on [[uuid]]
+- [[forgemind]] depends_on [[wait-timeout]]
+- [[forgemind]] depends_on [[which]]
+- [[forgemind]] depends_on [[tauri-plugin-dialog]]
+- [[forgemind]] depends_on [[tauri-plugin-opener]]
+- [[forgemind]] depends_on [[url]]
+- [[dbstudio-fixture-drizzle]] depends_on [[drizzle-orm]]
+- [[dbstudio-fixture-drizzle]] depends_on [[pg]]
+- [[dbstudio-fixture-drizzle]] depends_on [[drizzle-kit]]
+- [[dbstudio-fixture-drizzle]] depends_on [[typescript]]
+- [[@repo-analytics]] depends_on [[drizzle-orm]]
+- [[@repo-api]] depends_on [[@repo-db]]
+- [[@repo-worker]] depends_on [[@repo-db]]
+- [[dbstudio-fixture-monorepo]] depends_on [[pnpm]]
+- [[@repo-db]] depends_on [[@prisma-client]]
+- [[@repo-db]] depends_on [[prisma]]
+- [[dbstudio-fixture-multi-logical-db]] depends_on [[@prisma-client]]
+- [[dbstudio-fixture-multi-logical-db]] depends_on [[mysql2]]
+- [[dbstudio-fixture-prisma]] depends_on [[@prisma-client]]
+- [[dbstudio-fixture-prisma]] depends_on [[prisma]]
+- [[rust - agents - adapter]] uses `module.3ed764bcf4eee1d6`
+- [[rust - agents - adapter]] uses `module.b04ab8816dabdb01`
+- [[rust - agents - model_registry]] uses `module.82c4984ccb92fb5a`
+- [[detect_agents]] implemented_by [[rust - commands - agent_commands]]
+- [[list_agent_profiles]] implemented_by [[rust - commands - agent_commands]]
+- [[list_agent_sessions]] implemented_by [[rust - commands - agent_commands]]
+- [[reconcile_agent_resume_sessions]] implemented_by [[rust - commands - agent_commands]]
+- [[list_agent_resume_sessions]] implemented_by [[rust - commands - agent_commands]]
+- [[resume_agent_session]] implemented_by [[rust - commands - agent_commands]]
+- [[dismiss_agent_resume_session]] implemented_by [[rust - commands - agent_commands]]
+- [[dismiss_all_agent_resume_sessions]] implemented_by [[rust - commands - agent_commands]]
+- [[remove_agent_resume_session]] implemented_by [[rust - commands - agent_commands]]
+- [[relocate_agent_resume_worktree]] implemented_by [[rust - commands - agent_commands]]
+- [[detect_shells]] implemented_by [[rust - commands - agent_commands]]
+- [[save_custom_shell]] implemented_by [[rust - commands - agent_commands]]
+- [[validate_custom_executable]] implemented_by [[rust - commands - agent_commands]]
+- [[rust - commands - agent_commands]] uses `module.b13b30928c81b69f`
+- [[rust - commands - agent_commands]] uses `module.3ed764bcf4eee1d6`
+- [[rust - commands - agent_commands]] uses `module.b04ab8816dabdb01`
+- [[open_browser_view]] implemented_by [[rust - commands - browser_commands]]
+- [[browser_navigate]] implemented_by [[rust - commands - browser_commands]]
+- [[browser_reload]] implemented_by [[rust - commands - browser_commands]]
+- [[browser_stop]] implemented_by [[rust - commands - browser_commands]]
+- [[browser_set_bounds]] implemented_by [[rust - commands - browser_commands]]
+- [[browser_set_visible]] implemented_by [[rust - commands - browser_commands]]
+- [[browser_set_zoom]] implemented_by [[rust - commands - browser_commands]]
+- [[browser_set_inspect]] implemented_by [[rust - commands - browser_commands]]
+- [[close_browser_view]] implemented_by [[rust - commands - browser_commands]]
+- [[rust - commands - browser_commands]] uses `module.b13b30928c81b69f`
+- [[rust - commands - browser_commands]] uses `module.3ed764bcf4eee1d6`
+- [[rust - commands - browser_commands]] uses `module.6794b5c242c1258a`
+- [[rust - commands - code_commands]] uses `module.b13b30928c81b69f`
+- [[rust - commands - code_commands]] uses `module.327579f22c257d7d`
+- [[rust - commands - code_commands]] uses `module.bd9c7187259cf189`
+- [[rust - commands - code_commands]] uses `module.21268adefa7cc90f`
+- [[rust - commands - code_commands]] uses `module.2b01907941b6aae7`
+- [[database_discover_sources]] implemented_by [[rust - commands - database_commands]]
+- [[database_list_sources]] implemented_by [[rust - commands - database_commands]]
+- [[database_publish_canvas_state]] implemented_by [[rust - commands - database_commands]]
+- [[database_get_source]] implemented_by [[rust - commands - database_commands]]
+- [[database_get_schema]] implemented_by [[rust - commands - database_commands]]
+- [[database_get_object]] implemented_by [[rust - commands - database_commands]]
+- [[database_compare]] implemented_by [[rust - commands - database_commands]]
+- [[database_list_migrations]] implemented_by [[rust - commands - database_commands]]
+- [[database_list_usage]] implemented_by [[rust - commands - database_commands]]
+- [[database_list_issues]] implemented_by [[rust - commands - database_commands]]
+- [[database_introspect_sqlite_file]] implemented_by [[rust - commands - database_commands]]
+- [[database_create_draft]] implemented_by [[rust - commands - database_commands]]
+- [[database_list_designs]] implemented_by [[rust - commands - database_commands]]
+- [[database_get_design]] implemented_by [[rust - commands - database_commands]]
+- [[database_apply_design_operation]] implemented_by [[rust - commands - database_commands]]
+- [[database_approve_design]] implemented_by [[rust - commands - database_commands]]
+- [[database_reject_design]] implemented_by [[rust - commands - database_commands]]
+- [[database_archive_design]] implemented_by [[rust - commands - database_commands]]
+- [[database_save_layout]] implemented_by [[rust - commands - database_commands]]
+- [[database_get_layout]] implemented_by [[rust - commands - database_commands]]
+- [[database_build_context_pack]] implemented_by [[rust - commands - database_commands]]
+- [[database_adapter_support]] implemented_by [[rust - commands - database_commands]]
+- [[database_implement_design]] implemented_by [[rust - commands - database_commands]]
+- [[rust - commands - database_commands]] uses `module.b13b30928c81b69f`
+- [[rust - commands - database_commands]] uses `module.3ed764bcf4eee1d6`
+- [[rust - commands - database_commands]] uses `module.b04ab8816dabdb01`
+- [[rust - commands - database_commands]] uses `module.a8ddb8bf88c5edd7`
+- [[get_diagnostics]] implemented_by [[rust - commands - diagnostics_commands]]
+- [[run_health_check]] implemented_by [[rust - commands - diagnostics_commands]]
+- [[repair_database_metadata]] implemented_by [[rust - commands - diagnostics_commands]]
+- [[export_redacted_support_bundle]] implemented_by [[rust - commands - diagnostics_commands]]
+- [[rust - commands - diagnostics_commands]] uses `module.b13b30928c81b69f`
+- [[rust - commands - diagnostics_commands]] uses `module.3ed764bcf4eee1d6`
+- [[rust - commands - diagnostics_commands]] uses `module.b04ab8816dabdb01`
+- [[rust - commands - diagnostics_commands]] uses `module.57709159fa023727`
+- [[fabric_memory]] implemented_by [[rust - commands - fabric_ipc]]
+- [[fabric_intelligence]] implemented_by [[rust - commands - fabric_ipc]]
+- [[fabric_code]] implemented_by [[rust - commands - fabric_ipc]]
+- [[fabric_semantic]] implemented_by [[rust - commands - fabric_ipc]]
+- [[rust - commands - fabric_ipc]] uses `module.b13b30928c81b69f`
+- [[rust - commands - fabric_ipc]] uses `module.3ed764bcf4eee1d6`
+- [[rust - commands - fabric_ipc]] uses `module.06428a45de853457`
+- [[rust - commands - fabric_ipc]] uses `module.d8e94d73bbebef19`
+- [[rust - commands - fabric_ipc]] uses `module.75f2ae6ea8dbdb02`
+- [[rust - commands - fabric_ipc]] uses `module.b30f0713fb3f8e55`
+- [[rust - commands - fabric_ipc]] uses `module.224dcb86418c4695`
+- [[rust - commands - fabric_scope]] uses `module.b13b30928c81b69f`
+- [[rust - commands - fabric_scope]] uses `module.3ed764bcf4eee1d6`
+- [[list_project_directory]] implemented_by [[rust - commands - filesystem_commands]]
+- [[read_project_file]] implemented_by [[rust - commands - filesystem_commands]]
+- [[write_project_file]] implemented_by [[rust - commands - filesystem_commands]]
+- [[create_project_file]] implemented_by [[rust - commands - filesystem_commands]]
+- [[create_project_directory]] implemented_by [[rust - commands - filesystem_commands]]
+- [[rename_project_entry]] implemented_by [[rust - commands - filesystem_commands]]
+- [[copy_project_entry]] implemented_by [[rust - commands - filesystem_commands]]
+- [[delete_project_entry]] implemented_by [[rust - commands - filesystem_commands]]
+- [[search_project_files]] implemented_by [[rust - commands - filesystem_commands]]
+
+<!-- PARALITH:AUTO:END -->

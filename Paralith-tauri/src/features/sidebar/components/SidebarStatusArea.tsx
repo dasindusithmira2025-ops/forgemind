@@ -6,6 +6,7 @@ import {
   Database,
   Download,
   FolderGit2,
+  BrainCircuit,
   PanelLeftClose,
   RotateCw,
   Settings,
@@ -50,6 +51,17 @@ export function SidebarStatusArea({ actions }: { actions: SidebarActions }) {
             onClick={actions.onOpenDatabase}
           >
             <Database size={15} />
+          </button>
+        )}
+        {actions.onOpenMemory && (
+          <button
+            type="button"
+            className="sb-status-btn"
+            aria-label="Memory"
+            title="Memory"
+            onClick={actions.onOpenMemory}
+          >
+            <BrainCircuit size={15} />
           </button>
         )}
         {actions.onOpenUsage && (

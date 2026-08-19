@@ -1,4 +1,5 @@
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
+import type { KnowledgeUpdatedEvent } from '../features/memory/memoryTypes'
 import type { AgentStateEvent, BrowserEvent, ProjectFileChangeBatch, ProviderUsageSnapshot, RemoteProjection, RepositoryApprovalRequest, RepositoryOperationEvent, RepositoryOperationRecord, RestorationProgress, SidebarPreferences, SwarmChangedEvent, TerminalExitEvent, TerminalOutputEvent, TerminalStatusEvent } from './types'
 
 type TerminalOutputWireEvent = Omit<TerminalOutputEvent, 'data'> & { data: string }
@@ -57,6 +58,15 @@ export const onSidebarPreferencesChanged = (handler: (preferences: SidebarPrefer
 /** Backend emits this only after a material snapshot change; countdown text remains local. */
 export const onAiUsageChanged = (handler: (snapshots: ProviderUsageSnapshot[]) => void): Promise<UnlistenFn> =>
   listen<ProviderUsageSnapshot[]>('ai-usage-changed', (event) => handler(event.payload))
+
+/**
+ * Fired when the automatic knowledge lifecycle changed something a knowledge surface displays.
+ *
+ * Broadcast to every window, so a handler must check `projectId` before acting: a detached
+ * Workspace window must not refresh its knowledge because another Project's analysis finished.
+ */
+export const onKnowledgeUpdated = (handler: (event: KnowledgeUpdatedEvent) => void): Promise<UnlistenFn> =>
+  listen<KnowledgeUpdatedEvent>('memory-knowledge-updated', (event) => handler(event.payload))
 
 function decodeBase64(encoded: string): Uint8Array {
   const binary = atob(encoded)

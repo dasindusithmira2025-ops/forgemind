@@ -1,0 +1,134 @@
+{
+  "generated_from": "dependency manifests, process spawn sites, HTTP client usage and service composition in lib.rs",
+  "external_integrations": [
+    {
+      "id": "claude-code-cli",
+      "name": "Claude Code CLI",
+      "type": "external process (PTY)",
+      "mechanism": "spawned via portable-pty with a constructed argv; stdout parsed as stream-json",
+      "arguments": ["--print", "--model", "--effort", "--verbose", "--output-format stream-json", "--permission-mode acceptEdits|plan", "--resume <session_id>", "--allowedTools <22 test-runner patterns>", "--disallowedTools Edit,Write,NotebookEdit,Task,EnterWorktree,ExitWorktree"],
+      "used_by": ["terminal panes", "swarm agents", "usage service"],
+      "credentials_held_by_paralith": false,
+      "detection": "which::which('claude') or settings.claude_executable_path",
+      "status": "COMPLETE"
+    },
+    {
+      "id": "codex-cli",
+      "name": "Codex CLI",
+      "type": "external process (PTY + app-server)",
+      "mechanism": "PTY for agent execution; a separate `codex -s read-only -a untrusted app-server` child for usage, spoken over stdin/stdout JSON",
+      "arguments": ["exec", "resume", "--model", "-c model_reasoning_effort=", "--ask-for-approval never", "--sandbox workspace-write|read-only", "--cd", "--json", "--skip-git-repo-check"],
+      "used_by": ["terminal panes", "swarm agents", "usage service"],
+      "credentials_held_by_paralith": false,
+      "auth_detection": "presence of auth.json under CODEX_HOME",
+      "status": "COMPLETE"
+    },
+    {
+      "id": "opencode-cli",
+      "name": "OpenCode CLI",
+      "type": "external process (PTY)",
+      "mechanism": "spawned via portable-pty; Windows .ps1 npm shims handled explicitly",
+      "used_by": ["terminal panes only"],
+      "not_used_by": ["swarms", "usage tracking", "session resume"],
+      "status": "PARTIAL"
+    },
+    {
+      "id": "git-cli",
+      "name": "Git",
+      "type": "external process",
+      "mechanism": "argv arrays; no libgit2 dependency exists",
+      "subcommands": ["add", "apply", "branch", "checkout", "commit", "config", "diff", "fetch", "log", "ls-files", "merge", "pull", "push", "remote", "rev-list", "rev-parse", "stash", "status", "tag", "worktree"],
+      "primary_path": "RepositoryService::run_program — queued, timed out, cancellable, audited, stderr-redacted",
+      "secondary_paths": ["commands/git_commands.rs:365,386,595", "database/mod.rs:1870", "services/agent_resume.rs:466,598", "services/project_service.rs:156"],
+      "issue": "The 7 secondary sites bypass the queue, timeout, cancellation and audit ledger.",
+      "status": "COMPLETE"
+    },
+    {
+      "id": "github-cli",
+      "name": "GitHub CLI (gh)",
+      "type": "external process",
+      "mechanism": "argv arrays; JSON parsed from stdout; errors classified by classify_github_error",
+      "subcommands": ["api", "auth", "issue", "pr", "release", "repo", "run", "search", "workflow"],
+      "credentials_held_by_paralith": false,
+      "note": "There is NO direct api.github.com call anywhere in the codebase. Authentication is entirely gh's.",
+      "caching": "repository_remote_cache + repository_sync_cursors; 120 s UI refresh interval",
+      "rate_limiting": "none of Paralith's own; relies on gh",
+      "status": "COMPLETE"
+    },
+    {
+      "id": "webview2",
+      "name": "Microsoft WebView2",
+      "type": "OS component",
+      "mechanism": "Tauri child webview via WebviewBuilder + Window::add_child (requires the tauri 'unstable' feature)",
+      "isolation": "the browser webview label is granted NO capability; invoke from a page is ACL-denied",
+      "scheme_allow_list": ["http", "https"],
+      "status": "COMPLETE"
+    },
+    {
+      "id": "embedding-provider",
+      "name": "Embedding provider (configurable HTTP)",
+      "type": "HTTP (reqwest blocking)",
+      "mechanism": "services/embeddings.rs::client()",
+      "reachable_from_ui": false,
+      "status": "BACKEND-ONLY",
+      "issue": "All 5 semantic_* commands have zero frontend callers; the index cannot be configured, regenerated, cleared or queried by a user."
+    },
+    {
+      "id": "tauri-updater-endpoint",
+      "name": "Paralith update endpoint",
+      "type": "HTTPS + minisign",
+      "mechanism": "tauri-plugin-updater with a per-edition pubkey compiled into the binary",
+      "endpoint_source": "PARALITH_STABLE_UPDATE_ENDPOINT / PARALITH_PREVIEW_UPDATE_ENDPOINT / PARALITH_UPDATE_ENDPOINT at config-render time",
+      "https_enforced": true,
+      "disabled_in_debug": true,
+      "status": "COMPLETE"
+    },
+    {
+      "id": "github-releases",
+      "name": "GitHub Releases (distribution)",
+      "type": "CI publishing target",
+      "mechanism": "scripts/release/github-artifacts-publisher.mjs",
+      "status": "COMPLETE"
+    },
+    {
+      "id": "partner-mirror",
+      "name": "Partner-hosted mirror",
+      "type": "SSH publishing target",
+      "mechanism": "scripts/release/mirror-publisher.mjs + push-mirror-publication.ps1",
+      "secrets": ["PARALITH_MIRROR_SSH_KEY", "PARALITH_MIRROR_SSH_HOST_KEY"],
+      "status": "COMPLETE"
+    },
+    {
+      "id": "firebase-hosting",
+      "name": "Firebase Hosting",
+      "type": "legacy config artefact",
+      "mechanism": "Paralith-tauri/firebase.json configures hosting for update-site-dist with no-cache headers on /stable/latest.json and /preview/latest.json",
+      "status": "LEGACY",
+      "issue": "No Firebase code exists in the application and the release pipeline publishes via GitHub + SSH mirror. The file documents a superseded hosting approach."
+    },
+    {
+      "id": "sysinfo",
+      "name": "System metrics",
+      "type": "in-process crate (sysinfo 0.39.6)",
+      "used_by": ["usage_telemetry_service"],
+      "status": "PARTIAL"
+    }
+  ],
+  "explicitly_absent": [
+    "Any LLM API client (no Anthropic SDK, no OpenAI SDK, no model endpoint, no API key handling)",
+    "Any analytics or telemetry SDK",
+    "Any crash-reporting service",
+    "libgit2 / git2-rs",
+    "GitHub App installation flow or webhooks (schema exists, code does not)",
+    "MCP server or client implementation (schema exists, code does not)",
+    "Any plugin or extension loading surface",
+    "GitLab (no references found anywhere)"
+  ],
+  "internal_service_composition": {
+    "shared_database": "One Arc<DatabaseService> shared by every service; no service opens a second connection.",
+    "shared_filesystem": "FileSystemService (path-guarded) shared by MemoryService, ContextCompiler and the Orchestration Kernel.",
+    "shared_self_write_ledger": "SelfWriteLedger shared between FileSystemService and FileWatchService so Paralith's own writes are not reported as external changes.",
+    "watcher_fanout": "FileWatchService::new(..).with_database_studio(..).with_knowledge_lifecycle(..).with_code_intelligence(..) — one watcher per project feeding three subsystems.",
+    "terminal_sharing": "TerminalManager is shared by AgentResumeService, RestorationScheduler, SwarmService and the Orchestration Kernel."
+  }
+}

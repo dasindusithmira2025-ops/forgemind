@@ -10,8 +10,8 @@ mod services;
 use database::DatabaseService;
 use services::{
     AgentDetector, AgentResumeService, DatabaseStudioRuntime, FileSystemService, FileWatchService,
-    RepositoryService, RestorationScheduler, SelfWriteLedger, TerminalManager, UpdateService,
-    UsageService, WindowRegistry,
+    KnowledgeLifecycle, RepositoryService, RestorationScheduler, SelfWriteLedger, TerminalManager,
+    UpdateService, UsageService, UsageTelemetryService, WindowRegistry,
 };
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -31,6 +31,21 @@ pub struct AppState {
     database_studio: DatabaseStudioRuntime,
     /// Project-scoped, path-guarded filesystem access for the Code surface.
     filesystem: FileSystemService,
+    /// The Context Fabric: durable Project knowledge, its link graph, claims, and provenance.
+    /// Shares `database` and `filesystem`; it never opens a second connection or an unguarded path.
+    memory: services::MemoryService,
+    /// The code graph: files, symbols, imports, and references. Derived, rebuildable, and kept
+    /// current incrementally by the file watcher.
+    code: services::CodeIntelligence,
+    /// Optional semantic index: generation, health, and nearest-neighbour lookup. Contributes
+    /// candidates; never reranks a deterministic result.
+    semantic: services::SemanticService,
+    /// Retrieval and token packing over the Context Fabric. Shares `database`; holds no state of
+    /// its own, so a pack is always compiled from current knowledge.
+    context: services::ContextCompiler,
+    /// Closes the change → impact → staleness loop. Owns a single worker thread that drains the
+    /// durable knowledge job queue; every other subsystem only enqueues.
+    knowledge: KnowledgeLifecycle,
     /// Centralized per-Project filesystem watcher feeding the Code surface's external-change and
     /// conflict detection.
     file_watch: FileWatchService,
@@ -51,6 +66,7 @@ pub struct AppState {
     legacy_migration: database::legacy_migration::LegacyMigrationStatus,
     updates: UpdateService,
     usage: UsageService,
+    usage_telemetry: UsageTelemetryService,
 }
 
 pub(crate) fn require_main_window(window: &tauri::Window) -> errors::AppResult<()> {
@@ -355,10 +371,25 @@ pub fn run() {
             // reported back to the editor as external changes.
             let self_write_ledger = SelfWriteLedger::default();
             let filesystem = FileSystemService::new(database.clone(), self_write_ledger.clone());
+            let memory = services::MemoryService::new(database.clone(), filesystem.clone());
+            // The lifecycle worker starts here rather than on first Project open: a job left
+            // `retrying` by a previous crash has to be picked up whether or not anyone reopens the
+            // Project that queued it.
+            let knowledge = KnowledgeLifecycle::new(database.clone(), memory.clone())
+                .with_app(app.handle().clone());
+            if !recovery_mode {
+                knowledge.start();
+            }
+            let code = services::CodeIntelligence::new(database.clone());
             let file_watch =
                 FileWatchService::new(database.clone(), app.handle().clone(), self_write_ledger)
-                    .with_database_studio(database_studio.clone());
+                    .with_database_studio(database_studio.clone())
+                    .with_knowledge_lifecycle(knowledge.clone())
+                    .with_code_intelligence(code.clone());
             let browser = services::BrowserService::new(app.handle().clone());
+            let semantic = services::SemanticService::new(database.clone());
+            let context = services::ContextCompiler::new(database.clone(), filesystem.clone())
+                .with_database_studio(database_studio.clone());
             // The Swarm engine owns its own background scheduler thread; it starts here so
             // active Swarms keep progressing regardless of which window/view is focused.
             let swarms = services::SwarmService::new(
@@ -367,6 +398,8 @@ pub fn run() {
                 terminals.clone(),
                 repository.clone(),
                 app.handle().clone(),
+                knowledge.clone(),
+                context.clone(),
             );
             if !recovery_mode {
                 match repository.recover_on_startup() {
@@ -407,6 +440,7 @@ pub fn run() {
                 database_studio.clone(),
             );
             let usage = UsageService::new(database.clone());
+            let usage_telemetry = UsageTelemetryService::new();
             app.manage(AppState {
                 database,
                 detector,
@@ -416,6 +450,11 @@ pub fn run() {
                 repository,
                 database_studio,
                 filesystem,
+                memory,
+                code,
+                semantic,
+                context,
+                knowledge,
                 file_watch,
                 browser,
                 swarms,
@@ -429,6 +468,7 @@ pub fn run() {
                 legacy_migration,
                 updates: updates.clone(),
                 usage,
+                usage_telemetry,
             });
             // Give the update coordinator the app handle so every lifecycle change and download
             // progress tick is broadcast to all windows, not just the one that invoked the command.
@@ -617,6 +657,7 @@ pub fn run() {
             commands::get_ai_usage_history,
             commands::refresh_ai_usage,
             commands::get_ai_usage_diagnostics,
+            commands::usage_telemetry,
             commands::save_settings,
             commands::get_theme_preference,
             commands::set_theme_preference,
@@ -703,6 +744,10 @@ pub fn run() {
             commands::orchestrator_pause_session,
             commands::orchestrator_resume_session,
             commands::orchestrator_cancel_session,
+            commands::fabric_memory,
+            commands::fabric_intelligence,
+            commands::fabric_code,
+            commands::fabric_semantic,
         ])
         .build(context);
 

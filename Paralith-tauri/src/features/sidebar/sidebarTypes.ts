@@ -131,6 +131,8 @@ export interface SidebarActions {
   onOpenRepository?: () => void
   /** Open the Database Studio surface for the active project. */
   onOpenDatabase?: () => void
+  /** Open the Context Fabric (Memory) surface for the active project. */
+  onOpenMemory?: () => void
   /** Open Usage analytics. Application-scoped: token consumption is observed per machine. */
   onOpenUsage?: () => void
   onToggleCollapse: () => void

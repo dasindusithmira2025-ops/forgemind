@@ -6,12 +6,14 @@
 //! PARALITH's own atomic saves do not echo back as external changes, and delivered as typed
 //! [`ProjectFileChangeBatch`] events only to the windows authorized for that Project.
 //!
-//! The watcher deliberately records *what* changed, not *who* changed it. Source attribution
-//! (user vs. agent vs. git) is a separate slice with its own evidence model.
+//! The watcher records *what* changed **and who caused it**. Origin comes from the
+//! [`SelfWriteLedger`] stamp on the write, not from a guess about the path, which is what lets a
+//! memory-mirror write be suppressed while a user's edit to a Skill file in the same directory
+//! reaches the Context Fabric normally.
 
 use crate::database::DatabaseService;
 use crate::errors::{AppError, AppResult};
-use crate::models::{FileChangeKind, ProjectFileChange, ProjectFileChangeBatch};
+use crate::models::{ChangeOrigin, FileChangeKind, ProjectFileChange, ProjectFileChangeBatch};
 use crate::services::filesystem_service::{canonicalize_plain, SelfWriteLedger};
 use notify::event::ModifyKind;
 use notify::{Event, EventKind, RecursiveMode, Watcher};
@@ -50,6 +52,13 @@ pub struct FileWatchService {
     /// Present in the running application. Database Studio re-extracts only when a batch actually
     /// contains a database artifact, so editing a component never triggers schema work.
     database_studio: Option<crate::services::database_studio::DatabaseStudioRuntime>,
+    /// Present in the running application. The lifecycle only *enqueues* here — impact analysis
+    /// and any staleness write happen on its own worker thread, so a branch switch that touches
+    /// thousands of files costs this thread one row insert.
+    knowledge: Option<crate::services::KnowledgeLifecycle>,
+    /// Present in the running application. Keeps the code graph current for exactly the files a
+    /// change touched, never by rewalking the Project.
+    code: Option<crate::services::CodeIntelligence>,
 }
 
 impl FileWatchService {
@@ -60,7 +69,14 @@ impl FileWatchService {
             ledger,
             watchers: Arc::new(Mutex::new(HashMap::new())),
             database_studio: None,
+            knowledge: None,
+            code: None,
         }
+    }
+
+    pub fn with_code_intelligence(mut self, code: crate::services::CodeIntelligence) -> Self {
+        self.code = Some(code);
+        self
     }
 
     pub fn with_database_studio(
@@ -68,6 +84,14 @@ impl FileWatchService {
         database_studio: crate::services::database_studio::DatabaseStudioRuntime,
     ) -> Self {
         self.database_studio = Some(database_studio);
+        self
+    }
+
+    pub fn with_knowledge_lifecycle(
+        mut self,
+        knowledge: crate::services::KnowledgeLifecycle,
+    ) -> Self {
+        self.knowledge = Some(knowledge);
         self
     }
 
@@ -189,50 +213,39 @@ impl FileWatchService {
     ) {
         let app = self.app.clone();
         let ledger = self.ledger.clone();
-        let database_studio = self.database_studio.clone();
+        let sinks = ChangeSinks {
+            database_studio: self.database_studio.clone(),
+            knowledge: self.knowledge.clone(),
+            code: self.code.clone(),
+        };
         std::thread::Builder::new()
             .name(format!("paralith-fswatch-{project_id}"))
             .spawn(move || {
-                let mut pending: HashMap<String, FileChangeKind> = HashMap::new();
+                let mut pending: HashMap<String, (FileChangeKind, ChangeOrigin)> = HashMap::new();
                 loop {
                     match receiver.recv_timeout(DEBOUNCE) {
                         Ok(event) => {
-                            for (relative, kind) in
+                            for (relative, kind, origin) in
                                 classify_event(&root, &event.paths, &event.kind, &ledger)
                             {
-                                let merged = merge_change(pending.get(&relative).copied(), kind);
-                                pending.insert(relative, merged);
+                                let previous = pending.get(&relative).copied();
+                                let merged = merge_change(previous.map(|(kind, _)| kind), kind);
+                                let merged_origin =
+                                    merge_origin(previous.map(|(_, origin)| origin), origin);
+                                pending.insert(relative, (merged, merged_origin));
                             }
                             if pending.len() >= MAX_PENDING {
-                                flush(
-                                    &app,
-                                    &project_id,
-                                    &subscribers,
-                                    &mut pending,
-                                    database_studio.as_ref(),
-                                );
+                                flush(&app, &project_id, &subscribers, &mut pending, &sinks);
                             }
                         }
                         Err(RecvTimeoutError::Timeout) => {
                             if !pending.is_empty() {
-                                flush(
-                                    &app,
-                                    &project_id,
-                                    &subscribers,
-                                    &mut pending,
-                                    database_studio.as_ref(),
-                                );
+                                flush(&app, &project_id, &subscribers, &mut pending, &sinks);
                             }
                         }
                         Err(RecvTimeoutError::Disconnected) => {
                             if !pending.is_empty() {
-                                flush(
-                                    &app,
-                                    &project_id,
-                                    &subscribers,
-                                    &mut pending,
-                                    database_studio.as_ref(),
-                                );
+                                flush(&app, &project_id, &subscribers, &mut pending, &sinks);
                             }
                             break;
                         }
@@ -243,40 +256,84 @@ impl FileWatchService {
     }
 }
 
+/// The subsystems a flushed batch is handed to, besides the windows.
+///
+/// Both are `Option` because the watcher is constructed in tests without a running application.
+/// Each decides relevance itself: the watcher does not know what a database artifact is, and it
+/// does not know what can carry knowledge provenance.
+#[derive(Clone, Default)]
+struct ChangeSinks {
+    database_studio: Option<crate::services::database_studio::DatabaseStudioRuntime>,
+    knowledge: Option<crate::services::KnowledgeLifecycle>,
+    code: Option<crate::services::CodeIntelligence>,
+}
+
 fn flush(
     app: &AppHandle,
     project_id: &str,
     subscribers: &Arc<Mutex<HashSet<String>>>,
-    pending: &mut HashMap<String, FileChangeKind>,
-    database_studio: Option<&crate::services::database_studio::DatabaseStudioRuntime>,
+    pending: &mut HashMap<String, (FileChangeKind, ChangeOrigin)>,
+    sinks: &ChangeSinks,
 ) {
     let changes: Vec<ProjectFileChange> = pending
         .drain()
-        .map(|(relative_path, kind)| ProjectFileChange {
+        .map(|(relative_path, (kind, origin))| ProjectFileChange {
             relative_path,
             kind,
+            origin,
         })
         .collect();
     if changes.is_empty() {
         return;
     }
-    if let Some(database_studio) = database_studio {
-        let paths: Vec<String> = changes
-            .iter()
-            .map(|change| change.relative_path.clone())
-            .collect();
-        // Relevance is decided inside the runtime, which owns the definition of a database
-        // artifact; an unrelated batch returns immediately without touching the graph.
-        if let Err(error) = database_studio.handle_changed_paths(project_id, &paths) {
-            log::warn!(
-                "database studio incremental refresh skipped: {}",
-                error.message
-            );
+    // Only changes PARALITH did not itself produce are repository changes. A memory mirror write,
+    // a Skill save, or a Canvas export re-entering analysis would be the application reacting to
+    // its own output — the feedback loop the old `.paralith/` blacklist existed to prevent, now
+    // prevented by the fact rather than by the path.
+    let paths: Vec<String> = changes
+        .iter()
+        .filter(|change| !change.origin.is_self_write())
+        .map(|change| change.relative_path.clone())
+        .collect();
+    if !paths.is_empty() {
+        if let Some(database_studio) = &sinks.database_studio {
+            // Relevance is decided inside the runtime, which owns the definition of a database
+            // artifact; an unrelated batch returns immediately without touching the graph.
+            if let Err(error) = database_studio.handle_changed_paths(project_id, &paths) {
+                log::warn!(
+                    "database studio incremental refresh skipped: {}",
+                    error.message
+                );
+            }
         }
+        if let Some(knowledge) = &sinks.knowledge {
+            // Enqueue only. Impact analysis and any staleness write happen on the lifecycle worker,
+            // because this thread must return to coalescing the next burst immediately.
+            if let Err(error) = knowledge.handle_changed_paths(project_id, &paths) {
+                log::warn!("knowledge impact analysis not queued: {}", error.message);
+            }
+        }
+        if let Some(code) = &sinks.code {
+            // Reindexing the changed paths is bounded by the batch, not by the size of the
+            // Project, so it runs here rather than costing a second queue.
+            if let Err(error) = code.index_paths(project_id, &paths) {
+                log::warn!("code index not updated: {}", error.message);
+            }
+        }
+    }
+    // Windows are told about *external* changes only. An editor that received its own save back
+    // would show a spurious "changed on disk" conflict on every keystroke-triggered write, which
+    // is the behaviour the ledger has always existed to prevent.
+    let external: Vec<ProjectFileChange> = changes
+        .into_iter()
+        .filter(|change| !change.origin.is_self_write())
+        .collect();
+    if external.is_empty() {
+        return;
     }
     let batch = ProjectFileChangeBatch {
         project_id: project_id.to_owned(),
-        changes,
+        changes: external,
     };
     let targets: Vec<String> = subscribers.lock().iter().cloned().collect();
     for label in targets {
@@ -286,56 +343,68 @@ fn flush(
     }
 }
 
-/// Translate a raw notify event into zero or more `(relative_path, kind)` changes, dropping
-/// anything outside the root, PARALITH's own temp/atomic-save churn, `.git` internals, and paths
-/// the [`SelfWriteLedger`] shows were just written by PARALITH itself.
+/// Translate a raw notify event into zero or more `(relative_path, kind, origin)` changes, dropping
+/// anything outside the root, PARALITH's own temp/atomic-save churn, and `.git` internals.
+///
+/// A path the [`SelfWriteLedger`] recognizes is **kept and attributed**, not dropped. Dropping it
+/// was the old behaviour and it conflated two different needs: the editor must not see its own
+/// save echoed back, but the code index and the knowledge lifecycle need to know the change
+/// happened *and* that PARALITH caused it. Attribution serves both; suppression served only one.
 fn classify_event(
     root: &Path,
     paths: &[PathBuf],
     kind: &EventKind,
     ledger: &SelfWriteLedger,
-) -> Vec<(String, FileChangeKind)> {
-    let keep = |path: &PathBuf| -> Option<String> {
+) -> Vec<(String, FileChangeKind, ChangeOrigin)> {
+    let keep = |path: &PathBuf| -> Option<(String, ChangeOrigin)> {
         let relative = relativize(root, path)?;
-        if is_ignored_relative(&relative) || ledger.recently_written(path) {
+        if is_ignored_relative(&relative) {
             return None;
         }
-        Some(relative)
+        let origin = ledger.origin_of(path).unwrap_or(ChangeOrigin::Filesystem);
+        Some((relative, origin))
+    };
+    let map_all = |change: FileChangeKind| -> Vec<(String, FileChangeKind, ChangeOrigin)> {
+        paths
+            .iter()
+            .filter_map(|path| keep(path).map(|(relative, origin)| (relative, change, origin)))
+            .collect()
     };
     match kind {
-        EventKind::Create(_) => paths
-            .iter()
-            .filter_map(|path| keep(path).map(|relative| (relative, FileChangeKind::Created)))
-            .collect(),
-        EventKind::Remove(_) => paths
-            .iter()
-            .filter_map(|path| keep(path).map(|relative| (relative, FileChangeKind::Deleted)))
-            .collect(),
+        EventKind::Create(_) => map_all(FileChangeKind::Created),
+        EventKind::Remove(_) => map_all(FileChangeKind::Deleted),
         // A rename reported with both endpoints becomes a delete of the source and a create of the
         // destination; a single-ended rename is reported as a neutral modification because the
         // endpoint (from vs. to) is ambiguous.
         EventKind::Modify(ModifyKind::Name(_)) if paths.len() >= 2 => {
             let mut changes = Vec::new();
-            if let Some(source) = keep(&paths[0]) {
-                changes.push((source, FileChangeKind::Deleted));
+            if let Some((source, origin)) = keep(&paths[0]) {
+                changes.push((source, FileChangeKind::Deleted, origin));
             }
             for path in &paths[1..] {
-                if let Some(destination) = keep(path) {
-                    changes.push((destination, FileChangeKind::Created));
+                if let Some((destination, origin)) = keep(path) {
+                    changes.push((destination, FileChangeKind::Created, origin));
                 }
             }
             changes
         }
-        EventKind::Modify(_) => paths
-            .iter()
-            .filter_map(|path| keep(path).map(|relative| (relative, FileChangeKind::Modified)))
-            .collect(),
+        EventKind::Modify(_) => map_all(FileChangeKind::Modified),
         // Access events carry no change; anything else is treated conservatively as a modification.
         EventKind::Access(_) => Vec::new(),
-        _ => paths
-            .iter()
-            .filter_map(|path| keep(path).map(|relative| (relative, FileChangeKind::Modified)))
-            .collect(),
+        _ => map_all(FileChangeKind::Modified),
+    }
+}
+
+/// Coalesce two origins for the same path within one quiet period.
+///
+/// An external write always wins. If anyone other than PARALITH touched the path during the
+/// window, the batch is no longer purely our own output and must reach the editor and the
+/// analyzers — the conservative direction, because the cost of a wrong "external" is one extra
+/// analysis while the cost of a wrong "self" is a change that is silently never seen.
+fn merge_origin(existing: Option<ChangeOrigin>, incoming: ChangeOrigin) -> ChangeOrigin {
+    match existing {
+        Some(existing) if incoming.is_self_write() => existing,
+        Some(_) | None => incoming,
     }
 }
 
@@ -406,7 +475,11 @@ mod tests {
         );
         assert_eq!(
             created,
-            vec![("src/new.rs".to_owned(), FileChangeKind::Created)]
+            vec![(
+                "src/new.rs".to_owned(),
+                FileChangeKind::Created,
+                ChangeOrigin::Filesystem
+            )]
         );
 
         let modified = classify_event(
@@ -417,7 +490,11 @@ mod tests {
         );
         assert_eq!(
             modified,
-            vec![("a.txt".to_owned(), FileChangeKind::Modified)]
+            vec![(
+                "a.txt".to_owned(),
+                FileChangeKind::Modified,
+                ChangeOrigin::Filesystem
+            )]
         );
 
         let removed = classify_event(
@@ -428,7 +505,11 @@ mod tests {
         );
         assert_eq!(
             removed,
-            vec![("gone.txt".to_owned(), FileChangeKind::Deleted)]
+            vec![(
+                "gone.txt".to_owned(),
+                FileChangeKind::Deleted,
+                ChangeOrigin::Filesystem
+            )]
         );
     }
 
@@ -444,8 +525,16 @@ mod tests {
         assert_eq!(
             changes,
             vec![
-                ("old.txt".to_owned(), FileChangeKind::Deleted),
-                ("new.txt".to_owned(), FileChangeKind::Created),
+                (
+                    "old.txt".to_owned(),
+                    FileChangeKind::Deleted,
+                    ChangeOrigin::Filesystem
+                ),
+                (
+                    "new.txt".to_owned(),
+                    FileChangeKind::Created,
+                    ChangeOrigin::Filesystem
+                ),
             ]
         );
     }
@@ -481,7 +570,7 @@ mod tests {
     }
 
     #[test]
-    fn suppresses_paralith_own_writes() {
+    fn paralith_own_writes_are_attributed_rather_than_dropped() {
         let ledger = SelfWriteLedger::default();
         let path = under(&["saved.rs"]);
         ledger.mark(&path);
@@ -491,7 +580,54 @@ mod tests {
             &EventKind::Modify(ModifyKind::Data(notify::event::DataChange::Content)),
             &ledger,
         );
-        assert!(changes.is_empty(), "own write must not echo back");
+        assert_eq!(changes.len(), 1, "the change is still observed");
+        assert_eq!(changes[0].2, ChangeOrigin::User);
+        assert!(
+            changes[0].2.is_self_write(),
+            "a self-write must be filterable, which is what keeps it out of the editor"
+        );
+    }
+
+    #[test]
+    fn the_memory_mirror_is_distinguishable_from_a_user_editing_the_same_directory() {
+        let ledger = SelfWriteLedger::default();
+        let mirrored = under(&[".paralith", "memory", "auth.md"]);
+        let skill = under(&[".paralith", "skills", "review.md"]);
+        ledger.mark_origin(&mirrored, ChangeOrigin::MemoryMirror);
+
+        let changes = classify_event(
+            &root(),
+            &[mirrored, skill],
+            &EventKind::Modify(ModifyKind::Data(notify::event::DataChange::Content)),
+            &ledger,
+        );
+        let by_path: HashMap<String, ChangeOrigin> = changes
+            .iter()
+            .map(|(path, _, origin)| (path.clone(), *origin))
+            .collect();
+        assert_eq!(
+            by_path[".paralith/memory/auth.md"],
+            ChangeOrigin::MemoryMirror,
+            "the mirror writing itself must be suppressible"
+        );
+        assert_eq!(
+            by_path[".paralith/skills/review.md"],
+            ChangeOrigin::Filesystem,
+            "an unstamped .paralith edit is an ordinary external change"
+        );
+    }
+
+    #[test]
+    fn an_external_write_during_the_same_window_outranks_a_self_write() {
+        assert_eq!(
+            merge_origin(Some(ChangeOrigin::MemoryMirror), ChangeOrigin::Filesystem),
+            ChangeOrigin::Filesystem
+        );
+        assert_eq!(
+            merge_origin(Some(ChangeOrigin::Filesystem), ChangeOrigin::MemoryMirror),
+            ChangeOrigin::Filesystem
+        );
+        assert_eq!(merge_origin(None, ChangeOrigin::Skill), ChangeOrigin::Skill);
     }
 
     #[test]

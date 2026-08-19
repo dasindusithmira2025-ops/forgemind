@@ -1,7 +1,7 @@
 {
   "name": "paralith",
   "private": true,
-  "version": "0.4.13",
+  "version": "0.4.14",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -12,6 +12,13 @@
     "test:watch": "vitest",
     "preview": "vite preview",
     "visual": "vite --config vite.visual.config.ts",
+    "vault": "node scripts/vault/cli.mjs",
+    "vault:sync": "node scripts/vault/cli.mjs sync --repo ..",
+    "vault:status": "node scripts/vault/cli.mjs status --repo ..",
+    "vault:rebuild": "node scripts/vault/cli.mjs rebuild --repo ..",
+    "vault:validate": "node scripts/vault/cli.mjs validate --repo ..",
+    "vault:watch": "node scripts/vault/cli.mjs watch --repo ..",
+    "vault:test": "node --test scripts/vault/*.test.mjs",
     "tauri": "tauri",
     "release:sync": "node scripts/release/sync-version.mjs",
     "release:check": "node scripts/release/sync-version.mjs --check",
@@ -58,6 +65,6 @@
     "vitest": "^4.1.10"
   },
   "overrides": {
-    "dompurify": "3.4.12"
+    "dompurify": "3.4.13"
   }
 }

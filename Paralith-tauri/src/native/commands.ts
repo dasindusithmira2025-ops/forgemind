@@ -82,6 +82,7 @@ import type {
   ProviderUsageSnapshot,
   UsageDailyRow,
   AiUsageDiagnostics,
+  UsageTelemetrySnapshot,
 } from './types'
 
 export const native = {
@@ -89,6 +90,9 @@ export const native = {
   refreshAiUsage: () => invoke<ProviderUsageSnapshot[]>('refresh_ai_usage'),
   getAiUsageHistory: (days: number) => invoke<UsageDailyRow[]>('get_ai_usage_history', { days }),
   getAiUsageDiagnostics: () => invoke<AiUsageDiagnostics[]>('get_ai_usage_diagnostics'),
+  getUsageTelemetry: () => invoke<UsageTelemetrySnapshot>('usage_telemetry', { operation: 'snapshot' }),
+  sampleUsageTelemetry: () => invoke<UsageTelemetrySnapshot>('usage_telemetry', { operation: 'sample' }),
+  refreshUsageTelemetry: (forceGithub = false) => invoke<UsageTelemetrySnapshot>('usage_telemetry', { operation: 'refresh', forceGithub }),
   openProject: (path: string) => invoke<Project>('open_project', { path }),
   getProject: (projectId: string) => invoke<Project>('get_project', { projectId }),
   listRecentProjects: () => invoke<Project[]>('list_recent_projects'),
