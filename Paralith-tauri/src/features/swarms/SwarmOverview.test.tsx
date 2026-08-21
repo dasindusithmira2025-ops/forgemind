@@ -177,4 +177,20 @@ describe('SwarmOverview live backend projection', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Approve and continue' }))
     expect(resolveAttention).toHaveBeenCalledWith('s1', 'permission-1', 'Run the scoped test only', true)
   })
+
+  it('renders archived swarms as immutable history', async () => {
+    const archived = {
+      ...detail,
+      swarm: { ...detail.swarm, lifecycle: 'archived', archived: true },
+    } as SwarmDetail
+    const { container } = render(<MemoryRouter><SwarmOverview detail={archived} /></MemoryRouter>)
+
+    expect(screen.queryByText('Swarm defaults')).not.toBeInTheDocument()
+    expect(screen.queryByPlaceholderText(/Give the team/i)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^Send$/ })).not.toBeInTheDocument()
+
+    await userEvent.click(container.querySelector('.swarm-agent-node.role-builder') as HTMLElement)
+    expect(screen.queryByText('Next execution model')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Validate configuration' })).not.toBeInTheDocument()
+  })
 })

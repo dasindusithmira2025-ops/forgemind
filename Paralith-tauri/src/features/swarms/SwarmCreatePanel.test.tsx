@@ -1,7 +1,22 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import type { CreateSwarmRequest, SwarmLaunchPreview, SwarmPreset } from '../../native/types'
+import type { CreateSwarmRequest, SwarmLaunchPreview, SwarmModelCapability, SwarmPreset } from '../../native/types'
+
+/** The panel resolves every member's model against the backend registry, so a test that drives the
+ *  Team step has to publish one. Model identity itself is covered by SwarmModelConfiguration.test. */
+const model = (providerId: 'claude' | 'codex', modelId: string, displayName: string, recommendedRoles: string[]): SwarmModelCapability => ({
+  providerId, providerDisplayName: providerId === 'claude' ? 'Claude' : 'Codex', modelId, displayName,
+  description: `${displayName} description`, available: true, deprecated: false, coding: true, planning: true,
+  review: true, toolUse: true, vision: true, supportedReasoningEfforts: ['low', 'medium', 'high'],
+  supportedExecutionModes: ['interactive', 'autonomous', 'review'], recommendedRoles, authenticated: true, runtimeVersion: '1',
+})
+const registry: SwarmModelCapability[] = [
+  model('claude', 'opus', 'Opus', ['coordinator', 'scout']),
+  model('claude', 'sonnet', 'Sonnet', ['builder', 'reviewer', 'debugger']),
+  model('codex', 'gpt-5.5', 'GPT-5.5', ['builder', 'integrator']),
+  model('codex', 'terra', 'Terra', ['reviewer', 'scout', 'debugger']),
+]
 
 const presets: SwarmPreset[] = [
   {
@@ -49,6 +64,7 @@ vi.mock('../../native/commands', () => ({
   native: {
     getProject: vi.fn(async () => ({ id: 'p1', name: 'Paralith', rootPath: 'C:\\project' })),
     listSwarmPresets: vi.fn(async () => presets),
+    listSwarmModelRegistry: vi.fn(async () => registry),
     listSwarms: vi.fn(async () => created ? [{ swarm: created, activity: {} }] : []),
     previewSwarmLaunch: (...args: unknown[]) => previewSwarmLaunch(...(args as [CreateSwarmRequest])),
     createSwarm: (...args: unknown[]) => createSwarm(...(args as [CreateSwarmRequest])),
@@ -70,6 +86,7 @@ describe('SwarmCreatePanel V2', () => {
   it('uses the required Team, Mission, Review and Launch sequence', async () => {
     render(<SwarmCreatePanel projectId="p1" onCreated={vi.fn()} onCancel={() => {}} />)
     await screen.findByText('Auto')
+    await screen.findAllByText('Coordinator 1')
     expect(screen.getByRole('button', { name: /01Team/i })).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: /Continue to mission/i }))
     await userEvent.click(screen.getByRole('button', { name: /Review launch/i }))
@@ -90,6 +107,7 @@ describe('SwarmCreatePanel V2', () => {
     const onCreated = vi.fn()
     render(<SwarmCreatePanel projectId="p1" onCreated={onCreated} onCancel={() => {}} />)
     await userEvent.click(await screen.findByText('Standard'))
+    await screen.findByText('Builder 2')
     await userEvent.click(screen.getByRole('button', { name: /Continue to mission/i }))
     await userEvent.type(screen.getByPlaceholderText(/What should this team/i), 'Repair the notification delivery pipeline')
     await userEvent.click(screen.getByRole('button', { name: /Review launch/i }))
@@ -106,6 +124,7 @@ describe('SwarmCreatePanel V2', () => {
     blockLaunch = true
     render(<SwarmCreatePanel projectId="p1" onCreated={vi.fn()} onCancel={() => {}} />)
     await userEvent.click(await screen.findByText('Standard'))
+    await screen.findByText('Builder 2')
     await userEvent.click(screen.getByRole('button', { name: /Continue to mission/i }))
     await userEvent.type(screen.getByPlaceholderText(/What should this team/i), 'Repair the notification delivery pipeline')
     await userEvent.click(screen.getByRole('button', { name: /Review launch/i }))

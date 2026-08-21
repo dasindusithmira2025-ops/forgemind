@@ -14,6 +14,10 @@ export default defineConfig({
   },
   test: {
     environment: 'jsdom',
+    // The default worker_threads pool loses the suite context under jsdom on
+    // Windows once the whole suite runs at once ("Vitest failed to find the
+    // current suite" in every setup file). Forks are stable and faster here.
+    pool: 'forks',
     setupFiles: './src/test/setup.ts',
     include: ['src/**/*.{test,spec}.{ts,tsx}'],
     css: true,

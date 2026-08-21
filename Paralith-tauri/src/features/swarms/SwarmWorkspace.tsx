@@ -33,6 +33,8 @@ export function SwarmWorkspace({
     return value?.swarm.projectId === projectId ? value : undefined
   })
   const error = useSwarmStore((state) => state.error)
+  const detailLoading = useSwarmStore((state) => swarmId ? state.loadingDetailById[swarmId] : undefined)
+  const detailError = useSwarmStore((state) => swarmId ? state.detailErrors[swarmId] : undefined)
   const loadSwarms = useSwarmStore((state) => state.loadSwarms)
   const loadDetail = useSwarmStore((state) => state.loadDetail)
   const refresh = useSwarmStore((state) => state.refresh)
@@ -134,6 +136,13 @@ export function SwarmWorkspace({
           />
         ) : detail ? (
           <SwarmOverview detail={detail} />
+        ) : detailError && swarmId ? (
+          <div className="swarm-placeholder" role="alert">
+            <p>{detailError}</p>
+            <button type="button" className="button button-secondary" onClick={() => void loadDetail(projectId, swarmId)}>
+              Retry
+            </button>
+          </div>
         ) : !swarmId ? (
           <div className="swarm-placeholder">
             <p>Select a Swarm, or create a new one.</p>
@@ -141,8 +150,10 @@ export function SwarmWorkspace({
               <Plus size={15} /> New Swarm
             </button>
           </div>
-        ) : (
+        ) : detailLoading ? (
           <div className="swarm-placeholder"><p>Loading Swarm…</p></div>
+        ) : (
+          <div className="swarm-placeholder"><p>Select another Swarm or retry from the list.</p></div>
         )}
       </div>
     </div>

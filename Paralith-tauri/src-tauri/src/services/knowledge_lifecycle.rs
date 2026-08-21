@@ -130,6 +130,14 @@ impl KnowledgeLifecycle {
         if self.running.swap(true, Ordering::SeqCst) {
             return;
         }
+        // Anything left `running` belongs to a process that is gone: the claim query only takes
+        // `queued` and `retrying`, so without this the row is stranded forever *and* shadows every
+        // later enqueue sharing its dedup key. Safe here because no worker is live yet.
+        match self.database.recover_running_knowledge_jobs() {
+            Ok(0) => {}
+            Ok(recovered) => log::info!("requeued {recovered} interrupted knowledge job(s)"),
+            Err(error) => log::warn!("interrupted knowledge jobs not requeued: {}", error.message),
+        }
         let worker = self.clone();
         let spawned = std::thread::Builder::new()
             .name("paralith-knowledge".to_owned())

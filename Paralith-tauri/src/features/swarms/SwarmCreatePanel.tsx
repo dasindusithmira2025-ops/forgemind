@@ -8,6 +8,7 @@ import type {
   SwarmLaunchPreview,
   SwarmPreset,
   SwarmRole,
+  SwarmRoleAllocation,
   SwarmRoleConfig,
   SwarmRuntimeKind,
   SwarmMemberModelConfig,
@@ -20,7 +21,13 @@ type Step = 'team' | 'mission' | 'review'
 interface RosterAgent { id: string; role: SwarmRole; runtime: Exclude<SwarmRuntimeKind, 'auto'>; modelConfig: SwarmMemberModelConfig }
 
 const ROLES: SwarmRole[] = ['coordinator', 'scout', 'builder', 'debugger', 'reviewer', 'integrator']
-/** Mirrors `model_registry::PLACEHOLDER_MODEL_ID`: a member with no real selection yet. */
+/**
+ * Mirrors `model_registry::UNCONFIGURED_MODEL_ID`. It is a configuration *state*, never a runtime
+ * identity, and is only ever produced when the registry itself cannot offer a model for a
+ * provider. A member's runtime identity is always `providerId` + `modelId` resolved against the
+ * backend model registry; every label on screen is derived from that same registry entry, so the
+ * editor and readiness can never disagree about which model will run.
+ */
 const UNCONFIGURED_MODEL_ID = 'unconfigured'
 const RESPONSIBILITY: Record<SwarmRole, string> = {
   coordinator: 'Plans the mission, delegates runnable work, and maintains shared context.',
@@ -49,6 +56,10 @@ export function SwarmCreatePanel({ projectId, onCreated, onCancel }: {
   const [presetName, setPresetName] = useState('Custom team')
   const [presetDefault, setPresetDefault] = useState(false)
   const [roster, setRoster] = useState<RosterAgent[]>([])
+  /** A preset selected before the registry arrived. The roster is expanded once every allocation's
+   *  canonical model can be resolved, so it is never seeded with a placeholder identity that a
+   *  later effect has to repair. */
+  const [pendingPreset, setPendingPreset] = useState<SwarmPreset>()
   const [expanded, setExpanded] = useState<string>()
   const [maxParallel, setMaxParallel] = useState(4)
   const [mission, setMission] = useState('')
@@ -57,10 +68,16 @@ export function SwarmCreatePanel({ projectId, onCreated, onCancel }: {
   const [preview, setPreview] = useState<SwarmLaunchPreview>()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const [models, setModels] = useState<SwarmModelCapability[]>([])
+  /** `undefined` until the registry load settles. That distinction matters: "not loaded yet" must
+   *  postpone roster expansion, while "loaded and empty" is a real, reportable registry outage. */
+  const [models, setModels] = useState<SwarmModelCapability[]>()
 
   useEffect(() => { if (presets.length === 0) void loadPresets() }, [loadPresets, presets.length])
-  useEffect(() => { const load = native.listSwarmModelRegistry; if (load) void load().then(setModels).catch(() => setModels([])) }, [])
+  useEffect(() => {
+    const load = native.listSwarmModelRegistry
+    if (!load) { setModels([]); return }
+    void load().then(setModels).catch(() => setModels([]))
+  }, [])
   useEffect(() => {
     const load = native.getProject?.(projectId)
     void load?.then(setProject).catch(() => undefined)
@@ -73,26 +90,16 @@ export function SwarmCreatePanel({ projectId, onCreated, onCancel }: {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [presetId, presets])
 
-  // Built-in presets store no per-member model (an `auto` allocation has no provider yet), so the
-  // roster is seeded with a placeholder. Resolve those to a real registered model as soon as the
-  // registry arrives: the review step must show the model that will actually run, not
-  // "Model not configured".
+  // Expand a selected preset exactly once, and only against a loaded registry. Presets and the
+  // registry load concurrently and either can win the race; deriving the roster from both means the
+  // outcome is identical in both orders and no placeholder identity is ever committed.
   useEffect(() => {
-    if (models.length === 0) return
-    setRoster((current) => {
-      if (!current.some((agent) => agent.modelConfig.modelId === UNCONFIGURED_MODEL_ID)) return current
-      let changed = false
-      const next = current.map((agent) => {
-        if (agent.modelConfig.modelId !== UNCONFIGURED_MODEL_ID) return agent
-        const model = recommendedModel(models.filter((item) => item.providerId === agent.runtime), agent.role)
-        if (!model) return agent
-        changed = true
-        return { ...agent, modelConfig: preserveConfig(agent.modelConfig, model) }
-      })
-      return changed ? next : current
-    })
-  }, [models])
+    if (!pendingPreset || !models) return
+    setRoster(expandRoster(pendingPreset.roles, models))
+    setPendingPreset(undefined)
+  }, [pendingPreset, models])
 
+  const registry = models ?? []
   const roles = useMemo(() => rosterToRoles(roster), [roster])
   const roleCounts = useMemo(() => ROLES.map((role) => ({ role, count: roster.filter((agent) => agent.role === role).length })).filter((item) => item.count > 0), [roster])
   const duplicateNames = new Set(roster.map((agent) => agent.id)).size !== roster.length
@@ -103,7 +110,8 @@ export function SwarmCreatePanel({ projectId, onCreated, onCancel }: {
     setCustomPresetId(preset.builtin ? undefined : preset.id)
     setPresetName(preset.builtin ? `${preset.name} copy` : preset.name)
     setPresetDefault(preset.isDefault)
-    setRoster(expandRoster(preset.roles))
+    setRoster(models ? expandRoster(preset.roles, models) : [])
+    setPendingPreset(models ? undefined : preset)
     setMaxParallel(preset.maxParallel)
     setPreview(undefined)
     setError('')
@@ -158,7 +166,7 @@ export function SwarmCreatePanel({ projectId, onCreated, onCancel }: {
 
   function addAgent() {
     const ordinal = roster.filter((agent) => agent.role === 'builder').length + 1
-    const model = recommendedModel(models, 'builder')
+    const model = recommendedModel(registry, 'builder')
     if (!model) { setError('Model registry is unavailable. Refresh and select a provider before adding a member.'); return }
     setRoster((current) => [...current, { id: `builder-${ordinal}-${crypto.randomUUID()}`, role: 'builder', runtime: 'codex', modelConfig: configFromModel(model) }])
     setPresetId('__custom__')
@@ -177,6 +185,13 @@ export function SwarmCreatePanel({ projectId, onCreated, onCancel }: {
   async function moveToMission() {
     if (roster.length === 0 || duplicateNames) {
       setError('Add at least one valid agent before continuing.')
+      return
+    }
+    // A member without a resolved registry identity cannot be launched, so it must not reach
+    // Review either. Name the members and the reason rather than failing later at launch.
+    const unresolved = roster.filter((agent) => !modelReadiness(agent.modelConfig).resolved)
+    if (unresolved.length > 0) {
+      setError(`Select a registered model for: ${unresolved.map((agent) => `${displayName(agent, roster)} (${modelReadiness(agent.modelConfig).label})`).join(', ')}.`)
       return
     }
     setError('')
@@ -259,7 +274,7 @@ export function SwarmCreatePanel({ projectId, onCreated, onCancel }: {
           <div className="swarm-preset-strip" role="radiogroup" aria-label="Team preset">
             {presets.map((preset) => (
               <button key={preset.id} type="button" role="radio" aria-checked={presetId === preset.id} className={presetId === preset.id ? 'is-selected' : ''} onClick={() => selectPreset(preset)}>
-                <strong>{preset.name}</strong><span>{expandRoster(preset.roles).length} agents · {preset.maxParallel} parallel</span>
+                <strong>{preset.name}</strong><span>{agentCount(preset.roles)} agents · {preset.maxParallel} parallel</span>
               </button>
             ))}
             <button type="button" role="radio" aria-checked={presetId === '__custom__'} className={presetId === '__custom__' ? 'is-selected' : ''} onClick={() => setPresetId('__custom__')}>
@@ -286,20 +301,20 @@ export function SwarmCreatePanel({ projectId, onCreated, onCancel }: {
                     <strong>{displayName(agent, roster)}</strong>
                     <span>{roleLabel(agent.role).replace(/s$/, '')}</span>
                     <span className="swarm-runtime-mark">{agent.modelConfig.providerDisplayName}</span><span className="swarm-runtime-mark">{agent.modelConfig.modelDisplayName}</span>
-                    <span className="swarm-readiness-pending">{agent.modelConfig.lastValidationStatus === 'valid' ? 'Validated' : 'Validated before launch'}</span>
+                    <span className={modelReadiness(agent.modelConfig).ready ? 'swarm-readiness-ready' : 'swarm-readiness-pending'}>{modelReadiness(agent.modelConfig).label}</span>
                     <span className="swarm-agent-index">{String(index + 1).padStart(2, '0')}</span>
                   </button>
                   {isOpen ? (
                     <div className="swarm-roster-detail">
                       <p>{RESPONSIBILITY[agent.role]}</p>
                       <label>Role<select value={agent.role} onChange={(event) => updateAgent(agent.id, { role: event.target.value as SwarmRole })}>{ROLES.map((role) => <option key={role} value={role}>{roleLabel(role).replace(/s$/, '')}</option>)}</select></label>
-                      <label>Provider<select value={agent.modelConfig.providerId} onChange={(event) => { const model = recommendedModel(models.filter((item) => item.providerId === event.target.value), agent.role); if (model) updateAgent(agent.id, { runtime: model.providerId as RosterAgent['runtime'], modelConfig: preserveConfig(agent.modelConfig, model) }) }}><option value="claude">Claude</option><option value="codex">Codex</option></select></label>
-                      <label>Model<select value={agent.modelConfig.modelId} onChange={(event) => { const model = models.find((item) => item.providerId === agent.modelConfig.providerId && item.modelId === event.target.value); if (model) updateAgent(agent.id, { modelConfig: preserveConfig(agent.modelConfig, model) }) }}>{models.filter((item) => item.providerId === agent.modelConfig.providerId).map((model) => <option key={model.modelId} value={model.modelId} disabled={!model.available}>{model.displayName}{model.available ? ` — ${model.description}` : ' — unavailable'}</option>)}</select></label>
+                      <label>Provider<select value={agent.modelConfig.providerId} onChange={(event) => { const model = recommendedModel(registry.filter((item) => item.providerId === event.target.value), agent.role); if (model) updateAgent(agent.id, { runtime: model.providerId as RosterAgent['runtime'], modelConfig: preserveConfig(agent.modelConfig, model) }) }}><option value="claude">Claude</option><option value="codex">Codex</option></select></label>
+                      <label>Model<select value={agent.modelConfig.modelId} onChange={(event) => { const model = registry.find((item) => item.providerId === agent.modelConfig.providerId && item.modelId === event.target.value); if (model) updateAgent(agent.id, { modelConfig: preserveConfig(agent.modelConfig, model) }) }}>{registry.filter((item) => item.providerId === agent.modelConfig.providerId).map((model) => <option key={model.modelId} value={model.modelId} disabled={!model.available}>{model.displayName}{model.available ? ` — ${model.description}` : ' — unavailable'}</option>)}</select></label>
                       <label>Reasoning<select value={agent.modelConfig.reasoningEffort} onChange={(event) => updateAgent(agent.id, { modelConfig: { ...agent.modelConfig, reasoningEffort: event.target.value as SwarmMemberModelConfig['reasoningEffort'] } })}>{['low','medium','high','max'].map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
                       <label>Mode<select value={agent.modelConfig.executionMode} onChange={(event) => updateAgent(agent.id, { modelConfig: { ...agent.modelConfig, executionMode: event.target.value as SwarmMemberModelConfig['executionMode'] } })}>{['interactive','autonomous','review'].map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
                       <label>Context<select value={agent.modelConfig.contextStrategy} onChange={(event) => updateAgent(agent.id, { modelConfig: { ...agent.modelConfig, contextStrategy: event.target.value as SwarmMemberModelConfig['contextStrategy'] } })}>{['minimal','balanced','full'].map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
                       <label>Permission<select value={agent.modelConfig.permissionMode} onChange={(event) => updateAgent(agent.id, { modelConfig: { ...agent.modelConfig, permissionMode: event.target.value as SwarmMemberModelConfig['permissionMode'] } })}>{['ask','trusted','restricted'].map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
-                      <label>Fallback<select value={agent.modelConfig.fallback ? `${agent.modelConfig.fallback.providerId}/${agent.modelConfig.fallback.modelId}/${agent.modelConfig.fallback.policy}` : ''} onChange={(event) => { const [providerId, modelId, policy] = event.target.value.split('/'); updateAgent(agent.id, { modelConfig: { ...agent.modelConfig, fallback: providerId && modelId ? { providerId, modelId, policy: (policy || 'when_unavailable') as NonNullable<SwarmMemberModelConfig['fallback']>['policy'] } : null } }) }}><option value="">No fallback</option>{models.filter((model) => model.available && !(model.providerId === agent.modelConfig.providerId && model.modelId === agent.modelConfig.modelId)).flatMap((model) => ['when_unavailable', 'when_provider_cannot_start', 'require_approval'].map((policy) => <option key={`${model.providerId}/${model.modelId}/${policy}`} value={`${model.providerId}/${model.modelId}/${policy}`}>{model.providerDisplayName} / {model.displayName} · {policy.replaceAll('_', ' ')}</option>))}</select></label>
+                      <label>Fallback<select value={agent.modelConfig.fallback ? `${agent.modelConfig.fallback.providerId}/${agent.modelConfig.fallback.modelId}/${agent.modelConfig.fallback.policy}` : ''} onChange={(event) => { const [providerId, modelId, policy] = event.target.value.split('/'); updateAgent(agent.id, { modelConfig: { ...agent.modelConfig, fallback: providerId && modelId ? { providerId, modelId, policy: (policy || 'when_unavailable') as NonNullable<SwarmMemberModelConfig['fallback']>['policy'] } : null } }) }}><option value="">No fallback</option>{registry.filter((model) => model.available && !(model.providerId === agent.modelConfig.providerId && model.modelId === agent.modelConfig.modelId)).flatMap((model) => ['when_unavailable', 'when_provider_cannot_start', 'require_approval'].map((policy) => <option key={`${model.providerId}/${model.modelId}/${policy}`} value={`${model.providerId}/${model.modelId}/${policy}`}>{model.providerDisplayName} / {model.displayName} · {policy.replaceAll('_', ' ')}</option>))}</select></label>
                       <span className="swarm-permission-summary">{permissionSummary(agent.role)}</span>
                       <div className="swarm-roster-order"><button type="button" aria-label={`Move ${displayName(agent, roster)} up`} disabled={index === 0} onClick={() => moveAgent(agent.id, -1)}><ArrowUp size={13} /></button><button type="button" aria-label={`Move ${displayName(agent, roster)} down`} disabled={index === roster.length - 1} onClick={() => moveAgent(agent.id, 1)}><ArrowDown size={13} /></button></div>
                       <button type="button" className="swarm-remove-agent" onClick={() => removeAgent(agent.id)}><Trash2 size={13} /> Remove</button>
@@ -349,16 +364,43 @@ export function SwarmCreatePanel({ projectId, onCreated, onCancel }: {
   )
 }
 
-function expandRoster(roles: SwarmRoleConfig[]): RosterAgent[] {
+/**
+ * Resolve one stored allocation into the canonical model identity the roster will carry.
+ *
+ * A stored `(providerId, modelId)` is authoritative and is looked up in the registry so its label,
+ * capabilities, and availability are always *derived* rather than copied from whatever the preset
+ * happened to be serialized with. A preset naming a model the registry no longer publishes keeps
+ * its canonical id and is surfaced as an outdated model: it is neither silently downgraded to
+ * "not configured" nor silently swapped for a different model.
+ *
+ * An allocation with no stored model (an `auto` allocation, or a preset written before the model
+ * matrix existed) is resolved from the registry by role. Only an empty registry yields the
+ * unconfigured sentinel.
+ */
+function resolveConfig(allocation: SwarmRoleAllocation, role: SwarmRole, runtime: Exclude<SwarmRuntimeKind, 'auto'>, models: SwarmModelCapability[]): SwarmMemberModelConfig {
+  const stored = allocation.modelConfig
+  if (stored && stored.modelId !== UNCONFIGURED_MODEL_ID) {
+    const registered = models.find((item) => item.providerId === stored.providerId && item.modelId === stored.modelId)
+    return registered ? preserveConfig(stored, registered) : outdatedModel(stored)
+  }
+  const model = recommendedModel(models.filter((item) => item.providerId === runtime), role)
+  return model ? configFromModel(model) : unconfiguredModel(runtime)
+}
+
+function expandRoster(roles: SwarmRoleConfig[], models: SwarmModelCapability[]): RosterAgent[] {
   const result: RosterAgent[] = []
   for (const role of roles.filter((item) => item.enabled)) {
     for (const allocation of role.allocations) {
       const runtime = allocation.runtime === 'auto' ? (role.role === 'reviewer' ? 'codex' : 'claude') : allocation.runtime
-      const modelConfig = allocation.modelConfig ?? unconfiguredModel(runtime)
+      const modelConfig = resolveConfig(allocation, role.role, runtime, models)
       for (let index = 0; index < allocation.count; index += 1) result.push({ id: `${role.role}-${runtime}-${index}-${crypto.randomUUID()}`, role: role.role, runtime, modelConfig })
     }
   }
   return result
+}
+
+function agentCount(roles: SwarmRoleConfig[]): number {
+  return roles.filter((role) => role.enabled).flatMap((role) => role.allocations).reduce((total, allocation) => total + allocation.count, 0)
 }
 
 function rosterToRoles(roster: RosterAgent[]): SwarmRoleConfig[] {
@@ -375,6 +417,19 @@ function rosterToRoles(roster: RosterAgent[]): SwarmRoleConfig[] {
 function configFromModel(model: SwarmModelCapability): SwarmMemberModelConfig { return { providerId: model.providerId, providerDisplayName: model.providerDisplayName, modelId: model.modelId, modelDisplayName: model.displayName, reasoningEffort: (model.supportedReasoningEfforts.includes('high') ? 'high' : model.supportedReasoningEfforts[0] ?? 'medium') as SwarmMemberModelConfig['reasoningEffort'], executionMode: 'autonomous', contextStrategy: 'balanced', permissionMode: 'ask', providerOptions: {}, configVersion: 1, lastValidationStatus: model.available ? 'valid' : 'provider_unavailable' } }
 function preserveConfig(previous: SwarmMemberModelConfig, model: SwarmModelCapability): SwarmMemberModelConfig { const next = configFromModel(model); return { ...next, reasoningEffort: model.supportedReasoningEfforts.includes(previous.reasoningEffort) ? previous.reasoningEffort : next.reasoningEffort, executionMode: model.supportedExecutionModes.includes(previous.executionMode) ? previous.executionMode : next.executionMode, contextStrategy: previous.contextStrategy, permissionMode: previous.permissionMode, fallback: previous.fallback, providerOptions: previous.providerOptions } }
 function recommendedModel(models: SwarmModelCapability[], role: SwarmRole): SwarmModelCapability | undefined { const recommended = models.find((model) => model.available && model.recommendedRoles.includes(role)); return recommended ?? models.find((model) => model.available) ?? models[0] }
+/** A stored canonical model the registry no longer publishes. The id is preserved so the failure
+ *  is legible and so validation still reports the real identity that went stale. */
+function outdatedModel(previous: SwarmMemberModelConfig): SwarmMemberModelConfig { return { ...previous, modelDisplayName: `Unavailable model “${previous.modelId}”`, lastValidationStatus: 'deprecated_model' } }
+/** The one honest reading of a member's model state, derived from the single resolved config so
+ *  the roster row, the review step, and launch validation cannot disagree. */
+function modelReadiness(config: SwarmMemberModelConfig): { label: string; ready: boolean; resolved: boolean } {
+  if (config.modelId === UNCONFIGURED_MODEL_ID) return { label: 'Model not configured', ready: false, resolved: false }
+  if (config.lastValidationStatus === 'deprecated_model') return { label: 'Model no longer available', ready: false, resolved: false }
+  if (config.lastValidationStatus === 'valid') return { label: 'Ready', ready: true, resolved: true }
+  // A resolved model whose provider is not authenticated yet. The identity is sound, so the flow
+  // continues; `previewSwarmLaunch` is the authority on whether it may actually start.
+  return { label: 'Provider not ready', ready: false, resolved: true }
+}
 function unconfiguredModel(providerId: Exclude<SwarmRuntimeKind, 'auto'>): SwarmMemberModelConfig { return { providerId, providerDisplayName: providerId === 'claude' ? 'Claude' : 'Codex', modelId: UNCONFIGURED_MODEL_ID, modelDisplayName: 'Model not configured', reasoningEffort: 'medium', executionMode: 'autonomous', contextStrategy: 'balanced', permissionMode: 'ask', providerOptions: {}, configVersion: 1, lastValidationStatus: 'unvalidated' } }
 
 function displayName(agent: RosterAgent, roster: RosterAgent[]): string {

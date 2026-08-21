@@ -17,6 +17,23 @@ pub struct RegisteredModel {
     pub vision: bool,
 }
 
+/// Sentinel model id for a member that has never had a real model selected. It is a
+/// configuration state, never a runtime identity: validation must report it as "no model
+/// configured" rather than as an unknown model, and it can never reach a provider CLI.
+pub const UNCONFIGURED_MODEL_ID: &str = "unconfigured";
+
+/// True when the config carries the [`UNCONFIGURED_MODEL_ID`] sentinel instead of a real model.
+pub fn is_unconfigured(config: &SwarmMemberModelConfig) -> bool {
+    config.model_id == UNCONFIGURED_MODEL_ID
+}
+
+/// Canonical `provider/model` identity for diagnostics. Display labels are derived from this
+/// registry for presentation only and must never appear in a runtime identity or an error that
+/// names the model a launch will actually use.
+pub fn canonical_label(provider_id: &str, model_id: &str) -> String {
+    format!("{provider_id}/{model_id}")
+}
+
 const MODELS: &[RegisteredModel] = &[
     RegisteredModel {
         provider_id: "claude",
@@ -129,7 +146,7 @@ pub fn unvalidated_for(provider_id: &str) -> SwarmMemberModelConfig {
     SwarmMemberModelConfig {
         provider_id: provider_id.into(),
         provider_display_name: provider_id.into(),
-        model_id: "unconfigured".into(),
+        model_id: UNCONFIGURED_MODEL_ID.into(),
         model_display_name: "Model not configured".into(),
         reasoning_effort: "medium".into(),
         execution_mode: "autonomous".into(),
@@ -185,6 +202,15 @@ mod tests {
         assert_ne!(opus.model_id, sonnet.model_id);
         assert!(find("codex", "sonnet").is_none());
         assert_eq!(provider_models("codex").len(), 4);
+    }
+
+    #[test]
+    fn the_unconfigured_sentinel_is_never_a_registered_model() {
+        for provider in ["claude", "codex"] {
+            assert!(find(provider, UNCONFIGURED_MODEL_ID).is_none());
+            assert!(is_unconfigured(&unvalidated_for(provider)));
+            assert!(!is_unconfigured(&default_for(provider).unwrap()));
+        }
     }
 
     #[test]

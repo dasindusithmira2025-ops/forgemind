@@ -1420,7 +1420,20 @@ pub fn upgrade_role_configs_json(value: &serde_json::Value) -> Option<Vec<SwarmR
                         .filter(|value| !value.is_empty())
                         .map(str::to_string)
                         .unwrap_or_else(|| format!("{}-{}", role.as_str(), runtime.as_str()));
-                    Some(SwarmRoleAllocation::new(id, runtime, count))
+                    let mut allocation = SwarmRoleAllocation::new(id, runtime, count);
+                    // A stored canonical model identity is user configuration, not a derived
+                    // default: carry it through the upgrade untouched. Only when the entry has
+                    // none does the registry-backed suggestion from `new` stand.
+                    if let Some(config) = item
+                        .get("modelConfig")
+                        .filter(|value| !value.is_null())
+                        .and_then(|value| {
+                            serde_json::from_value::<SwarmMemberModelConfig>(value.clone()).ok()
+                        })
+                    {
+                        allocation.model_config = Some(config);
+                    }
+                    Some(allocation)
                 })
                 .collect()
         } else {
@@ -1447,4 +1460,116 @@ pub fn upgrade_role_configs_json(value: &serde_json::Value) -> Option<Vec<SwarmR
         });
     }
     Some(roles)
+}
+
+#[cfg(test)]
+mod model_identity_tests {
+    use super::*;
+
+    /// Every built-in preset must ship a canonical, registry-resolvable model for each allocation
+    /// that names a concrete runtime. An `auto` allocation carries none by design: it has no
+    /// provider yet, and the engine resolves it from the registry when the agent is staffed.
+    #[test]
+    fn builtin_presets_carry_registry_resolvable_models() {
+        for (id, _name, _max_parallel, roles) in builtin_presets() {
+            for role in &roles {
+                for allocation in &role.allocations {
+                    if allocation.runtime == SwarmRuntimeKind::Auto {
+                        assert!(
+                            allocation.model_config.is_none(),
+                            "{id}: an auto allocation must not pin a provider"
+                        );
+                        continue;
+                    }
+                    let config = allocation
+                        .model_config
+                        .as_ref()
+                        .unwrap_or_else(|| panic!("{id}: {:?} has no model", allocation.id));
+                    assert_eq!(
+                        config.provider_id,
+                        allocation.runtime.as_str(),
+                        "{id}: model provider must match the allocation runtime"
+                    );
+                    assert!(
+                        !crate::agents::model_registry::is_unconfigured(config),
+                        "{id}: a built-in preset must never ship the unconfigured sentinel"
+                    );
+                    assert!(
+                        crate::agents::model_registry::find(&config.provider_id, &config.model_id)
+                            .is_some(),
+                        "{id}: {}/{} is not registered",
+                        config.provider_id,
+                        config.model_id
+                    );
+                }
+            }
+        }
+    }
+
+    /// Display labels are derived presentation. They must agree with the registry entry the
+    /// canonical id resolves to, so no surface can ever show a model that is not the one that runs.
+    #[test]
+    fn builtin_preset_labels_are_derived_from_the_registry() {
+        for (_id, _name, _max_parallel, roles) in builtin_presets() {
+            for allocation in roles.iter().flat_map(|role| role.allocations.iter()) {
+                let Some(config) = allocation.model_config.as_ref() else {
+                    continue;
+                };
+                let model =
+                    crate::agents::model_registry::find(&config.provider_id, &config.model_id)
+                        .unwrap();
+                assert_eq!(config.model_display_name, model.display_name);
+                assert_eq!(config.provider_display_name, model.provider_name);
+            }
+        }
+    }
+
+    /// The legacy-shape upgrade is the one place stored preset configuration is rewritten. A
+    /// canonical model identity is user configuration, not a derived default: losing it silently
+    /// converts a configured member into an unconfigured one.
+    #[test]
+    fn upgrading_a_stored_preset_preserves_its_canonical_model() {
+        let value = serde_json::json!([{
+            "role": "builder",
+            "enabled": true,
+            "allocations": [{
+                "id": "builder-claude",
+                "runtime": "claude",
+                "count": 2,
+                "modelConfig": {
+                    "providerId": "claude",
+                    "providerDisplayName": "Claude",
+                    "modelId": "opus",
+                    "modelDisplayName": "Opus",
+                    "reasoningEffort": "high",
+                    "executionMode": "review",
+                    "contextStrategy": "full",
+                    "permissionMode": "trusted"
+                }
+            }]
+        }]);
+        let roles = upgrade_role_configs_json(&value).unwrap();
+        let config = roles[0].allocations[0].model_config.as_ref().unwrap();
+        assert_eq!(config.model_id, "opus");
+        assert_eq!(config.reasoning_effort, "high");
+        assert_eq!(config.execution_mode, "review");
+        assert_eq!(config.permission_mode, "trusted");
+    }
+
+    /// An allocation with no stored model still gets the registry-backed default for its runtime,
+    /// never the unconfigured sentinel.
+    #[test]
+    fn upgrading_an_allocation_without_a_model_falls_back_to_the_registry_default() {
+        let value = serde_json::json!([{
+            "role": "builder",
+            "enabled": true,
+            "allocations": [{ "id": "b", "runtime": "codex", "count": 1 }]
+        }]);
+        let roles = upgrade_role_configs_json(&value).unwrap();
+        let config = roles[0].allocations[0].model_config.as_ref().unwrap();
+        assert!(!crate::agents::model_registry::is_unconfigured(config));
+        assert!(
+            crate::agents::model_registry::find(&config.provider_id, &config.model_id).is_some()
+        );
+    }
 }
