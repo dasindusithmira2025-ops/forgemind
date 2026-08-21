@@ -42,7 +42,7 @@ describe('swarmStore (backend-authoritative)', () => {
     state.swarms = []
     state.detail = null
     vi.clearAllMocks()
-    useSwarmStore.setState({ presets: [], itemsByProject: {}, detailById: {}, pendingBySwarm: {}, error: undefined })
+    useSwarmStore.setState({ presets: [], itemsByProject: {}, includeArchivedByProject: {}, detailById: {}, loadingDetailById: {}, detailErrors: {}, pendingBySwarm: {}, error: undefined })
   })
 
   it('creates a swarm and reloads the project list from the backend', async () => {
@@ -66,6 +66,28 @@ describe('swarmStore (backend-authoritative)', () => {
     expect(startSwarm).toHaveBeenCalledWith('p1', 's1')
     // Progress reflects the backend response, not a local increment.
     expect(useSwarmStore.getState().itemsByProject.p1[0].swarm.lifecycle).toBe('building')
+  })
+
+  it('preserves history mode when actions refresh the project list', async () => {
+    await useSwarmStore.getState().create({ projectId: 'p1', mission: 'Fix bug', presetId: 'auto' })
+    await useSwarmStore.getState().loadSwarms('p1', true)
+    await useSwarmStore.getState().loadDetail('p1', 's1')
+
+    await useSwarmStore.getState().start('s1')
+
+    expect(listSwarms).toHaveBeenLastCalledWith('p1', true)
+    expect(useSwarmStore.getState().includeArchivedByProject.p1).toBe(true)
+  })
+
+  it('tracks detail load failures per swarm so the view can retry', async () => {
+    getSwarmDetail.mockRejectedValueOnce(new Error('database offline'))
+
+    const detail = await useSwarmStore.getState().loadDetail('p1', 's1')
+
+    expect(detail).toBeUndefined()
+    expect(useSwarmStore.getState().loadingDetailById.s1).toBeUndefined()
+    expect(useSwarmStore.getState().detailErrors.s1).toBe('database offline')
+    expect(useSwarmStore.getState().error).toBe('database offline')
   })
 
   it('surfaces native errors instead of throwing them unhandled for lifecycle actions', async () => {

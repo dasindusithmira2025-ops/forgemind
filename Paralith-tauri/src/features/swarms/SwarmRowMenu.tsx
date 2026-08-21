@@ -24,7 +24,7 @@ export function SwarmRowMenu({ item, onOpen, onCreated }: {
   const create = useSwarmStore((state) => state.create)
   const swarm = item.swarm
   const active = isActiveLifecycle(swarm.lifecycle) || swarm.lifecycle === 'decision_required'
-  const canDelete = swarm.lifecycle === 'draft' || ['completed', 'failed', 'cancelled', 'archived', 'ready_for_review'].includes(swarm.lifecycle)
+  const canDelete = !swarm.archived && (swarm.lifecycle === 'draft' || ['completed', 'failed', 'cancelled', 'ready_for_review'].includes(swarm.lifecycle))
   const canArchive = ['completed', 'failed', 'cancelled', 'ready_for_review'].includes(swarm.lifecycle)
   const canFollowUp = ['completed', 'failed', 'cancelled', 'archived', 'ready_for_review'].includes(swarm.lifecycle)
 

@@ -2396,7 +2396,8 @@ impl SwarmService {
         swarm_id: &str,
         defaults: &SwarmExecutionDefaults,
     ) -> AppResult<()> {
-        self.swarm_for_project(project_id, swarm_id)?;
+        let (swarm, _) = self.swarm_for_project(project_id, swarm_id)?;
+        ensure_swarm_mutable(&swarm)?;
         if let Some(config) = &defaults.member {
             self.validate_model_config(config)?;
         }
@@ -2423,7 +2424,8 @@ impl SwarmService {
         swarm_id: &str,
         member_ids: &[String],
     ) -> AppResult<usize> {
-        self.swarm_for_project(project_id, swarm_id)?;
+        let (swarm, _) = self.swarm_for_project(project_id, swarm_id)?;
+        ensure_swarm_mutable(&swarm)?;
         let defaults = self.db().swarm_execution_defaults(swarm_id)?;
         let Some(default_config) = defaults.member else {
             return Err(AppError::new(
@@ -2468,7 +2470,8 @@ impl SwarmService {
         swarm_id: &str,
         member_id: &str,
     ) -> AppResult<SwarmMemberModelConfig> {
-        self.swarm_for_project(project_id, swarm_id)?;
+        let (swarm, _) = self.swarm_for_project(project_id, swarm_id)?;
+        ensure_swarm_mutable(&swarm)?;
         let mut agent = self
             .db()
             .list_swarm_agents(swarm_id)?
@@ -2536,7 +2539,8 @@ impl SwarmService {
         member_id: &str,
         mut config: SwarmMemberModelConfig,
     ) -> AppResult<SwarmMemberModelConfig> {
-        self.swarm_for_project(project_id, swarm_id)?;
+        let (swarm, _) = self.swarm_for_project(project_id, swarm_id)?;
+        ensure_swarm_mutable(&swarm)?;
         let agent = self
             .db()
             .list_swarm_agents(swarm_id)?
@@ -2608,10 +2612,17 @@ impl SwarmService {
             .ok_or_else(|| {
                 AppError::new(
                     "swarm_model_unavailable",
-                    format!(
-                        "{} / {} is not in the provider registry.",
-                        config.provider_display_name, config.model_display_name
-                    ),
+                    if crate::agents::model_registry::is_unconfigured(config) {
+                        "This member has no model configured.".to_string()
+                    } else {
+                        format!(
+                            "{} is not in the provider registry.",
+                            crate::agents::model_registry::canonical_label(
+                                &config.provider_id,
+                                &config.model_id
+                            )
+                        )
+                    },
                     true,
                 )
             })?;
@@ -2763,40 +2774,7 @@ impl SwarmService {
             .unwrap_or(preset.max_parallel)
             .clamp(1, total_agents.clamp(1, 16));
         let runtime_readiness = self.runtime_readiness()?;
-        let mut warnings = Vec::new();
-        for runtime in roles
-            .iter()
-            .filter(|role| role.enabled)
-            .flat_map(|role| role.allocations.iter())
-            .filter(|allocation| {
-                allocation.count > 0
-                    && allocation
-                        .model_config
-                        .as_ref()
-                        .and_then(|config| config.fallback.as_ref())
-                        .is_none()
-            })
-            .map(|allocation| allocation.runtime)
-        {
-            if runtime == SwarmRuntimeKind::Auto {
-                if !runtime_readiness.is_empty()
-                    && !runtime_readiness.iter().any(|item| item.available)
-                {
-                    warnings.push(
-                        "Auto has no authenticated Claude or Codex runtime available.".into(),
-                    );
-                }
-            } else if let Some(item) = runtime_readiness
-                .iter()
-                .find(|item| item.runtime == runtime)
-            {
-                if !item.available {
-                    warnings.push(format!("{}: {}", runtime_label(runtime), item.message));
-                }
-            }
-        }
-        warnings.sort();
-        warnings.dedup();
+        let warnings = launch_blockers_for_roles(&roles, &runtime_readiness);
         Ok(SwarmLaunchPreview {
             name: request
                 .name
@@ -2842,6 +2820,11 @@ impl SwarmService {
         // must not share ids with the source preset (whose ids may repeat across presets) nor with
         // any other Swarm.
         validate_role_configs(&roles).map_err(role_config_error)?;
+        let runtime_readiness = self.runtime_readiness()?;
+        let blockers = launch_blockers_for_roles(&roles, &runtime_readiness);
+        if !blockers.is_empty() {
+            return Err(launch_blockers_error(&request.project_id, blockers));
+        }
         let total_agents: i64 = roles.iter().map(SwarmRoleConfig::total_count).sum();
         let max_parallel = request
             .max_parallel
@@ -2922,7 +2905,8 @@ impl SwarmService {
     // ---- Lifecycle controls --------------------------------------------------------------
 
     pub fn rename_swarm(&self, project_id: &str, id: &str, name: &str) -> AppResult<Swarm> {
-        self.swarm_for_project(project_id, id)?;
+        let (current, _) = self.swarm_for_project(project_id, id)?;
+        ensure_swarm_mutable(&current)?;
         let swarm = self.db().rename_swarm(id, name)?;
         self.emit_changed(project_id, id);
         Ok(swarm)
@@ -2934,6 +2918,7 @@ impl SwarmService {
         let operation_lock = self.operation_lock(id);
         let operation = operation_lock.lock();
         let (swarm, project) = self.swarm_for_project(project_id, id)?;
+        ensure_swarm_mutable(&swarm)?;
         self.live_project_root(&project)?;
         if swarm.lifecycle.is_terminal() {
             return Err(AppError::new(
@@ -3076,6 +3061,7 @@ impl SwarmService {
         let operation_lock = self.operation_lock(id);
         let _operation = operation_lock.lock();
         let (swarm, _) = self.swarm_for_project(project_id, id)?;
+        ensure_swarm_mutable(&swarm)?;
         if swarm.lifecycle.is_terminal() {
             return Ok(());
         }
@@ -3180,6 +3166,7 @@ impl SwarmService {
         let operation_lock = self.operation_lock(id);
         let operation = operation_lock.lock();
         let (swarm, _) = self.swarm_for_project(project_id, id)?;
+        ensure_swarm_mutable(&swarm)?;
         if !matches!(
             swarm.lifecycle,
             SwarmLifecycle::Paused | SwarmLifecycle::Pausing
@@ -3221,6 +3208,7 @@ impl SwarmService {
         let operation_lock = self.operation_lock(id);
         let _operation = operation_lock.lock();
         let (swarm, _) = self.swarm_for_project(project_id, id)?;
+        ensure_swarm_mutable(&swarm)?;
         if swarm.lifecycle.is_terminal() {
             return Ok(());
         }
@@ -3314,7 +3302,8 @@ impl SwarmService {
     }
 
     pub fn set_priority(&self, project_id: &str, id: &str, priority: i64) -> AppResult<()> {
-        self.swarm_for_project(project_id, id)?;
+        let (swarm, _) = self.swarm_for_project(project_id, id)?;
+        ensure_swarm_mutable(&swarm)?;
         self.db().set_swarm_priority(id, priority)?;
         self.emit_changed(project_id, id);
         Ok(())
@@ -3453,6 +3442,7 @@ impl SwarmService {
     /// Deleting a running Swarm is refused; the caller must stop it first (or use stop-then-delete).
     pub fn delete_swarm(&self, project_id: &str, id: &str) -> AppResult<()> {
         let (swarm, _) = self.swarm_for_project(project_id, id)?;
+        ensure_swarm_mutable(&swarm)?;
         if !matches!(
             swarm.lifecycle,
             SwarmLifecycle::Draft
@@ -3484,7 +3474,8 @@ impl SwarmService {
                 true,
             ));
         }
-        self.swarm_for_project(project_id, &request.swarm_id)?;
+        let (swarm, _) = self.swarm_for_project(project_id, &request.swarm_id)?;
+        ensure_swarm_mutable(&swarm)?;
         let agents = self.db().list_swarm_agents(&request.swarm_id)?;
         let valid_target = request.target == "@swarm"
             || role_from_target(&request.target).is_some()
@@ -3525,6 +3516,7 @@ impl SwarmService {
         repair: bool,
     ) -> AppResult<()> {
         let (swarm, _) = self.swarm_for_project(project_id, swarm_id)?;
+        ensure_swarm_mutable(&swarm)?;
         if swarm.lifecycle.is_terminal() {
             return Err(AppError::new(
                 "swarm_test_followup_closed",
@@ -3607,7 +3599,8 @@ impl SwarmService {
         target: &str,
         body: &str,
     ) -> AppResult<()> {
-        self.swarm_for_project(project_id, swarm_id)?;
+        let (swarm, _) = self.swarm_for_project(project_id, swarm_id)?;
+        ensure_swarm_mutable(&swarm)?;
         if body.len() > 32_768 {
             return Err(AppError::new(
                 "swarm_draft_too_large",
@@ -3622,6 +3615,7 @@ impl SwarmService {
     /// gate — a Swarm can only be accepted from Ready, never forced complete.
     pub fn accept_result(&self, project_id: &str, id: &str) -> AppResult<()> {
         let (swarm, _) = self.swarm_for_project(project_id, id)?;
+        ensure_swarm_mutable(&swarm)?;
         if swarm.lifecycle != SwarmLifecycle::ReadyForReview {
             return Err(AppError::new(
                 "not_ready_for_acceptance",
@@ -3653,6 +3647,7 @@ impl SwarmService {
 
     pub fn resolve_decision(&self, project_id: &str, id: &str, choice: &str) -> AppResult<()> {
         let (swarm, _) = self.swarm_for_project(project_id, id)?;
+        ensure_swarm_mutable(&swarm)?;
         if swarm.lifecycle != SwarmLifecycle::DecisionRequired {
             return Err(AppError::new(
                 "decision_not_open",
@@ -3706,6 +3701,7 @@ impl SwarmService {
         let operation_lock = self.operation_lock(swarm_id);
         let operation = operation_lock.lock();
         let (swarm, _) = self.swarm_for_project(project_id, swarm_id)?;
+        ensure_swarm_mutable(&swarm)?;
         if swarm.lifecycle != SwarmLifecycle::DecisionRequired {
             return Err(AppError::new(
                 "swarm_attention_stale",
@@ -3767,6 +3763,7 @@ impl SwarmService {
         let operation_lock = self.operation_lock(swarm_id);
         let operation = operation_lock.lock();
         let (swarm, _) = self.swarm_for_project(project_id, swarm_id)?;
+        ensure_swarm_mutable(&swarm)?;
         if !matches!(
             swarm.lifecycle,
             SwarmLifecycle::Failed | SwarmLifecycle::Cancelled
@@ -4949,117 +4946,18 @@ impl SwarmService {
         let Some(_detector) = self.inner.detector.as_ref() else {
             return Ok(());
         };
-        let mut needed: Vec<SwarmRuntimeKind> = swarm
-            .roles
-            .iter()
-            .filter(|role| role.enabled)
-            .flat_map(|role| role.allocations.iter())
-            .filter(|allocation| {
-                allocation.count > 0
-                    && allocation
-                        .model_config
-                        .as_ref()
-                        .and_then(|config| config.fallback.as_ref())
-                        .map_or(true, |fallback| {
-                            fallback.policy == "no_fallback"
-                                || fallback.policy == "require_approval"
-                        })
-            })
-            .map(|allocation| allocation.runtime)
-            .collect();
-        needed.sort_by_key(|runtime| runtime.as_str());
-        needed.dedup();
-
         let readiness = self.runtime_readiness()?;
-        let mut unavailable = Vec::new();
-        for runtime in needed {
-            if runtime == SwarmRuntimeKind::Auto {
-                if !readiness.iter().any(|item| item.available) {
-                    unavailable.push("Auto (no authenticated Claude or Codex runtime)".into());
-                }
-                continue;
-            }
-            if let Some(item) = readiness.iter().find(|item| item.runtime == runtime) {
-                if !item.available {
-                    unavailable.push(format!("{} ({})", runtime_label(runtime), item.message));
-                }
-            } else {
-                unavailable.push(format!("{} (readiness unknown)", runtime_label(runtime)));
-            }
-        }
-        for allocation in swarm
-            .roles
-            .iter()
-            .filter(|role| role.enabled)
-            .flat_map(|role| role.allocations.iter())
-            .filter(|allocation| allocation.count > 0)
-        {
-            let Some(config) = allocation.model_config.as_ref() else {
-                unavailable.push(format!(
-                    "{} member has no saved model configuration",
-                    runtime_label(allocation.runtime)
-                ));
-                continue;
-            };
-            let Some(model) =
-                crate::agents::model_registry::find(&config.provider_id, &config.model_id)
-            else {
-                unavailable.push(format!(
-                    "{} / {} is not registered",
-                    config.provider_display_name, config.model_display_name
-                ));
-                continue;
-            };
-            if config.provider_id != allocation.runtime.as_str()
-                || !model.reasoning.contains(&config.reasoning_effort.as_str())
-                || !model.modes.contains(&config.execution_mode.as_str())
-            {
-                unavailable.push(format!(
-                    "{} / {} has unsupported execution settings",
-                    config.provider_display_name, config.model_display_name
-                ));
-            }
-            if let Some(fallback) = &config.fallback {
-                if crate::agents::model_registry::find(&fallback.provider_id, &fallback.model_id)
-                    .is_none()
-                {
-                    unavailable.push(format!(
-                        "Fallback {} / {} is not registered",
-                        fallback.provider_id, fallback.model_id
-                    ));
-                } else if let Some(runtime) = SwarmRuntimeKind::from_db(&fallback.provider_id) {
-                    if !readiness
-                        .iter()
-                        .any(|item| item.runtime == runtime && item.available)
-                    {
-                        unavailable.push(format!(
-                            "Fallback {} / {} is not available",
-                            fallback.provider_id, fallback.model_id
-                        ));
-                    }
-                }
-            }
-        }
-        if unavailable.is_empty() {
+        let blockers = launch_blockers_for_roles(&swarm.roles, &readiness);
+        if blockers.is_empty() {
             return Ok(());
         }
-        Err(AppError::new(
-            "swarm_runtime_unavailable",
-            format!(
-                "This Swarm cannot launch until these runtimes are ready: {}.",
-                unavailable.join("; ")
-            ),
-            true,
-        )
-        .entity(&swarm.id)
-        .action(
-            "Install or authenticate the runtime, or replace the allocation, then start again.",
-        ))
+        Err(launch_blockers_error(&swarm.id, blockers))
     }
 
     /// Add another Builder to a running Swarm (spec §6 — scale during execution).
     pub fn add_builder(&self, project_id: &str, swarm_id: &str) -> AppResult<()> {
-        self.swarm_for_project(project_id, swarm_id)?;
+        let (swarm, _) = self.swarm_for_project(project_id, swarm_id)?;
+        ensure_swarm_mutable(&swarm)?;
         let default_config = self.db().swarm_execution_defaults(swarm_id)?.member;
         let runtime = default_config
             .as_ref()
@@ -5391,6 +5289,142 @@ fn infer_safeguards(
     safeguards
 }
 
+fn ensure_swarm_mutable(swarm: &Swarm) -> AppResult<()> {
+    if !swarm.archived && swarm.lifecycle != SwarmLifecycle::Archived {
+        return Ok(());
+    }
+    Err(AppError::new(
+        "swarm_archived_immutable",
+        "Archived Swarms are immutable history. Start a follow-up Swarm to continue the work.",
+        true,
+    )
+    .entity(&swarm.id))
+}
+
+fn launch_blockers_for_roles(
+    roles: &[SwarmRoleConfig],
+    runtime_readiness: &[SwarmRuntimeReadiness],
+) -> Vec<String> {
+    let mut blockers = Vec::new();
+    for allocation in roles
+        .iter()
+        .filter(|role| role.enabled)
+        .flat_map(|role| role.allocations.iter())
+        .filter(|allocation| allocation.count > 0)
+    {
+        blockers.extend(diagnose_allocation_model(allocation));
+        let fallback = allocation
+            .model_config
+            .as_ref()
+            .and_then(|config| config.fallback.as_ref());
+        let fallback_can_run_without_approval = fallback
+            .map(|fallback| {
+                fallback.policy != "no_fallback" && fallback.policy != "require_approval"
+            })
+            .unwrap_or(false);
+        if let Some(fallback) = fallback {
+            if crate::agents::model_registry::find(&fallback.provider_id, &fallback.model_id)
+                .is_none()
+            {
+                blockers.push(format!(
+                    "Fallback {} / {} is not registered",
+                    fallback.provider_id, fallback.model_id
+                ));
+            } else if !runtime_readiness.is_empty() {
+                if let Some(runtime) = SwarmRuntimeKind::from_db(&fallback.provider_id) {
+                    if !runtime_readiness
+                        .iter()
+                        .any(|item| item.runtime == runtime && item.available)
+                    {
+                        blockers.push(format!(
+                            "Fallback {} / {} is not available",
+                            fallback.provider_id, fallback.model_id
+                        ));
+                    }
+                }
+            }
+        }
+        if fallback_can_run_without_approval {
+            continue;
+        }
+        let runtime = allocation.runtime;
+        if runtime == SwarmRuntimeKind::Auto {
+            if !runtime_readiness.is_empty() && !runtime_readiness.iter().any(|item| item.available)
+            {
+                blockers
+                    .push("Auto has no authenticated Claude or Codex runtime available.".into());
+            }
+        } else if let Some(item) = runtime_readiness
+            .iter()
+            .find(|item| item.runtime == runtime)
+        {
+            if !item.available {
+                blockers.push(format!("{}: {}", runtime_label(runtime), item.message));
+            }
+        } else if !runtime_readiness.is_empty() {
+            blockers.push(format!("{}: readiness unknown", runtime_label(runtime)));
+        }
+    }
+    blockers.sort();
+    blockers.dedup();
+    blockers
+}
+
+fn launch_blockers_error(entity: &str, blockers: Vec<String>) -> AppError {
+    AppError::new(
+        "swarm_runtime_unavailable",
+        format!(
+            "This Swarm cannot launch until these runtimes are ready: {}.",
+            blockers.join("; ")
+        ),
+        true,
+    )
+    .entity(entity)
+    .action("Install or authenticate the runtime, or replace the allocation, then start again.")
+}
+
+/// Diagnose one allocation's stored model identity against the application registry.
+///
+/// The registry is the sole authority on which `(providerId, modelId)` pairs can run, so every
+/// message here names the canonical identity — never a display label. A label is derived
+/// presentation that a stale preset may carry unchanged, and reporting it would describe a model
+/// that does not exist ("Claude / Model not configured is not registered").
+///
+/// Returns `None` when the allocation is launchable as configured.
+fn diagnose_allocation_model(allocation: &SwarmRoleAllocation) -> Option<String> {
+    let Some(config) = allocation.model_config.as_ref() else {
+        // An `auto` allocation legitimately has no provider yet: the engine resolves it to a
+        // concrete runtime and that runtime's registered default when the agent is staffed. A
+        // concrete runtime with no stored config is a genuine configuration gap.
+        if allocation.runtime == SwarmRuntimeKind::Auto {
+            return None;
+        }
+        return Some(format!(
+            "{} member has no model configured",
+            runtime_label(allocation.runtime)
+        ));
+    };
+    if crate::agents::model_registry::is_unconfigured(config) {
+        return Some(format!(
+            "{} member has no model configured",
+            runtime_label(allocation.runtime)
+        ));
+    }
+    let canonical =
+        crate::agents::model_registry::canonical_label(&config.provider_id, &config.model_id);
+    let Some(model) = crate::agents::model_registry::find(&config.provider_id, &config.model_id)
+    else {
+        return Some(format!("{canonical} is no longer a registered model"));
+    };
+    if config.provider_id != allocation.runtime.as_str()
+        || !model.reasoning.contains(&config.reasoning_effort.as_str())
+        || !model.modes.contains(&config.execution_mode.as_str())
+    {
+        return Some(format!("{canonical} has unsupported execution settings"));
+    }
+    None
+}
+
 fn runtime_label(runtime: SwarmRuntimeKind) -> &'static str {
     match runtime {
         SwarmRuntimeKind::Auto => "Auto",
@@ -5544,6 +5578,158 @@ fn decompose(swarm: &Swarm) -> Vec<NewSwarmTask> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn allocation(
+        runtime: SwarmRuntimeKind,
+        config: Option<SwarmMemberModelConfig>,
+    ) -> SwarmRoleAllocation {
+        SwarmRoleAllocation {
+            id: "allocation".into(),
+            runtime,
+            count: 1,
+            model_config: config,
+        }
+    }
+
+    /// The launch gate must accept exactly what the registry can run — nothing weaker.
+    #[test]
+    fn a_registered_model_on_a_matching_runtime_is_launchable() {
+        for provider in ["claude", "codex"] {
+            let runtime = SwarmRuntimeKind::from_db(provider).unwrap();
+            let config = crate::agents::model_registry::default_for(provider).unwrap();
+            assert_eq!(
+                diagnose_allocation_model(&allocation(runtime, Some(config))),
+                None
+            );
+        }
+    }
+
+    /// An `auto` allocation carries no provider by design; the engine resolves it when the agent
+    /// is staffed, so it must not be reported as a configuration gap.
+    #[test]
+    fn an_auto_allocation_without_a_model_is_not_a_configuration_gap() {
+        assert_eq!(
+            diagnose_allocation_model(&allocation(SwarmRuntimeKind::Auto, None)),
+            None
+        );
+    }
+
+    #[test]
+    fn a_concrete_runtime_without_a_model_is_reported_as_unconfigured() {
+        let message = diagnose_allocation_model(&allocation(SwarmRuntimeKind::Claude, None))
+            .expect("a concrete runtime with no model cannot launch");
+        assert!(message.contains("no model configured"), "{message}");
+    }
+
+    /// The defect this contract exists to prevent: the unconfigured sentinel reported as though it
+    /// were a model the registry had merely forgotten.
+    #[test]
+    fn the_unconfigured_sentinel_is_reported_as_missing_not_as_an_unknown_model() {
+        let config = crate::agents::model_registry::unvalidated_for("claude");
+        let message =
+            diagnose_allocation_model(&allocation(SwarmRuntimeKind::Claude, Some(config)))
+                .expect("the sentinel cannot launch");
+        assert!(message.contains("no model configured"), "{message}");
+        assert!(!message.contains("Model not configured"), "{message}");
+        assert!(
+            !message.contains("is no longer a registered model"),
+            "{message}"
+        );
+    }
+
+    /// A deprecated or mistyped model id is a distinct, actionable failure, and it is reported by
+    /// canonical identity so the stale value is visible.
+    #[test]
+    fn an_unregistered_model_is_reported_by_canonical_identity() {
+        let mut config = crate::agents::model_registry::default_for("claude").unwrap();
+        config.model_id = "claude-3-retired".into();
+        config.model_display_name = "Sonnet".into();
+        let message =
+            diagnose_allocation_model(&allocation(SwarmRuntimeKind::Claude, Some(config)))
+                .expect("an unregistered model cannot launch");
+        assert!(message.contains("claude/claude-3-retired"), "{message}");
+        assert!(
+            message.contains("no longer a registered model"),
+            "{message}"
+        );
+        // The display label the stale preset carried is never what gets reported.
+        assert!(!message.contains("Sonnet"), "{message}");
+    }
+
+    #[test]
+    fn a_model_from_another_provider_cannot_run_on_this_runtime() {
+        let config = crate::agents::model_registry::default_for("codex").unwrap();
+        let message =
+            diagnose_allocation_model(&allocation(SwarmRuntimeKind::Claude, Some(config)))
+                .expect("a cross-provider model cannot launch");
+        assert!(
+            message.contains("unsupported execution settings"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn an_unsupported_reasoning_effort_is_rejected() {
+        let mut config = crate::agents::model_registry::default_for("claude").unwrap();
+        config.reasoning_effort = "extreme".into();
+        assert!(
+            diagnose_allocation_model(&allocation(SwarmRuntimeKind::Claude, Some(config)))
+                .is_some()
+        );
+    }
+
+    /// End of the pipeline: what the built-in presets actually ship must pass the launch gate.
+    #[test]
+    fn every_builtin_preset_allocation_passes_the_launch_gate() {
+        for (id, _name, _max_parallel, roles) in crate::models::swarm::builtin_presets() {
+            for allocation in roles.iter().flat_map(|role| role.allocations.iter()) {
+                assert_eq!(
+                    diagnose_allocation_model(allocation),
+                    None,
+                    "built-in preset {id} cannot launch as shipped"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn preview_and_create_use_the_same_model_launch_gate() {
+        let (service, _database, project) = service_with(Arc::new(SimAdapter::default()));
+        let mut stale = crate::agents::model_registry::default_for("claude").unwrap();
+        stale.model_id = "claude-3-retired".into();
+        stale.model_display_name = "Sonnet".into();
+        let roles = vec![SwarmRoleConfig {
+            role: SwarmRole::Builder,
+            enabled: true,
+            allocations: vec![SwarmRoleAllocation {
+                id: "builder-claude".into(),
+                runtime: SwarmRuntimeKind::Claude,
+                count: 1,
+                model_config: Some(stale),
+            }],
+        }];
+        let request = CreateSwarmRequest {
+            project_id: project,
+            mission: "Repair the stale model path".into(),
+            name: None,
+            preset_id: "quick_fix".into(),
+            max_parallel: None,
+            instructions: None,
+            roles: Some(roles),
+            attachments: Vec::new(),
+        };
+
+        let preview = service.preview_launch(&request).unwrap();
+        assert!(!preview.can_launch);
+        assert!(preview
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("claude/claude-3-retired")));
+
+        let error = service.create_swarm(&request).unwrap_err();
+        assert_eq!(error.code, "swarm_runtime_unavailable");
+        assert!(error.message.contains("claude/claude-3-retired"));
+    }
 
     fn empty_compiled_context() -> CompiledContextPack {
         CompiledContextPack {
@@ -6589,6 +6775,44 @@ mod tests {
             reloaded.roles, snapshot,
             "the running Swarm keeps its launch-time team snapshot"
         );
+    }
+
+    #[test]
+    fn archived_swarms_are_readable_but_immutable() {
+        let (service, _database, project) = service_with(Arc::new(SimAdapter::new(1.0)));
+        let swarm = create(&service, &project, "quick_fix");
+        service.start_swarm(&project, &swarm.id).unwrap();
+        run_to_quiescence(&service, &swarm.id);
+        assert_eq!(
+            service
+                .get_detail(&project, &swarm.id)
+                .unwrap()
+                .swarm
+                .lifecycle,
+            SwarmLifecycle::ReadyForReview
+        );
+
+        service.archive_swarm(&project, &swarm.id, true).unwrap();
+        assert_eq!(
+            service
+                .get_detail(&project, &swarm.id)
+                .unwrap()
+                .swarm
+                .lifecycle,
+            SwarmLifecycle::Archived
+        );
+
+        for error in [
+            service
+                .rename_swarm(&project, &swarm.id, "Renamed")
+                .unwrap_err(),
+            service
+                .save_command_draft(&project, &swarm.id, "@swarm", "mutate history")
+                .unwrap_err(),
+            service.delete_swarm(&project, &swarm.id).unwrap_err(),
+        ] {
+            assert_eq!(error.code, "swarm_archived_immutable");
+        }
     }
 
     #[test]

@@ -203,6 +203,33 @@ impl DatabaseService {
         Ok(status)
     }
 
+    /// Return jobs the previous process died holding to the queue.
+    ///
+    /// A crash — or a plain window close mid-analysis — leaves a row in `running`, and
+    /// [`Self::claim_knowledge_job`] only claims `queued` and `retrying`. Without this the job is
+    /// stranded: never run, never failed, and (because `dedup_key` matching also ignores `running`)
+    /// silently shadowed by every later enqueue of the same kind.
+    ///
+    /// The attempt was already counted when it was claimed, so a job that reliably kills the
+    /// process is retried at most `max_attempts` times and then recorded as failed rather than
+    /// crash-looping on every launch.
+    ///
+    /// Safe only because it runs once at startup, before the single worker begins: at that moment
+    /// no live handler owns a `running` row.
+    pub fn recover_running_knowledge_jobs(&self) -> AppResult<usize> {
+        let connection = self.connection.lock();
+        let now = Utc::now().to_rfc3339();
+        let recovered = connection.execute(
+            "UPDATE memory_jobs \
+             SET status = CASE WHEN attempts >= max_attempts THEN 'failed' ELSE 'retrying' END, \
+                 error = 'interrupted before completion', \
+                 finished_at = CASE WHEN attempts >= max_attempts THEN ?1 ELSE NULL END \
+             WHERE status='running'",
+            params![now],
+        )?;
+        Ok(recovered)
+    }
+
     /// Cancel a job that has not started, or stop a failing job from retrying. A `running` job is
     /// left alone: the queue cannot interrupt a handler mid-write, and pretending otherwise would
     /// report a cancellation that did not happen.

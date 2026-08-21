@@ -1,7 +1,7 @@
 use crate::errors::{AppError, AppResult};
 use rusqlite::{params, Connection};
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 36;
+pub const CURRENT_SCHEMA_VERSION: i64 = 37;
 
 const MIGRATION_1: &str = r#"
 CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
@@ -948,6 +948,9 @@ pub fn apply(connection: &Connection) -> AppResult<()> {
     if current < 36 || !table_exists(connection, "swarm_compiled_context_packs")? {
         migrate_v36(connection)?;
     }
+    if current < 37 || builtin_presets_missing_model_config(connection)? {
+        migrate_v37(connection)?;
+    }
     Ok(())
 }
 
@@ -955,6 +958,9 @@ pub fn requires_migration(connection: &Connection) -> AppResult<bool> {
     let current: i64 = connection
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .map_err(AppError::database)?;
+    if builtin_presets_missing_model_config(connection)? {
+        return Ok(true);
+    }
     Ok(current < CURRENT_SCHEMA_VERSION
         || !table_exists(connection, "missions")?
         || !table_exists(connection, "memory_items")?
@@ -2089,6 +2095,63 @@ CREATE INDEX IF NOT EXISTS idx_swarm_compiled_context_task
         record_migration(connection, 36)
     })();
     finish_migration_transaction(connection, result, 36)
+}
+
+/// A built-in preset row whose stored `config_json` predates the model matrix carries no
+/// `modelConfig` on its allocations. Loading it yields allocations with no canonical model
+/// identity, which the creation flow could only render as an unconfigured member — a preset that
+/// looks complete but cannot launch. Detect that shape so the repair runs even on a database
+/// whose `user_version` was already advanced.
+fn builtin_presets_missing_model_config(connection: &Connection) -> AppResult<bool> {
+    if !table_exists(connection, "swarm_presets")? {
+        return Ok(false);
+    }
+    let rows: Vec<String> = {
+        let mut statement = connection
+            .prepare("SELECT config_json FROM swarm_presets WHERE builtin=1")
+            .map_err(AppError::database)?;
+        let mapped = statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(AppError::database)?;
+        mapped
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(AppError::database)?
+    };
+    for config_json in rows {
+        let Ok(roles) =
+            serde_json::from_str::<Vec<crate::models::swarm::SwarmRoleConfig>>(&config_json)
+        else {
+            return Ok(true);
+        };
+        for role in roles {
+            for allocation in role.allocations {
+                // `auto` allocations legitimately carry no provider yet; the engine resolves them
+                // from the registry when the agent is staffed. Any concrete runtime must have one.
+                if allocation.runtime != crate::models::swarm::SwarmRuntimeKind::Auto
+                    && allocation.model_config.is_none()
+                {
+                    return Ok(true);
+                }
+            }
+        }
+    }
+    Ok(false)
+}
+
+/// Re-serialize the built-in team presets from [`crate::models::swarm::builtin_presets`]. Their
+/// stored `config_json` was last written by v17, before allocations carried a canonical model
+/// identity, so every built-in preset loaded as a roster of members with no model. Built-ins are
+/// immutable definitions, so rewriting them loses nothing; user presets are untouched.
+fn migrate_v37(connection: &Connection) -> AppResult<()> {
+    connection
+        .execute_batch("BEGIN IMMEDIATE;")
+        .map_err(AppError::database)?;
+    let result = (|| {
+        seed_builtin_presets(connection)?;
+        refresh_builtin_presets(connection)?;
+        record_migration(connection, 37)
+    })();
+    finish_migration_transaction(connection, result, 37)
 }
 
 fn table_exists(connection: &Connection, table: &str) -> AppResult<bool> {
@@ -3989,6 +4052,108 @@ fn run_migration(connection: &Connection, sql: &str, version: i64) -> AppResult<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Reproduces the shipped defect: built-in preset `config_json` was last written by v17,
+    /// before allocations carried a canonical model identity. Every built-in preset therefore
+    /// loaded as a roster of members with no model, which the creation flow could only render as
+    /// "Model not configured" and which launch validation correctly refused to start.
+    #[test]
+    fn builtin_presets_written_before_the_model_matrix_are_repaired() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE swarm_presets(id TEXT PRIMARY KEY, name TEXT, builtin INTEGER, \
+                 is_default INTEGER, max_parallel INTEGER, instructions TEXT, config_json TEXT, \
+                 created_at TEXT, updated_at TEXT);
+                 CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT);",
+            )
+            .unwrap();
+        // The exact v17 serialization: allocations with no `modelConfig` key at all.
+        let legacy = r#"[{"role":"coordinator","enabled":true,"allocations":[{"id":"coordinator-claude","runtime":"claude","count":1}]},{"role":"reviewer","enabled":true,"allocations":[{"id":"reviewer-codex","runtime":"codex","count":1}]}]"#;
+        connection
+            .execute(
+                "INSERT INTO swarm_presets VALUES('quick_fix','Focused',1,0,3,'',?1,'t','t')",
+                [legacy],
+            )
+            .unwrap();
+        // A user preset is not a built-in definition and must survive untouched.
+        connection
+            .execute(
+                "INSERT INTO swarm_presets VALUES('mine','My Team',0,0,2,'',?1,'t','t')",
+                [legacy],
+            )
+            .unwrap();
+
+        assert!(builtin_presets_missing_model_config(&connection).unwrap());
+        migrate_v37(&connection).unwrap();
+        assert!(!builtin_presets_missing_model_config(&connection).unwrap());
+
+        let repaired: String = connection
+            .query_row(
+                "SELECT config_json FROM swarm_presets WHERE id='quick_fix'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let roles: Vec<crate::models::swarm::SwarmRoleConfig> =
+            serde_json::from_str(&repaired).unwrap();
+        assert!(!roles.is_empty());
+        for allocation in roles.iter().flat_map(|role| role.allocations.iter()) {
+            let config = allocation.model_config.as_ref().expect("canonical model");
+            assert!(!crate::agents::model_registry::is_unconfigured(config));
+            assert!(
+                crate::agents::model_registry::find(&config.provider_id, &config.model_id)
+                    .is_some()
+            );
+        }
+
+        let user_preset: String = connection
+            .query_row(
+                "SELECT config_json FROM swarm_presets WHERE id='mine'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(user_preset, legacy);
+    }
+
+    /// The repair is keyed on the stored shape, not only on `user_version`, so a database whose
+    /// version was advanced by an unrelated path is still detected and fixed.
+    #[test]
+    fn repaired_builtin_presets_are_not_rewritten_again() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE swarm_presets(id TEXT PRIMARY KEY, name TEXT, builtin INTEGER, \
+                 is_default INTEGER, max_parallel INTEGER, instructions TEXT, config_json TEXT, \
+                 created_at TEXT, updated_at TEXT);
+                 CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT);",
+            )
+            .unwrap();
+        migrate_v37(&connection).unwrap();
+        let before: Vec<String> = {
+            let mut statement = connection
+                .prepare("SELECT config_json FROM swarm_presets ORDER BY id")
+                .unwrap();
+            let rows = statement
+                .query_map([], |row| row.get::<_, String>(0))
+                .unwrap();
+            rows.collect::<Result<Vec<_>, _>>().unwrap()
+        };
+        assert!(!before.is_empty());
+        assert!(!builtin_presets_missing_model_config(&connection).unwrap());
+        migrate_v37(&connection).unwrap();
+        let after: Vec<String> = {
+            let mut statement = connection
+                .prepare("SELECT config_json FROM swarm_presets ORDER BY id")
+                .unwrap();
+            let rows = statement
+                .query_map([], |row| row.get::<_, String>(0))
+                .unwrap();
+            rows.collect::<Result<Vec<_>, _>>().unwrap()
+        };
+        assert_eq!(before, after);
+    }
 
     #[test]
     fn model_configuration_migration_is_additive_and_preserves_existing_rows() {

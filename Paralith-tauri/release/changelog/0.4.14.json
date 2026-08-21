@@ -16,6 +16,7 @@
     "Schema v34 adds Context Fabric and knowledge-intelligence tables for memory quality, wikilinks, claims, relations, jobs, candidates, conflicts, handoffs, timelines, project facts, capabilities, branch merges, and code graph indexes",
     "Schema v35 preserves repository audit provenance against live Swarm tasks and removes retired Mission foreign-key coupling while retaining historical rows",
     "Schema v36 persists the exact compiled ContextPack delivered to each Swarm AgentRun while preserving historical context-pack rows",
+    "Schema v37 refreshes built-in Swarm presets so concrete agent allocations carry canonical provider and model identities",
     "Existing Projects, Workspaces, terminals, Missions, prior Memory rows, Database Studio data, Usage history, settings, and Stable updater state are preserved through forward migrations"
   ],
   "knownIssues": [

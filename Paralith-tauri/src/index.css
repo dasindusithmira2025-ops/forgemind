@@ -2123,6 +2123,7 @@ html[data-theme-swapping] *, html[data-theme-swapping] *::before, html[data-them
 .swarm-roster-summary > span { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .swarm-roster-summary .swarm-runtime-mark { color: var(--text); font-family: var(--mono); font-weight: 600; font-size: var(--font-2xs); line-height: 1; }
 .swarm-roster-summary .swarm-readiness-pending { color: var(--faint); font-size: var(--font-xs); }
+.swarm-roster-summary .swarm-readiness-ready { color: var(--muted); font-size: var(--font-xs); }
 .swarm-agent-index { text-align: right; font-family: var(--mono); font-weight: 400; font-size: var(--font-2xs); line-height: 1; }
 .swarm-roster-detail { display: grid; grid-template-columns: minmax(230px, 1fr) 135px 135px minmax(190px, .8fr) auto auto; align-items: end; gap: 12px; padding: 11px 12px 13px 38px; background: var(--surface-2); border-top: 1px solid var(--border); }
 .swarm-roster-detail p, .swarm-permission-summary { color: var(--muted); font-size: var(--font-xs); line-height: 1.45; }
