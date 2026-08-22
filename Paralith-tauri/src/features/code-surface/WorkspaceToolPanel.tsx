@@ -38,7 +38,7 @@ export interface WorkspaceToolPanelProps {
 
 /**
  * The docked right-side Surface Workspace: a registry-driven tab strip switches between tool
- * surfaces (Files, Browser, Diff, Agents). Each open surface stays mounted while present in
+ * surfaces (Files, Browser, Source Control, Agents). Each open surface stays mounted while present in
  * `surfaces` (display-toggled, not unmounted) so its state — editor tabs/buffers, browser URL/zoom,
  * diff staging selection, scroll position — survives switching tabs; it mounts only once opened, so
  * a surface the user never opens never pays its runtime's startup cost. It never owns the terminal
@@ -117,7 +117,7 @@ export function WorkspaceToolPanel({
 
           {isOpen('diff') && (
             <div className="tool-surface-host" style={{ display: isActive('diff') ? undefined : 'none' }}>
-              <DiffSurface projectId={projectId} />
+              <DiffSurface projectId={projectId} projectRootPath={projectRootPath} workspaceId={workspaceId} />
             </div>
           )}
 

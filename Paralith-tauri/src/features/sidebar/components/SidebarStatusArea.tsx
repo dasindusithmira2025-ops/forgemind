@@ -5,7 +5,7 @@ import {
   BarChart3,
   Database,
   Download,
-  FolderGit2,
+  GitBranch,
   BrainCircuit,
   PanelLeftClose,
   RotateCw,
@@ -35,11 +35,11 @@ export function SidebarStatusArea({ actions }: { actions: SidebarActions }) {
           <button
             type="button"
             className="sb-status-btn"
-            aria-label="Repository"
-            title="Repository"
+            aria-label="Source Control"
+            title="Source Control"
             onClick={actions.onOpenRepository}
           >
-            <FolderGit2 size={15} />
+            <GitBranch size={15} />
           </button>
         )}
         {actions.onOpenDatabase && (

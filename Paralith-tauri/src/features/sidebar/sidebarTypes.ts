@@ -127,7 +127,7 @@ export interface SidebarActions {
   onRevealProject?: (projectId: string) => void
   onRefreshProjectById?: (projectId: string) => void
   onOpenSettings: () => void
-  /** Open the Repository Command Center for the active project. */
+  /** Open workspace-scoped Source Control for the active project/worktree. */
   onOpenRepository?: () => void
   /** Open the Database Studio surface for the active project. */
   onOpenDatabase?: () => void

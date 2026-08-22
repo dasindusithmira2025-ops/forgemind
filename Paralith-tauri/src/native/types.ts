@@ -368,7 +368,7 @@ export interface IsolatedWorktreeResult {
   baseRef: string
 }
 
-// ---- Repository Command Center -----------------------------------------------------------
+// ---- Source Control / repository service -------------------------------------------------
 
 export type RepositoryActorKind = 'human' | 'agent' | 'system'
 export interface RepositoryActor {

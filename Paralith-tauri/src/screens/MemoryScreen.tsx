@@ -9,7 +9,7 @@ import { useAppStore } from '../stores/appStore'
 import { MemoryWorkspace } from '../features/memory/components/MemoryWorkspace'
 
 /**
- * Project-level route hosting the Context Fabric. Mirrors `DatabaseScreen` and `RepositoryScreen`
+ * Project-level route hosting the Context Fabric. Mirrors `DatabaseScreen`
  * exactly: the same full-screen titlebar and Back pattern, and the same project-name resolution
  * from the active session or a fresh lookup.
  */

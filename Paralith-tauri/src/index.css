@@ -1423,7 +1423,7 @@ html[data-theme-swapping] *, html[data-theme-swapping] *::before, html[data-them
 .close-policy-option.danger:hover:not(:disabled) { border-color: var(--danger); }
 .close-policy-option.ghost { background: transparent; }
 
-/* ---- Repository Command Center ----------------------------------------------------- */
+/* ---- Project tool shell and repository component primitives ------------------------ */
 .repo-shell { height: 100dvh; display: grid; grid-template-rows: var(--header-height) minmax(0, 1fr); background: var(--bg); overflow: hidden; }
 .repo-shell > .settings-titlebar { height: var(--header-height); padding: 0 10px; display: flex; align-items: center; gap: 10px; }
 .repo-shell > .settings-titlebar h1 { font-size: var(--font-sm); margin: 0; }

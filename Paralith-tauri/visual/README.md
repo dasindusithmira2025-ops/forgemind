@@ -17,7 +17,7 @@ Open the index for a list of surfaces, or go straight to one:
 
 | Param | Values |
 | --- | --- |
-| `surface` | `primitives`, `launcher`, `workspace`, `setup`, `settings`, `repository`, `database`, `memory`, `swarms` |
+| `surface` | `primitives`, `launcher`, `workspace`, `setup`, `settings`, `database`, `memory`, `swarms` |
 | `theme` | any theme id (`paralith-dark`, `graphite`, `obsidian`, `ember`, `arctic-light`) |
 | `density` | `comfortable`, `standard`, `compact` |
 | `scale` | `--ui-scale` multiplier, e.g. `1.25`, `1.5` — the Windows-scaling rehearsal |
