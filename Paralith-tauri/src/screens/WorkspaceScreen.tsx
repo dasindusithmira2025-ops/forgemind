@@ -1006,6 +1006,8 @@ export function WorkspaceScreen() {
     onOpenRepository: openSourceControl,
     onOpenDatabase: () => { if (project) navigate(`/database/${project.id}`) },
     onOpenMemory: () => { if (project) navigate(`/memory/${project.id}`) },
+    onOpenRuns: () => { if (project) navigate(`/runs/${project.id}`) },
+    onOpenMissions: () => { if (project) navigate(`/missions/${project.id}`) },
     onOpenUsage: () => navigate('/usage'),
     onToggleCollapse: toggleCollapse,
     onResizeCommit: commitSidebarWidth,

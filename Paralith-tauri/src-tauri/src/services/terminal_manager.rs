@@ -176,6 +176,19 @@ impl TerminalManager {
         }
     }
 
+    /// Real persistence, no Tauri handle. Used by the real-provider canary, which drives the
+    /// production execution path (PTY ownership, session records, exit reaping) without a window.
+    /// Only frontend event emission is absent, and no engine decision depends on it.
+    #[cfg(test)]
+    pub(crate) fn headless(database: Arc<DatabaseService>) -> Self {
+        Self {
+            sessions: Arc::new(RwLock::new(HashMap::new())),
+            creating: Arc::new(Mutex::new(HashSet::new())),
+            database: Some(database),
+            app_handle: None,
+        }
+    }
+
     pub fn create_session(&self, mut request: CreateTerminalRequest) -> AppResult<TerminalSession> {
         prepare_exact_provider_identity(&mut request);
         let machine_protocol = is_machine_protocol_workspace(&request.workspace_id);
@@ -1045,8 +1058,16 @@ fn consume_cursor_position_queries(pending: &mut Vec<u8>, input: &[u8]) -> (Vec<
     (output, query_count)
 }
 
+/// Whether a session's output is a *machine protocol* — JSON lines an engine parses — rather
+/// than a human terminal.
+///
+/// Such a session gets an extremely wide, tall PTY. That is not cosmetic: a provider's
+/// structured records are single lines of many kilobytes, and at human geometry ConPTY wraps
+/// and re-renders them, which destroys the record and can stall the stream entirely. The Run
+/// Engine's sessions (`run-engine-<project>`) are launched with `--output-format stream-json`
+/// exactly like the Swarm engine's, so they belong to the same class.
 fn is_machine_protocol_workspace(workspace_id: &str) -> bool {
-    workspace_id.starts_with("swarm-runtime-")
+    workspace_id.starts_with("swarm-runtime-") || workspace_id.starts_with("run-engine-")
 }
 
 /// Bulk/duplicate termination must be idempotent: a session another path already reaped is a
@@ -1595,8 +1616,11 @@ mod tests {
     }
 
     #[test]
-    fn swarm_runtime_workspaces_keep_a_stable_machine_protocol_surface() {
+    fn structured_agent_workspaces_keep_a_stable_machine_protocol_surface() {
         assert!(is_machine_protocol_workspace("swarm-runtime-swarm-id"));
+        // Regression: a Run Engine session streams the same JSON-lines protocol. At human
+        // terminal geometry its records were wrapped and the Run hung in `running` forever.
+        assert!(is_machine_protocol_workspace("run-engine-project-id"));
         assert!(!is_machine_protocol_workspace("normal-workspace"));
         let protocol_columns = MACHINE_PROTOCOL_COLS;
         assert!(protocol_columns > 1_000);

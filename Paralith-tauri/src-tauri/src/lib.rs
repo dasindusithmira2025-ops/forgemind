@@ -52,6 +52,13 @@ pub struct AppState {
     /// Owns the isolated embedded development-browser child webviews (one per Workspace).
     browser: services::BrowserService,
     swarms: services::SwarmService,
+    /// The canonical Run Engine: the single durable execution primitive every structured agent
+    /// operation goes through. Owns its own scheduler thread and reconciles interrupted Runs at
+    /// startup, so a Run outlives any pane, window or renderer reload.
+    runs: services::RunService,
+    /// Mission Control: the orchestration layer directly above the Run Engine. It owns Mission
+    /// and Task lifecycle and asks the Run Engine to execute; it never executes anything itself.
+    missions: services::MissionService,
     /// Authoritative runtime layer for open-Project sessions, Workspace placement, exclusive
     /// interactive leases, handoff coordination, and monitor state.
     windows: WindowRegistry,
@@ -401,7 +408,56 @@ pub fn run() {
                 knowledge.clone(),
                 context.clone(),
             );
+            // The Run Engine owns a background scheduler thread of its own for the same reason
+            // the Swarm engine does: Runs must keep progressing regardless of which window or
+            // view is focused, and must survive the renderer entirely.
+            let runs = services::RunService::new(
+                database.clone(),
+                app.handle().clone(),
+                detector.clone(),
+                terminals.clone(),
+                repository.clone(),
+                context.clone(),
+                swarms.clone(),
+            );
+            // Mission Control sits above the Run Engine and shares its services. The planner
+            // reads the code graph, Memory, Git and the Context Fabric; it retrieves nothing of
+            // its own.
+            let missions = services::MissionService::new(
+                database.clone(),
+                app.handle().clone(),
+                runs.clone(),
+                swarms.clone(),
+                services::mission_planner::MissionPlanner::new(
+                    code.clone(),
+                    memory.clone(),
+                    repository.clone(),
+                    context.clone(),
+                ),
+            );
             if !recovery_mode {
+                // Reconcile before anything can observe stale rows: a Run that claimed a live
+                // provider process when the previous process died must be marked interrupted,
+                // never left displaying activity nothing is producing.
+                match runs.reconcile_after_restart() {
+                    Ok(0) => {}
+                    Ok(count) => {
+                        log::warn!("{count} Run(s) were interrupted by the previous shutdown")
+                    }
+                    Err(error) => {
+                        log::warn!("run reconciliation skipped: {}", error.message)
+                    }
+                }
+                // Strictly after the Run Engine: Mission Tasks derive their state from Run
+                // rows, so recovering Missions first would read a `running` Run that no process
+                // backs and conclude the Task was fine.
+                match missions.reconcile_after_restart() {
+                    Ok(0) => {}
+                    Ok(count) => log::warn!("{count} Mission(s) were reconciled after restart"),
+                    Err(error) => {
+                        log::warn!("mission reconciliation skipped: {}", error.message)
+                    }
+                }
                 match repository.recover_on_startup() {
                     Ok(interrupted) if !interrupted.is_empty() => log::warn!(
                         "{} interrupted repository operation(s) require recovery",
@@ -458,6 +514,8 @@ pub fn run() {
                 file_watch,
                 browser,
                 swarms,
+                runs,
+                missions,
                 windows,
                 orchestrator,
                 log_directory,
@@ -538,6 +596,31 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::create_mission,
+            commands::update_mission_draft,
+            commands::prepare_mission,
+            commands::start_mission,
+            commands::cancel_mission,
+            commands::revise_mission_plan,
+            commands::accept_mission,
+            commands::retry_mission_task,
+            commands::start_mission_task,
+            commands::complete_manual_mission_task,
+            commands::waive_acceptance_criterion,
+            commands::list_missions,
+            commands::get_mission_detail,
+            commands::get_mission_activity,
+            commands::get_mission_plan_revisions,
+            commands::get_mission_runs,
+            commands::get_mission_task_outputs,
+            commands::create_run,
+            commands::cancel_run,
+            commands::retry_run,
+            commands::resolve_run_approval,
+            commands::list_runs,
+            commands::get_run_detail,
+            commands::run_inbox_summary,
+            commands::default_run_isolation,
             commands::open_project,
             commands::get_project,
             commands::list_recent_projects,
@@ -770,12 +853,18 @@ pub fn run() {
                     {
                         log::error!("install-on-exit failed: {error}");
                     }
+                    // Stop the Run scheduler before terminating processes so it cannot observe
+                    // a half-torn-down world and record a spurious failure on the way out.
+                    state.runs.shutdown();
+                    state.missions.shutdown();
                     let _ = state.terminals.terminate_all_sessions();
                 }
             }
             RunEvent::Exit => {
                 startup_diagnostic("shutdown", "runtime exited");
                 if let Some(state) = app_handle.try_state::<AppState>() {
+                    state.runs.shutdown();
+                    state.missions.shutdown();
                     let _ = state.terminals.terminate_all_sessions();
                 }
             }

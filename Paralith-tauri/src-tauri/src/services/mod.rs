@@ -13,6 +13,12 @@ pub mod knowledge_intelligence;
 pub mod knowledge_lifecycle;
 pub mod memory_markdown;
 pub mod memory_service;
+/// Real-provider end-to-end proof for Mission Control. Test-only and `#[ignore]`d, for the same
+/// reason the Run Engine's canary is.
+#[cfg(test)]
+mod mission_canary;
+pub mod mission_planner;
+pub mod mission_service;
 pub mod process_util;
 pub mod project_analyzer;
 pub mod project_service;
@@ -20,6 +26,12 @@ pub mod query_engine;
 pub mod repository_intelligence;
 pub mod repository_service;
 pub mod restoration_scheduler;
+/// Real-provider end-to-end proof for the Run Engine. Test-only and `#[ignore]`d: it launches an
+/// installed provider CLI, so it must be an explicit act, never part of an ordinary test run.
+#[cfg(test)]
+mod run_canary;
+pub mod run_executor;
+pub mod run_service;
 pub mod semantic;
 pub mod startup_service;
 pub mod swarm_service;
@@ -43,9 +55,11 @@ pub use filesystem_service::{FileSystemService, SelfWriteLedger};
 pub use knowledge_intelligence::KnowledgeIntelligence;
 pub use knowledge_lifecycle::KnowledgeLifecycle;
 pub use memory_service::MemoryService;
+pub use mission_service::MissionService;
 pub use project_service::ProjectService;
 pub use repository_service::RepositoryService;
 pub use restoration_scheduler::RestorationScheduler;
+pub use run_service::RunService;
 pub use semantic::SemanticService;
 pub use swarm_service::SwarmService;
 pub use terminal_manager::TerminalManager;
