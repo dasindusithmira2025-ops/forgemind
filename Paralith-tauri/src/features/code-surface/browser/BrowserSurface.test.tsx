@@ -6,6 +6,7 @@ const holder = vi.hoisted(() => ({ handler: undefined as ((event: BrowserEvent) 
 
 const browserNavigate = vi.fn().mockResolvedValue(undefined)
 const openBrowserView = vi.fn().mockResolvedValue(undefined)
+const browserSetBounds = vi.fn().mockResolvedValue(undefined)
 const browserSetVisible = vi.fn().mockResolvedValue(undefined)
 const browserSetInspect = vi.fn().mockResolvedValue(undefined)
 const closeBrowserView = vi.fn().mockResolvedValue(undefined)
@@ -16,7 +17,7 @@ vi.mock('../../../native/commands', () => ({
     browserNavigate: (...args: unknown[]) => browserNavigate(...args),
     browserReload: vi.fn().mockResolvedValue(undefined),
     browserStop: vi.fn().mockResolvedValue(undefined),
-    browserSetBounds: vi.fn().mockResolvedValue(undefined),
+    browserSetBounds: (...args: unknown[]) => browserSetBounds(...args),
     browserSetVisible: (...args: unknown[]) => browserSetVisible(...args),
     browserSetZoom: vi.fn().mockResolvedValue(undefined),
     browserSetInspect: (...args: unknown[]) => browserSetInspect(...args),
@@ -40,6 +41,7 @@ const context = { workspaceId: 'wsb', projectId: 'p1', workspaceName: 'WS', proj
 beforeEach(() => {
   holder.handler = undefined
   browserNavigate.mockClear()
+  browserSetBounds.mockReset().mockResolvedValue(undefined)
   browserSetVisible.mockReset().mockResolvedValue(undefined)
   browserSetInspect.mockClear()
   openBrowserView.mockReset().mockResolvedValue(undefined)
@@ -88,8 +90,11 @@ describe('BrowserSurface', () => {
     act(() => { useBrowserSessionStore.getState().init('wsb') })
     act(() => { useBrowserSessionStore.getState().navigate('http://localhost:3000/') })
     const { rerender } = render(<BrowserSurface active context={context} />)
+    await waitFor(() => expect(openBrowserView).toHaveBeenCalled())
+    browserSetBounds.mockClear()
     browserSetVisible.mockClear()
     rerender(<BrowserSurface active={false} context={context} />)
+    await waitFor(() => expect(browserSetBounds).toHaveBeenCalledWith('wsb', { x: -32000, y: -32000, width: 1, height: 1 }))
     await waitFor(() => expect(browserSetVisible).toHaveBeenCalledWith('wsb', false))
   })
 
@@ -100,6 +105,9 @@ describe('BrowserSurface', () => {
     openBrowserView.mockImplementationOnce(async () => {
       await opened
       lifecycle.push('open:resolved')
+    })
+    browserSetBounds.mockImplementation(async (_workspaceId: string, bounds: { x: number; y: number; width: number; height: number }) => {
+      if (bounds.x === -32000 && bounds.y === -32000 && bounds.width === 1 && bounds.height === 1) lifecycle.push('bounds:hidden')
     })
     browserSetVisible.mockImplementation(async (_workspaceId: string, visible: boolean) => {
       lifecycle.push(`visible:${visible}`)
@@ -115,6 +123,7 @@ describe('BrowserSurface', () => {
     finishOpen()
 
     await waitFor(() => expect(lifecycle.at(-1)).toBe('visible:false'))
+    expect(lifecycle).toContain('bounds:hidden')
     expect(browserSetVisible).not.toHaveBeenCalledWith('wsb', true)
   })
 

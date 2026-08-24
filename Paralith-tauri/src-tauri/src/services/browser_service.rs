@@ -166,7 +166,6 @@ impl BrowserService {
                 webview
                     .set_size(LogicalSize::new(bounds.width, bounds.height))
                     .map_err(build_failed)?;
-                webview.show().map_err(build_failed)?;
                 if let Some(target) = target {
                     let mut current = view.current_url.lock();
                     if current.as_deref() != Some(target.as_str()) {
@@ -320,6 +319,7 @@ impl BrowserService {
             created.position(),
             created.size()
         );
+        created.hide().map_err(build_failed)?;
 
         Ok(())
     }
