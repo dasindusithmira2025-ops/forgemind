@@ -5,7 +5,7 @@ import { caseStudies, caseStudyBySlug } from "@/content/work";
 import { paralith } from "@/content/products";
 import { Arrow, Band, GoLink, Rail, SectionHead } from "@/components/primitives";
 import { ProductFilm } from "@/components/ProductFilm";
-import paralithPoster from "@/../public/media/paralith-showcase-poster.jpg";
+import paralithPoster from "../../../../public/media/paralith-showcase-poster.jpg";
 
 export function generateStaticParams() {
   return caseStudies.map((study) => ({ slug: study.slug }));

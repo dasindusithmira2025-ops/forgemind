@@ -4,7 +4,7 @@ import { caseStudies, clientWorkNote } from "@/content/work";
 import { PageHead } from "@/components/PageHead";
 import { Arrow, Band, GoLink } from "@/components/primitives";
 import Image from "next/image";
-import paralithPoster from "@/../public/media/paralith-showcase-poster.jpg";
+import paralithPoster from "../../../public/media/paralith-showcase-poster.jpg";
 
 export const metadata: Metadata = {
   title: "Work",

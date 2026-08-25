@@ -4,7 +4,7 @@ import { paralith } from "@/content/products";
 import { site } from "@/content/site";
 import { Arrow, Band, GoLink, Rail, SectionHead } from "@/components/primitives";
 import { ProductFilm } from "@/components/ProductFilm";
-import paralithPoster from "@/../public/media/paralith-showcase-poster.jpg";
+import paralithPoster from "../../../../public/media/paralith-showcase-poster.jpg";
 
 export const metadata: Metadata = {
   title: "Paralith — agentic development environment",

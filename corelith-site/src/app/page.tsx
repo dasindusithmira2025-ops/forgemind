@@ -12,7 +12,7 @@ import { CapabilitySystem } from "@/components/home/CapabilitySystem";
 import { ProcessSystem } from "@/components/visuals/ProcessSystem";
 import { ResearchTraces } from "@/components/visuals/ResearchTraces";
 import { ProductFilm } from "@/components/ProductFilm";
-import paralithPoster from "@/../public/media/paralith-poster.png";
+import paralithPoster from "../../public/media/paralith-poster.png";
 
 const delay = (ms: number) => ({ "--d": `${ms}ms` }) as CSSProperties;
 
