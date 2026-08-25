@@ -1,0 +1,14 @@
+{
+  "projects": {
+    "default": "corelithwebsite"
+  },
+  "targets": {
+    "corelithwebsite": {
+      "hosting": {
+        "corelithwebsite": [
+          "corelithwebsite"
+        ]
+      }
+    }
+  }
+}

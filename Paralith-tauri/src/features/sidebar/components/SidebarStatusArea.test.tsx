@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { UpdateStatus } from '../../../native/types'
+import { useWorkspacePanelStore } from '../../code-surface/workspacePanelStore'
 import { useUpdateController } from '../../updates/updateController'
 import type { SidebarActions } from '../sidebarTypes'
 import { CollapsedUpdateAction, SidebarStatusArea } from './SidebarStatusArea'
@@ -16,6 +17,9 @@ const actions = {
   onToggleCollapse: vi.fn(),
   onOpenRepository: vi.fn(),
   onOpenDatabase: vi.fn(),
+  onOpenMissions: vi.fn(),
+  onOpenRuns: vi.fn(),
+  onOpenMemory: vi.fn(),
   onOpenUsage: vi.fn(),
 } as unknown as SidebarActions
 
@@ -41,6 +45,7 @@ function status(
 
 afterEach(() => {
   useUpdateController.setState({ status: undefined, operation: undefined })
+  useWorkspacePanelStore.setState({ open: false, activeSurface: undefined })
   vi.clearAllMocks()
 })
 
@@ -51,6 +56,34 @@ describe('SidebarStatusArea', () => {
     // A dead disabled button is the failure mode this replaces, so assert the band is otherwise live.
     expect(screen.getByRole('button', { name: 'Settings' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Source Control' })).toBeInTheDocument()
+  })
+
+  it('names every destination it offers, rather than hiding them behind hover tooltips', () => {
+    render(<SidebarStatusArea actions={actions} />)
+    for (const name of ['Source Control', 'Database', 'Missions', 'Runs', 'Memory', 'Usage']) {
+      expect(screen.getByRole('button', { name })).toBeInTheDocument()
+    }
+    fireEvent.click(screen.getByRole('button', { name: 'Source Control' }))
+    expect(actions.onOpenRepository).toHaveBeenCalledTimes(1)
+  })
+
+  it('omits a destination whose action was never supplied instead of rendering it dead', () => {
+    render(<SidebarStatusArea actions={{ ...actions, onOpenDatabase: undefined } as unknown as SidebarActions} />)
+    expect(screen.queryByRole('button', { name: 'Database' })).not.toBeInTheDocument()
+  })
+
+  it('marks Source Control current only while the panel it opens is actually showing it', () => {
+    const { rerender } = render(<SidebarStatusArea actions={actions} />)
+    expect(screen.getByRole('button', { name: 'Source Control' })).not.toHaveAttribute('aria-current')
+
+    useWorkspacePanelStore.setState({ open: true, activeSurface: 'diff' })
+    rerender(<SidebarStatusArea actions={actions} />)
+    expect(screen.getByRole('button', { name: 'Source Control' })).toHaveAttribute('aria-current', 'page')
+
+    // Open panel, different tab — the tile must follow the visible surface, not just visibility.
+    useWorkspacePanelStore.setState({ open: true, activeSurface: 'files' })
+    rerender(<SidebarStatusArea actions={actions} />)
+    expect(screen.getByRole('button', { name: 'Source Control' })).not.toHaveAttribute('aria-current')
   })
 
   it('reads its label from the real updater phase and installs through the controller', () => {

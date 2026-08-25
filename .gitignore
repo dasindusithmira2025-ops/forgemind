@@ -53,10 +53,14 @@ Paralith-tauri/release/test-keys/
 
 # Firebase deploy cache for the marketing site (regenerated on every deploy)
 corelith-web/.firebase/
+corelith-site/.firebase/
 
 # Local tooling output (not part of the app source)
 graphify-out
 .claude/settings.local.json
+.jcode/
+.obsidian/
+.paralith/
 tmp/
 media/exports/
 

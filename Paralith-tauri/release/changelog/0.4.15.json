@@ -5,8 +5,7 @@
   "highlights": [
     "Swarm creation now preserves canonical provider and model identities for built-in presets, duplicated presets, custom presets, and review snapshots",
     "Built-in Swarm presets are repaired during schema migration when older databases stored concrete agent allocations without model configuration",
-    "Run Engine and Mission Control add durable Project-scoped execution and orchestration surfaces with restart reconciliation",
-    "Release metadata now matches runtime schema 39 so protected release checks validate the tagged build"
+    "Stable release metadata now matches runtime schema 37 so the protected release workflow can validate the tagged build"
   ],
   "fixes": [
     "Built-in Swarm teams no longer appear complete while carrying `Model not configured` members that cannot launch",
@@ -15,9 +14,6 @@
   ],
   "databaseChanges": [
     "Schema v37 refreshes built-in Swarm presets so concrete agent allocations carry canonical provider and model identities",
-    "Schema v38 adds the canonical Runs, Run events, and Run approvals tables for durable agent execution history",
-    "Schema v39 installs Mission Control tables, correlates Runs with Missions and Mission Tasks, and keeps Run history when a Mission is deleted",
-    "Schema v39 retires the abandoned v7 Mission table cluster; non-empty legacy rows are preserved under _legacy_v7 table names instead of being dropped",
     "User-created Swarm presets, Projects, Workspaces, terminals, Missions, Memory rows, Database Studio data, Usage history, settings, and Stable updater state are preserved through forward migrations"
   ],
   "knownIssues": [

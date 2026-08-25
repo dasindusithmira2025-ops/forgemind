@@ -1,25 +1,22 @@
 import type { CSSProperties } from 'react'
-import {
-  Activity,
-  AlertTriangle,
-  BarChart3,
-  Database,
-  Download,
-  GitBranch,
-  BrainCircuit,
-  PlayCircle,
-  Target,
-  PanelLeftClose,
-  RotateCw,
-  Settings,
-} from 'lucide-react'
+import { AlertTriangle, Download, PanelLeftClose, RotateCw } from 'lucide-react'
+import { useWorkspacePanelStore } from '../../code-surface/workspacePanelStore'
 import { requestUpdateNow, updateActionable, useUpdateController } from '../../updates/updateController'
+import { destinationTitle, sidebarDestinations, sidebarUtilities } from '../sidebarDestinations'
 import { useSidebarStore } from '../sidebarStore'
 import type { SidebarActions } from '../sidebarTypes'
 
 /**
- * The pinned bottom band: the destinations that are not Workspaces, and — below them, as its own
- * footer action — the update state.
+ * The pinned bottom band: the destinations that are not Workspaces, the application utilities
+ * beneath them, and — as its own footer action — the update state.
+ *
+ * The destinations are named, not guessed. They were previously nine identical 16px glyphs packed
+ * into one strip, so every one of them cost a hover-and-wait to identify and the project *places you
+ * can go* were indistinguishable from the three *things the app does*. They are now a labelled
+ * grid (which reflows to one column on a narrow sidebar) over a quieter utility row, with the
+ * keyboard route in each tooltip. Colour is stable per destination rather than appearing only on
+ * hover, so it reads as identity instead of decoration — and never as the only cue, since every
+ * tile carries its name.
  *
  * The update action is the *durable* half of the update surface. The toast announces a new build
  * once and can be dismissed; this stays for as long as the build is actually available, reading
@@ -29,105 +26,64 @@ import type { SidebarActions } from '../sidebarTypes'
  */
 export function SidebarStatusArea({ actions }: { actions: SidebarActions }) {
   const setDiagnostics = useSidebarStore((state) => state.setDiagnosticsOpen)
+  // Source Control is the one destination that is a panel rather than a screen, so it is the one
+  // that can be *currently open* while this sidebar is still on screen. Read from the panel store
+  // it actually toggles, so the tile can never claim a state the panel disagrees with.
+  const panelOpen = useWorkspacePanelStore((state) => state.open)
+  const activeSurface = useWorkspacePanelStore((state) => state.activeSurface)
+  const sourceControlOpen = panelOpen && activeSurface === 'diff'
 
   return (
     <div className="sb-status">
-      <div className="sb-status-tools">
-        {actions.onOpenRepository && (
-          <button
-            type="button"
-            className="sb-status-btn"
-            aria-label="Source Control"
-            title="Source Control"
-            onClick={actions.onOpenRepository}
-          >
-            <GitBranch size={15} />
-          </button>
-        )}
-        {actions.onOpenDatabase && (
-          <button
-            type="button"
-            className="sb-status-btn"
-            aria-label="Database"
-            title="Database"
-            onClick={actions.onOpenDatabase}
-          >
-            <Database size={15} />
-          </button>
-        )}
-        {actions.onOpenMissions && (
-          <button
-            type="button"
-            className="sb-status-btn"
-            aria-label="Missions"
-            title="Missions"
-            onClick={actions.onOpenMissions}
-          >
-            <Target size={15} />
-          </button>
-        )}
-        {actions.onOpenRuns && (
-          <button
-            type="button"
-            className="sb-status-btn"
-            aria-label="Runs"
-            title="Runs"
-            onClick={actions.onOpenRuns}
-          >
-            <PlayCircle size={15} />
-          </button>
-        )}
-        {actions.onOpenMemory && (
-          <button
-            type="button"
-            className="sb-status-btn"
-            aria-label="Memory"
-            title="Memory"
-            onClick={actions.onOpenMemory}
-          >
-            <BrainCircuit size={15} />
-          </button>
-        )}
-        {actions.onOpenUsage && (
-          <button
-            type="button"
-            className="sb-status-btn"
-            aria-label="Usage"
-            title="Usage"
-            onClick={actions.onOpenUsage}
-          >
-            <BarChart3 size={15} />
-          </button>
-        )}
-        <span className="sb-status-gap" />
+      <nav className="sb-dest" aria-label="Project tools">
+        {sidebarDestinations(actions).map((destination) => {
+          const { id, label, Icon, run } = destination
+          const active = id === 'source' && sourceControlOpen
+          return (
+            <button
+              key={id}
+              type="button"
+              className="sb-dest-btn"
+              data-surface={id}
+              data-active={active ? 'true' : undefined}
+              aria-current={active ? 'page' : undefined}
+              title={destinationTitle(destination)}
+              onClick={run}
+            >
+              <Icon size={15} aria-hidden />
+              <span className="sb-dest-label">{label}</span>
+            </button>
+          )
+        })}
+      </nav>
+
+      <div className="sb-utils">
+        {sidebarUtilities(actions, () => setDiagnostics(true)).map((utility) => {
+          const { id, label, Icon, run } = utility
+          return (
+            <button
+              key={id}
+              type="button"
+              className="sb-util-btn"
+              aria-label={label}
+              title={destinationTitle(utility)}
+              onClick={run}
+            >
+              <Icon size={15} aria-hidden />
+            </button>
+          )
+        })}
         <button
           type="button"
-          className="sb-status-btn"
-          aria-label="Diagnostics"
-          title="Diagnostics"
-          onClick={() => setDiagnostics(true)}
-        >
-          <Activity size={15} />
-        </button>
-        <button
-          type="button"
-          className="sb-status-btn"
-          aria-label="Settings"
-          title="Settings"
-          onClick={actions.onOpenSettings}
-        >
-          <Settings size={15} />
-        </button>
-        <button
-          type="button"
-          className="sb-status-btn"
+          className="sb-util-btn sb-util-end"
           aria-label="Collapse sidebar"
-          title="Collapse sidebar"
+          title="Collapse sidebar — show the icon rail · Ctrl+B"
           onClick={actions.onToggleCollapse}
         >
-          <PanelLeftClose size={15} />
+          <PanelLeftClose size={15} aria-hidden />
         </button>
       </div>
+
       <UpdateAction />
     </div>
   )

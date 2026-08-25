@@ -845,11 +845,78 @@ html[data-theme-swapping] *, html[data-theme-swapping] *::before, html[data-them
 .ws-context-menu { position: fixed; right: auto; top: auto; width: 232px; }
 
 /* ---- Status band: the real updater state, then the destinations that are not Workspaces ----- */
-.sb-status { flex: 0 0 auto; padding: 6px 6px 8px; display: flex; flex-direction: column; gap: var(--space-2); border-top: 1px solid var(--border-faint); background: var(--sidebar-bg); }
-.sb-status-tools { display: flex; align-items: center; gap: 1px; }
-.sb-status-gap { flex: 1 1 auto; }
-.sb-status-btn { width: calc(26px * var(--ui-scale)); height: calc(26px * var(--ui-scale)); display: grid; place-items: center; color: var(--faint); background: transparent; border: 0; border-radius: var(--radius-sm); cursor: pointer; transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out); }
-.sb-status-btn:hover { color: var(--text); background: var(--surface-hover); }
+.sb-status {
+  flex: 0 0 auto; padding: 7px 6px 8px; display: flex; flex-direction: column; gap: 6px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--surface) 58%, transparent), transparent 46%),
+    var(--sidebar-bg);
+}
+/* Destinations, named. Two-up on a normal sidebar, one column the moment the user drags it
+   narrow — `auto-fit` does that without a resize observer or a breakpoint. Each tile is a full
+   row of hit target rather than a 28px glyph, and its hue is fixed per destination so colour
+   reads as identity; the label carries the meaning, so colour is never the only cue. */
+.sb-dest {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(104px, 1fr)); gap: 3px;
+}
+.sb-dest-btn {
+  --dest: var(--accent);
+  position: relative; display: flex; align-items: center; gap: 7px;
+  min-height: calc(30px * var(--ui-scale)); padding: 0 8px;
+  color: var(--muted); background: transparent;
+  border: 1px solid transparent; border-radius: var(--radius-sm); cursor: pointer;
+  font-size: var(--font-xs); font-weight: 500; text-align: left;
+  transition:
+    color var(--dur-fast) var(--ease-out),
+    background-color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
+}
+.sb-dest-btn svg { flex: 0 0 auto; color: color-mix(in srgb, var(--dest) 68%, var(--muted)); transition: color var(--dur-fast) var(--ease-out); }
+.sb-dest-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sb-dest-btn:hover {
+  color: var(--text-strong);
+  background-color: color-mix(in srgb, var(--dest) 10%, var(--surface-hover));
+  border-color: color-mix(in srgb, var(--dest) 22%, var(--border));
+}
+.sb-dest-btn:hover svg { color: var(--dest); }
+.sb-dest-btn:active { transform: translateY(1px); }
+/* "You are here" uses the same filled left edge as an active Workspace row, so the sidebar has
+   one vocabulary for current-ness rather than two. */
+.sb-dest-btn[data-active] {
+  color: var(--text-strong);
+  background-color: color-mix(in srgb, var(--dest) 13%, transparent);
+  border-color: color-mix(in srgb, var(--dest) 28%, transparent);
+}
+.sb-dest-btn[data-active]::before {
+  content: ""; position: absolute; left: 0; top: 6px; bottom: 6px; width: 2px;
+  border-radius: var(--radius-pill); background: var(--dest);
+}
+.sb-dest-btn[data-active] svg { color: var(--dest); }
+
+/* Destination identity. Shared with the collapsed rail so one destination is one colour at any
+   sidebar width. */
+.sb-dest-btn[data-surface="source"], .collapsed-utilities button[data-surface="source"] { --dest: #8fb7ff; }
+.sb-dest-btn[data-surface="database"], .collapsed-utilities button[data-surface="database"] { --dest: #8bd8c7; }
+.sb-dest-btn[data-surface="memory"], .collapsed-utilities button[data-surface="memory"] { --dest: #c5a7ff; }
+.sb-dest-btn[data-surface="usage"], .collapsed-utilities button[data-surface="usage"] { --dest: #77c8f2; }
+
+/* Application utilities: same band, deliberately lower rank than the destinations above them —
+   no label, no hue, no fill until hovered. Collapse is pinned to the far end because it acts on
+   the sidebar itself rather than on the project. */
+.sb-utils {
+  display: flex; align-items: center; gap: 2px; padding-top: 5px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+}
+.sb-util-btn {
+  width: calc(28px * var(--ui-scale)); height: calc(26px * var(--ui-scale));
+  display: grid; place-items: center; color: var(--faint);
+  background: transparent; border: 1px solid transparent; border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
+}
+.sb-util-btn:hover { color: var(--text); background: var(--surface-hover); border-color: var(--border); }
+.sb-util-btn:active { transform: translateY(1px); }
+.sb-util-end { margin-left: auto; }
 
 /* Present only while an update actually is — the footer's own action, inset from the utility rail
    above it. It earns prominence from a bright edge and a soft neutral bloom against a near-black
@@ -878,7 +945,8 @@ html[data-theme-swapping] *, html[data-theme-swapping] *::before, html[data-them
 
 /* Focus is never implied by hover here: every sidebar control keeps the one house halo, and the
    Workspace row shows it on the row rather than only on the inner button. */
-.sb-header-action:focus-visible, .sb-section-action:focus-visible, .sb-status-btn:focus-visible,
+.sb-header-action:focus-visible, .sb-section-action:focus-visible,
+.sb-dest-btn:focus-visible, .sb-util-btn:focus-visible,
 .ws-row-close:focus-visible, .ws-row-menu:focus-visible, .sb-update:focus-visible,
 .collapsed-update:focus-visible { outline: none; box-shadow: var(--focus-shadow); }
 .ws-row:focus-within { border-color: var(--border-strong); }
@@ -911,7 +979,7 @@ html[data-theme-swapping] *, html[data-theme-swapping] *::before, html[data-them
 .collapsed-swarms-dot.tone-red { background: var(--danger); }
 .collapsed-swarms-dot.tone-blue { background: var(--info); }
 .collapsed-swarms-dot.tone-neutral { background: var(--faint); }
-.collapsed-utilities { margin-top: auto; display: flex; flex-direction: column; align-items: center; gap: var(--space-1); padding-top: var(--space-2); border-top: 1px solid var(--border); width: 100%; }
+.collapsed-utilities { margin-top: auto; flex: 0 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; align-items: center; gap: var(--space-1); padding-top: var(--space-2); border-top: 1px solid var(--border); width: 100%; }
 
 /* The footer capsule at rail width — same bloom, same flow, never a wider rail. */
 .collapsed-update {

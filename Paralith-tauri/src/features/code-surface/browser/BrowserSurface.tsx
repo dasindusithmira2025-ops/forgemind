@@ -65,6 +65,8 @@ const COMMON_PORTS: { port: number; label: string }[] = [
   { port: 4200, label: 'Angular' },
 ]
 
+const HIDDEN_BROWSER_BOUNDS: BrowserBounds = { x: -32_000, y: -32_000, width: 1, height: 1 }
+
 export function BrowserSurface({ active, context, onSendToAgent }: BrowserSurfaceProps) {
   const workspaceId = context.workspaceId
   const store = useBrowserSessionStore()
@@ -126,6 +128,7 @@ export function BrowserSurface({ active, context, onSendToAgent }: BrowserSurfac
   useEffect(() => {
     if (!shouldShowWebview) {
       queueBrowserOperation(async () => {
+        await native.browserSetBounds(workspaceId, HIDDEN_BROWSER_BOUNDS).catch(() => undefined)
         await native.browserSetVisible(workspaceId, false).catch(() => undefined)
       })
       return
