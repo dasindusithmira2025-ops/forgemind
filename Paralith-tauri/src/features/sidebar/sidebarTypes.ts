@@ -133,6 +133,10 @@ export interface SidebarActions {
   onOpenDatabase?: () => void
   /** Open the Context Fabric (Memory) surface for the active project. */
   onOpenMemory?: () => void
+  /** Open the Run Engine surface for the active project. */
+  onOpenRuns?: () => void
+  /** Open Mission Control for the active project. */
+  onOpenMissions?: () => void
   /** Open Usage analytics. Application-scoped: token consumption is observed per machine. */
   onOpenUsage?: () => void
   onToggleCollapse: () => void
