@@ -6,9 +6,9 @@ import type {
 } from '../../native/types'
 
 /**
- * The Repository Command Center sections. Ordering here drives the section rail. The core
- * development loop (Changes → Branches → Pull Requests → Actions) is prioritized; the
- * remaining sections render connected surfaces backed by the same remote projection contract.
+ * Source Control section identifiers retained for shared repository components. The workspace
+ * surface exposes only the active development loop; legacy section ids remain typed so reusable
+ * components can keep routing intent explicit while the old top-level command center is removed.
  */
 export type RepositorySectionId =
   | 'overview'

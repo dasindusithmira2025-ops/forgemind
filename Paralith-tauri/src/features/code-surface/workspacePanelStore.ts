@@ -3,7 +3,7 @@ import { isSurfaceKind, type SurfaceKind } from './surfaceRegistry'
 
 /**
  * State for the docked Surface Workspace panel that sits beside the terminal canvas: a tab strip of
- * open tool surfaces (Files, Browser, Diff, Agents), plus panel visibility/size. Kept in a
+ * open tool surfaces (Files, Browser, Source Control, Agents), plus panel visibility/size. Kept in a
  * standalone store (not React component state) for two reasons:
  *   1. The terminal canvas must never remount when the panel opens/closes/resizes, so panel state
  *      cannot live in a component that also owns the canvas subtree.

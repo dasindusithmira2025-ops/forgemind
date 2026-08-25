@@ -1010,18 +1010,6 @@ impl RepositoryService {
                 value
             }
         };
-        let name_with_owner = repository_metadata
-            .get("nameWithOwner")
-            .and_then(Value::as_str)
-            .ok_or_else(|| {
-                AppError::new(
-                    "github_repository_identity_missing",
-                    "GitHub did not return a repository owner and name.",
-                    true,
-                )
-                .layer("github_provider")
-            })?;
-
         self.store_remote_stream(
             &request.project_id,
             "pull_request",
@@ -1032,118 +1020,6 @@ impl RepositoryService {
             self.gh_json(&repository, &["pr", "list", "--state", "all", "--limit", "250", "--json", "number,title,state,isDraft,headRefName,baseRefName,headRefOid,updatedAt,url,author,body,changedFiles,additions,deletions,reviewDecision,mergeable,labels,assignees"], None),
             "number", Some("updatedAt"), None, &fetched_at, Some("pull_requests:read"),
         )?;
-        self.store_remote_stream(
-            &request.project_id,
-            "issue",
-            self.gh_json(
-                &repository,
-                &[
-                    "issue",
-                    "list",
-                    "--state",
-                    "all",
-                    "--limit",
-                    "250",
-                    "--json",
-                    "number,title,state,updatedAt,url,author,labels,assignees,comments,milestone",
-                ],
-                None,
-            ),
-            "number",
-            Some("updatedAt"),
-            None,
-            &fetched_at,
-            Some("issues:read"),
-        )?;
-
-        let workflows_endpoint = format!("repos/{name_with_owner}/actions/workflows?per_page=100");
-        let workflow_result = self
-            .gh_json(
-                &repository,
-                &["api", &workflows_endpoint, "--paginate", "--slurp"],
-                None,
-            )
-            .and_then(|payload| {
-                self.enrich_workflow_definitions(&repository, name_with_owner, payload)
-            });
-        self.store_remote_stream(
-            &request.project_id,
-            "workflow",
-            workflow_result,
-            "id",
-            Some("updated_at"),
-            None,
-            &fetched_at,
-            Some("actions:read"),
-        )?;
-        let runs_endpoint = format!("repos/{name_with_owner}/actions/runs?per_page=100");
-        self.store_remote_stream(
-            &request.project_id,
-            "workflow_run",
-            self.gh_json(
-                &repository,
-                &["api", &runs_endpoint, "--paginate", "--slurp"],
-                None,
-            ),
-            "id",
-            Some("updated_at"),
-            Some("workflow_runs"),
-            &fetched_at,
-            Some("actions:read"),
-        )?;
-
-        let releases_endpoint = format!("repos/{name_with_owner}/releases?per_page=100");
-        self.store_remote_stream(
-            &request.project_id,
-            "release",
-            self.gh_json(
-                &repository,
-                &["api", &releases_endpoint, "--paginate", "--slurp"],
-                None,
-            ),
-            "id",
-            Some("published_at"),
-            None,
-            &fetched_at,
-            Some("contents:read"),
-        )?;
-        for (kind, endpoint, permission) in [
-            (
-                "dependabot_alert",
-                format!("repos/{name_with_owner}/dependabot/alerts?per_page=100"),
-                "dependabot_alerts:read",
-            ),
-            (
-                "code_scanning_alert",
-                format!("repos/{name_with_owner}/code-scanning/alerts?per_page=100"),
-                "security_events:read",
-            ),
-            (
-                "secret_scanning_alert",
-                format!("repos/{name_with_owner}/secret-scanning/alerts?per_page=100"),
-                "secret_scanning_alerts:read",
-            ),
-            (
-                "ruleset",
-                format!("repos/{name_with_owner}/rulesets?per_page=100"),
-                "metadata:read",
-            ),
-        ] {
-            self.store_remote_stream(
-                &request.project_id,
-                kind,
-                self.gh_json(
-                    &repository,
-                    &["api", &endpoint, "--paginate", "--slurp"],
-                    None,
-                ),
-                "number",
-                Some("updated_at"),
-                None,
-                &fetched_at,
-                Some(permission),
-            )?;
-        }
 
         let objects = self
             .database
@@ -1387,6 +1263,7 @@ impl RepositoryService {
         )
     }
 
+    #[allow(dead_code)]
     fn enrich_workflow_definitions(
         &self,
         repository: &Path,

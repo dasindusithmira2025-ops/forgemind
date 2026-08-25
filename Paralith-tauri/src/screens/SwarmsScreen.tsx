@@ -10,7 +10,7 @@ import { SwarmWorkspace } from '../features/swarms/SwarmWorkspace'
 
 /**
  * Project-level route hosting the Paralith Swarms workspace. Follows the same full-screen shell
- * as the Repository Command Center (own titlebar + Back), reached from the sidebar's SWARMS
+ * as other project-level tools (own titlebar + Back), reached from the sidebar's SWARMS
  * section. Scoped to `projectId`; an optional `swarmId` selects a Swarm to open.
  */
 export function SwarmsScreen() {

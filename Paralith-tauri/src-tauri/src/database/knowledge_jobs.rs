@@ -343,6 +343,7 @@ mod tests {
     fn payload(paths: &[&str]) -> String {
         serde_json::to_string(&AnalyzeImpactPayload {
             paths: paths.iter().map(|path| path.to_string()).collect(),
+            changes: Vec::new(),
             trigger: "file change".into(),
         })
         .unwrap()

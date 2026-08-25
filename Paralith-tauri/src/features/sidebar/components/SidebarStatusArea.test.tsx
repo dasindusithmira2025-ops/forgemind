@@ -50,7 +50,7 @@ describe('SidebarStatusArea', () => {
     expect(screen.queryByRole('button', { name: /Update Now/ })).not.toBeInTheDocument()
     // A dead disabled button is the failure mode this replaces, so assert the band is otherwise live.
     expect(screen.getByRole('button', { name: 'Settings' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Repository' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Source Control' })).toBeInTheDocument()
   })
 
   it('reads its label from the real updater phase and installs through the controller', () => {

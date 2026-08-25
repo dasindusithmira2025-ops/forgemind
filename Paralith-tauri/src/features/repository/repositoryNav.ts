@@ -2,8 +2,8 @@ import type { ProviderAccountStatus, RemoteProjection } from '../../native/types
 import type { PullRequestView, RepositorySectionId } from './repositoryTypes'
 
 /**
- * Contextual repository filters surfaced in the command-center left rail. A filter never renders
- * its own page — it selects a primary section and narrows that section to a backend-derived slice
+ * Contextual repository filters surfaced by Source Control and reusable repository components.
+ * A filter never renders its own page — it selects a primary section and narrows that section to a backend-derived slice
  * (e.g. "Awaiting review" opens Pull Requests filtered to PRs that still need a review decision).
  * This keeps the experience one coordinated workspace instead of a set of disconnected screens.
  */

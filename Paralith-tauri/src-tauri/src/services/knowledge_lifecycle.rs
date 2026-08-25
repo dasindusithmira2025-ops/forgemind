@@ -27,9 +27,15 @@
 use crate::database::DatabaseService;
 use crate::errors::AppResult;
 use crate::models::graph::ImpactReport;
-use crate::models::intelligence::{AgentHandoff, TimelineKind};
+use crate::models::intelligence::{
+    entity_kind, AgentHandoff, CandidateInput, CandidateOrigin, FactEvidence, TimelineKind,
+};
 use crate::models::knowledge::*;
-use crate::models::memory::MemoryQuality;
+use crate::models::memory::{
+    AttachSourceRequest, ClaimStatus, MemoryDetail, MemoryQuality, SaveClaimRequest,
+    SaveMemoryRequest, SaveRelationRequest, SetMemoryQualityRequest,
+};
+use crate::models::{FileChangeKind, ProjectFileChange};
 use crate::services::knowledge_intelligence::KnowledgeIntelligence;
 use crate::services::memory_service::MemoryService;
 use crate::services::{agent_handoff, project_analyzer};
@@ -156,22 +162,51 @@ impl KnowledgeLifecycle {
     /// Returns whether anything was enqueued. Paths that cannot carry knowledge provenance —
     /// PARALITH's own memory mirror, build output, dependencies — are dropped here rather than in
     /// the worker, so an `npm install` does not queue a job at all.
+    #[cfg(test)]
     pub fn handle_changed_paths(&self, project_id: &str, changed: &[String]) -> AppResult<bool> {
-        let relevant: Vec<String> = changed
+        let changes: Vec<ChangedPath> = changed
             .iter()
             .filter(|path| is_knowledge_relevant(path))
-            .cloned()
+            .map(|path| ChangedPath {
+                path: path.clone(),
+                kind: FileChangeKind::Modified,
+            })
             .collect();
-        if relevant.is_empty() {
+        self.handle_changed_path_kinds(project_id, changes, "file change")
+    }
+
+    pub fn handle_file_change_batch(
+        &self,
+        project_id: &str,
+        changed: &[ProjectFileChange],
+    ) -> AppResult<bool> {
+        let changes: Vec<ChangedPath> = changed
+            .iter()
+            .filter(|change| is_knowledge_relevant(&change.relative_path))
+            .map(|change| ChangedPath {
+                path: change.relative_path.clone(),
+                kind: change.kind,
+            })
+            .collect();
+        self.handle_changed_path_kinds(project_id, changes, "file change")
+    }
+
+    fn handle_changed_path_kinds(
+        &self,
+        project_id: &str,
+        changes: Vec<ChangedPath>,
+        trigger: &str,
+    ) -> AppResult<bool> {
+        if changes.is_empty() {
             return Ok(false);
         }
         // A manifest or workflow change may have moved the *shape* of the Project, so re-derive
         // what it is. A source edit does not: re-walking a monorepo on every save would be the
         // performance failure this whole queue exists to avoid.
-        if relevant.iter().any(|path| is_structural(path)) {
+        if changes.iter().any(|change| is_structural(&change.path)) {
             let _ = self.request_project_analysis(project_id, "manifest change");
         }
-        self.enqueue_impact(project_id, relevant, "file change")?;
+        self.enqueue_impact(project_id, changes, trigger)?;
         Ok(true)
     }
 
@@ -257,10 +292,13 @@ impl KnowledgeLifecycle {
         paths: &[String],
         trigger: &str,
     ) -> AppResult<bool> {
-        let relevant: Vec<String> = paths
+        let relevant: Vec<ChangedPath> = paths
             .iter()
             .filter(|path| is_knowledge_relevant(path))
-            .cloned()
+            .map(|path| ChangedPath {
+                path: path.clone(),
+                kind: FileChangeKind::Modified,
+            })
             .collect();
         if relevant.is_empty() {
             return Ok(false);
@@ -270,16 +308,35 @@ impl KnowledgeLifecycle {
     }
 
     /// Union new paths into the Project's pending impact job, or create it.
-    fn enqueue_impact(&self, project_id: &str, paths: Vec<String>, trigger: &str) -> AppResult<()> {
-        let mut merged = self
+    fn enqueue_impact(
+        &self,
+        project_id: &str,
+        changes: Vec<ChangedPath>,
+        trigger: &str,
+    ) -> AppResult<()> {
+        let mut merged: Vec<ChangedPath> = self
             .database
-            .pending_impact_paths(project_id, IMPACT_DEDUP_KEY)?;
-        merged.extend(paths);
-        merged.sort();
-        merged.dedup();
+            .pending_impact_paths(project_id, IMPACT_DEDUP_KEY)?
+            .into_iter()
+            .map(|path| ChangedPath {
+                path,
+                kind: FileChangeKind::Modified,
+            })
+            .collect();
+        merged.extend(changes);
+        merged.sort_by(|left, right| left.path.cmp(&right.path));
+        merged.dedup_by(|left, right| {
+            if left.path != right.path {
+                return false;
+            }
+            left.kind = merge_path_kind(left.kind, right.kind);
+            true
+        });
         merged.truncate(MAX_PATHS_PER_JOB);
+        let paths = merged.iter().map(|change| change.path.clone()).collect();
         let payload = serde_json::to_string(&AnalyzeImpactPayload {
-            paths: merged,
+            paths,
+            changes: merged,
             trigger: trigger.to_owned(),
         })
         .unwrap_or_else(|_| "{}".to_owned());
@@ -364,24 +421,58 @@ impl KnowledgeLifecycle {
     /// Resolve the job's paths into affected memories and apply the staleness policy.
     fn run_analyze_impact(&self, job: &KnowledgeJob) -> AppResult<(String, Vec<String>)> {
         let payload: AnalyzeImpactPayload = serde_json::from_str(&job.payload).unwrap_or_default();
+        let changes = payload_changes(&payload);
         let mut outcome = ImpactOutcome {
             paths_analyzed: 0,
             ..ImpactOutcome::default()
         };
         let mut to_mark: Vec<(String, String)> = Vec::new();
-        for path in &payload.paths {
+        let mut changed_items: Vec<String> = Vec::new();
+        let mut review_inputs: Vec<CandidateInput> = Vec::new();
+        for change in &changes {
             // A path the guard rejects is not an error for the batch: the watcher can surface an
             // odd entry, and one bad path must not abandon analysis of the rest.
-            let report = match self.memory.impact(&job.project_id, path, None) {
+            let report = match self.memory.impact(&job.project_id, &change.path, None) {
                 Ok(report) => report,
                 Err(error) => {
-                    log::debug!("impact skipped for {path}: {}", error.message);
+                    log::debug!("impact skipped for {}: {}", change.path, error.message);
                     continue;
                 }
             };
             outcome.paths_analyzed += 1;
+            let understanding = self.understand_change(job, change, &changes, &report);
+            outcome
+                .understandings
+                .push(understanding.understanding.clone());
+            for transition in understanding.transitions {
+                match transition {
+                    KnowledgeTransition::Supersede {
+                        old_item_id,
+                        new_item_id,
+                    } => {
+                        outcome.superseded.push(old_item_id.clone());
+                        outcome.learned.push(new_item_id.clone());
+                        changed_items.push(old_item_id);
+                        changed_items.push(new_item_id);
+                    }
+                    KnowledgeTransition::NeedsReview(input) => review_inputs.push(*input),
+                    KnowledgeTransition::Unchanged { item_id, reason } => {
+                        outcome.skipped.push(SkippedHit { item_id, reason });
+                    }
+                }
+            }
             let (mark, skipped) = staleness_decision(&report);
             for item_id in mark {
+                if outcome.superseded.iter().any(|id| id == &item_id) {
+                    continue;
+                }
+                if outcome
+                    .skipped
+                    .iter()
+                    .any(|skipped| skipped.item_id == item_id && skipped.reason.contains("rename"))
+                {
+                    continue;
+                }
                 to_mark.push((item_id, report.file_path.clone()));
             }
             outcome.skipped.extend(skipped);
@@ -403,9 +494,26 @@ impl KnowledgeLifecycle {
             outcome.marked_stale.push(item_id);
         }
 
-        let changed = outcome.marked_stale.clone();
+        if !review_inputs.is_empty() {
+            let queued = self
+                .intelligence
+                .queue_candidates(&job.project_id, &review_inputs)?;
+            if queued > 0 {
+                self.request_candidate_processing(&job.project_id)?;
+            }
+            outcome
+                .needs_review
+                .extend(review_inputs.into_iter().map(|input| input.statement));
+        }
+
+        changed_items.extend(outcome.marked_stale.clone());
+        changed_items.sort();
+        changed_items.dedup();
+        if !changed_items.is_empty() || !outcome.needs_review.is_empty() {
+            let _ = self.database.clear_context_cache(&job.project_id);
+        }
         let result = serde_json::to_string(&outcome).unwrap_or_else(|_| "{}".to_owned());
-        Ok((result, changed))
+        Ok((result, changed_items))
     }
 
     /// Re-derive what the Project is, and queue candidates for what changed.
@@ -497,6 +605,302 @@ impl KnowledgeLifecycle {
         Ok((result, Vec::new()))
     }
 
+    fn understand_change(
+        &self,
+        job: &KnowledgeJob,
+        change: &ChangedPath,
+        all_changes: &[ChangedPath],
+        report: &ImpactReport,
+    ) -> ChangeProcessing {
+        let mut processing = ChangeProcessing {
+            understanding: ChangeUnderstanding {
+                changed_paths: vec![change.clone()],
+                change_kind: classify_change_kind(change, all_changes).to_string(),
+                before_summary: None,
+                after_summary: None,
+                affected_symbols: Vec::new(),
+                affected_project_facts: Vec::new(),
+                affected_memory_ids: report
+                    .hits
+                    .iter()
+                    .map(|hit| hit.summary.id.clone())
+                    .collect(),
+                contradicted_memory_ids: Vec::new(),
+                candidate_new_knowledge: Vec::new(),
+                confidence: 0.45,
+                evidence: vec![change.path.clone()],
+            },
+            transitions: Vec::new(),
+        };
+
+        if change.kind == FileChangeKind::Deleted {
+            if let Some(renamed_to) = matching_created_path(change, all_changes) {
+                processing.understanding.change_kind = "file_renamed".into();
+                processing.understanding.after_summary = Some(format!(
+                    "{} appears to have moved to {}",
+                    change.path, renamed_to.path
+                ));
+                processing.understanding.confidence = 0.7;
+                for hit in report.hits.iter().filter(|hit| hit.distance == 0) {
+                    let attached = self.memory.attach_source(&AttachSourceRequest {
+                        project_id: job.project_id.clone(),
+                        item_id: hit.summary.id.clone(),
+                        claim_id: None,
+                        source_type: "file".into(),
+                        file_path: Some(renamed_to.path.clone()),
+                        line_start: None,
+                        line_end: None,
+                        uri: None,
+                        excerpt: Some("evidence path renamed".into()),
+                    });
+                    if attached.is_ok() {
+                        processing.transitions.push(KnowledgeTransition::Unchanged {
+                            item_id: hit.summary.id.clone(),
+                            reason: format!(
+                                "rename: evidence moved from {} to {}",
+                                change.path, renamed_to.path
+                            ),
+                        });
+                    }
+                }
+            }
+            return processing;
+        }
+
+        let literals = match source_literals(&self.database, &job.project_id, &change.path) {
+            Ok(literals) => literals,
+            Err(error) => {
+                log::debug!(
+                    "literal understanding skipped for {}: {}",
+                    change.path,
+                    error
+                );
+                Vec::new()
+            }
+        };
+        if literals.is_empty() {
+            return processing;
+        }
+        processing.understanding.change_kind = if change.kind == FileChangeKind::Created {
+            "file_added"
+        } else if literals.len() == 1 {
+            "literal_config_changed"
+        } else {
+            "source_literals_changed"
+        }
+        .into();
+        processing.understanding.after_summary = Some(
+            literals
+                .iter()
+                .take(6)
+                .map(|literal| format!("{} = {}", literal.symbol, literal.value))
+                .collect::<Vec<_>>()
+                .join("; "),
+        );
+        processing.understanding.affected_symbols = literals
+            .iter()
+            .map(|literal| literal.symbol.clone())
+            .collect();
+        processing.understanding.confidence = if literals.len() == 1 { 0.92 } else { 0.65 };
+        processing.understanding.evidence.extend(
+            literals
+                .iter()
+                .map(|literal| format!("{}#L{}", change.path, literal.line)),
+        );
+
+        for hit in report.hits.iter().filter(|hit| hit.distance == 0) {
+            if !matches!(
+                hit.summary.quality,
+                MemoryQuality::Supported | MemoryQuality::Verified | MemoryQuality::Canonical
+            ) {
+                continue;
+            }
+            let Ok(detail) = self.memory.get(&job.project_id, &hit.summary.id) else {
+                continue;
+            };
+            let old_values = memory_literal_values(&detail);
+            let replacements: Vec<(&String, &SourceLiteral)> = old_values
+                .iter()
+                .flat_map(|old| {
+                    literals
+                        .iter()
+                        .filter(move |literal| literal.value != *old)
+                        .map(move |literal| (old, literal))
+                })
+                .collect();
+            if replacements.len() == 1 {
+                let (old, literal) = replacements[0];
+                processing.understanding.before_summary =
+                    Some(format!("{} referenced {}", detail.summary.title, old));
+                processing
+                    .understanding
+                    .contradicted_memory_ids
+                    .push(detail.summary.id.clone());
+                match self.supersede_memory_from_literal(job, &detail, old, literal, &change.path) {
+                    Ok(new_item_id) => {
+                        processing
+                            .understanding
+                            .candidate_new_knowledge
+                            .push(format!("{} -> {}", old, literal.value));
+                        processing.transitions.push(KnowledgeTransition::Supersede {
+                            old_item_id: detail.summary.id.clone(),
+                            new_item_id,
+                        });
+                    }
+                    Err(error) => {
+                        log::warn!(
+                            "literal supersession not applied for {}: {}",
+                            detail.summary.id,
+                            error.message
+                        );
+                        processing
+                            .transitions
+                            .push(KnowledgeTransition::NeedsReview(Box::new(
+                                review_candidate(&job.project_id, &change.path, old, literal, 0.7),
+                            )));
+                    }
+                }
+            } else if !old_values.is_empty() {
+                let literal = &literals[0];
+                processing
+                    .transitions
+                    .push(KnowledgeTransition::NeedsReview(Box::new(
+                        review_candidate(
+                            &job.project_id,
+                            &change.path,
+                            old_values.first().map(String::as_str).unwrap_or("unknown"),
+                            literal,
+                            0.55,
+                        ),
+                    )));
+            }
+        }
+
+        if report.hits.iter().all(|hit| hit.distance != 0) && change.kind == FileChangeKind::Created
+        {
+            for literal in literals.iter().take(3) {
+                processing
+                    .transitions
+                    .push(KnowledgeTransition::NeedsReview(Box::new(
+                        new_literal_candidate(&job.project_id, &change.path, literal, 0.88),
+                    )));
+            }
+        }
+
+        processing
+    }
+
+    fn supersede_memory_from_literal(
+        &self,
+        job: &KnowledgeJob,
+        old: &MemoryDetail,
+        old_value: &str,
+        literal: &SourceLiteral,
+        path: &str,
+    ) -> AppResult<String> {
+        let new_title = replace_once(&old.summary.title, old_value, &literal.value);
+        let new_body = replace_once(&old.body, old_value, &literal.value);
+        let saved = self.memory.save(&SaveMemoryRequest {
+            project_id: job.project_id.clone(),
+            item_id: None,
+            title: if new_title == old.summary.title {
+                format!("{} ({})", old.summary.title, literal.value)
+            } else {
+                new_title
+            },
+            body: new_body,
+            memory_type: Some(old.summary.memory_type.clone()),
+            workspace_id: old.summary.workspace_id.clone(),
+            branch_name: old.summary.branch_name.clone(),
+            write_file: Some(true),
+        })?;
+        let statement = replace_once(&old.summary.summary, old_value, &literal.value);
+        let claim_id = self
+            .memory
+            .save_claim(&SaveClaimRequest {
+                project_id: job.project_id.clone(),
+                item_id: saved.summary.id.clone(),
+                claim_id: None,
+                statement: if statement.trim().is_empty() {
+                    saved.summary.title.clone()
+                } else {
+                    statement
+                },
+                status: ClaimStatus::Supported,
+                confidence: Some(0.92),
+                valid_from: None,
+                valid_until: None,
+            })?
+            .first()
+            .map(|claim| claim.id.clone());
+        self.memory.attach_source(&AttachSourceRequest {
+            project_id: job.project_id.clone(),
+            item_id: saved.summary.id.clone(),
+            claim_id,
+            source_type: "file".into(),
+            file_path: Some(path.to_owned()),
+            line_start: Some(literal.line as i64),
+            line_end: Some(literal.line as i64),
+            uri: None,
+            excerpt: Some(literal.excerpt.clone()),
+        })?;
+        self.memory.set_quality(&SetMemoryQualityRequest {
+            project_id: job.project_id.clone(),
+            item_id: saved.summary.id.clone(),
+            quality: old.summary.quality,
+        })?;
+        for claim in &old.claims {
+            let _ = self.memory.save_claim(&SaveClaimRequest {
+                project_id: job.project_id.clone(),
+                item_id: old.summary.id.clone(),
+                claim_id: Some(claim.id.clone()),
+                statement: claim.statement.clone(),
+                status: ClaimStatus::Superseded,
+                confidence: Some(claim.confidence),
+                valid_from: claim.valid_from.clone(),
+                valid_until: Some(chrono::Utc::now().to_rfc3339()),
+            });
+        }
+        self.memory.set_quality(&SetMemoryQualityRequest {
+            project_id: job.project_id.clone(),
+            item_id: old.summary.id.clone(),
+            quality: MemoryQuality::Superseded,
+        })?;
+        let reason = truncate_reason(&format!(
+            "{}: {} changed from {} to {}",
+            job.kind.as_str(),
+            path,
+            old_value,
+            literal.value
+        ));
+        self.memory.mark_stale(
+            &job.project_id,
+            std::slice::from_ref(&old.summary.id),
+            Some(&reason),
+        )?;
+        let _ = self.memory.save_relation(&SaveRelationRequest {
+            project_id: job.project_id.clone(),
+            from_item_id: saved.summary.id.clone(),
+            to_item_id: old.summary.id.clone(),
+            relation_type: "supersedes".into(),
+            confidence: Some(0.95),
+        });
+        let _ = self.database.append_timeline(
+            &job.project_id,
+            TimelineKind::QualityChanged,
+            &format!(
+                "{} superseded by {}",
+                old.summary.title, saved.summary.title
+            ),
+            Some(&reason),
+            "system",
+            Some(&old.summary.id),
+            None,
+            None,
+        );
+        Ok(saved.summary.id)
+    }
+
     fn emit_updated(&self, job: &KnowledgeJob, changed_item_ids: Vec<String>) {
         let Some(app) = &self.app else { return };
         let _ = app.emit(
@@ -508,6 +912,237 @@ impl KnowledgeLifecycle {
                 changed_item_ids,
             },
         );
+    }
+}
+
+struct ChangeProcessing {
+    understanding: ChangeUnderstanding,
+    transitions: Vec<KnowledgeTransition>,
+}
+
+enum KnowledgeTransition {
+    Supersede {
+        old_item_id: String,
+        new_item_id: String,
+    },
+    NeedsReview(Box<CandidateInput>),
+    Unchanged {
+        item_id: String,
+        reason: String,
+    },
+}
+
+#[derive(Debug, Clone)]
+struct SourceLiteral {
+    symbol: String,
+    value: String,
+    line: usize,
+    excerpt: String,
+}
+
+fn payload_changes(payload: &AnalyzeImpactPayload) -> Vec<ChangedPath> {
+    if !payload.changes.is_empty() {
+        return payload.changes.clone();
+    }
+    payload
+        .paths
+        .iter()
+        .map(|path| ChangedPath {
+            path: path.clone(),
+            kind: FileChangeKind::Modified,
+        })
+        .collect()
+}
+
+fn classify_change_kind(change: &ChangedPath, all_changes: &[ChangedPath]) -> &'static str {
+    match change.kind {
+        FileChangeKind::Created => "file_added",
+        FileChangeKind::Deleted if matching_created_path(change, all_changes).is_some() => {
+            "file_renamed"
+        }
+        FileChangeKind::Deleted => "file_removed",
+        FileChangeKind::Modified if is_structural(&change.path) => "project_fact_changed",
+        FileChangeKind::Modified => "source_modified",
+    }
+}
+
+fn matching_created_path<'a>(
+    deleted: &ChangedPath,
+    all_changes: &'a [ChangedPath],
+) -> Option<&'a ChangedPath> {
+    if deleted.kind != FileChangeKind::Deleted {
+        return None;
+    }
+    let deleted_name = deleted.path.rsplit('/').next()?;
+    all_changes.iter().find(|candidate| {
+        candidate.kind == FileChangeKind::Created
+            && candidate.path != deleted.path
+            && candidate.path.rsplit('/').next() == Some(deleted_name)
+    })
+}
+
+fn source_literals(
+    database: &DatabaseService,
+    project_id: &str,
+    relative_path: &str,
+) -> std::io::Result<Vec<SourceLiteral>> {
+    let project = database
+        .get_project(project_id)
+        .map_err(|error| std::io::Error::other(error.message))?;
+    let root = std::path::PathBuf::from(project.root_path);
+    let content = std::fs::read_to_string(root.join(relative_path))?;
+    let mut literals = Vec::new();
+    for (index, line) in content.lines().enumerate() {
+        let Some((left, right)) = line.split_once('=') else {
+            continue;
+        };
+        let Some(value) = quoted_value(right) else {
+            continue;
+        };
+        let symbol = left
+            .split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+            .rfind(|part| !part.is_empty())
+            .unwrap_or("value")
+            .to_string();
+        if symbol.is_empty() || value.is_empty() || value.len() > 120 {
+            continue;
+        }
+        literals.push(SourceLiteral {
+            symbol,
+            value,
+            line: index + 1,
+            excerpt: line.trim().chars().take(240).collect(),
+        });
+        if literals.len() >= 24 {
+            break;
+        }
+    }
+    Ok(literals)
+}
+
+fn quoted_value(input: &str) -> Option<String> {
+    let mut quote = None;
+    let mut start = 0usize;
+    for (index, ch) in input.char_indices() {
+        if ch == '"' || ch == '\'' || ch == '`' {
+            quote = Some(ch);
+            start = index + ch.len_utf8();
+            break;
+        }
+    }
+    let quote = quote?;
+    let rest = &input[start..];
+    let end = rest.find(quote)?;
+    Some(rest[..end].to_string())
+}
+
+fn memory_literal_values(memory: &MemoryDetail) -> Vec<String> {
+    let material = format!(
+        "{}\n{}\n{}",
+        memory.summary.title, memory.summary.summary, memory.body
+    );
+    let mut values = Vec::new();
+    values.extend(quoted_values(&material));
+    for token in material.split_whitespace() {
+        let cleaned = token.trim_matches(|ch: char| {
+            matches!(
+                ch,
+                '.' | ',' | ';' | ':' | '(' | ')' | '[' | ']' | '{' | '}' | '"' | '\'' | '`'
+            )
+        });
+        if cleaned.len() >= 2
+            && cleaned.len() <= 80
+            && cleaned.chars().any(|ch| ch.is_ascii_uppercase())
+            && cleaned
+                .chars()
+                .all(|ch| ch.is_ascii_uppercase() || ch.is_ascii_digit() || ch == '_' || ch == '-')
+        {
+            values.push(cleaned.to_owned());
+        }
+    }
+    values.sort();
+    values.dedup();
+    values
+}
+
+fn quoted_values(input: &str) -> Vec<String> {
+    let mut values = Vec::new();
+    for quote in ['"', '\'', '`'] {
+        let mut rest = input;
+        while let Some(start) = rest.find(quote) {
+            rest = &rest[start + quote.len_utf8()..];
+            let Some(end) = rest.find(quote) else {
+                break;
+            };
+            let value = rest[..end].trim();
+            if !value.is_empty() && value.len() <= 120 {
+                values.push(value.to_owned());
+            }
+            rest = &rest[end + quote.len_utf8()..];
+        }
+    }
+    values
+}
+
+fn replace_once(input: &str, old: &str, new: &str) -> String {
+    input.replacen(old, new, 1)
+}
+
+fn review_candidate(
+    _project_id: &str,
+    path: &str,
+    old_value: &str,
+    literal: &SourceLiteral,
+    confidence: f64,
+) -> CandidateInput {
+    CandidateInput {
+        kind: "source_change.literal_review".into(),
+        subject: path.to_owned(),
+        subject_kind: entity_kind::MODULE.into(),
+        subject_identity: Some(format!("file:{path}")),
+        predicate: literal.symbol.clone(),
+        object: literal.value.clone(),
+        statement: format!(
+            "{} may have changed from {} to {}.",
+            literal.symbol, old_value, literal.value
+        ),
+        suggested_memory_type: "component".into(),
+        confidence,
+        origin: CandidateOrigin::Deterministic,
+        branch_name: None,
+        created_by: "knowledge_lifecycle".into(),
+        evidence: vec![FactEvidence {
+            path: path.to_owned(),
+            kind: "source_change".into(),
+            excerpt: Some(literal.excerpt.clone()),
+        }],
+    }
+}
+
+fn new_literal_candidate(
+    _project_id: &str,
+    path: &str,
+    literal: &SourceLiteral,
+    confidence: f64,
+) -> CandidateInput {
+    CandidateInput {
+        kind: "source_change.literal_added".into(),
+        subject: path.to_owned(),
+        subject_kind: entity_kind::MODULE.into(),
+        subject_identity: Some(format!("file:{path}")),
+        predicate: literal.symbol.clone(),
+        object: literal.value.clone(),
+        statement: format!("{} defines {} as {}.", path, literal.symbol, literal.value),
+        suggested_memory_type: "component".into(),
+        confidence,
+        origin: CandidateOrigin::Deterministic,
+        branch_name: None,
+        created_by: "knowledge_lifecycle".into(),
+        evidence: vec![FactEvidence {
+            path: path.to_owned(),
+            kind: "source_change".into(),
+            excerpt: Some(literal.excerpt.clone()),
+        }],
     }
 }
 
@@ -629,6 +1264,14 @@ fn truncate_reason(reason: &str) -> String {
         .take(MAX_REASON_CHARS - 1)
         .collect::<String>()
         + "…"
+}
+
+fn merge_path_kind(existing: FileChangeKind, incoming: FileChangeKind) -> FileChangeKind {
+    match (existing, incoming) {
+        (_, FileChangeKind::Deleted) => FileChangeKind::Deleted,
+        (FileChangeKind::Created, FileChangeKind::Modified) => FileChangeKind::Created,
+        (_, kind) => kind,
+    }
 }
 
 #[cfg(test)]
@@ -765,10 +1408,13 @@ mod tests {
 #[cfg(test)]
 mod loop_tests {
     use super::*;
+    use crate::agents::{provider_arguments, AgentInvocation};
+    use crate::models::context::ContextRequest;
     use crate::models::memory::{
         AttachSourceRequest, MemoryDetail, SaveMemoryRequest, SetMemoryQualityRequest,
     };
-    use crate::models::Project;
+    use crate::models::{AgentProvider, Project};
+    use crate::services::context_compiler::ContextCompiler;
     use crate::services::filesystem_service::{FileSystemService, SelfWriteLedger};
     use std::path::PathBuf;
     use uuid::Uuid;
@@ -875,6 +1521,14 @@ mod loop_tests {
             .unwrap()
             .summary
             .stale_reason
+    }
+
+    fn compiler(fixture: &Fixture) -> ContextCompiler {
+        let filesystem = FileSystemService::new(
+            Arc::clone(&fixture.lifecycle.database),
+            SelfWriteLedger::default(),
+        );
+        ContextCompiler::new(Arc::clone(&fixture.lifecycle.database), filesystem)
     }
 
     #[test]
@@ -1279,6 +1933,366 @@ mod loop_tests {
         assert!(
             stale_reason(&fixture, &canonical.summary.id).is_none(),
             "impact is scoped by Project, so an identically named path elsewhere is not this Project's change"
+        );
+    }
+
+    #[test]
+    fn closed_loop_canary_source_truth_change_reaches_provider_bound_prompt() {
+        let fixture = fixture();
+        let app_file = fixture.root.join("src/app.rs");
+        std::fs::write(&app_file, "pub const greeting: &str = \"ALPHA\";\n").unwrap();
+        let saved = fixture
+            .memory
+            .save(&SaveMemoryRequest {
+                project_id: fixture.project_id.clone(),
+                item_id: None,
+                title: "Application Greeting".into(),
+                body: "The application greeting is ALPHA.".into(),
+                memory_type: Some("decision".into()),
+                workspace_id: None,
+                branch_name: None,
+                write_file: Some(false),
+            })
+            .unwrap();
+        fixture
+            .memory
+            .attach_source(&AttachSourceRequest {
+                project_id: fixture.project_id.clone(),
+                item_id: saved.summary.id.clone(),
+                claim_id: None,
+                source_type: "file".into(),
+                file_path: Some("src/app.rs".into()),
+                line_start: Some(1),
+                line_end: Some(1),
+                uri: None,
+                excerpt: Some("pub const greeting: &str = \"ALPHA\";".into()),
+            })
+            .unwrap();
+        fixture
+            .memory
+            .set_quality(&SetMemoryQualityRequest {
+                project_id: fixture.project_id.clone(),
+                item_id: saved.summary.id.clone(),
+                quality: MemoryQuality::Canonical,
+            })
+            .unwrap();
+        let stale_decoy = fixture
+            .memory
+            .save(&SaveMemoryRequest {
+                project_id: fixture.project_id.clone(),
+                item_id: None,
+                title: "Historical Greeting".into(),
+                body: "The old staging greeting was ALPHA.".into(),
+                memory_type: Some("note".into()),
+                workspace_id: None,
+                branch_name: None,
+                write_file: Some(false),
+            })
+            .unwrap();
+        fixture
+            .memory
+            .mark_stale(
+                &fixture.project_id,
+                std::slice::from_ref(&stale_decoy.summary.id),
+                Some("historical note pending review"),
+            )
+            .unwrap();
+
+        let compiler = compiler(&fixture);
+        let request = ContextRequest {
+            project_id: fixture.project_id.clone(),
+            task: "greeting".into(),
+            focus_files: vec!["src/app.rs".into()],
+            bypass_cache: Some(false),
+            ..ContextRequest::default()
+        };
+        let before = compiler.compile_cached(&request).unwrap();
+        assert!(before
+            .sections
+            .iter()
+            .flat_map(|section| &section.entries)
+            .any(|entry| entry.text.contains("ALPHA")));
+        assert!(compiler.compile_cached(&request).unwrap().cached);
+        assert_eq!(
+            fixture
+                .lifecycle
+                .database
+                .context_cache_rows_for_project(&fixture.project_id)
+                .unwrap(),
+            1
+        );
+
+        std::fs::write(&app_file, "pub const greeting: &str = \"BETA\";\n").unwrap();
+        let watcher = crate::services::FileWatchService::new_for_tests(
+            Arc::clone(&fixture.lifecycle.database),
+            SelfWriteLedger::default(),
+        )
+        .with_knowledge_lifecycle(fixture.lifecycle.clone());
+        watcher.dispatch_changes_for_test(
+            &fixture.project_id,
+            vec![ProjectFileChange {
+                relative_path: "src/app.rs".into(),
+                kind: FileChangeKind::Modified,
+                origin: crate::models::ChangeOrigin::Filesystem,
+            }],
+        );
+        assert_eq!(fixture.lifecycle.drain(), 1);
+        assert_eq!(
+            fixture
+                .lifecycle
+                .database
+                .context_cache_rows_for_project(&fixture.project_id)
+                .unwrap(),
+            0,
+            "truth-changing maintenance must explicitly clear warm context cache rows"
+        );
+
+        let jobs = fixture
+            .lifecycle
+            .database
+            .list_knowledge_jobs(&fixture.project_id, false, None)
+            .unwrap();
+        let outcome: ImpactOutcome =
+            serde_json::from_str(jobs[0].result.as_deref().unwrap()).unwrap();
+        assert_eq!(jobs[0].status, KnowledgeJobStatus::Complete);
+        assert_eq!(outcome.superseded, vec![saved.summary.id.clone()]);
+        assert_eq!(outcome.learned.len(), 1);
+        assert!(outcome.understandings[0]
+            .after_summary
+            .as_deref()
+            .unwrap()
+            .contains("BETA"));
+
+        let old = fixture
+            .memory
+            .get(&fixture.project_id, &saved.summary.id)
+            .unwrap();
+        assert_eq!(old.summary.quality, MemoryQuality::Superseded);
+        assert!(old
+            .summary
+            .stale_reason
+            .as_deref()
+            .unwrap()
+            .contains("ALPHA"));
+        let new = fixture
+            .memory
+            .get(&fixture.project_id, &outcome.learned[0])
+            .unwrap();
+        assert_eq!(new.summary.quality, MemoryQuality::Canonical);
+        assert!(new.body.contains("BETA"));
+        assert!(new.sources.iter().any(|source| {
+            source.file_path.as_deref() == Some("src/app.rs")
+                && source
+                    .excerpt
+                    .as_deref()
+                    .unwrap_or_default()
+                    .contains("BETA")
+        }));
+        assert!(new
+            .relations
+            .iter()
+            .any(|relation| relation.relation_type == "supersedes"
+                && relation.to_title == old.summary.title));
+
+        let after = compiler.compile_cached(&request).unwrap();
+        assert!(
+            !after.cached,
+            "supersession must invalidate an already cached ALPHA pack"
+        );
+        let after_entries = after
+            .sections
+            .iter()
+            .flat_map(|section| &section.entries)
+            .collect::<Vec<_>>();
+        assert!(after_entries
+            .iter()
+            .any(|entry| entry.text.contains("BETA")));
+        assert!(after_entries
+            .iter()
+            .all(|entry| { entry.item_id != saved.summary.id && !entry.text.contains("ALPHA") }));
+        assert!(after
+            .rejected
+            .iter()
+            .any(|rejection| rejection.item_id == saved.summary.id
+                && matches!(rejection.reason.as_str(), "stale" | "superseded")));
+
+        let prompt = after
+            .sections
+            .iter()
+            .flat_map(|section| &section.entries)
+            .map(|entry| format!("{}: {}", entry.title, entry.text))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let invocation = AgentInvocation {
+            provider: AgentProvider::Claude,
+            model_id: "claude-test".into(),
+            reasoning_effort: "medium".into(),
+            may_write: false,
+            working_directory: fixture.root.to_string_lossy().to_string(),
+            prompt,
+            resume_session_id: None,
+        };
+        let claude_args = provider_arguments(&invocation).join("\n");
+        assert!(claude_args.contains("BETA"));
+        assert!(!claude_args.contains("ALPHA"));
+        let codex_args = provider_arguments(&AgentInvocation {
+            provider: AgentProvider::Codex,
+            ..invocation
+        })
+        .join("\n");
+        assert!(codex_args.contains("BETA"));
+        assert!(!codex_args.contains("ALPHA"));
+    }
+
+    #[test]
+    fn deleted_evidence_marks_current_knowledge_stale_without_destroying_history() {
+        let fixture = fixture();
+        let canonical = cited_memory(&fixture, "Rotation Decision", MemoryQuality::Canonical);
+        std::fs::remove_file(fixture.root.join("src/auth/token.rs")).unwrap();
+        fixture
+            .lifecycle
+            .handle_file_change_batch(
+                &fixture.project_id,
+                &[ProjectFileChange {
+                    relative_path: "src/auth/token.rs".into(),
+                    kind: FileChangeKind::Deleted,
+                    origin: crate::models::ChangeOrigin::Filesystem,
+                }],
+            )
+            .unwrap();
+        fixture.lifecycle.drain();
+        let updated = fixture
+            .memory
+            .get(&fixture.project_id, &canonical.summary.id)
+            .unwrap();
+        assert_eq!(updated.summary.quality, MemoryQuality::Canonical);
+        assert!(updated.summary.stale_reason.is_some());
+    }
+
+    #[test]
+    fn rename_keeps_knowledge_current_and_adds_the_new_evidence_path() {
+        let fixture = fixture();
+        let canonical = cited_memory(&fixture, "Rotation Decision", MemoryQuality::Canonical);
+        std::fs::create_dir_all(fixture.root.join("src/security")).unwrap();
+        std::fs::rename(
+            fixture.root.join("src/auth/token.rs"),
+            fixture.root.join("src/security/token.rs"),
+        )
+        .unwrap();
+        fixture
+            .lifecycle
+            .handle_file_change_batch(
+                &fixture.project_id,
+                &[
+                    ProjectFileChange {
+                        relative_path: "src/auth/token.rs".into(),
+                        kind: FileChangeKind::Deleted,
+                        origin: crate::models::ChangeOrigin::Filesystem,
+                    },
+                    ProjectFileChange {
+                        relative_path: "src/security/token.rs".into(),
+                        kind: FileChangeKind::Created,
+                        origin: crate::models::ChangeOrigin::Filesystem,
+                    },
+                ],
+            )
+            .unwrap();
+        fixture.lifecycle.drain();
+        let updated = fixture
+            .memory
+            .get(&fixture.project_id, &canonical.summary.id)
+            .unwrap();
+        assert_eq!(updated.summary.quality, MemoryQuality::Canonical);
+        assert!(updated.summary.stale_reason.is_none());
+        assert!(updated
+            .sources
+            .iter()
+            .any(|source| source.file_path.as_deref() == Some("src/security/token.rs")));
+    }
+
+    #[test]
+    fn ambiguous_literal_change_routes_to_review_instead_of_rewriting_truth() {
+        let fixture = fixture();
+        let app_file = fixture.root.join("src/auth/token.rs");
+        std::fs::write(
+            &app_file,
+            "const PRIMARY: &str = \"ALPHA\";\nconst FALLBACK: &str = \"OMEGA\";\n",
+        )
+        .unwrap();
+        let memory = fixture
+            .memory
+            .save(&SaveMemoryRequest {
+                project_id: fixture.project_id.clone(),
+                item_id: None,
+                title: "Greeting Rule".into(),
+                body: "The greeting is BETA.".into(),
+                memory_type: Some("decision".into()),
+                workspace_id: None,
+                branch_name: None,
+                write_file: Some(false),
+            })
+            .unwrap();
+        fixture
+            .memory
+            .attach_source(&AttachSourceRequest {
+                project_id: fixture.project_id.clone(),
+                item_id: memory.summary.id.clone(),
+                claim_id: None,
+                source_type: "file".into(),
+                file_path: Some("src/auth/token.rs".into()),
+                line_start: Some(1),
+                line_end: Some(2),
+                uri: None,
+                excerpt: None,
+            })
+            .unwrap();
+        fixture
+            .memory
+            .set_quality(&SetMemoryQualityRequest {
+                project_id: fixture.project_id.clone(),
+                item_id: memory.summary.id.clone(),
+                quality: MemoryQuality::Canonical,
+            })
+            .unwrap();
+
+        fixture
+            .lifecycle
+            .handle_file_change_batch(
+                &fixture.project_id,
+                &[ProjectFileChange {
+                    relative_path: "src/auth/token.rs".into(),
+                    kind: FileChangeKind::Modified,
+                    origin: crate::models::ChangeOrigin::Filesystem,
+                }],
+            )
+            .unwrap();
+        assert!(
+            fixture.lifecycle.drain() >= 1,
+            "impact may enqueue a candidate review pass"
+        );
+
+        let old = fixture
+            .memory
+            .get(&fixture.project_id, &memory.summary.id)
+            .unwrap();
+        assert_eq!(
+            old.summary.quality,
+            MemoryQuality::Canonical,
+            "ambiguous evidence must not supersede the old memory automatically"
+        );
+        assert!(old.summary.stale_reason.is_some());
+        let candidates = fixture
+            .lifecycle
+            .database
+            .list_candidates(&fixture.project_id, None, None)
+            .unwrap();
+        assert!(
+            candidates.iter().any(|candidate| candidate
+                .decision_reason
+                .as_deref()
+                .unwrap_or_default()
+                .contains("confidence")),
+            "ambiguous deterministic observations are visible in review"
         );
     }
 }

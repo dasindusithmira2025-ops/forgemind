@@ -1,6 +1,6 @@
 import type { CSSProperties } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Activity, BarChart3, Boxes, BrainCircuit, Database, Folder, FolderGit2, MoreHorizontal, Settings } from 'lucide-react'
+import { Activity, BarChart3, Boxes, BrainCircuit, Database, Folder, GitBranch, MoreHorizontal, Settings } from 'lucide-react'
 import { Brand } from '../../../components/ui/Brand'
 import { useSwarmStore } from '../../swarms/swarmStore'
 import { isActiveLifecycle, lifecycleLabel, lifecycleTone } from '../../swarms/swarmPresentation'
@@ -126,8 +126,8 @@ export function CollapsedSidebar({
       {/* Mirrors the expanded footer rail exactly, so collapsing never hides a utility. */}
       <div className="collapsed-utilities">
         {actions.onOpenRepository && (
-          <button type="button" aria-label="Repository" title="Repository" onClick={actions.onOpenRepository}>
-            <FolderGit2 size={16} />
+          <button type="button" aria-label="Source Control" title="Source Control" onClick={actions.onOpenRepository}>
+            <GitBranch size={16} />
           </button>
         )}
         {actions.onOpenMemory && (

@@ -28,7 +28,7 @@ export interface SurfaceDef {
 export const SURFACE_REGISTRY: SurfaceDef[] = [
   { kind: 'files', label: 'Files', description: 'Browse and edit project files', icon: Files, singleton: true },
   { kind: 'browser', label: 'Browser', description: 'Open an app or URL', icon: Globe, singleton: true },
-  { kind: 'diff', label: 'Diff', description: 'Review working-tree changes', icon: Diff, singleton: true },
+  { kind: 'diff', label: 'Source Control', description: 'Review, stage, commit and push this worktree', icon: Diff, singleton: true },
   { kind: 'agents', label: 'Agents', description: 'Watch agent activity', icon: Bot, singleton: true },
 ]
 

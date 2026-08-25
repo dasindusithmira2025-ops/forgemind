@@ -5,8 +5,10 @@ import {
   BarChart3,
   Database,
   Download,
-  FolderGit2,
+  GitBranch,
   BrainCircuit,
+  PlayCircle,
+  Target,
   PanelLeftClose,
   RotateCw,
   Settings,
@@ -35,11 +37,11 @@ export function SidebarStatusArea({ actions }: { actions: SidebarActions }) {
           <button
             type="button"
             className="sb-status-btn"
-            aria-label="Repository"
-            title="Repository"
+            aria-label="Source Control"
+            title="Source Control"
             onClick={actions.onOpenRepository}
           >
-            <FolderGit2 size={15} />
+            <GitBranch size={15} />
           </button>
         )}
         {actions.onOpenDatabase && (
@@ -51,6 +53,28 @@ export function SidebarStatusArea({ actions }: { actions: SidebarActions }) {
             onClick={actions.onOpenDatabase}
           >
             <Database size={15} />
+          </button>
+        )}
+        {actions.onOpenMissions && (
+          <button
+            type="button"
+            className="sb-status-btn"
+            aria-label="Missions"
+            title="Missions"
+            onClick={actions.onOpenMissions}
+          >
+            <Target size={15} />
+          </button>
+        )}
+        {actions.onOpenRuns && (
+          <button
+            type="button"
+            className="sb-status-btn"
+            aria-label="Runs"
+            title="Runs"
+            onClick={actions.onOpenRuns}
+          >
+            <PlayCircle size={15} />
           </button>
         )}
         {actions.onOpenMemory && (
