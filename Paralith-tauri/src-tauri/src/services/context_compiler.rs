@@ -101,9 +101,9 @@ const SEMANTIC_LIMIT: usize = 20;
 pub const CONTEXT_COMPILER_VERSION: &str = "2";
 const EXTERNAL_TEXT_CHARS: usize = 1_200;
 
-/// Quality multiplier. Canonical knowledge outranks a working note at the same relevance, and
-/// deprecated knowledge is heavily discounted without being made unreachable — an agent sometimes
-/// needs to know what the project *used* to do.
+/// Quality multiplier. Canonical knowledge outranks a working note at the same relevance.
+/// Retired knowledge is normally filtered before scoring; the low multipliers only apply when a
+/// caller explicitly asks for historical context.
 fn quality_multiplier(quality: MemoryQuality) -> f64 {
     match quality {
         MemoryQuality::Canonical => 1.3,
@@ -151,24 +151,10 @@ struct PackCandidate {
 
 impl Candidate {
     /// Score is the sum of reason weights, scaled by how much the project trusts the memory.
-    ///
-    /// Staleness discounts rather than excludes: a decision that a commit put in question is still
-    /// the best answer available until someone replaces it, and hiding it would leave the agent
-    /// with nothing rather than with a caveat.
     fn score(&self) -> f64 {
         let base: f64 = self.reasons.iter().map(|reason| reason.weight).sum();
         let importance = 0.8 + self.summary.importance.clamp(0.0, 1.0) * 0.4;
-        let stale = if self
-            .summary
-            .stale_reason
-            .as_deref()
-            .is_some_and(|r| !r.is_empty())
-        {
-            0.6
-        } else {
-            1.0
-        };
-        base * quality_multiplier(self.summary.quality) * importance * stale
+        base * quality_multiplier(self.summary.quality) * importance
     }
 }
 
@@ -402,14 +388,29 @@ impl ContextCompiler {
         let mut rejected: Vec<ContextRejection> = Vec::new();
         let mut kept: Vec<(Candidate, f64)> = Vec::new();
         for (candidate, score) in ranked {
+            let explicit = candidate
+                .reasons
+                .iter()
+                .any(|reason| reason.source == "explicit");
+            let stale = candidate
+                .summary
+                .stale_reason
+                .as_deref()
+                .is_some_and(|reason| !reason.is_empty());
+            if stale && !explicit {
+                rejected.push(ContextRejection {
+                    item_id: candidate.summary.id.clone(),
+                    title: candidate.summary.title.clone(),
+                    score,
+                    reason: "stale".into(),
+                });
+                continue;
+            }
             match candidate.summary.quality {
                 MemoryQuality::Superseded | MemoryQuality::Deprecated
                     // A memory the caller named explicitly is kept even when superseded: the
                     // request is more specific than the default policy.
-                    if !candidate
-                        .reasons
-                        .iter()
-                        .any(|reason| reason.source == "explicit") =>
+                    if !explicit =>
                 {
                     rejected.push(ContextRejection {
                         item_id: candidate.summary.id.clone(),
@@ -1918,7 +1919,7 @@ mod tests {
     }
 
     #[test]
-    fn stale_knowledge_is_carried_but_flagged_and_discounted() {
+    fn stale_knowledge_is_rejected_from_normal_project_truth() {
         let fixture = fixture();
         let fresh = save(&fixture, "Rotation A", "decision", "token rotation policy");
         let stale = save(&fixture, "Rotation B", "decision", "token rotation policy");
@@ -1936,11 +1937,16 @@ mod tests {
             .compile(&request(&fixture, "token rotation policy"))
             .unwrap();
         let all = entries(&pack);
-        let stale_entry = all.iter().find(|entry| entry.item_id == stale).unwrap();
         let fresh_entry = all.iter().find(|entry| entry.item_id == fresh).unwrap();
-        assert!(stale_entry.stale);
         assert!(!fresh_entry.stale);
-        assert!(stale_entry.score < fresh_entry.score);
+        assert!(
+            all.iter().all(|entry| entry.item_id != stale),
+            "stale knowledge must not be injected as current project truth"
+        );
+        assert!(pack
+            .rejected
+            .iter()
+            .any(|rejection| rejection.item_id == stale && rejection.reason == "stale"));
     }
 
     #[test]
@@ -2280,7 +2286,11 @@ mod tests {
             .unwrap();
         let after = fixture.compiler.compile_cached(&warm).unwrap();
         assert!(!after.cached);
-        assert!(entries(&after)[0].stale);
+        assert!(entries(&after).is_empty());
+        assert!(after
+            .rejected
+            .iter()
+            .any(|rejection| rejection.item_id == item_id && rejection.reason == "stale"));
     }
 
     #[test]

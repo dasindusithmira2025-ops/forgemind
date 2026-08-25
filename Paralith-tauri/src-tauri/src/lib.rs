@@ -474,6 +474,13 @@ pub fn run() {
             if let Err(error) = windows.hydrate_from_disk() {
                 log::warn!("window registry hydration skipped: {}", error.message);
             }
+            match file_watch.ensure_open_project_session_watches() {
+                Ok(0) => {}
+                Ok(count) => log::info!("restored file watchers for {count} open Project(s)"),
+                Err(error) => {
+                    log::warn!("open Project file watchers not restored: {}", error.message)
+                }
+            }
             let detached_to_restore = if recovery_mode {
                 Vec::new()
             } else {

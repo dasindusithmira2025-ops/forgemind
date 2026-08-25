@@ -1348,6 +1348,16 @@ impl DatabaseService {
         )?)
     }
 
+    #[cfg(test)]
+    pub fn context_cache_rows_for_project(&self, project_id: &str) -> AppResult<usize> {
+        let connection = self.connection.lock();
+        Ok(connection.query_row(
+            "SELECT COUNT(*) FROM knowledge_context_cache WHERE project_id=?1",
+            [project_id],
+            |row| row.get::<_, i64>(0),
+        )? as usize)
+    }
+
     // ---- Embeddings ----------------------------------------------------------------------------
 
     /// Every stored vector for one provider/model in this Project.

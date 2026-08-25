@@ -670,11 +670,15 @@ impl DatabaseService {
 
     /// Attach a provenance record to a memory and, optionally, to one of its claims.
     ///
-    /// `uri` is the deduplication identity: attaching the same file range twice reuses the
-    /// existing source row instead of accumulating duplicate evidence.
+    /// `uri` plus excerpt is the deduplication identity. A watched source line can keep the same
+    /// path/range while its content changes; collapsing those rows would rewrite provenance.
     pub fn attach_source(&self, request: &AttachSourceRequest, uri: &str) -> AppResult<String> {
         let now = Utc::now().to_rfc3339();
-        let content_hash = hash(uri);
+        let content_hash = hash(&format!(
+            "{}\u{0}{}",
+            uri,
+            request.excerpt.as_deref().unwrap_or_default()
+        ));
         let mut connection = self.connection.lock();
         let transaction = connection.transaction()?;
         let owned: Option<String> = transaction
