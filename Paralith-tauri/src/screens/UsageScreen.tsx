@@ -5,7 +5,7 @@ import { Button } from '../components/ui/Button'
 import { UsagePage } from '../features/usage/components/UsagePage'
 
 /**
- * Application-level route for Usage analytics. Unlike Repository and Database this is not
+ * Application-level route for Usage analytics. Unlike Database this is not
  * project-scoped: provider token consumption is observed per machine, not per repository, so
  * scoping it to a project would report a number that is true of neither.
  */

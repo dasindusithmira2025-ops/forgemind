@@ -41,12 +41,9 @@ function useActiveProject(open: boolean): { projectId?: string; workspaceId?: st
     if (!open) return
     let active = true
     const hash = window.location.hash
-    const repo = hash.match(/#\/repository\/([^/?]+)/)
     const swarm = hash.match(/#\/swarms\/([^/?]+)/)
     const workspace = hash.match(/#\/workspace\/([^/?]+)/)
-    if (repo) {
-      setScope({ projectId: decodeURIComponent(repo[1]) })
-    } else if (swarm) {
+    if (swarm) {
       setScope({ projectId: decodeURIComponent(swarm[1]) })
     } else if (workspace) {
       const workspaceId = decodeURIComponent(workspace[1])

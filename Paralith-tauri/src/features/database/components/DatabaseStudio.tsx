@@ -29,7 +29,7 @@ const LAYERS: Array<{ id: DatabaseLayer; label: string; hint: string }> = [
 
 /**
  * The Database Studio surface — one persistent, Project-scoped workspace analogous to
- * `RepositoryCommandCenter`. Composes the left rail (sources/sections), a center work surface
+ * the project-level tools. Composes the left rail (sources/sections), a center work surface
  * (section-specific), and the right Inspector rail. Nav state is a discriminated-union `if` chain
  * on `SectionId`, not `react-router` sub-routes, matching UI-SPEC.md §1 item 4.
  */

@@ -36,6 +36,7 @@ pub fn open_project_session(
 ) -> AppResult<Vec<OpenProjectSession>> {
     crate::require_main_window(&window)?;
     state.windows.open_project(&project_id, make_active)?;
+    state.file_watch.ensure_project_session_watch(&project_id)?;
     state.windows.list_open_projects()
 }
 
@@ -47,6 +48,7 @@ pub fn set_active_project(
 ) -> AppResult<Vec<OpenProjectSession>> {
     crate::require_main_window(&window)?;
     state.windows.set_active_project(&project_id)?;
+    state.file_watch.ensure_project_session_watch(&project_id)?;
     state.windows.list_open_projects()
 }
 
@@ -62,6 +64,7 @@ pub fn close_project_session(
         .swarms
         .prepare_project_close(&project_id, swarm_behavior)?;
     state.windows.close_project(&project_id)?;
+    state.file_watch.release_project_session_watch(&project_id);
     state.windows.list_open_projects()
 }
 

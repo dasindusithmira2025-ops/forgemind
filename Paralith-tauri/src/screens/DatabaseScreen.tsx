@@ -9,7 +9,7 @@ import { useAppStore } from '../stores/appStore'
 import { DatabaseStudio } from '../features/database/components/DatabaseStudio'
 
 /**
- * Project-level route hosting the Database Studio surface. Mirrors `RepositoryScreen` exactly:
+ * Project-level route hosting the Database Studio surface:
  * same full-screen titlebar + Back pattern, same project-name resolution from the active session
  * or a fresh `native.getProject` lookup, reached from within an active project.
  */

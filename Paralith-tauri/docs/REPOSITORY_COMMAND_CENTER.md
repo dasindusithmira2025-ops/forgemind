@@ -1,18 +1,19 @@
-# Repository Command Center backend
+# Source Control backend
 
-The Repository Command Center is a project-scoped native service. Git remains authoritative for
-local state; GitHub remains authoritative for collaboration state. SQLite stores leases,
-idempotency, approval state, remote projections, recovery checkpoints, and an attributable
-operation history. It does not copy Git history.
+Source Control is a workspace/worktree-scoped developer surface backed by the existing
+`RepositoryService`. Git remains authoritative for local state; forge providers add contextual
+collaboration state only for the active work. SQLite stores leases, idempotency, approval state,
+remote projections, recovery checkpoints, and an attributable operation history. It does not copy
+Git history.
 
 ## Ownership and trust boundaries
 
-- `RepositoryService` is the repository mutation boundary. The pre-existing pane stage, restore,
-  and isolated-worktree commands now translate their user intent into the same queue, policy,
-  approval, lease, and ledger path instead of invoking Git mutations directly.
+- `RepositoryService` is the repository mutation boundary. Source Control, pane stage/restore,
+  and isolated-worktree commands translate user intent into the same queue, policy, approval,
+  lease, and ledger path instead of invoking Git mutations directly.
 - The service invokes installed `git` and `gh` executables with structured arguments and hidden
   Windows helper processes. Path-bearing Git operations enable literal pathspec handling.
-- Every Tauri command validates the caller's active Project/window ownership before reaching the
+- Every Git operation resolves against an explicit repository/worktree path before reaching the
   service. Agent actors must match an active task, branch, and worktree lease.
 - Git transport continues to use the user's Git configuration, hooks, signing, SSH, Git
   Credential Manager, LFS, and submodule configuration.
@@ -56,12 +57,12 @@ not create a parallel task, evidence, or project model.
 
 ## Provider and synchronization behavior
 
-GitHub draft PR, review, workflow, release, and merge actions run through typed operations. Merge
-execution refreshes PR state and validates the expected head SHA immediately before invoking the
-provider merge. Initial, manual, mutation-triggered, and bounded background refresh synchronize
-repository metadata, pull requests, issues, workflow definitions, repository-wide workflow runs,
-releases, rulesets, and supported security alerts into SQLite. Each category refreshes
-independently; failures preserve the last projection and its explicit diagnostic state.
+GitHub draft PR, review, check, and merge actions run through typed operations. Merge execution
+refreshes PR state and validates the expected head SHA immediately before invoking the provider
+merge. Source Control refresh synchronizes repository metadata and pull requests for the active
+workspace. Detailed PR and check data is loaded contextually; generic repository administration,
+releases, security dashboards, rulesets, organization state and global Actions browsing belong on
+GitHub. Failures preserve the last projection and its explicit diagnostic state.
 
 The desktop does not host a public webhook endpoint. The schema includes delivery deduplication for
 an authenticated Corelith relay, but signature verification and relay ingestion belong in that

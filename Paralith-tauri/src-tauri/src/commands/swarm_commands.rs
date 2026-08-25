@@ -231,8 +231,28 @@ pub async fn start_swarm(
     state: State<'_, AppState>,
 ) -> AppResult<()> {
     crate::require_main_window(&window)?;
+    // A Swarm launch is now represented as a Run, so its status, cancellation and history share
+    // one model with every other execution in Paralith. The Swarm engine still owns everything
+    // below the launch — worker scheduling, the task graph, completion gates.
+    //
+    // The launch itself stays synchronous. `SwarmService::start_swarm` is where launch validation
+    // lives, and its typed refusals must reach the user on this call rather than appearing as a
+    // failed Run a scheduler tick later.
     let swarms = state.swarms.clone();
-    run_blocking(move || swarms.start_swarm(&project_id, &swarm_id)).await
+    let runs = state.runs.clone();
+    run_blocking(move || {
+        let swarm = swarms.get_detail(&project_id, &swarm_id)?.swarm;
+        let run = runs.start_swarm(&project_id, &swarm_id, &swarm.mission, "user")?;
+        match swarms.start_swarm(&project_id, &swarm_id) {
+            Ok(()) => Ok(()),
+            Err(error) => {
+                // Do not leave a queued Run behind for a launch that was refused.
+                let _ = runs.abandon_launch(&run.id, &error);
+                Err(error)
+            }
+        }
+    })
+    .await
 }
 
 #[tauri::command]

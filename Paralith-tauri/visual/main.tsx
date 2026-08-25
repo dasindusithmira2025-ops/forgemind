@@ -18,7 +18,6 @@ const ProjectLauncher = lazy(() => import('../src/screens/ProjectLauncher').then
 const WorkspaceScreen = lazy(() => import('../src/screens/WorkspaceScreen').then((m) => ({ default: m.WorkspaceScreen })))
 const WorkspaceSetup = lazy(() => import('../src/screens/WorkspaceSetup').then((m) => ({ default: m.WorkspaceSetup })))
 const SettingsScreen = lazy(() => import('../src/screens/SettingsScreen').then((m) => ({ default: m.SettingsScreen })))
-const RepositoryScreen = lazy(() => import('../src/screens/RepositoryScreen').then((m) => ({ default: m.RepositoryScreen })))
 const DatabaseScreen = lazy(() => import('../src/screens/DatabaseScreen').then((m) => ({ default: m.DatabaseScreen })))
 const SwarmsScreen = lazy(() => import('../src/screens/SwarmsScreen').then((m) => ({ default: m.SwarmsScreen })))
 const UsageScreen = lazy(() => import('../src/screens/UsageScreen').then((m) => ({ default: m.UsageScreen })))
@@ -31,7 +30,6 @@ const SURFACES: Record<string, { label: string; path: string; element: ReactElem
   workspace: { label: 'Workspace (4 terminals)', path: '/workspace/ws-main', route: '/workspace/:workspaceId', element: <WorkspaceScreen /> },
   setup: { label: 'Workspace creation', path: '/setup/proj-paralith', route: '/setup/:projectId', element: <WorkspaceSetup /> },
   settings: { label: 'Settings', path: '/settings', route: '/settings', element: <SettingsScreen /> },
-  repository: { label: 'Repository command center', path: '/repository/proj-paralith', route: '/repository/:projectId', element: <RepositoryScreen /> },
   database: { label: 'Database studio', path: '/database/proj-paralith', route: '/database/:projectId', element: <DatabaseScreen /> },
   memory: { label: 'Memory (Context Fabric)', path: '/memory/proj-paralith', route: '/memory/:projectId', element: <MemoryScreen /> },
   usage: { label: 'Usage analytics', path: '/usage', route: '/usage', element: <UsageScreen /> },
