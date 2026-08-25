@@ -1,7 +1,8 @@
 # Paralith Memory Intelligence Loop Completion
 
 Date: 2026-08-25
-Branch: `feat/run-engine-mission-control`
+Branch: `feat/memory-intelligence-loop`
+Base branch: `feat/run-engine-mission-control`
 
 ## 1. Architecture Before
 
@@ -180,7 +181,7 @@ Code anchors:
 
 ## 9. Runtime / Test Evidence
 
-Executed and passed:
+Executed and passed on the implementation commit. Re-verified locally on 2026-08-25 after the final mutation restore:
 
 ```text
 cargo test services::memory_service::tests --lib
@@ -220,13 +221,20 @@ cargo test services::knowledge_lifecycle::loop_tests::closed_loop_canary_source_
 1 passed after final formatting and clippy fixes
 ```
 
+Current PR validation:
+
+```text
+PR #87 Close Memory source-change intelligence loop
+Validate desktop (GitHub Windows): success
+```
+
 ## 10. Mutation-Test Evidence
 
 The closed-loop canary was intentionally broken and restored for these failure modes:
 
 ```text
 knowledge supersession disabled
-canary failed because source change no longer produced the expected completed transition.
+canary failed because ALPHA remained Canonical instead of Superseded.
 
 context cache invalidation disabled
 canary failed because the warmed ALPHA context cache row survived BETA maintenance.
@@ -235,7 +243,7 @@ stale exclusion disabled
 canary failed because stale ALPHA decoy knowledge contaminated normal greeting context.
 
 new knowledge creation disabled
-canary failed because the learned replacement did not contain BETA.
+canary failed because the learned replacement body did not contain BETA.
 ```
 
 Each mutation was restored and the canary passed afterward.
