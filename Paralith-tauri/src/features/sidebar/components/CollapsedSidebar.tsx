@@ -1,9 +1,10 @@
 import type { CSSProperties } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Activity, BarChart3, Boxes, BrainCircuit, Database, Folder, FolderGit2, MoreHorizontal, Settings } from 'lucide-react'
+import { Boxes, Folder, MoreHorizontal } from 'lucide-react'
 import { Brand } from '../../../components/ui/Brand'
 import { useSwarmStore } from '../../swarms/swarmStore'
 import { isActiveLifecycle, lifecycleLabel, lifecycleTone } from '../../swarms/swarmPresentation'
+import { destinationTitle, sidebarDestinations, sidebarUtilities } from '../sidebarDestinations'
 import { useSidebarStore } from '../sidebarStore'
 import { runtimeStatusLabel, runtimeStatusText } from '../sidebarSelectors'
 import type { ForgeSpaceSidebarProps } from '../sidebarTypes'
@@ -123,34 +124,23 @@ export function CollapsedSidebar({
         </button>
       )}
 
-      {/* Mirrors the expanded footer rail exactly, so collapsing never hides a utility. */}
+      {/* Renders from the same destination registry as the expanded footer, so collapsing can
+          neither drop a destination nor rename one by giving it a different glyph. */}
       <div className="collapsed-utilities">
-        {actions.onOpenRepository && (
-          <button type="button" aria-label="Repository" title="Repository" onClick={actions.onOpenRepository}>
-            <FolderGit2 size={16} />
-          </button>
+        {[...sidebarDestinations(actions), ...sidebarUtilities(actions, () => setDiagnostics(true))].map(
+          (item) => (
+            <button
+              key={item.id}
+              type="button"
+              data-surface={item.id}
+              aria-label={item.label}
+              title={destinationTitle(item)}
+              onClick={item.run}
+            >
+              <item.Icon size={16} aria-hidden />
+            </button>
+          ),
         )}
-        {actions.onOpenMemory && (
-          <button type="button" aria-label="Memory" title="Memory" onClick={actions.onOpenMemory}>
-            <BrainCircuit size={15} />
-          </button>
-        )}
-        {actions.onOpenDatabase && (
-          <button type="button" aria-label="Database" title="Database" onClick={actions.onOpenDatabase}>
-            <Database size={16} />
-          </button>
-        )}
-        {actions.onOpenUsage && (
-          <button type="button" aria-label="Usage" title="Usage" onClick={actions.onOpenUsage}>
-            <BarChart3 size={16} />
-          </button>
-        )}
-        <button type="button" aria-label="Settings" title="Settings" onClick={actions.onOpenSettings}>
-          <Settings size={16} />
-        </button>
-        <button type="button" aria-label="Diagnostics" title="Diagnostics" onClick={() => setDiagnostics(true)}>
-          <Activity size={16} />
-        </button>
       </div>
 
       {/* The expanded footer's capsule, at rail width: an icon and an attention marker, never a

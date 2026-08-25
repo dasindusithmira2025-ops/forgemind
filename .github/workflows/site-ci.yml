@@ -1,0 +1,64 @@
+name: Validate corelith-site
+
+# Scoped to the new website package only. The existing desktop, legacy-website
+# and video workflows are untouched and keep their own path filters, so this
+# adds a gate without changing what already gates anything else.
+on:
+  pull_request:
+    paths:
+      - 'corelith-site/**'
+      - '.github/workflows/site-ci.yml'
+  push:
+    branches: [main, integration]
+    paths:
+      - 'corelith-site/**'
+      - '.github/workflows/site-ci.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validate-site-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-site:
+    name: Validate corelith-site (GitHub Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+        working-directory: corelith-site
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.12.0
+          cache: npm
+          cache-dependency-path: corelith-site/package-lock.json
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      # Next's production build carries its own route-generation and type gates
+      # on top of the explicit typecheck above.
+      - name: Build
+        run: npm run build
+
+      # A high-severity advisory in a shipped dependency fails the run rather
+      # than being reported and ignored.
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high

@@ -1,0 +1,728 @@
+/* ============================================================================
+   CORELITH — SYSTEM LAYER
+
+   The primitives every page is assembled from.
+
+   1. THE WHITE SHEET. Sections are fields of air, not boxes. Depth is one blue
+      atmosphere behind the content and a hairline where a division is real.
+   2. THE EMPHASIS PHRASE. One phrase per headline is set in Corelith blue. One
+      per page carries it at display scale; the rest of the page is black.
+   3. RESTRAINT IS THE CHROME. Moderate radii, hairline borders, no glow, no
+      glass except where an element genuinely floats over moving content.
+   ========================================================================== */
+
+@layer components {
+  /* --- Shell ------------------------------------------------------------- */
+
+  .shell {
+    width: 100%;
+    max-width: var(--shell);
+    margin-inline: auto;
+    padding-inline: var(--gutter);
+  }
+
+  .measure {
+    width: 100%;
+    max-width: var(--measure);
+    margin-inline: auto;
+    padding-inline: var(--gutter);
+  }
+
+  .prose-measure {
+    max-width: var(--measure-text);
+  }
+
+  .band {
+    padding-block: var(--band);
+  }
+
+  .band-tight {
+    padding-block: var(--band-tight);
+  }
+
+  /* --- Grounds ------------------------------------------------------------
+     Two rooms, and the difference between them is almost nothing: white, and
+     white with the faintest cool shift. The site does not alternate light and
+     dark bands for excitement — that is template design, and it is what made
+     the previous version read as a sequence of unrelated pages. */
+
+  .on-ground {
+    background-color: var(--ground);
+  }
+
+  .on-recessed {
+    position: relative;
+    background-color: var(--ground-soft);
+  }
+
+  /* --- The closing block ---------------------------------------------------
+     The one dark surface on the site, and it is the footer in both themes.
+     A page that ends on white ends by running out; a page that ends on a dark
+     block has been closed. It is the same block at night, so the identity does
+     not change with the theme — which is exactly why it is allowed to be the
+     only inversion anywhere. */
+  .on-close {
+    --ground: #0a0d13;
+    --ground-soft: #0a0d13;
+    --surface: rgba(255, 255, 255, 0.04);
+    --surface-2: rgba(255, 255, 255, 0.07);
+    --ink: #f4f6fa;
+    --ink-2: #9aa4b5;
+    --ink-3: #7b8698;
+    --accent: #5b93ff;
+    --accent-strong: #85aeff;
+    --accent-light: #9cc0ff;
+    --accent-soft: rgba(91, 147, 255, 0.16);
+    --accent-knockout: #0a0d13;
+    --hair: rgba(255, 255, 255, 0.09);
+    --hair-strong: rgba(255, 255, 255, 0.16);
+    --hair-faint: rgba(255, 255, 255, 0.05);
+
+    position: relative;
+    background-color: var(--ground);
+    color: var(--ink);
+  }
+
+  /* --- Atmosphere ---------------------------------------------------------
+     The light in the room. Two blooms of one blue, both far below the threshold
+     where a viewer would name them as colour, positioned by custom properties
+     so a section places its own light rather than inheriting a decoration. */
+
+  .bloom {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .bloom::before,
+  .bloom::after {
+    content: "";
+    position: absolute;
+    border-radius: 50%;
+    /* Wide enough that neither bloom ever shows an edge. A visible boundary is
+       what turns light into a gradient graphic. */
+    filter: blur(130px);
+  }
+
+  .bloom::before {
+    width: clamp(420px, 58vw, 940px);
+    aspect-ratio: 1;
+    top: var(--bloom-y, -22%);
+    left: var(--bloom-x, 48%);
+    background: radial-gradient(circle, var(--bloom-a) 0%, transparent 68%);
+  }
+
+  .bloom::after {
+    width: clamp(320px, 42vw, 700px);
+    aspect-ratio: 1;
+    top: var(--bloom-y2, 34%);
+    left: var(--bloom-x2, -16%);
+    background: radial-gradient(circle, var(--bloom-b) 0%, transparent 68%);
+  }
+
+  /* Content sitting above the light. */
+  .lit {
+    position: relative;
+    z-index: 1;
+  }
+
+  /* A hairline that fades at both ends rather than stopping. Divisions on this
+     site are seams, not rules drawn across the page. */
+  .seam {
+    height: 1px;
+    border: 0;
+    background: linear-gradient(
+      to right,
+      transparent,
+      var(--hair-strong) 18%,
+      var(--hair-strong) 82%,
+      transparent
+    );
+  }
+
+  /* --- The section marker -------------------------------------------------
+     An ordinal and the section name, held in the margin beside the content on
+     wide screens and folded above it on narrow ones. */
+
+  .rail {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 32px;
+  }
+
+  @media (min-width: 1120px) {
+    .rail {
+      grid-template-columns: 152px 1fr;
+      gap: clamp(40px, 5vw, 88px);
+      align-items: start;
+    }
+  }
+
+  .rail-mark {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  @media (min-width: 1120px) {
+    .rail-mark {
+      position: sticky;
+      top: 120px;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 12px;
+    }
+  }
+
+  /* --- Micro type ---------------------------------------------------------
+     `.mono` is the eyebrow and it is deliberately NOT monospaced. A page that
+     sets every label in a console face reads as a developer tool no matter what
+     else it does. */
+
+  .mono {
+    font-family: var(--font-sans);
+    font-size: var(--step-fine);
+    font-weight: 500;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    line-height: 1.4;
+  }
+
+  /* The machine face, rationed. Real values only: versions, identifiers,
+     measurements. Never a label, never a heading, never navigation. */
+  .mono-plain {
+    font-family: var(--font-mono);
+    font-size: var(--step-fine);
+    letter-spacing: -0.01em;
+    line-height: 1.55;
+    font-variant-numeric: tabular-nums;
+    text-transform: none;
+  }
+
+  /* The section ordinal. Metadata, set as metadata. */
+  .index {
+    font-family: var(--font-display);
+    font-size: var(--step-fine);
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    color: var(--ink-3);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* The ordinal where it is the composition rather than a footnote — the
+     capability field, where a number is one of four things on a whole screen. */
+  .index-lg {
+    font-family: var(--font-display);
+    font-size: var(--step-fine);
+    font-weight: 500;
+    letter-spacing: 0.12em;
+    color: var(--accent);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* The emphasis phrase. Corelith blue, same family, same weight, same size.
+     It is the only colour display type is allowed to carry, and it is the
+     identity.
+
+     Two weights of it. A headline that runs black → light blue → blue states
+     the entire palette in one gesture, and the light step is what stops a
+     fully-blue second line reading as a shout. */
+  .em {
+    color: var(--accent);
+  }
+
+  .em-light {
+    color: var(--accent-light);
+  }
+
+  /* --- The note ------------------------------------------------------------
+     A small outlined pill under a statement: where the company operates, what
+     a section is, what state something is in. It is a label, never a control,
+     so it has no hover and never contains a link. */
+  .note {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 15px;
+    border: 1px solid var(--hair-strong);
+    border-radius: var(--r-full);
+    background-color: var(--surface);
+    color: var(--ink-2);
+    font-size: 13.5px;
+    font-weight: 450;
+    line-height: 1.2;
+    white-space: nowrap;
+  }
+
+  /* --- The visual panel ----------------------------------------------------
+     Spatial graphics are framed rather than floated. A rendered object dropped
+     straight onto a white page has no edge, so it reads as something that
+     failed to load; inside a panel with its own light it reads as a plate.
+
+     The light is a broad white bloom behind the object and a very faint cool
+     wash across the plate — the same room the page is lit in, one stop up. */
+  .viz-panel {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+    border: 1px solid var(--hair);
+    border-radius: var(--r-xl);
+    background:
+      radial-gradient(120% 90% at 18% 12%, var(--accent-softer) 0%, transparent 55%),
+      linear-gradient(155deg, var(--surface) 0%, var(--ground-soft) 100%);
+  }
+
+  .viz-panel::before {
+    content: "";
+    position: absolute;
+    inset: -20%;
+    z-index: 0;
+    background: radial-gradient(closest-side, rgba(255, 255, 255, 0.9), transparent 72%);
+    filter: blur(28px);
+    pointer-events: none;
+  }
+
+  :root[data-theme="dark"] .viz-panel::before {
+    background: radial-gradient(closest-side, rgba(120, 160, 235, 0.16), transparent 72%);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .viz-panel::before {
+      background: radial-gradient(closest-side, rgba(120, 160, 235, 0.16), transparent 72%);
+    }
+  }
+
+  .viz-panel > * {
+    position: relative;
+    z-index: 1;
+  }
+
+  /* The caption on a panel. Two-tone, because the object it names is the
+     company's and the second word is the part that means something. */
+  .viz-caption {
+    position: absolute;
+    bottom: 18px;
+    left: 0;
+    right: 0;
+    z-index: 2;
+    text-align: center;
+    font-size: 13.5px;
+    font-weight: 500;
+    color: var(--accent-light);
+  }
+
+  .viz-caption strong {
+    font-weight: 600;
+    color: var(--accent);
+  }
+
+  /* --- The fact ------------------------------------------------------------
+     A checkable value about the thing beside it, as a quiet stack rather than a
+     metric tile. No border, no card, no icon. */
+
+  .dim {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    color: var(--ink-2);
+  }
+
+  .dim::before {
+    content: "";
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--accent);
+    flex-shrink: 0;
+  }
+
+  .dim-tick {
+    display: block;
+  }
+
+  /* --- Rules --------------------------------------------------------------- */
+
+  .rule {
+    height: 1px;
+    border: 0;
+    background: var(--hair);
+  }
+
+  .rule-strong {
+    height: 1px;
+    border: 0;
+    background: var(--hair-strong);
+  }
+
+  /* --- Surfaces ------------------------------------------------------------
+     A sheet is a soft raised plane. Used sparingly: most of this site is
+     content on the sheet of the page itself, not content inside boxes. */
+
+  .sheet {
+    background-color: var(--surface);
+    border: 1px solid var(--hair);
+    border-radius: var(--r-lg);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .sheet-hover {
+    transition:
+      border-color var(--t-base) var(--ease),
+      box-shadow var(--t-base) var(--ease),
+      transform var(--t-base) var(--ease);
+  }
+
+  .sheet-hover:hover {
+    border-color: var(--hair-strong);
+    box-shadow: var(--shadow-md);
+    transform: translateY(-3px);
+  }
+
+  /* Backdrop blur is used in exactly one place — the navigation — because that
+     is the only element that genuinely sits over moving content. */
+  .glass {
+    background-color: var(--scrim);
+    backdrop-filter: saturate(1.06) blur(18px);
+    -webkit-backdrop-filter: saturate(1.06) blur(18px);
+  }
+
+  /* --- Buttons -------------------------------------------------------------
+     Moderate radius, not pills. Three weights, one geometry. No glow, no
+     bounce — the movement is the arrow shifting and the surface deepening. */
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    min-height: 46px;
+    padding: 12px 24px;
+    border: 1px solid transparent;
+    border-radius: var(--r-full);
+    font-family: var(--font-sans);
+    font-size: var(--step-fine);
+    font-weight: 500;
+    letter-spacing: 0.002em;
+    line-height: 1;
+    white-space: nowrap;
+    cursor: pointer;
+    transition:
+      background-color var(--t-fast) var(--ease),
+      border-color var(--t-fast) var(--ease),
+      color var(--t-fast) var(--ease),
+      box-shadow var(--t-base) var(--ease);
+  }
+
+  .btn:disabled,
+  .btn[aria-disabled="true"] {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+
+  /* The strongest action on the page: solid ink with the ground knocked out. */
+  .btn-primary {
+    background-color: var(--ink);
+    color: var(--ground);
+  }
+
+  .btn-primary:hover:not(:disabled) {
+    background-color: var(--accent);
+    color: #ffffff;
+  }
+
+  /* Used where the action is the identity rather than the instruction: the
+     closing statement, and the intake form's submit. */
+  .btn-accent {
+    background-color: var(--accent);
+    color: #ffffff;
+  }
+
+  .btn-accent:hover:not(:disabled) {
+    background-color: var(--accent-strong);
+  }
+
+  .btn-secondary {
+    background-color: transparent;
+    border-color: var(--hair-strong);
+    color: var(--ink);
+  }
+
+  .btn-secondary:hover:not(:disabled) {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  .btn-ghost {
+    background-color: transparent;
+    color: var(--ink-2);
+    padding-inline: 14px;
+  }
+
+  .btn-ghost:hover:not(:disabled) {
+    color: var(--ink);
+    background-color: var(--surface-2);
+  }
+
+  .btn svg {
+    transition: transform var(--t-base) var(--ease);
+  }
+
+  .btn:hover svg {
+    transform: translateX(3px);
+  }
+
+  /* --- Inline link ---------------------------------------------------------
+     A link inside prose carries its underline all the time. A rule that only
+     appears on hover is invisible to anyone not already pointing at it. */
+
+  .link {
+    color: var(--ink);
+    text-decoration: underline;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 4px;
+    text-decoration-color: color-mix(in srgb, var(--accent) 55%, transparent);
+    transition:
+      text-decoration-color var(--t-base) var(--ease),
+      color var(--t-base) var(--ease);
+  }
+
+  .link:hover,
+  .link:focus-visible {
+    color: var(--accent-strong);
+    text-decoration-color: var(--accent);
+  }
+
+  /* Arrow link. The mark rides in its own round well, which is what makes it
+     read as a control rather than as punctuation. */
+  .link-go {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    color: var(--ink);
+    text-decoration: none;
+    font-weight: 500;
+    font-size: var(--step-fine);
+    transition: color var(--t-base) var(--ease);
+  }
+
+  .go-well {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    flex-shrink: 0;
+    border-radius: 50%;
+    border: 1px solid var(--hair-strong);
+    transition:
+      border-color var(--t-base) var(--ease),
+      background-color var(--t-base) var(--ease),
+      color var(--t-base) var(--ease),
+      transform var(--t-base) var(--ease);
+  }
+
+  .link-go:hover,
+  .link-go:focus-visible {
+    color: var(--accent);
+  }
+
+  .link-go:hover .go-well,
+  .link-go:focus-visible .go-well {
+    border-color: transparent;
+    background-color: var(--accent-soft);
+    color: var(--accent);
+    transform: translateX(4px);
+  }
+
+  /* --- Fields --------------------------------------------------------------- */
+
+  .field {
+    width: 100%;
+    min-height: 50px;
+    padding: 13px 16px;
+    background-color: var(--surface);
+    border: 1px solid var(--hair-strong);
+    border-radius: var(--r-sm);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-size: var(--step-body);
+    line-height: 1.5;
+    transition:
+      border-color var(--t-fast) var(--ease),
+      box-shadow var(--t-fast) var(--ease);
+  }
+
+  .field::placeholder {
+    color: var(--ink-3);
+  }
+
+  .field:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+
+  .field[aria-invalid="true"] {
+    border-color: #d4483c;
+    box-shadow: 0 0 0 3px rgba(212, 72, 60, 0.12);
+  }
+
+  select.field {
+    cursor: pointer;
+    appearance: none;
+    background-image: linear-gradient(45deg, transparent 50%, currentColor 50%),
+      linear-gradient(135deg, currentColor 50%, transparent 50%);
+    background-position:
+      calc(100% - 23px) calc(50% + 1px),
+      calc(100% - 18px) calc(50% + 1px);
+    background-size: 5px 5px, 5px 5px;
+    background-repeat: no-repeat;
+    padding-right: 44px;
+  }
+
+  /* --- Tag ------------------------------------------------------------------ */
+
+  .tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 13px;
+    border: 1px solid var(--hair);
+    border-radius: var(--r-full);
+    background-color: transparent;
+    color: var(--ink-2);
+    font-family: var(--font-sans);
+    font-size: var(--step-fine);
+    font-weight: 450;
+    letter-spacing: 0.002em;
+    line-height: 1.2;
+  }
+
+  .tag-accent {
+    border-color: transparent;
+    background-color: var(--accent-soft);
+    color: var(--accent-strong);
+  }
+}
+
+/* ============================================================================
+   REVEALS
+   One IntersectionObserver stamps data-inview. Headlines rise and settle;
+   everything else lifts, quietly.
+   ========================================================================== */
+
+@layer utilities {
+  /* The hidden state is scoped to [data-reveal], which the observer sets on the
+     document once it is actually running — so a script error, a blocked bundle
+     or an unexpected re-render fails to a readable page rather than a blank
+     one. */
+  .reveal {
+    transition:
+      opacity var(--t-slow) var(--ease),
+      transform var(--t-slow) var(--ease);
+    transition-delay: var(--d, 0ms);
+  }
+
+  [data-reveal] .reveal {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+
+  .reveal[data-inview] {
+    opacity: 1;
+    transform: none;
+  }
+
+  /* Display type arrives from under its own baseline: further and slower than
+     the body gesture, so a headline settles last. Opacity and transform only —
+     a clipped element reports zero intersection area and would never reveal. */
+  .reveal-wipe {
+    transition:
+      opacity var(--t-scene) var(--ease),
+      transform var(--t-scene) var(--ease);
+    transition-delay: var(--d, 0ms);
+  }
+
+  [data-reveal] .reveal-wipe {
+    opacity: 0;
+    transform: translateY(0.34em);
+  }
+
+  .reveal-wipe[data-inview] {
+    opacity: 1;
+    transform: none;
+  }
+
+  .reveal-rule {
+    transform-origin: left;
+    transition: transform var(--t-scene) var(--ease);
+    transition-delay: var(--d, 0ms);
+  }
+
+  [data-reveal] .reveal-rule {
+    transform: scaleX(0);
+  }
+
+  .reveal-rule[data-inview] {
+    transform: scaleX(1);
+  }
+
+  /* The delivery system's nodes and connections. cx/cy/x1/y1 are geometry
+     properties and therefore animatable in CSS, which is why the whole
+     transformation is ninety transitions and no animation loop. The per-node
+     delay is what makes the arrangement resolve rather than snap. */
+  .proc-node {
+    transition:
+      cx var(--t-scene) var(--ease),
+      cy var(--t-scene) var(--ease),
+      r var(--t-base) var(--ease),
+      fill var(--t-base) var(--ease),
+      opacity var(--t-base) var(--ease);
+    transition-delay: calc(var(--i, 0) * 7ms);
+  }
+
+  .proc-edge {
+    transition:
+      x1 var(--t-scene) var(--ease),
+      y1 var(--t-scene) var(--ease),
+      x2 var(--t-scene) var(--ease),
+      y2 var(--t-scene) var(--ease),
+      opacity var(--t-base) var(--ease);
+    transition-delay: calc(var(--i, 0) * 7ms);
+  }
+
+  .no-scrollbar {
+    scrollbar-width: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .reveal,
+  .reveal-wipe,
+  .reveal-rule {
+    opacity: 1;
+    transform: none;
+  }
+
+  /* The delivery system still changes state — it simply arrives there rather
+     than travelling. Removing the transition is correct here; removing the
+     control would remove the information. */
+  .proc-node,
+  .proc-edge {
+    transition-delay: 0ms !important;
+  }
+}
