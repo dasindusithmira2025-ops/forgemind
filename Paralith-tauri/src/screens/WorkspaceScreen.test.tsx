@@ -129,7 +129,7 @@ describe('Workspace screen', () => {
     expect(screen.getByRole('button', { name: 'New swarm' })).toBeInTheDocument()
     // Band 4 — status: the destinations that are not Workspaces. No update is available in the
     // fixture, so no update control exists at all rather than a dead disabled one.
-    expect(screen.getByRole('button', { name: 'Repository' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Source Control' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Settings' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Diagnostics' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Update now|Install & restart/ })).not.toBeInTheDocument()
@@ -138,7 +138,7 @@ describe('Workspace screen', () => {
     // Two Workspaces and no Swarms is under the filter threshold, so the field stays hidden.
     expect(screen.queryByRole('searchbox', { name: 'Filter Workspaces and Swarms' })).not.toBeInTheDocument()
     // Removed navigation must not exist anywhere.
-    for (const name of ['Agents', 'Files', 'Source Control', 'Preview', 'Terminal Grid', 'Workspace overview']) {
+    for (const name of ['Agents', 'Files', 'Preview', 'Terminal Grid', 'Workspace overview']) {
       expect(screen.queryByRole('button', { name })).not.toBeInTheDocument()
     }
   })
