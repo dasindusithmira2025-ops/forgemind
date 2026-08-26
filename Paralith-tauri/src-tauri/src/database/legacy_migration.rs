@@ -54,17 +54,6 @@ pub struct LegacyMigrationRoots<'a> {
     pub backup_base: &'a Path,
 }
 
-pub fn local_development_not_applicable(roots: LegacyMigrationRoots<'_>) -> LegacyMigrationStatus {
-    let mut status = base_status(
-        &roots,
-        LegacyMigrationState::NotApplicable,
-        "Local development uses an isolated runtime profile and never inspects or migrates installed application data.",
-    );
-    status.destination_identifier = crate::build_info::LOCAL_DEVELOPMENT_IDENTIFIER.into();
-    status.source_data_directory = None;
-    status
-}
-
 pub fn migrate_legacy_stable(
     edition: ProductEdition,
     roots: LegacyMigrationRoots<'_>,

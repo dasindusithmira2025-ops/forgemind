@@ -1,5 +1,6 @@
 use crate::models::AgentProvider;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -78,4 +79,44 @@ pub struct TerminalExitEvent {
 pub struct TerminalStatusEvent {
     pub session: TerminalSession,
     pub lifecycle_event: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalRuntimeResource {
+    pub session_id: String,
+    pub project_id: String,
+    pub workspace_id: String,
+    pub pane_id: String,
+    pub provider: AgentProvider,
+    pub status: String,
+    pub process_id: Option<u32>,
+    pub started_at: String,
+    pub output_bytes: u64,
+    pub output_batches: u64,
+    pub dropped_output_bytes: u64,
+    pub input_writes: u64,
+    pub input_bytes: u64,
+    pub resize_requests: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalRuntimeDiagnostics {
+    pub managed_process_count: usize,
+    pub pty_session_count: usize,
+    pub creating_session_count: usize,
+    pub orphan_session_count: usize,
+    pub process_types: HashMap<String, usize>,
+    pub lifecycle_states: HashMap<String, usize>,
+    pub output_bytes: u64,
+    pub output_batches: u64,
+    pub renderer_deliveries: u64,
+    pub suppressed_deliveries: u64,
+    pub dropped_output_bytes: u64,
+    pub input_writes: u64,
+    pub input_bytes: u64,
+    pub resize_requests: u64,
+    pub active_output_subscribers: usize,
+    pub resources: Vec<TerminalRuntimeResource>,
 }

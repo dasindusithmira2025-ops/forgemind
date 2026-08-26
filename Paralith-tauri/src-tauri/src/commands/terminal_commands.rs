@@ -138,6 +138,32 @@ pub fn list_live_sessions(
 }
 
 #[tauri::command]
+pub fn subscribe_terminal_output(
+    workspace_id: String,
+    window: Window,
+    state: State<'_, AppState>,
+) -> AppResult<Vec<TerminalSession>> {
+    state
+        .windows
+        .validate_workspace_caller(&workspace_id, window.label(), true)?;
+    Ok(state
+        .terminals
+        .subscribe_output(window.label(), &workspace_id))
+}
+
+#[tauri::command]
+pub fn unsubscribe_terminal_output(
+    workspace_id: String,
+    window: Window,
+    state: State<'_, AppState>,
+) -> AppResult<()> {
+    state
+        .terminals
+        .unsubscribe_output(window.label(), &workspace_id);
+    Ok(())
+}
+
+#[tauri::command]
 pub fn terminal_session_status(
     session_id: String,
     window: Window,

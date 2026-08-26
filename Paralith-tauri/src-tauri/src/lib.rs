@@ -155,24 +155,63 @@ fn startup_diagnostic(subsystem: &str, message: &str) {
     log::info!("startup [{subsystem}]: {message}");
 }
 
+fn spawn_runtime_health_logger(state: AppState) {
+    let _ = std::thread::Builder::new()
+        .name("paralith-runtime-health".into())
+        .spawn(move || {
+            let mut previous_output_bytes = 0u64;
+            let mut previous_deliveries = 0u64;
+            loop {
+                std::thread::sleep(std::time::Duration::from_secs(30));
+                match commands::diagnostics_commands::build_runtime_health(&state) {
+                    Ok(snapshot) => {
+                        let terminals = snapshot.terminals;
+                        let output_delta = terminals.output_bytes.saturating_sub(previous_output_bytes);
+                        let delivery_delta = terminals
+                            .renderer_deliveries
+                            .saturating_sub(previous_deliveries);
+                        previous_output_bytes = terminals.output_bytes;
+                        previous_deliveries = terminals.renderer_deliveries;
+                        log::info!(
+                            "runtime health managed_processes={} pty_sessions={} creating={} orphans={} output_bytes_30s={} output_batches={} renderer_deliveries_30s={} suppressed={} dropped_bytes={} output_subscribers={} watchers={} watcher_subscribers={} memory_queued={} memory_running={} memory_retrying={} browser_views={} browser_operations={} database_bytes={} wal_bytes={}",
+                            terminals.managed_process_count,
+                            terminals.pty_session_count,
+                            terminals.creating_session_count,
+                            terminals.orphan_session_count,
+                            output_delta,
+                            terminals.output_batches,
+                            delivery_delta,
+                            terminals.suppressed_deliveries,
+                            terminals.dropped_output_bytes,
+                            terminals.active_output_subscribers,
+                            snapshot.project_watchers,
+                            snapshot.watcher_subscribers,
+                            snapshot.knowledge_jobs.queued,
+                            snapshot.knowledge_jobs.running,
+                            snapshot.knowledge_jobs.retrying,
+                            snapshot.browser_views,
+                            snapshot.browser_operations,
+                            snapshot.database_bytes,
+                            snapshot.wal_bytes,
+                        );
+                    }
+                    Err(error) => log::warn!("runtime health snapshot failed: {}", error.code),
+                }
+            }
+        });
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let mut context = tauri::generate_context!();
-    if cfg!(debug_assertions) {
-        // Tauri derives its Windows single-instance mutex, WebView2 profile and platform data
-        // directories from this identifier. Scoping it before Builder::build lets an installed
-        // release and `tauri dev` coexist without creating a second public product or build flavor.
-        context.config_mut().identifier = build_info::runtime_identifier().into();
-        startup_diagnostic(
-            "runtime-isolation",
-            "local development identity active; installed application resources are not shared",
-        );
-    } else {
-        startup_diagnostic(
-            "runtime-isolation",
-            "release identity active; production single-instance protection is enabled",
-        );
-    }
+    // Development and packaged builds deliberately share the configured product identity and
+    // runtime state. The single-instance guard below prevents two backends from owning the same
+    // database or native resources concurrently.
+    context.config_mut().identifier = build_info::runtime_identifier().into();
+    startup_diagnostic(
+        "runtime-identity",
+        "configured product identity active; single-instance protection is enabled",
+    );
     let mut builder = tauri::Builder::default();
     // Single-instance guard MUST be the first registered plugin. A second PARALITH launch
     // hands its argv/cwd to the already-running instance (which just refocuses) and then exits,
@@ -238,21 +277,17 @@ pub fn run() {
                 ),
                 backup_base: &backup_base,
             };
-            let mut legacy_migration = if cfg!(debug_assertions) {
-                database::legacy_migration::local_development_not_applicable(migration_roots)
-            } else {
-                database::legacy_migration::migrate_legacy_stable(
-                    edition,
-                    migration_roots,
-                    env!("CARGO_PKG_VERSION"),
-                )
-            };
+            let mut legacy_migration = database::legacy_migration::migrate_legacy_stable(
+                edition,
+                migration_roots,
+                env!("CARGO_PKG_VERSION"),
+            );
             // Logging is initialized after the one-time profile migration so the new log file
             // cannot make the destination look non-empty or race legacy log preservation.
             if let Err(error) = app.handle().plugin(build_logger().build()) {
                 eprintln!("PARALITH: file logging unavailable: {error}");
             }
-            startup_diagnostic("persistence", "isolated runtime directories resolved");
+            startup_diagnostic("persistence", "configured runtime directories resolved");
             let database_path = data_dir.join(database::backup::DATABASE_FILENAME);
             let restored = database::backup::apply_staged_restore(&data_dir, &database_path)
                 .unwrap_or_else(|error| {
@@ -535,6 +570,9 @@ pub fn run() {
                 usage,
                 usage_telemetry,
             });
+            if let Some(state) = app.try_state::<AppState>() {
+                spawn_runtime_health_logger(state.inner().clone());
+            }
             // Give the update coordinator the app handle so every lifecycle change and download
             // progress tick is broadcast to all windows, not just the one that invoked the command.
             updates.attach_app(app.handle().clone());
@@ -693,6 +731,8 @@ pub fn run() {
             commands::terminate_terminal_session,
             commands::terminate_workspace_sessions,
             commands::list_live_sessions,
+            commands::subscribe_terminal_output,
+            commands::unsubscribe_terminal_output,
             commands::terminal_session_status,
             commands::save_dropped_image,
             commands::restore_workspace_sessions,
@@ -789,6 +829,7 @@ pub fn run() {
             commands::retry_swarm,
             commands::add_swarm_builder,
             commands::get_diagnostics,
+            commands::get_runtime_health,
             commands::run_health_check,
             commands::repair_database_metadata,
             commands::export_redacted_support_bundle,
@@ -887,6 +928,7 @@ pub fn run() {
                 // Detached windows are closed and every Rust-owned process is terminated, so
                 // no hidden backend or orphan PTY survives after the control window is gone.
                 if let Some(state) = app_handle.try_state::<AppState>() {
+                    state.terminals.forget_output_subscriber(&label);
                     let _ = state.terminals.terminate_all_sessions();
                     for detached in state.windows.detached_window_labels() {
                         if let Some(window) = app_handle.get_webview_window(&detached) {
@@ -902,6 +944,7 @@ pub fn run() {
                 ..
             } => {
                 if let Some(state) = app_handle.try_state::<AppState>() {
+                    state.terminals.forget_output_subscriber(&label);
                     state.windows.forget_window(&label);
                     state.file_watch.forget_window(&label);
                     // Tear down any embedded browser webviews owned by the closing window so no

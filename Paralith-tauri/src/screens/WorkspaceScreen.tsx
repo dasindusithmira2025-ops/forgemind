@@ -208,10 +208,15 @@ export function WorkspaceScreen() {
         if (forceFresh) {
           // Reuse the saved configuration but start brand-new Terminal Sessions.
           await native.terminateWorkspaceSessions(loadedWorkspace.id).catch(() => undefined)
-        } else {
-          const liveSessions = await native.listLiveSessions(loadedWorkspace.id)
-          if (liveSessions.length > 0) { terminalRuntime.hydrate(liveSessions); alreadyLive = true }
         }
+        // Register this renderer before taking the replay snapshot. Inactive PTYs keep running,
+        // but only the workspace currently rendered by this window receives output events.
+        const liveSessions = await native.subscribeTerminalOutput(loadedWorkspace.id)
+        if (!live) {
+          await native.unsubscribeTerminalOutput(loadedWorkspace.id).catch(() => undefined)
+          return
+        }
+        if (liveSessions.length > 0) { terminalRuntime.hydrate(liveSessions); alreadyLive = true }
         // A superseded hydration (rapid workspace switch, remount) must never reach launchAll:
         // its restore would spawn terminals for a screen no longer on display, and with the
         // keep-running policy those sessions silently accumulate in the background.
@@ -234,7 +239,10 @@ export function WorkspaceScreen() {
       } catch (caught) { if (live) setError(asNativeError(caught).message) }
       finally { if (live) { setLoading(false); setSwitchingWorkspaceId(undefined) } }
     })()
-    return () => { live = false }
+    return () => {
+      live = false
+      void native.unsubscribeTerminalOutput(workspaceId).catch(() => undefined)
+    }
     // Workspace identity controls hydration. Actions update local state directly.
     // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceId])

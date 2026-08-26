@@ -76,6 +76,7 @@ pub struct DiagnosticsSnapshot {
     pub backup_path: Option<String>,
     pub backup_directory: String,
     pub live_terminal_count: usize,
+    pub runtime: RuntimeHealthSnapshot,
     pub updater_endpoint_status: String,
     pub last_update_check: Option<String>,
     pub last_update_result: Option<String>,
@@ -90,6 +91,30 @@ pub struct DiagnosticsSnapshot {
     pub update_log_entries: Vec<String>,
     pub health: HealthReport,
     pub readiness: ReadinessReport,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeHealthSnapshot {
+    pub captured_at: String,
+    pub terminals: crate::models::TerminalRuntimeDiagnostics,
+    pub project_watchers: usize,
+    pub watcher_subscribers: usize,
+    pub browser_views: usize,
+    pub browser_operations: usize,
+    pub knowledge_jobs: KnowledgeJobDiagnostics,
+    pub database_bytes: u64,
+    pub wal_bytes: u64,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KnowledgeJobDiagnostics {
+    pub queued: u64,
+    pub running: u64,
+    pub retrying: u64,
+    pub failed: u64,
+    pub payload_bytes: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

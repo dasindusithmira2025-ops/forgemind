@@ -61,8 +61,11 @@ export function DetachedWorkspaceWindow({ workspaceId }: { workspaceId: string }
         if (!live) return
         useCanvasStore.getState().init(loadedWorkspace.id, buildFromPersisted(loadedWorkspace, canvasRecord.canvasJson), canvasRecord.revision)
         // Re-subscribe to the still-running Terminal Sessions — PTYs were never stopped.
-        const liveSessions = await native.listLiveSessions(loadedWorkspace.id)
-        if (!live) return
+        const liveSessions = await native.subscribeTerminalOutput(loadedWorkspace.id)
+        if (!live) {
+          await native.unsubscribeTerminalOutput(loadedWorkspace.id).catch(() => undefined)
+          return
+        }
         if (liveSessions.length > 0) terminalRuntime.hydrate(liveSessions)
         setActivePane(loadedWorkspace.activePaneId ?? loadedWorkspace.panes[0]?.id)
         // This is the atomic cut-over point. Until now this native window was hidden and the
@@ -78,6 +81,7 @@ export function DetachedWorkspaceWindow({ workspaceId }: { workspaceId: string }
     })()
     return () => {
       live = false
+      void native.unsubscribeTerminalOutput(workspaceId).catch(() => undefined)
     }
   }, [workspaceId, setActivePane])
 
