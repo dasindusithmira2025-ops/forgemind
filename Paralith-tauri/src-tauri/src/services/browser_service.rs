@@ -95,12 +95,28 @@ impl BrowserService {
         }
     }
 
+    pub fn diagnostics_counts(&self) -> (usize, usize) {
+        (self.views.lock().len(), self.operations.lock().len())
+    }
+
     fn operation_lock(&self, key: &str) -> Arc<Mutex<()>> {
         self.operations
             .lock()
             .entry(key.to_owned())
             .or_insert_with(|| Arc::new(Mutex::new(())))
             .clone()
+    }
+
+    fn release_operation_lock(&self, key: &str, operation_lock: &Arc<Mutex<()>>) {
+        let mut operations = self.operations.lock();
+        let is_current = operations
+            .get(key)
+            .is_some_and(|current| Arc::ptr_eq(current, operation_lock));
+        // The map and this caller are the only owners when no operation is waiting. A waiting
+        // caller keeps the entry alive and will perform the same cleanup after it runs.
+        if is_current && Arc::strong_count(operation_lock) == 2 {
+            operations.remove(key);
+        }
     }
 
     /// Validate a navigation target against the scheme allow-list, mirroring the frontend guard.
@@ -142,186 +158,191 @@ impl BrowserService {
         let key = view_key(window.label(), workspace_id);
         let operation_lock = self.operation_lock(&key);
         let _operation = operation_lock.lock();
-        log::info!(
-            "browser open: window={} workspace={} bounds=({}, {}, {}x{}) scale={:?} url={}",
-            window.label(),
-            workspace_id,
-            bounds.x,
-            bounds.y,
-            bounds.width,
-            bounds.height,
-            window.scale_factor(),
-            target
-                .as_ref()
-                .map(redact_for_log)
-                .unwrap_or_else(|| "<none>".into())
-        );
-        let existing = self.views.lock().get(&key).cloned();
-        if let Some(view) = existing {
-            if let Some(webview) = self.app.get_webview(&view.webview_label) {
-                log::info!("browser open: reusing existing view {}", view.webview_label);
-                webview
-                    .set_position(LogicalPosition::new(bounds.x, bounds.y))
-                    .map_err(build_failed)?;
-                webview
-                    .set_size(LogicalSize::new(bounds.width, bounds.height))
-                    .map_err(build_failed)?;
-                if let Some(target) = target {
-                    let mut current = view.current_url.lock();
-                    if current.as_deref() != Some(target.as_str()) {
-                        webview.navigate(target.clone()).map_err(build_failed)?;
-                        *current = Some(target.to_string());
-                    }
-                }
-                return Ok(());
-            }
-            // Stale entry (window/webview gone); fall through and rebuild.
-            self.views.lock().remove(&key);
-        }
-
-        let label = webview_label(window.label(), workspace_id);
-        let app = self.app.clone();
-        let owner = window.label().to_string();
-        let ws = workspace_id.to_string();
-
-        let initial = match &target {
-            Some(target) => WebviewUrl::External(target.clone()),
-            None => WebviewUrl::External(Url::parse("about:blank").map_err(build_failed)?),
-        };
-
-        // Security + inspect bridge: refuse anything outside the allow-list and intercept the inspect
-        // sentinel host without ever performing the navigation.
-        let nav_app = app.clone();
-        let nav_owner = owner.clone();
-        let nav_ws = ws.clone();
-        let nav_views = self.views.clone();
-        let nav_key = key.clone();
-        let load_views = self.views.clone();
-        let load_key = key.clone();
-        let builder = WebviewBuilder::new(&label, initial)
-            // No PARALITH init scripts and its own isolated data are the default for an External URL;
-            // the page shares nothing with the main frontend's origin.
-            .on_navigation(move |url| {
-                let scheme = url.scheme().to_ascii_lowercase();
-                // Allow the webview's own internal blank/initialization loads through untouched;
-                // blocking them here can wedge the webview before any real page is shown.
-                if scheme == "about" {
-                    return url.as_str() == "about:blank";
-                }
-                if ALLOWED_SCHEMES.contains(&scheme.as_str()) {
-                    if url.host_str() == Some(INSPECT_HOST) {
-                        let view = nav_views.lock().get(&nav_key).cloned();
-                        let was_enabled = view
-                            .as_ref()
-                            .is_some_and(|view| view.inspect_enabled.swap(false, Ordering::AcqRel));
-                        if was_enabled {
-                            if let Some(payload) = inspect_payload(url) {
-                                let _ = nav_app.emit_to(
-                                    nav_owner.as_str(),
-                                    BROWSER_EVENT,
-                                    BrowserEvent::InspectSelected {
-                                        workspace_id: nav_ws.clone(),
-                                        payload,
-                                    },
-                                );
-                            } else {
-                                log::warn!(
-                                    "browser inspect payload rejected: window={} workspace={}",
-                                    nav_owner,
-                                    nav_ws
-                                );
-                            }
+        let result = (|| {
+            log::info!(
+                "browser open: window={} workspace={} bounds=({}, {}, {}x{}) scale={:?} url={}",
+                window.label(),
+                workspace_id,
+                bounds.x,
+                bounds.y,
+                bounds.width,
+                bounds.height,
+                window.scale_factor(),
+                target
+                    .as_ref()
+                    .map(redact_for_log)
+                    .unwrap_or_else(|| "<none>".into())
+            );
+            let existing = self.views.lock().get(&key).cloned();
+            if let Some(view) = existing {
+                if let Some(webview) = self.app.get_webview(&view.webview_label) {
+                    log::info!("browser open: reusing existing view {}", view.webview_label);
+                    webview
+                        .set_position(LogicalPosition::new(bounds.x, bounds.y))
+                        .map_err(build_failed)?;
+                    webview
+                        .set_size(LogicalSize::new(bounds.width, bounds.height))
+                        .map_err(build_failed)?;
+                    if let Some(target) = target {
+                        let mut current = view.current_url.lock();
+                        if current.as_deref() != Some(target.as_str()) {
+                            webview.navigate(target.clone()).map_err(build_failed)?;
+                            *current = Some(target.to_string());
                         }
-                        return false;
                     }
-                    return true;
+                    return Ok(());
                 }
-                let _ = nav_app.emit_to(
-                    nav_owner.as_str(),
+                // Stale entry (window/webview gone); fall through and rebuild.
+                self.views.lock().remove(&key);
+            }
+
+            let label = webview_label(window.label(), workspace_id);
+            let app = self.app.clone();
+            let owner = window.label().to_string();
+            let ws = workspace_id.to_string();
+
+            let initial = match &target {
+                Some(target) => WebviewUrl::External(target.clone()),
+                None => WebviewUrl::External(Url::parse("about:blank").map_err(build_failed)?),
+            };
+
+            // Security + inspect bridge: refuse anything outside the allow-list and intercept the inspect
+            // sentinel host without ever performing the navigation.
+            let nav_app = app.clone();
+            let nav_owner = owner.clone();
+            let nav_ws = ws.clone();
+            let nav_views = self.views.clone();
+            let nav_key = key.clone();
+            let load_views = self.views.clone();
+            let load_key = key.clone();
+            let builder = WebviewBuilder::new(&label, initial)
+                // No PARALITH init scripts and its own isolated data are the default for an External URL;
+                // the page shares nothing with the main frontend's origin.
+                .on_navigation(move |url| {
+                    let scheme = url.scheme().to_ascii_lowercase();
+                    // Allow the webview's own internal blank/initialization loads through untouched;
+                    // blocking them here can wedge the webview before any real page is shown.
+                    if scheme == "about" {
+                        return url.as_str() == "about:blank";
+                    }
+                    if ALLOWED_SCHEMES.contains(&scheme.as_str()) {
+                        if url.host_str() == Some(INSPECT_HOST) {
+                            let view = nav_views.lock().get(&nav_key).cloned();
+                            let was_enabled = view.as_ref().is_some_and(|view| {
+                                view.inspect_enabled.swap(false, Ordering::AcqRel)
+                            });
+                            if was_enabled {
+                                if let Some(payload) = inspect_payload(url) {
+                                    let _ = nav_app.emit_to(
+                                        nav_owner.as_str(),
+                                        BROWSER_EVENT,
+                                        BrowserEvent::InspectSelected {
+                                            workspace_id: nav_ws.clone(),
+                                            payload,
+                                        },
+                                    );
+                                } else {
+                                    log::warn!(
+                                        "browser inspect payload rejected: window={} workspace={}",
+                                        nav_owner,
+                                        nav_ws
+                                    );
+                                }
+                            }
+                            return false;
+                        }
+                        return true;
+                    }
+                    let _ = nav_app.emit_to(
+                        nav_owner.as_str(),
+                        BROWSER_EVENT,
+                        BrowserEvent::NavBlocked {
+                            workspace_id: nav_ws.clone(),
+                            url: url.to_string(),
+                            scheme,
+                        },
+                    );
+                    false
+                })
+                .on_page_load(move |webview, payload| {
+                    let url = payload.url().to_string();
+                    if url.contains(INSPECT_HOST) {
+                        return;
+                    }
+                    // Track where the page actually is (redirects, in-page link clicks), not only what
+                    // was last commanded — otherwise the frontend syncing its address bar to the real
+                    // URL would make the next `open` issue a redundant re-navigation (a reload).
+                    if url != "about:blank" {
+                        if let Some(view) = load_views.lock().get(&load_key).cloned() {
+                            *view.current_url.lock() = Some(url.clone());
+                            view.inspect_enabled.store(false, Ordering::Release);
+                        }
+                    }
+                    let event = match payload.event() {
+                        tauri::webview::PageLoadEvent::Started => BrowserEvent::LoadStarted {
+                            workspace_id: ws.clone(),
+                            url,
+                        },
+                        tauri::webview::PageLoadEvent::Finished => BrowserEvent::LoadFinished {
+                            workspace_id: ws.clone(),
+                            url,
+                        },
+                    };
+                    let _ = webview
+                        .app_handle()
+                        .emit_to(owner.as_str(), BROWSER_EVENT, event);
+                });
+
+            let title_app = app.clone();
+            let title_owner = window.label().to_string();
+            let title_ws = workspace_id.to_string();
+            let builder = builder.on_document_title_changed(move |_webview, title| {
+                let _ = title_app.emit_to(
+                    title_owner.as_str(),
                     BROWSER_EVENT,
-                    BrowserEvent::NavBlocked {
-                        workspace_id: nav_ws.clone(),
-                        url: url.to_string(),
-                        scheme,
+                    BrowserEvent::TitleChanged {
+                        workspace_id: title_ws.clone(),
+                        title,
                     },
                 );
-                false
-            })
-            .on_page_load(move |webview, payload| {
-                let url = payload.url().to_string();
-                if url.contains(INSPECT_HOST) {
-                    return;
-                }
-                // Track where the page actually is (redirects, in-page link clicks), not only what
-                // was last commanded — otherwise the frontend syncing its address bar to the real
-                // URL would make the next `open` issue a redundant re-navigation (a reload).
-                if url != "about:blank" {
-                    if let Some(view) = load_views.lock().get(&load_key).cloned() {
-                        *view.current_url.lock() = Some(url.clone());
-                        view.inspect_enabled.store(false, Ordering::Release);
-                    }
-                }
-                let event = match payload.event() {
-                    tauri::webview::PageLoadEvent::Started => BrowserEvent::LoadStarted {
-                        workspace_id: ws.clone(),
-                        url,
-                    },
-                    tauri::webview::PageLoadEvent::Finished => BrowserEvent::LoadFinished {
-                        workspace_id: ws.clone(),
-                        url,
-                    },
-                };
-                let _ = webview
-                    .app_handle()
-                    .emit_to(owner.as_str(), BROWSER_EVENT, event);
             });
 
-        let title_app = app.clone();
-        let title_owner = window.label().to_string();
-        let title_ws = workspace_id.to_string();
-        let builder = builder.on_document_title_changed(move |_webview, title| {
-            let _ = title_app.emit_to(
-                title_owner.as_str(),
-                BROWSER_EVENT,
-                BrowserEvent::TitleChanged {
-                    workspace_id: title_ws.clone(),
-                    title,
+            // Register ownership before creating the child: WebView can synchronously deliver initial
+            // navigation/page-load callbacks from `add_child`, and those callbacks must see the view.
+            self.views.lock().insert(
+                key.clone(),
+                BrowserView {
+                    webview_label: label.clone(),
+                    window_label: window.label().to_string(),
+                    current_url: Arc::new(Mutex::new(target.map(|url| url.to_string()))),
+                    inspect_enabled: Arc::new(AtomicBool::new(false)),
                 },
             );
-        });
+            let created = match window.add_child(
+                builder,
+                LogicalPosition::new(bounds.x, bounds.y),
+                LogicalSize::new(bounds.width, bounds.height),
+            ) {
+                Ok(created) => created,
+                Err(error) => {
+                    self.views.lock().remove(&key);
+                    log::error!("browser open: add_child failed for {label}: {error}");
+                    return Err(build_failed(error));
+                }
+            };
+            log::info!(
+                "browser open: created {} pos={:?} size={:?}",
+                label,
+                created.position(),
+                created.size()
+            );
+            created.hide().map_err(build_failed)?;
 
-        // Register ownership before creating the child: WebView can synchronously deliver initial
-        // navigation/page-load callbacks from `add_child`, and those callbacks must see the view.
-        self.views.lock().insert(
-            key.clone(),
-            BrowserView {
-                webview_label: label.clone(),
-                window_label: window.label().to_string(),
-                current_url: Arc::new(Mutex::new(target.map(|url| url.to_string()))),
-                inspect_enabled: Arc::new(AtomicBool::new(false)),
-            },
-        );
-        let created = match window.add_child(
-            builder,
-            LogicalPosition::new(bounds.x, bounds.y),
-            LogicalSize::new(bounds.width, bounds.height),
-        ) {
-            Ok(created) => created,
-            Err(error) => {
-                self.views.lock().remove(&key);
-                log::error!("browser open: add_child failed for {label}: {error}");
-                return Err(build_failed(error));
-            }
-        };
-        log::info!(
-            "browser open: created {} pos={:?} size={:?}",
-            label,
-            created.position(),
-            created.size()
-        );
-        created.hide().map_err(build_failed)?;
-
-        Ok(())
+            Ok(())
+        })();
+        drop(_operation);
+        self.release_operation_lock(&key, &operation_lock);
+        result
     }
 
     fn with_webview<T>(
@@ -430,6 +451,8 @@ impl BrowserService {
                 let _ = webview.close();
             }
         }
+        drop(_operation);
+        self.release_operation_lock(&key, &operation_lock);
         Ok(())
     }
 
@@ -451,6 +474,10 @@ impl BrowserService {
                 let _ = webview.close();
             }
         }
+        let prefix = format!("{window_label}::");
+        self.operations
+            .lock()
+            .retain(|key, _| !key.starts_with(&prefix));
     }
 }
 

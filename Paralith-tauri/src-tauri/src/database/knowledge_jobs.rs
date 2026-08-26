@@ -12,6 +12,7 @@
 use super::DatabaseService;
 use crate::errors::AppResult;
 use crate::models::knowledge::*;
+use crate::models::KnowledgeJobDiagnostics;
 use chrono::Utc;
 use rusqlite::{params, OptionalExtension, Row};
 use uuid::Uuid;
@@ -66,6 +67,36 @@ fn known_kinds() -> String {
 }
 
 impl DatabaseService {
+    pub fn knowledge_job_diagnostics(&self) -> AppResult<KnowledgeJobDiagnostics> {
+        let connection = self.connection.lock();
+        let mut diagnostics = KnowledgeJobDiagnostics::default();
+        let mut statement = connection.prepare(
+            "SELECT status,COUNT(*),COALESCE(SUM(LENGTH(payload)),0) FROM memory_jobs \
+             WHERE status IN ('queued','running','retrying','failed') GROUP BY status",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
+        })?;
+        for row in rows {
+            let (status, count, payload_bytes) = row?;
+            let count = count.max(0) as u64;
+            let payload_bytes = payload_bytes.max(0) as u64;
+            match status.as_str() {
+                "queued" => diagnostics.queued = count,
+                "running" => diagnostics.running = count,
+                "retrying" => diagnostics.retrying = count,
+                "failed" => diagnostics.failed = count,
+                _ => {}
+            }
+            diagnostics.payload_bytes = diagnostics.payload_bytes.saturating_add(payload_bytes);
+        }
+        Ok(diagnostics)
+    }
+
     /// Queue a job, coalescing into an existing claimable job with the same `dedup_key`.
     ///
     /// Coalescing replaces the payload rather than appending to it, because only the caller knows

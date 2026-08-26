@@ -3,24 +3,9 @@ use serde::{Deserialize, Serialize};
 pub const STABLE_IDENTIFIER: &str = "com.corelith.paralith";
 pub const PREVIEW_IDENTIFIER: &str = "com.corelith.paralith.preview";
 pub const LEGACY_STABLE_IDENTIFIER: &str = "com.forgemind.workspace";
-/// Private runtime identity used only by unbundled debug builds. This is deliberately not an
-/// installer/product edition: it scopes Tauri's OS resources and platform directories away from
-/// an installed Stable or Preview process while preserving the public release identities above.
-pub const LOCAL_DEVELOPMENT_IDENTIFIER: &str = "com.corelith.paralith.local-development";
-
-pub const fn runtime_identifier_for(
-    development_build: bool,
-    edition: ProductEdition,
-) -> &'static str {
-    if development_build {
-        LOCAL_DEVELOPMENT_IDENTIFIER
-    } else {
-        edition.identifier()
-    }
-}
 
 pub fn runtime_identifier() -> &'static str {
-    runtime_identifier_for(cfg!(debug_assertions), ProductEdition::current())
+    ProductEdition::current().identifier()
 }
 
 pub const fn updater_enabled_for(development_build: bool) -> bool {
@@ -133,23 +118,9 @@ mod tests {
     }
 
     #[test]
-    fn local_development_has_private_runtime_identity_without_changing_release_identity() {
-        assert_eq!(
-            runtime_identifier_for(true, ProductEdition::Stable),
-            LOCAL_DEVELOPMENT_IDENTIFIER
-        );
-        assert_eq!(
-            runtime_identifier_for(true, ProductEdition::Preview),
-            LOCAL_DEVELOPMENT_IDENTIFIER
-        );
-        assert_eq!(
-            runtime_identifier_for(false, ProductEdition::Stable),
-            STABLE_IDENTIFIER
-        );
-        assert_eq!(
-            runtime_identifier_for(false, ProductEdition::Preview),
-            PREVIEW_IDENTIFIER
-        );
+    fn local_development_uses_the_configured_product_identity() {
+        assert_eq!(ProductEdition::Stable.identifier(), STABLE_IDENTIFIER);
+        assert_eq!(ProductEdition::Preview.identifier(), PREVIEW_IDENTIFIER);
         assert!(!updater_enabled_for(true));
         assert!(updater_enabled_for(false));
     }

@@ -4,6 +4,7 @@ import type {
   AppSettings,
   BrowserBounds,
   DiagnosticsSnapshot,
+  RuntimeHealthSnapshot,
   SafeRestartAssessment,
   SafeRestartClientState,
   StartupStatus,
@@ -174,6 +175,8 @@ export const native = {
   terminateTerminalSession: (sessionId: string) => invoke<void>('terminate_terminal_session', { sessionId }),
   terminateWorkspaceSessions: (workspaceId: string) => invoke<void>('terminate_workspace_sessions', { workspaceId }),
   listLiveSessions: (workspaceId?: string) => invoke<TerminalSession[]>('list_live_sessions', { workspaceId }),
+  subscribeTerminalOutput: (workspaceId: string) => invoke<TerminalSession[]>('subscribe_terminal_output', { workspaceId }),
+  unsubscribeTerminalOutput: (workspaceId: string) => invoke<void>('unsubscribe_terminal_output', { workspaceId }),
   terminalSessionStatus: (sessionId: string) => invoke<TerminalSession>('terminal_session_status', { sessionId }),
   /** Save clipboard/dropped image bytes to a temp file and return its absolute path (to type into a terminal). */
   saveDroppedImage: (data: number[], extension?: string) => invoke<string>('save_dropped_image', { data, extension }),
@@ -210,6 +213,7 @@ export const native = {
   relocateAgentResumeWorktree: (terminalSessionId: string, path: string) =>
     invoke<AgentResumeRecord>('relocate_agent_resume_worktree', { terminalSessionId, path }),
   getDiagnostics: () => invoke<DiagnosticsSnapshot>('get_diagnostics'),
+  getRuntimeHealth: () => invoke<RuntimeHealthSnapshot>('get_runtime_health'),
   runHealthCheck: () => invoke<HealthReport>('run_health_check'),
   exportRedactedSupportBundle: () => invoke<string>('export_redacted_support_bundle'),
   getUpdateStatus: () => invoke<UpdateStatus>('get_update_status'),

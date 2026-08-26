@@ -215,9 +215,16 @@ impl FileWatchService {
         }
     }
 
-    #[cfg(test)]
-    fn watcher_count(&self) -> usize {
+    pub fn watcher_count(&self) -> usize {
         self.watchers.lock().len()
+    }
+
+    pub fn subscriber_count(&self) -> usize {
+        self.watchers
+            .lock()
+            .values()
+            .map(|watch| watch.subscribers.lock().len())
+            .sum()
     }
 
     #[cfg(test)]
