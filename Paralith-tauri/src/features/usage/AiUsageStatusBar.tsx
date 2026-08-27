@@ -40,10 +40,16 @@ export function AiUsageStatusBar() {
 }
 
 function ProviderCompact({ snapshot }: { snapshot: ProviderUsageSnapshot }) {
+  const windows = orderedWindows(snapshot).filter(({ kind }) => kind === 'five_hour' || kind === 'weekly')
   const tightest = tightestWindow(snapshot)
+  const compact = windows.length > 0
+    ? windows.map((window) => `${compactWindowName(window.kind)} ${window.remainingPercent}%`).join(' · ')
+    : tightest
+      ? `${tightest.remainingPercent}%`
+      : '--'
   return <span className={`ai-usage-compact-provider is-${snapshot.provider}`}>
     <span>{snapshot.provider === 'claude' ? 'Cl' : 'Cx'}</span>
-    <strong>{tightest ? `${tightest.remainingPercent}%` : '--'}</strong>
+    <strong>{compact}</strong>
   </span>
 }
 
@@ -217,6 +223,10 @@ function windowName(kind: UsageWindowKind) {
   if (kind === 'five_hour') return '5-hour'
   if (kind === 'fable_weekly') return 'Fable weekly'
   return kind.charAt(0).toUpperCase() + kind.slice(1)
+}
+
+function compactWindowName(kind: UsageWindowKind) {
+  return kind === 'five_hour' ? '5h' : 'Wk'
 }
 
 function resetText(window: UsageWindow, now: number) {

@@ -4,7 +4,7 @@ import type { ContributionDay, GithubActivitySnapshot, ProviderUsageSnapshot, Sy
 import { formatDay } from '../usageFormat'
 
 const providerName = (provider: ProviderUsageSnapshot['provider']) => provider === 'claude' ? 'Claude Code' : 'Codex'
-const windowName = (kind: UsageWindow['kind']) => ({ five_hour: 'SESSION', daily: 'DAILY', weekly: 'WEEKLY', fable_weekly: 'FABLE WEEKLY' })[kind]
+const windowName = (kind: UsageWindow['kind']) => ({ five_hour: '5-HOUR', daily: 'DAILY', weekly: 'WEEKLY', fable_weekly: 'FABLE WEEKLY' })[kind]
 
 function stateLabel(state: TelemetryState | ProviderUsageSnapshot['status'], freshness?: ProviderUsageSnapshot['freshness']) {
   if (state === 'ready') return freshness === 'stale' ? 'STALE CACHE' : 'ONLINE'
