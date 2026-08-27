@@ -7,6 +7,7 @@ vi.mock('../../native/events', () => ({ onAiUsageChanged: vi.fn().mockResolvedVa
 
 import { useNativeOverlayStore } from '../../stores/nativeOverlay'
 import { AiUsageStatusBar } from './AiUsageStatusBar'
+import { aiUsageStore } from './aiUsageStore'
 import { placeUsagePopover } from './usagePopoverPlacement'
 
 const claude = {
@@ -14,6 +15,14 @@ const claude = {
   freshness: 'live' as const, status: 'ready' as const, windows: [
     { kind: 'five_hour' as const, usedPercent: 57, remainingPercent: 43, source: 'supported_endpoint' as const, confidence: 'authoritative' as const, isWarning: false, isCritical: false, resetsAt: new Date(Date.now() + 2 * 60 * 60_000).toISOString() },
     { kind: 'weekly' as const, usedPercent: 89, remainingPercent: 11, source: 'supported_endpoint' as const, confidence: 'authoritative' as const, isWarning: true, isCritical: false },
+  ],
+}
+
+const codex = {
+  provider: 'codex' as const, collectedAt: new Date().toISOString(), sourceUpdatedAt: new Date().toISOString(), source: 'provider_cli' as const,
+  freshness: 'live' as const, status: 'ready' as const, windows: [
+    { kind: 'five_hour' as const, usedPercent: 22, remainingPercent: 78, source: 'provider_cli' as const, confidence: 'authoritative' as const, isWarning: false, isCritical: false },
+    { kind: 'weekly' as const, usedPercent: 54, remainingPercent: 46, source: 'provider_cli' as const, confidence: 'authoritative' as const, isWarning: false, isCritical: false },
   ],
 }
 
@@ -32,6 +41,36 @@ describe('AiUsageStatusBar', () => {
     fireEvent.keyDown(window, { key: 'Escape' })
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     expect(chip).toHaveFocus()
+  })
+
+  it('shows the Codex weekly and 5-hour windows when reported', async () => {
+    mocks.native.getAiUsageSnapshots.mockResolvedValue([codex])
+    mocks.native.refreshAiUsage.mockResolvedValue([codex])
+    await aiUsageStore.refresh()
+    render(<AiUsageStatusBar />)
+    const chip = await screen.findByRole('button', { name: /subscription usage.*codex 46% remaining/i })
+    expect(chip).toHaveTextContent('5h 78% · Wk 46%')
+    fireEvent.click(chip)
+    const dialog = await screen.findByRole('dialog', { name: /subscription usage/i })
+    expect(dialog).toHaveTextContent('5-hour')
+    expect(dialog).toHaveTextContent('Weekly')
+    expect(screen.getByRole('progressbar', { name: /5-hour remaining/i })).toHaveAttribute('aria-valuenow', '78')
+    expect(screen.getByRole('progressbar', { name: /Weekly remaining/i })).toHaveAttribute('aria-valuenow', '46')
+  })
+
+  it('does not render a Codex 5-hour window when the subscription reports weekly only', async () => {
+    const weeklyOnly = { ...codex, windows: [codex.windows[1]] }
+    mocks.native.getAiUsageSnapshots.mockResolvedValue([weeklyOnly])
+    mocks.native.refreshAiUsage.mockResolvedValue([weeklyOnly])
+    await aiUsageStore.refresh()
+    render(<AiUsageStatusBar />)
+    const chip = await screen.findByRole('button', { name: /subscription usage.*codex 46% remaining/i })
+    expect(chip).toHaveTextContent('Wk 46%')
+    expect(chip).not.toHaveTextContent('5h')
+    fireEvent.click(chip)
+    const dialog = await screen.findByRole('dialog', { name: /subscription usage/i })
+    expect(dialog).toHaveTextContent('Weekly')
+    expect(screen.queryByRole('progressbar', { name: /5-hour remaining/i })).not.toBeInTheDocument()
   })
 
   it('places the roster fully inside the viewport without relying on a transform', async () => {

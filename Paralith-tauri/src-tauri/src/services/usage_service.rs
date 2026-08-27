@@ -1007,45 +1007,25 @@ fn fetch_codex_usage(
 fn codex_windows_from_payload(payload: &Value, now: DateTime<Utc>) -> Vec<UsageWindow> {
     let primary = payload.get("primary");
     let secondary = payload.get("secondary");
-    let mut session = None;
-    let mut weekly = None;
-    for value in [primary, secondary].into_iter().flatten() {
-        let Some(used) = value.get("usedPercent").and_then(Value::as_f64) else {
-            continue;
-        };
-        let duration = value.get("windowDurationMins").and_then(Value::as_f64);
-        let window = (value, used);
-        if duration.is_some_and(|minutes| (minutes - 300.0).abs() <= 1.0) && session.is_none() {
-            session = Some(window);
-        } else if duration.is_some_and(|minutes| (minutes - 10_080.0).abs() <= 1.0)
-            && weekly.is_none()
-        {
-            weekly = Some(window);
-        }
-    }
-    if session.is_none() {
-        session = primary.and_then(|value| {
-            let duration = value.get("windowDurationMins").and_then(Value::as_f64);
-            let used = value.get("usedPercent").and_then(Value::as_f64)?;
-            (!duration.is_some_and(|minutes| {
-                (minutes - 300.0).abs() <= 1.0 || (minutes - 10_080.0).abs() <= 1.0
-            }))
-            .then_some((value, used))
-        });
-    }
-    if weekly.is_none() {
-        weekly = secondary.and_then(|value| {
-            let duration = value.get("windowDurationMins").and_then(Value::as_f64);
-            let used = value.get("usedPercent").and_then(Value::as_f64)?;
-            (!duration.is_some_and(|minutes| {
-                (minutes - 300.0).abs() <= 1.0 || (minutes - 10_080.0).abs() <= 1.0
-            }))
-            .then_some((value, used))
-        });
-    }
+    // Codex can omit either quota bucket for a subscription. `windowDurationMins` is the only
+    // reliable discriminator, so never infer a 5-hour or weekly limit from the primary/secondary
+    // position when the provider did not report its duration.
+    let window_for_duration = |expected_minutes: f64| {
+        [primary, secondary]
+            .into_iter()
+            .flatten()
+            .find_map(|value| {
+                let duration = value.get("windowDurationMins").and_then(Value::as_f64)?;
+                if (duration - expected_minutes).abs() > 1.0 {
+                    return None;
+                }
+                let used = value.get("usedPercent").and_then(Value::as_f64)?;
+                Some((value, used))
+            })
+    };
     [
-        (UsageWindowKind::FiveHour, session),
-        (UsageWindowKind::Weekly, weekly),
+        (UsageWindowKind::FiveHour, window_for_duration(300.0)),
+        (UsageWindowKind::Weekly, window_for_duration(10_080.0)),
     ]
     .into_iter()
     .filter_map(|(kind, window)| {
@@ -1253,6 +1233,26 @@ mod tests {
         assert_eq!(windows[0].used_percent, 20);
         assert_eq!(windows[1].kind, UsageWindowKind::Weekly);
         assert_eq!(windows[1].used_percent, 80);
+    }
+    #[test]
+    fn codex_does_not_infer_a_limit_when_duration_is_missing() {
+        let payload = serde_json::json!({
+            "primary": { "usedPercent": 24 },
+            "secondary": null
+        });
+        assert!(codex_windows_from_payload(&payload, Utc::now()).is_empty());
+    }
+
+    #[test]
+    fn codex_reports_a_standalone_five_hour_limit() {
+        let payload = serde_json::json!({
+            "primary": { "usedPercent": 24, "windowDurationMins": 300 },
+            "secondary": null
+        });
+        let windows = codex_windows_from_payload(&payload, Utc::now());
+        assert_eq!(windows.len(), 1);
+        assert_eq!(windows[0].kind, UsageWindowKind::FiveHour);
+        assert_eq!(windows[0].used_percent, 24);
     }
     #[test]
     fn countdown_uses_zero_for_elapsed_resets() {
