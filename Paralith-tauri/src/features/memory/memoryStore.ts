@@ -31,12 +31,13 @@ import type {
 
 /** Which surface the centre pane is showing. The rail and inspector stay put across both. */
 export type MemoryView =
-  | 'document'
-  | 'graph'
-  | 'context'
-  | 'activity'
   | 'overview'
+  | 'knowledge'
+  | 'graph'
+  | 'decisions'
+  | 'activity'
   | 'review'
+  | 'context'
   | 'timeline'
   | 'search'
 
@@ -166,7 +167,7 @@ const EMPTY = {
   connections: undefined,
   history: [] as MemoryRevisionSummary[],
   revisionPreview: undefined,
-  view: 'document' as MemoryView,
+  view: 'overview' as MemoryView,
   contextTask: '',
   contextBudget: 'balanced',
   contextPack: undefined,

@@ -109,7 +109,7 @@ describe('MemoryActivity', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'Rotation Decision' }))
     expect(useMemoryStore.getState().activeId).toBe('m1')
-    expect(useMemoryStore.getState().view).toBe('document')
+    expect(useMemoryStore.getState().view).toBe('knowledge')
     expect(getApi).not.toHaveBeenCalled()
   })
 

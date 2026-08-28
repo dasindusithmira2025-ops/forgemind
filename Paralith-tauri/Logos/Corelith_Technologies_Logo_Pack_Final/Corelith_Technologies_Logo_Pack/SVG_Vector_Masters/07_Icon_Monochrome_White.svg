@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1200" viewBox="0 0 1200 1200"><defs>
+      <linearGradient id="coreGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#2563EB"/><stop offset="50%" stop-color="#3B82F6"/><stop offset="100%" stop-color="#22D3EE"/>
+      </linearGradient>
+      <linearGradient id="pillarGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#67E8F9"/><stop offset="55%" stop-color="#22D3EE"/><stop offset="100%" stop-color="#14B8A6"/>
+      </linearGradient>
+      <linearGradient id="tileGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#172554"/><stop offset="45%" stop-color="#0F172A"/><stop offset="100%" stop-color="#020617"/>
+      </linearGradient>
+      <filter id="softShadow" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur in="SourceAlpha" stdDeviation="18" result="blur"/><feOffset dy="16" result="off"/><feColorMatrix in="off" type="matrix" values="0 0 0 0 0.05 0 0 0 0 0.15 0 0 0 0 0.45 0 0 0 .45 0"/><feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    </defs><g transform="translate(100,100) scale(1.0)">
+      <path d="M 760 250 L 500 100 L 240 250 L 240 750 L 500 900 L 760 750" fill="none" stroke="#F8FAFC" stroke-width="104" stroke-linejoin="miter" stroke-linecap="square"/>
+      <path d="M 470 365 L 520 325 L 570 365 L 570 690 L 675 628 L 675 735 L 520 825 L 470 795 Z" fill="#F8FAFC"/>
+    </g></svg>

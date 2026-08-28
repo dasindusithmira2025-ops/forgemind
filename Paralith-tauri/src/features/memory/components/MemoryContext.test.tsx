@@ -205,7 +205,7 @@ describe('MemoryContext', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Rotation ADR' }))
 
     expect(useMemoryStore.getState().activeId).toBe('m1')
-    expect(useMemoryStore.getState().view).toBe('document')
+    expect(useMemoryStore.getState().view).toBe('knowledge')
   })
 
   it('surfaces a compile failure instead of leaving a stale pack on screen', async () => {

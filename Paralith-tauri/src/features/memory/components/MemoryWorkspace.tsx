@@ -2,13 +2,13 @@ import { useEffect, type KeyboardEvent, type ReactNode } from 'react'
 import {
   Activity,
   Compass,
-  FileText,
-  History,
+  GitBranch,
   Layers,
   ListChecks,
   Network,
   Plus,
   Search,
+  ScrollText,
 } from 'lucide-react'
 import { Button } from '../../../components/ui/Button'
 import { ErrorNotice } from '../../../components/ui/ErrorNotice'
@@ -24,19 +24,19 @@ import { MemoryOverview } from './MemoryOverview'
 import { MemoryReview } from './MemoryReview'
 import { MemoryTimeline } from './MemoryTimeline'
 import { MemorySearch } from './MemorySearch'
+import { MemoryDecisions } from './MemoryDecisions'
 import { onKnowledgeUpdated } from '../../../native/events'
 
-/** The centre pane's tabs, in the order the work usually flows: read the document, see the
- * knowledge around it, then the surfaces that maintain it. */
+/** Project Intelligence navigation, ordered by the questions a user asks first. */
 const VIEWS: { value: MemoryView; label: string; icon: ReactNode }[] = [
-  { value: 'document', label: 'Document', icon: <FileText size={13} aria-hidden /> },
   { value: 'overview', label: 'Overview', icon: <Compass size={13} aria-hidden /> },
-  { value: 'search', label: 'Search', icon: <Search size={13} aria-hidden /> },
+  { value: 'knowledge', label: 'Knowledge', icon: <ScrollText size={13} aria-hidden /> },
   { value: 'graph', label: 'Graph', icon: <Network size={13} aria-hidden /> },
-  { value: 'context', label: 'Context', icon: <Layers size={13} aria-hidden /> },
-  { value: 'review', label: 'Review', icon: <ListChecks size={13} aria-hidden /> },
-  { value: 'timeline', label: 'Timeline', icon: <History size={13} aria-hidden /> },
+  { value: 'decisions', label: 'Decisions', icon: <GitBranch size={13} aria-hidden /> },
   { value: 'activity', label: 'Activity', icon: <Activity size={13} aria-hidden /> },
+  { value: 'review', label: 'Review', icon: <ListChecks size={13} aria-hidden /> },
+  { value: 'context', label: 'Context', icon: <Layers size={13} aria-hidden /> },
+  { value: 'search', label: 'Search', icon: <Search size={13} aria-hidden /> },
 ]
 
 export function MemoryViewTabs({
@@ -147,11 +147,15 @@ export function MemoryWorkspace({ projectId }: { projectId: string }) {
     <div className="memory-shell">
       <div className="memory-rail">
         <div className="memory-rail-head">
-          <h2 className="section-label">Memory</h2>
+          <div>
+            <h2 className="section-label">Memory</h2>
+            <p>Project intelligence</p>
+          </div>
           <Button variant="secondary" icon={<Plus size={13} />} onClick={startNew}>
             New
           </Button>
         </div>
+        <MemoryViewTabs view={view} onSelect={(nextView) => void setView(nextView)} />
         <MemoryList />
       </div>
 
@@ -164,7 +168,6 @@ export function MemoryWorkspace({ projectId }: { projectId: string }) {
             </Button>
           </div>
         )}
-        <MemoryViewTabs view={view} onSelect={(nextView) => void setView(nextView)} />
         <div
           id={`memory-panel-${view}`}
           className="memory-view-panel"
@@ -173,13 +176,14 @@ export function MemoryWorkspace({ projectId }: { projectId: string }) {
           tabIndex={0}
         >
           {view === 'graph' && <MemoryGraph />}
+          {view === 'decisions' && <MemoryDecisions />}
           {view === 'context' && <MemoryContext />}
           {view === 'activity' && <MemoryActivity />}
           {view === 'overview' && <MemoryOverview />}
           {view === 'review' && <MemoryReview />}
           {view === 'timeline' && <MemoryTimeline />}
           {view === 'search' && <MemorySearch />}
-          {view === 'document' && <MemoryEditor />}
+          {view === 'knowledge' && <MemoryEditor />}
         </div>
       </div>
 
