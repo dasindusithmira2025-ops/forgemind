@@ -39,7 +39,7 @@ describe('SurfaceTabBar', () => {
     const onOpen = vi.fn()
     render(<SurfaceTabBar surfaces={[]} onSelect={vi.fn()} onClose={vi.fn()} onReorder={vi.fn()} onOpen={onOpen} />)
     fireEvent.click(screen.getByRole('button', { name: 'Open surface' }))
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Diff' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Source Control' }))
     expect(onOpen).toHaveBeenCalledWith('diff')
     expect(screen.queryByRole('menu')).not.toBeInTheDocument()
   })
@@ -50,7 +50,7 @@ describe('SurfaceEmptyState', () => {
     render(<SurfaceEmptyState onOpen={vi.fn()} />)
     expect(screen.getByRole('button', { name: /Files/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Browser/ })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Diff/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Source Control/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Agents/ })).toBeInTheDocument()
   })
 

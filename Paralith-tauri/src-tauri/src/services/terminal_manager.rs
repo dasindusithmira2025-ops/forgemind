@@ -3,7 +3,8 @@ use crate::database::DatabaseService;
 use crate::errors::{AppError, AppResult};
 use crate::models::{
     AgentActivityState, AgentSignal, AgentStateEvent, AgentStateSource, CreateTerminalRequest,
-    TerminalExitEvent, TerminalOutputEvent, TerminalSession, TerminalStatusEvent,
+    TerminalExitEvent, TerminalOutputEvent, TerminalRuntimeDiagnostics, TerminalRuntimeResource,
+    TerminalSession, TerminalStatusEvent,
 };
 #[cfg(windows)]
 use crate::services::process_util::background_command;
@@ -14,7 +15,7 @@ use chrono::Utc;
 use parking_lot::Condvar;
 use parking_lot::{Mutex, RwLock};
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -26,7 +27,7 @@ use std::time::{Duration, Instant, SystemTime};
 use tauri::{AppHandle, Emitter};
 use uuid::Uuid;
 
-const OUTPUT_TAIL_LIMIT: usize = 64 * 1024;
+const OUTPUT_TAIL_LIMIT: usize = 256 * 1024;
 const OUTPUT_BUFFER_SIZE: usize = 16 * 1024;
 const OUTPUT_QUEUE_DEPTH: usize = 128;
 const OUTPUT_BATCH_LIMIT: usize = 64 * 1024;
@@ -122,17 +123,31 @@ struct TerminalHandle {
     child: Mutex<Box<dyn Child + Send + Sync>>,
     cancelled: AtomicBool,
     sequence: AtomicU64,
-    output_tail: Mutex<Vec<u8>>,
+    output_tail: Mutex<VecDeque<u8>>,
     output_log: Option<Mutex<TerminalLog>>,
     started_at: Instant,
     machine_protocol: bool,
+    output_bytes: AtomicU64,
+    output_batches: AtomicU64,
+    input_writes: AtomicU64,
+    input_bytes: AtomicU64,
+    resize_requests: AtomicU64,
     #[cfg(test)]
     exit_signal: (Mutex<bool>, Condvar),
+}
+
+#[derive(Default)]
+struct TerminalRuntimeCounters {
+    renderer_deliveries: AtomicU64,
+    suppressed_deliveries: AtomicU64,
 }
 
 #[derive(Clone)]
 pub struct TerminalManager {
     sessions: Arc<RwLock<HashMap<String, Arc<TerminalHandle>>>>,
+    /// The workspace currently rendered by each Tauri window. Native PTYs remain live when a
+    /// workspace is inactive, but their high-volume output must not enter an unrelated renderer.
+    output_subscriptions: Arc<RwLock<HashMap<String, String>>>,
     /// Panes with a session creation in flight, keyed by (workspace_id, pane_id). The
     /// running-duplicate check in [`create_session`](Self::create_session) reads `sessions`,
     /// but a session only lands there *after* the PTY spawn completes — a window long enough
@@ -142,6 +157,7 @@ pub struct TerminalManager {
     creating: Arc<Mutex<HashSet<(String, String)>>>,
     database: Option<Arc<DatabaseService>>,
     app_handle: Option<AppHandle>,
+    counters: Arc<TerminalRuntimeCounters>,
 }
 
 /// Releases a pane's creation reservation on every exit path, including panics.
@@ -160,9 +176,11 @@ impl TerminalManager {
     pub fn new(database: Arc<DatabaseService>, app_handle: AppHandle) -> Self {
         Self {
             sessions: Arc::new(RwLock::new(HashMap::new())),
+            output_subscriptions: Arc::new(RwLock::new(HashMap::new())),
             creating: Arc::new(Mutex::new(HashSet::new())),
             database: Some(database),
             app_handle: Some(app_handle),
+            counters: Arc::new(TerminalRuntimeCounters::default()),
         }
     }
 
@@ -170,9 +188,26 @@ impl TerminalManager {
     fn for_test() -> Self {
         Self {
             sessions: Arc::new(RwLock::new(HashMap::new())),
+            output_subscriptions: Arc::new(RwLock::new(HashMap::new())),
             creating: Arc::new(Mutex::new(HashSet::new())),
             database: None,
             app_handle: None,
+            counters: Arc::new(TerminalRuntimeCounters::default()),
+        }
+    }
+
+    /// Real persistence, no Tauri handle. Used by the real-provider canary, which drives the
+    /// production execution path (PTY ownership, session records, exit reaping) without a window.
+    /// Only frontend event emission is absent, and no engine decision depends on it.
+    #[cfg(test)]
+    pub(crate) fn headless(database: Arc<DatabaseService>) -> Self {
+        Self {
+            sessions: Arc::new(RwLock::new(HashMap::new())),
+            output_subscriptions: Arc::new(RwLock::new(HashMap::new())),
+            creating: Arc::new(Mutex::new(HashSet::new())),
+            database: Some(database),
+            app_handle: None,
+            counters: Arc::new(TerminalRuntimeCounters::default()),
         }
     }
 
@@ -320,10 +355,15 @@ impl TerminalManager {
             child: Mutex::new(child),
             cancelled: AtomicBool::new(false),
             sequence: AtomicU64::new(0),
-            output_tail: Mutex::new(Vec::new()),
+            output_tail: Mutex::new(VecDeque::with_capacity(OUTPUT_TAIL_LIMIT)),
             output_log: output_log.map(Mutex::new),
             started_at: Instant::now(),
             machine_protocol,
+            output_bytes: AtomicU64::new(0),
+            output_batches: AtomicU64::new(0),
+            input_writes: AtomicU64::new(0),
+            input_bytes: AtomicU64::new(0),
+            resize_requests: AtomicU64::new(0),
             #[cfg(test)]
             exit_signal: (Mutex::new(false), Condvar::new()),
         });
@@ -496,6 +536,9 @@ impl TerminalManager {
     ) -> std::io::Result<()> {
         let app = self.app_handle.clone();
         let database = self.database.clone();
+        let counters = self.counters.clone();
+        let output_subscriptions = self.output_subscriptions.clone();
+        let reader_subscriptions = self.output_subscriptions.clone();
         let emitter_handle = handle.clone();
         let (sender, receiver) = sync_channel::<Vec<u8>>(OUTPUT_QUEUE_DEPTH);
         thread::Builder::new()
@@ -536,8 +579,21 @@ impl TerminalManager {
                         }
                     }
                     let sequence = append_and_sequence(&emitter_handle, &data);
+                    emitter_handle
+                        .output_bytes
+                        .fetch_add(data.len() as u64, Ordering::Relaxed);
+                    emitter_handle
+                        .output_batches
+                        .fetch_add(1, Ordering::Relaxed);
                     let signal = parse_agent_signal(&emitter_handle, &data);
-                    emit_output(&app, &emitter_handle, sequence, data);
+                    emit_output(
+                        &app,
+                        &counters,
+                        &output_subscriptions,
+                        &emitter_handle,
+                        sequence,
+                        data,
+                    );
                     if let Some(signal) = signal {
                         transition_agent_state(&app, &database, &emitter_handle, signal);
                     }
@@ -553,47 +609,56 @@ impl TerminalManager {
             ))
             .spawn(move || {
                 let mut buffer = vec![0u8; OUTPUT_BUFFER_SIZE];
-                let mut protocol_pending = Vec::new();
+                let mut control_pending = Vec::new();
+                let workspace_id = handle.metadata.read().workspace_id.clone();
                 loop {
                     match reader.read(&mut buffer) {
                         Ok(0) => {
-                            if !protocol_pending.is_empty() {
-                                let _ = sender.try_send(std::mem::take(&mut protocol_pending));
+                            if !control_pending.is_empty() {
+                                let _ = sender.try_send(std::mem::take(&mut control_pending));
                             }
                             break;
                         }
                         Ok(read) => {
-                            let data = if handle.machine_protocol {
-                                let (data, query_count) = consume_cursor_position_queries(
-                                    &mut protocol_pending,
+                            let has_renderer = reader_subscriptions
+                                .read()
+                                .values()
+                                .any(|subscribed| subscribed == &workspace_id);
+                            // ConPTY asks the terminal for cursor position while constructing an
+                            // ordinary PowerShell/cmd prompt too. Answer natively only while the
+                            // workspace is hidden; an active xterm supplies its real coordinates.
+                            let (data, query_count) = if has_renderer {
+                                let mut data = std::mem::take(&mut control_pending);
+                                data.extend_from_slice(&buffer[..read]);
+                                (data, 0)
+                            } else {
+                                consume_cursor_position_queries(
+                                    &mut control_pending,
                                     &buffer[..read],
-                                );
-                                if query_count > 0 {
-                                    let mut writer = handle.writer.lock();
-                                    if let Some(writer) = writer.as_mut() {
-                                        for _ in 0..query_count {
-                                            if let Err(error) =
-                                                writer.write_all(CURSOR_POSITION_RESPONSE)
-                                            {
-                                                log::warn!(
-                                                    "machine-protocol PTY query response failed for {}: {error}",
-                                                    handle.metadata.read().id
-                                                );
-                                                break;
-                                            }
-                                        }
-                                        if let Err(error) = writer.flush() {
+                                )
+                            };
+                            if query_count > 0 {
+                                let mut writer = handle.writer.lock();
+                                if let Some(writer) = writer.as_mut() {
+                                    for _ in 0..query_count {
+                                        if let Err(error) =
+                                            writer.write_all(CURSOR_POSITION_RESPONSE)
+                                        {
                                             log::warn!(
-                                                "machine-protocol PTY query flush failed for {}: {error}",
+                                                "PTY cursor query response failed for {}: {error}",
                                                 handle.metadata.read().id
                                             );
+                                            break;
                                         }
                                     }
+                                    if let Err(error) = writer.flush() {
+                                        log::warn!(
+                                            "PTY cursor query flush failed for {}: {error}",
+                                            handle.metadata.read().id
+                                        );
+                                    }
                                 }
-                                data
-                            } else {
-                                buffer[..read].to_vec()
-                            };
+                            }
                             if data.is_empty() {
                                 continue;
                             }
@@ -648,7 +713,7 @@ impl TerminalManager {
                         metadata.clone(),
                     )
                 };
-                let tail = handle.output_tail.lock().clone();
+                let tail = handle.output_tail.lock().iter().copied().collect::<Vec<_>>();
                 if let Some(database) = &database {
                     let _ = database.mark_session_ended(&session_id, &status, exit_code, &tail);
                 }
@@ -780,6 +845,12 @@ impl TerminalManager {
                 },
             );
         }
+        if result.is_ok() {
+            handle.input_writes.fetch_add(1, Ordering::Relaxed);
+            handle
+                .input_bytes
+                .fetch_add(data.len() as u64, Ordering::Relaxed);
+        }
         result
     }
 
@@ -813,7 +884,7 @@ impl TerminalManager {
             pixel_width: 0,
             pixel_height: 0,
         });
-        result.map_err(|error| {
+        let result = result.map_err(|error| {
             AppError::new(
                 "terminal_resize_failed",
                 "The native terminal could not be resized.",
@@ -821,7 +892,11 @@ impl TerminalManager {
             )
             .detail(error.to_string())
             .entity(session_id)
-        })
+        });
+        if result.is_ok() {
+            handle.resize_requests.fetch_add(1, Ordering::Relaxed);
+        }
+        result
     }
 
     pub fn terminate_session(&self, session_id: &str) -> AppResult<()> {
@@ -902,6 +977,78 @@ impl TerminalManager {
             })
             .collect();
         self.terminate_many(session_ids, "workspace_stopped")
+    }
+
+    pub fn runtime_diagnostics(&self) -> TerminalRuntimeDiagnostics {
+        let sessions = self.sessions.read();
+        let mut process_types = HashMap::new();
+        let mut lifecycle_states = HashMap::new();
+        let mut resources = Vec::with_capacity(sessions.len());
+        let mut output_bytes = 0u64;
+        let mut output_batches = 0u64;
+        let mut dropped_output_bytes = 0u64;
+        let mut input_writes = 0u64;
+        let mut input_bytes = 0u64;
+        let mut resize_requests = 0u64;
+        let mut managed_process_count = 0usize;
+        for handle in sessions.values() {
+            let metadata = handle.metadata.read();
+            if metadata.process_id.is_some() {
+                managed_process_count += 1;
+            }
+            *process_types
+                .entry(metadata.provider.as_str().to_owned())
+                .or_insert(0) += 1;
+            *lifecycle_states.entry(metadata.status.clone()).or_insert(0) += 1;
+            let resource = TerminalRuntimeResource {
+                session_id: metadata.id.clone(),
+                project_id: metadata.project_id.clone(),
+                workspace_id: metadata.workspace_id.clone(),
+                pane_id: metadata.pane_id.clone(),
+                provider: metadata.provider.clone(),
+                status: metadata.status.clone(),
+                process_id: metadata.process_id,
+                started_at: metadata.started_at.clone(),
+                output_bytes: handle.output_bytes.load(Ordering::Relaxed),
+                output_batches: handle.output_batches.load(Ordering::Relaxed),
+                dropped_output_bytes: metadata.dropped_output_bytes,
+                input_writes: handle.input_writes.load(Ordering::Relaxed),
+                input_bytes: handle.input_bytes.load(Ordering::Relaxed),
+                resize_requests: handle.resize_requests.load(Ordering::Relaxed),
+            };
+            output_bytes = output_bytes.saturating_add(resource.output_bytes);
+            output_batches = output_batches.saturating_add(resource.output_batches);
+            dropped_output_bytes =
+                dropped_output_bytes.saturating_add(resource.dropped_output_bytes);
+            input_writes = input_writes.saturating_add(resource.input_writes);
+            input_bytes = input_bytes.saturating_add(resource.input_bytes);
+            resize_requests = resize_requests.saturating_add(resource.resize_requests);
+            resources.push(resource);
+        }
+        resources.sort_by(|left, right| left.started_at.cmp(&right.started_at));
+        TerminalRuntimeDiagnostics {
+            managed_process_count,
+            pty_session_count: sessions.len(),
+            creating_session_count: self.creating.lock().len(),
+            orphan_session_count: resources
+                .iter()
+                .filter(|resource| {
+                    resource.project_id.is_empty() || resource.workspace_id.is_empty()
+                })
+                .count(),
+            process_types,
+            lifecycle_states,
+            output_bytes,
+            output_batches,
+            renderer_deliveries: self.counters.renderer_deliveries.load(Ordering::Relaxed),
+            suppressed_deliveries: self.counters.suppressed_deliveries.load(Ordering::Relaxed),
+            dropped_output_bytes,
+            input_writes,
+            input_bytes,
+            resize_requests,
+            active_output_subscribers: self.output_subscriptions.read().len(),
+            resources,
+        }
     }
 
     pub fn terminate_all_sessions(&self) -> AppResult<()> {
@@ -985,11 +1132,37 @@ impl TerminalManager {
                 }
                 let tail = handle.output_tail.lock();
                 metadata.next_sequence = handle.sequence.load(Ordering::Acquire);
-                metadata.output_tail = tail.clone();
+                metadata.output_tail = tail.iter().copied().collect();
                 drop(tail);
                 Some(metadata)
             })
             .collect()
+    }
+
+    /// Atomically route future output to this renderer before returning its replay snapshot.
+    /// Output produced during snapshotting is either present in the bounded tail or follows as
+    /// an event with a larger sequence, so reconnecting xterms cannot miss a transition.
+    pub fn subscribe_output(&self, window_label: &str, workspace_id: &str) -> Vec<TerminalSession> {
+        self.output_subscriptions
+            .write()
+            .insert(window_label.to_owned(), workspace_id.to_owned());
+        self.list_live_sessions(Some(workspace_id))
+    }
+
+    /// Remove only the subscription this cleanup owns. A stale React cleanup from a rapid
+    /// workspace switch must not clear the replacement subscription installed by the new view.
+    pub fn unsubscribe_output(&self, window_label: &str, workspace_id: &str) {
+        let mut subscriptions = self.output_subscriptions.write();
+        if subscriptions
+            .get(window_label)
+            .is_some_and(|current| current == workspace_id)
+        {
+            subscriptions.remove(window_label);
+        }
+    }
+
+    pub fn forget_output_subscriber(&self, window_label: &str) {
+        self.output_subscriptions.write().remove(window_label);
     }
 
     pub fn session_status(&self, session_id: &str) -> AppResult<TerminalSession> {
@@ -997,7 +1170,7 @@ impl TerminalManager {
         let mut metadata = handle.metadata.read().clone();
         let tail = handle.output_tail.lock();
         metadata.next_sequence = handle.sequence.load(Ordering::Acquire);
-        metadata.output_tail = tail.clone();
+        metadata.output_tail = tail.iter().copied().collect();
         drop(tail);
         Ok(metadata)
     }
@@ -1018,9 +1191,9 @@ impl TerminalManager {
     }
 }
 
-/// Machine-protocol providers can query cursor position before they emit JSON. An attached
-/// xterm normally answers this, but Swarm agents must also run while their terminal is hidden.
-/// Remove the query from the visible/output stream and let the server-owned PTY answer it.
+/// ConPTY children can query cursor position before displaying a prompt or emitting provider
+/// output. An attached xterm normally answers this, but inactive workspaces intentionally have
+/// no renderer. Remove the query from the output stream and let the native PTY owner answer it.
 fn consume_cursor_position_queries(pending: &mut Vec<u8>, input: &[u8]) -> (Vec<u8>, usize) {
     pending.extend_from_slice(input);
     let mut output = Vec::with_capacity(pending.len());
@@ -1045,8 +1218,16 @@ fn consume_cursor_position_queries(pending: &mut Vec<u8>, input: &[u8]) -> (Vec<
     (output, query_count)
 }
 
+/// Whether a session's output is a *machine protocol* — JSON lines an engine parses — rather
+/// than a human terminal.
+///
+/// Such a session gets an extremely wide, tall PTY. That is not cosmetic: a provider's
+/// structured records are single lines of many kilobytes, and at human geometry ConPTY wraps
+/// and re-renders them, which destroys the record and can stall the stream entirely. The Run
+/// Engine's sessions (`run-engine-<project>`) are launched with `--output-format stream-json`
+/// exactly like the Swarm engine's, so they belong to the same class.
 fn is_machine_protocol_workspace(workspace_id: &str) -> bool {
-    workspace_id.starts_with("swarm-runtime-")
+    workspace_id.starts_with("swarm-runtime-") || workspace_id.starts_with("run-engine-")
 }
 
 /// Bulk/duplicate termination must be idempotent: a session another path already reaped is a
@@ -1061,7 +1242,7 @@ fn ignore_already_gone(result: AppResult<()>) -> AppResult<()> {
 fn append_and_sequence(handle: &TerminalHandle, data: &[u8]) -> u64 {
     // Tail and sequence advance atomically from a reconnecting renderer's perspective.
     let mut tail = handle.output_tail.lock();
-    tail.extend_from_slice(data);
+    tail.extend(data.iter().copied());
     if tail.len() > OUTPUT_TAIL_LIMIT {
         let drain = tail.len() - OUTPUT_TAIL_LIMIT;
         tail.drain(..drain);
@@ -1072,9 +1253,32 @@ fn append_and_sequence(handle: &TerminalHandle, data: &[u8]) -> u64 {
     handle.sequence.fetch_add(1, Ordering::AcqRel)
 }
 
-fn emit_output(app: &Option<AppHandle>, handle: &TerminalHandle, sequence: u64, data: Vec<u8>) {
+fn emit_output(
+    app: &Option<AppHandle>,
+    counters: &TerminalRuntimeCounters,
+    output_subscriptions: &RwLock<HashMap<String, String>>,
+    handle: &TerminalHandle,
+    sequence: u64,
+    data: Vec<u8>,
+) {
+    let Some(app) = app else {
+        return;
+    };
     let metadata = handle.metadata.read();
     let workspace_id = metadata.workspace_id.clone();
+    let targets = output_subscriptions
+        .read()
+        .iter()
+        .filter_map(|(label, subscribed_workspace)| {
+            (subscribed_workspace == &workspace_id).then_some(label.clone())
+        })
+        .collect::<Vec<_>>();
+    if targets.is_empty() {
+        counters
+            .suppressed_deliveries
+            .fetch_add(1, Ordering::Relaxed);
+        return;
+    }
     let event = TerminalOutputEvent {
         session_id: metadata.id.clone(),
         pane_id: metadata.pane_id.clone(),
@@ -1083,17 +1287,10 @@ fn emit_output(app: &Option<AppHandle>, handle: &TerminalHandle, sequence: u64, 
         data: BASE64.encode(data),
     };
     drop(metadata);
-    if let Some(app) = app {
-        let _ = app.emit_to(
-            crate::services::MAIN_WINDOW_LABEL,
-            "terminal-output",
-            event.clone(),
-        );
-        let _ = app.emit_to(
-            crate::services::detached_label(&workspace_id),
-            "terminal-output",
-            event,
-        );
+    for label in targets {
+        if app.emit_to(label, "terminal-output", event.clone()).is_ok() {
+            counters.renderer_deliveries.fetch_add(1, Ordering::Relaxed);
+        }
     }
 }
 
@@ -1595,15 +1792,18 @@ mod tests {
     }
 
     #[test]
-    fn swarm_runtime_workspaces_keep_a_stable_machine_protocol_surface() {
+    fn structured_agent_workspaces_keep_a_stable_machine_protocol_surface() {
         assert!(is_machine_protocol_workspace("swarm-runtime-swarm-id"));
+        // Regression: a Run Engine session streams the same JSON-lines protocol. At human
+        // terminal geometry its records were wrapped and the Run hung in `running` forever.
+        assert!(is_machine_protocol_workspace("run-engine-project-id"));
         assert!(!is_machine_protocol_workspace("normal-workspace"));
         let protocol_columns = MACHINE_PROTOCOL_COLS;
         assert!(protocol_columns > 1_000);
     }
 
     #[test]
-    fn hidden_machine_protocol_terminals_answer_split_cursor_queries() {
+    fn hidden_terminals_answer_split_cursor_queries_without_an_xterm() {
         let mut pending = Vec::new();
         let (first, first_queries) = consume_cursor_position_queries(&mut pending, b"before\x1b[");
         assert_eq!(first, b"before");
@@ -1615,6 +1815,27 @@ mod tests {
         assert_eq!(second, b"after");
         assert_eq!(second_queries, 2);
         assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn output_subscriptions_replace_workspace_and_ignore_stale_cleanup() {
+        let manager = TerminalManager::for_test();
+        manager.subscribe_output("main", "workspace-one");
+        assert_eq!(manager.runtime_diagnostics().active_output_subscribers, 1);
+
+        manager.subscribe_output("main", "workspace-two");
+        manager.unsubscribe_output("main", "workspace-one");
+        assert_eq!(
+            manager
+                .output_subscriptions
+                .read()
+                .get("main")
+                .map(String::as_str),
+            Some("workspace-two")
+        );
+
+        manager.unsubscribe_output("main", "workspace-two");
+        assert_eq!(manager.runtime_diagnostics().active_output_subscribers, 0);
     }
 
     #[test]

@@ -368,7 +368,7 @@ export interface IsolatedWorktreeResult {
   baseRef: string
 }
 
-// ---- Repository Command Center -----------------------------------------------------------
+// ---- Source Control / repository service -------------------------------------------------
 
 export type RepositoryActorKind = 'human' | 'agent' | 'system'
 export interface RepositoryActor {
@@ -621,6 +621,7 @@ export interface DiagnosticsSnapshot {
   backupPath?: string
   backupDirectory: string
   liveTerminalCount: number
+  runtime: RuntimeHealthSnapshot
   updaterEndpointStatus: string
   lastUpdateCheck?: string
   lastUpdateResult?: string
@@ -635,6 +636,60 @@ export interface DiagnosticsSnapshot {
   updateLogEntries: string[]
   health: HealthReport
   readiness: ReadinessReport
+}
+
+export interface TerminalRuntimeResource {
+  sessionId: string
+  projectId: string
+  workspaceId: string
+  paneId: string
+  provider: AgentProvider
+  status: string
+  processId?: number
+  startedAt: string
+  outputBytes: number
+  outputBatches: number
+  droppedOutputBytes: number
+  inputWrites: number
+  inputBytes: number
+  resizeRequests: number
+}
+
+export interface TerminalRuntimeDiagnostics {
+  managedProcessCount: number
+  ptySessionCount: number
+  creatingSessionCount: number
+  orphanSessionCount: number
+  processTypes: Record<string, number>
+  lifecycleStates: Record<string, number>
+  outputBytes: number
+  outputBatches: number
+  rendererDeliveries: number
+  suppressedDeliveries: number
+  droppedOutputBytes: number
+  inputWrites: number
+  inputBytes: number
+  resizeRequests: number
+  activeOutputSubscribers: number
+  resources: TerminalRuntimeResource[]
+}
+
+export interface RuntimeHealthSnapshot {
+  capturedAt: string
+  terminals: TerminalRuntimeDiagnostics
+  projectWatchers: number
+  watcherSubscribers: number
+  browserViews: number
+  browserOperations: number
+  knowledgeJobs: {
+    queued: number
+    running: number
+    retrying: number
+    failed: number
+    payloadBytes: number
+  }
+  databaseBytes: number
+  walBytes: number
 }
 
 export type ProductEdition = 'stable' | 'preview'

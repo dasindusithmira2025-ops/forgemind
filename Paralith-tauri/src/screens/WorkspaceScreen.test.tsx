@@ -21,6 +21,7 @@ const listSwarms = vi.fn()
 const closeProjectSession = vi.fn()
 const getSidebarPreferences = vi.fn()
 const setSidebarPreferences = vi.fn()
+const inspectRepository = vi.fn()
 
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn() }))
 vi.mock('@tauri-apps/plugin-opener', () => ({ openPath: vi.fn() }))
@@ -58,9 +59,19 @@ vi.mock('../native/commands', () => ({
     duplicateWorkspace: vi.fn().mockResolvedValue(undefined),
     renameWorkspace: vi.fn(), removeRecentWorkspace: vi.fn(), deleteWorkspaceConfiguration: vi.fn(), relocateProject: vi.fn(), openProject: vi.fn(),
     detectAgents: vi.fn().mockResolvedValue([]), detectShells: vi.fn().mockResolvedValue([{ id: 'shell', name: 'PowerShell', executablePath: 'C:\\pwsh.exe', args: [], available: true, source: 'detected' }]),
-    listLiveSessions: vi.fn().mockResolvedValue([]), restoreWorkspaceSessions: (...args: unknown[]) => restoreWorkspace(...args),
+    listLiveSessions: vi.fn().mockResolvedValue([]),
+    subscribeTerminalOutput: vi.fn().mockResolvedValue([]), unsubscribeTerminalOutput: vi.fn().mockResolvedValue(undefined),
+    restoreWorkspaceSessions: (...args: unknown[]) => restoreWorkspace(...args),
     createTerminalSession: (...args: unknown[]) => createTerminalSession(...args), terminateTerminalSession: vi.fn(), terminateWorkspaceSessions: (...args: unknown[]) => terminateWorkspace(...args),
     getPaneGitReview: vi.fn(), stagePaneFile: vi.fn(), restorePaneFile: vi.fn(), createIsolatedPaneWorktree: vi.fn(),
+    inspectRepository: (...args: unknown[]) => inspectRepository(...args),
+    listRepositoryWorktreeLeases: vi.fn().mockResolvedValue([]),
+    getWorktreeConflictRisks: vi.fn().mockResolvedValue([]),
+    listRepositoryBranches: vi.fn().mockResolvedValue([]),
+    getGitHubProviderStatus: vi.fn().mockResolvedValue({ provider: 'github', host: 'github.com', authenticated: false, authenticationSource: 'gh_cli_secure_store', permissions: [], message: 'GitHub unavailable' }),
+    listRepositoryApprovals: vi.fn().mockResolvedValue([]),
+    refreshRepositoryRemoteProjection: vi.fn().mockResolvedValue({ projectId: 'project', provider: 'github', repository: {}, objects: [], syncStatuses: [], lastSuccessfulSync: '', stale: false }),
+    listAgentProfiles: vi.fn().mockResolvedValue([]),
     removeLayoutPane: vi.fn(), splitLayoutPane: vi.fn(), validateWorkingDirectory: vi.fn(),
     getDiagnostics: vi.fn(), runHealthCheck: vi.fn(),
     listSwarms: (...args: unknown[]) => listSwarms(...args),
@@ -88,6 +99,7 @@ describe('Workspace screen', () => {
     useSidebarStore.setState({ projectSwitcherOpen: false, listOptionsOpen: false, diagnosticsOpen: false, menuWorkspaceId: undefined, draggingWorkspaceId: undefined, filterQuery: '', groupBy: 'project', sortMode: 'manual', collapsedGroups: {}, frozenOrder: [], sortEpoch: 0, preferencesHydrated: true })
     getSidebarPreferences.mockResolvedValue({ groupBy: 'project', sortMode: 'manual', collapsedGroups: [] })
     setSidebarPreferences.mockResolvedValue(undefined)
+    inspectRepository.mockResolvedValue({ projectId: 'project', repositoryPath: 'C:\\fixture', worktreePath: 'C:\\fixture', branch: 'main', headSha: '0123456789012345678901234567890123456789', upstream: 'origin/main', ahead: 0, behind: 0, remotes: ['origin'], files: [], health: { gitAvailable: true, worktreeValid: true, bare: false, shallow: false, mergeInProgress: false, rebaseInProgress: false, cherryPickInProgress: false, revertInProgress: false, indexLocked: false, submodulesPresent: false, gitLfsAvailable: true, warnings: [] }, capturedAt: '' })
     restoreWorkspace.mockResolvedValue({ workspaceId: 'workspace', sessions: [session], deferredPaneIds: [], failures: [], budget: 4 })
     createTerminalSession.mockResolvedValue(session)
     terminateWorkspace.mockResolvedValue(undefined)
@@ -155,6 +167,13 @@ describe('Workspace screen', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Open a Project' }))
     expect(await screen.findByRole('dialog', { name: 'Project' })).toBeInTheDocument()
     expect(screen.getAllByRole('button', { name: 'Close project Fixture' })).toHaveLength(1)
+  })
+
+  it('opens Source Control in the workspace panel with the active worktree path', async () => {
+    renderWorkspace(); await screen.findByTestId('terminal-pane')
+    fireEvent.click(screen.getByRole('button', { name: 'Source Control' }))
+    await waitFor(() => expect(inspectRepository).toHaveBeenCalledWith('project', 'C:\\fixture', 'C:\\fixture'))
+    expect(screen.getByRole('tab', { name: 'Source Control' })).toBeInTheDocument()
   })
 
   it('collapses the Workspace list alone, and persists that through typed settings', async () => {

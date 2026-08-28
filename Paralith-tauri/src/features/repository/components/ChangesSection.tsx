@@ -71,13 +71,26 @@ export function ChangesSection({ onNavigate, onRequestAgentWorktree }: { onNavig
     const branchPr = pullRequests.find((pr) => pr.headBranch === branch && (pr.state === 'open' || pr.state === 'draft'))
     const fetch = () => void runOperation({ kind: 'fetch_remote', remote: snapshot?.remotes[0] ?? 'origin', prune: true }, { key: 'clean-fetch' }).catch(() => undefined)
     const pull = () => branch && void runOperation({ kind: 'pull_branch', remote: snapshot?.remotes[0] ?? 'origin', branch, rebase: false }, { key: 'clean-pull' }).catch(() => undefined)
+    const createPr = () => {
+      if (!branch) return
+      const base = window.prompt('Base branch for this pull request:', 'main')?.trim()
+      if (!base) return
+      const title = window.prompt('Pull request title:', branch)?.trim()
+      if (!title) return
+      void runOperation({ kind: 'open_draft_pull_request', base, head: branch, title, body: '' }, { key: 'create-pr' }).catch(() => undefined)
+    }
+    const createBranch = () => {
+      const name = window.prompt('New branch name:')?.trim()
+      if (!name) return
+      void runOperation({ kind: 'create_branch', name, startPoint: snapshot?.headSha }, { key: 'create-branch' }).catch(() => undefined)
+    }
     const agent = () => onRequestAgentWorktree({ title: 'Create agent worktree', purpose: 'Start isolated repository work from the current clean commit.', defaultBranch: `agent/${Date.now().toString(36)}`, fileScope: [], taskId: `task-${Date.now().toString(36)}`, requiresApproval: false, permission: 'Create a branch and isolated Git worktree' })
     return <div className="repo-clean-changes">
       <section><span>Working tree</span><strong>Clean</strong><small>No staged, unstaged or untracked files.</small></section>
       <section><span>Current branch</span><strong>{branch ?? 'Detached HEAD'}</strong><small>{snapshot?.headSha.slice(0, 12)} · {snapshot?.upstream ?? 'not published'}</small></section>
       <section><span>Synchronization</span><strong>{sync === 'clean' ? 'Up to date' : sync.replace('_', ' ')}</strong><small>{snapshot?.ahead ?? 0} outgoing · {snapshot?.behind ?? 0} incoming commit{snapshot?.behind === 1 ? '' : 's'}</small></section>
       {branchPr && <section><span>Pull request</span><strong>#{branchPr.number} {branchPr.title}</strong><small>{branchPr.state} · {branchPr.checksState.replace('_', ' ')}</small><Button variant="ghost" onClick={() => onNavigate('pull-requests')}>Open cockpit</Button></section>}
-      <div className="repo-clean-actions"><Button variant="secondary" onClick={fetch} disabled={Boolean(pending['clean-fetch'])}>Fetch</Button>{(snapshot?.behind ?? 0) > 0 && <Button variant="secondary" onClick={pull} disabled={Boolean(pending['clean-pull'])}>Pull</Button>}{canPush && <Button variant="primary" onClick={publish}>Push {snapshot?.ahead} commit{snapshot?.ahead === 1 ? '' : 's'}</Button>}<Button variant="secondary" onClick={() => onNavigate('branches')}>Create branch</Button><Button variant="secondary" icon={<Bot size={14} />} onClick={agent}>Create agent worktree</Button></div>
+      <div className="repo-clean-actions"><Button variant="secondary" onClick={fetch} disabled={Boolean(pending['clean-fetch'])}>Fetch</Button>{(snapshot?.behind ?? 0) > 0 && <Button variant="secondary" onClick={pull} disabled={Boolean(pending['clean-pull'])}>Pull</Button>}{canPush && <Button variant="primary" onClick={publish}>Push {snapshot?.ahead} commit{snapshot?.ahead === 1 ? '' : 's'}</Button>}{branch && !branchPr && sync !== 'unpublished' && <Button variant="primary" onClick={createPr} disabled={Boolean(pending['create-pr'])}>Create PR</Button>}<Button variant="secondary" onClick={createBranch} disabled={Boolean(pending['create-branch'])}>Create branch</Button><Button variant="secondary" icon={<Bot size={14} />} onClick={agent}>Create agent worktree</Button></div>
     </div>
   }
 

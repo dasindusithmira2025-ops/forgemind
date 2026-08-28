@@ -6,6 +6,7 @@
 //! record survives restart, so knowledge work that was in flight when the app closed is not lost
 //! and — more importantly — is *inspectable* rather than an invisible background effect.
 
+use super::FileChangeKind;
 use serde::{Deserialize, Serialize};
 
 /// What a job does. The kind determines which handler runs and how the payload is read.
@@ -127,9 +128,42 @@ pub struct KnowledgeJob {
 pub struct AnalyzeImpactPayload {
     /// Project-relative paths that changed. Already filtered and coalesced by the enqueuer.
     pub paths: Vec<String>,
+    /// Structured changes when the caller has them. Older callers only populate `paths`; those
+    /// are interpreted as modifications so the worker remains backward-compatible.
+    #[serde(default)]
+    pub changes: Vec<ChangedPath>,
     /// What moved the paths — `file_change`, `commit`, `merge`. Ends up verbatim in the staleness
     /// reason, so a user reading a stale memory learns why it was flagged.
     pub trigger: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ChangedPath {
+    pub path: String,
+    pub kind: FileChangeKind,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ChangeUnderstanding {
+    pub changed_paths: Vec<ChangedPath>,
+    pub change_kind: String,
+    pub before_summary: Option<String>,
+    pub after_summary: Option<String>,
+    #[serde(default)]
+    pub affected_symbols: Vec<String>,
+    #[serde(default)]
+    pub affected_project_facts: Vec<String>,
+    #[serde(default)]
+    pub affected_memory_ids: Vec<String>,
+    #[serde(default)]
+    pub contradicted_memory_ids: Vec<String>,
+    #[serde(default)]
+    pub candidate_new_knowledge: Vec<String>,
+    pub confidence: f64,
+    #[serde(default)]
+    pub evidence: Vec<String>,
 }
 
 /// What one analyze-impact run actually did. Stored as the job result so the effect of an
@@ -138,8 +172,16 @@ pub struct AnalyzeImpactPayload {
 #[serde(rename_all = "camelCase")]
 pub struct ImpactOutcome {
     pub paths_analyzed: usize,
+    #[serde(default)]
+    pub understandings: Vec<ChangeUnderstanding>,
     /// Memories the policy marked stale on this run.
     pub marked_stale: Vec<String>,
+    #[serde(default)]
+    pub superseded: Vec<String>,
+    #[serde(default)]
+    pub learned: Vec<String>,
+    #[serde(default)]
+    pub needs_review: Vec<String>,
     /// Memories that were hit but deliberately left alone, with the reason the policy skipped
     /// them. An automatic system that only reports what it changed cannot be audited for what it
     /// wrongly ignored.

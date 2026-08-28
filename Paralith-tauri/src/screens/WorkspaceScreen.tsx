@@ -208,10 +208,15 @@ export function WorkspaceScreen() {
         if (forceFresh) {
           // Reuse the saved configuration but start brand-new Terminal Sessions.
           await native.terminateWorkspaceSessions(loadedWorkspace.id).catch(() => undefined)
-        } else {
-          const liveSessions = await native.listLiveSessions(loadedWorkspace.id)
-          if (liveSessions.length > 0) { terminalRuntime.hydrate(liveSessions); alreadyLive = true }
         }
+        // Register this renderer before taking the replay snapshot. Inactive PTYs keep running,
+        // but only the workspace currently rendered by this window receives output events.
+        const liveSessions = await native.subscribeTerminalOutput(loadedWorkspace.id)
+        if (!live) {
+          await native.unsubscribeTerminalOutput(loadedWorkspace.id).catch(() => undefined)
+          return
+        }
+        if (liveSessions.length > 0) { terminalRuntime.hydrate(liveSessions); alreadyLive = true }
         // A superseded hydration (rapid workspace switch, remount) must never reach launchAll:
         // its restore would spawn terminals for a screen no longer on display, and with the
         // keep-running policy those sessions silently accumulate in the background.
@@ -234,7 +239,10 @@ export function WorkspaceScreen() {
       } catch (caught) { if (live) setError(asNativeError(caught).message) }
       finally { if (live) { setLoading(false); setSwitchingWorkspaceId(undefined) } }
     })()
-    return () => { live = false }
+    return () => {
+      live = false
+      void native.unsubscribeTerminalOutput(workspaceId).catch(() => undefined)
+    }
     // Workspace identity controls hydration. Actions update local state directly.
     // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceId])
@@ -298,6 +306,10 @@ export function WorkspaceScreen() {
     const store = useWorkspacePanelStore.getState()
     if (store.open) store.closePanel()
     else store.openPanel()
+  }, [])
+
+  const openSourceControl = useCallback(() => {
+    useWorkspacePanelStore.getState().openSurface('diff')
   }, [])
 
   // Focus a Pane from the Agents surface: same "select + focus the terminal" pair the attention
@@ -999,9 +1011,11 @@ export function WorkspaceScreen() {
     onRefreshProjectById: (id) => void refreshProjectById(id),
     onOpenLauncher: () => navigate('/'),
     onOpenSettings: () => navigate('/settings'),
-    onOpenRepository: () => { if (project) navigate(`/repository/${project.id}`) },
+    onOpenRepository: openSourceControl,
     onOpenDatabase: () => { if (project) navigate(`/database/${project.id}`) },
     onOpenMemory: () => { if (project) navigate(`/memory/${project.id}`) },
+    onOpenRuns: () => { if (project) navigate(`/runs/${project.id}`) },
+    onOpenMissions: () => { if (project) navigate(`/missions/${project.id}`) },
     onOpenUsage: () => navigate('/usage'),
     onToggleCollapse: toggleCollapse,
     onResizeCommit: commitSidebarWidth,
@@ -1010,7 +1024,7 @@ export function WorkspaceScreen() {
     onFocusWorkspaceWindow: (id) => void focusOrReopen(id),
     onMoveToMonitor: (id) => setMonitorPicker(id),
     onCloseWorkspaceWindow: (id) => void runHandoff(id, 'close-window'),
-  }), [switchWorkspace, openFresh, newWorkspace, renameWorkspaceById, reconfigureWorkspaceById, duplicateWorkspace, restartWorkspaceById, stopWorkspaceById, moveWorkspace, reorderWorkspaces, removeFromRecents, deleteWorkspaceById, openProjectFolder, locateFolder, refreshProject, navigate, toggleCollapse, commitSidebarWidth, openInNewWindow, runHandoff, focusOrReopen, selectProject, closeProject, openProjectFromSelection, revealProjectById, refreshProjectById, project])
+  }), [switchWorkspace, openFresh, newWorkspace, renameWorkspaceById, reconfigureWorkspaceById, duplicateWorkspace, restartWorkspaceById, stopWorkspaceById, moveWorkspace, reorderWorkspaces, removeFromRecents, deleteWorkspaceById, openProjectFolder, locateFolder, refreshProject, navigate, toggleCollapse, commitSidebarWidth, openInNewWindow, runHandoff, focusOrReopen, selectProject, closeProject, openProjectFromSelection, revealProjectById, refreshProjectById, project, openSourceControl])
 
   const sidebarWorkspaces: SidebarWorkspace[] = useMemo(
     () =>
@@ -1106,7 +1120,7 @@ export function WorkspaceScreen() {
       if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'w') { event.preventDefault(); void closePane(activePaneId) }
       if (event.ctrlKey && event.shiftKey && event.key === 'Enter') { event.preventDefault(); useCanvasStore.getState().toggleMaximize(activePaneId) }
       if (event.ctrlKey && event.key === ',') { event.preventDefault(); navigate('/settings') }
-      if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'g') { event.preventDefault(); if (project) navigate(`/repository/${project.id}`) }
+      if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'g') { event.preventDefault(); openSourceControl(); return }
       if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'o') { event.preventDefault(); navigate('/') }
       if (event.ctrlKey && (event.key === 'PageDown' || event.key === 'PageUp')) {
         event.preventDefault(); const ids = paneIds(workspace.layout); const index = ids.indexOf(activePaneId); const delta = event.key === 'PageDown' ? 1 : -1; setActivePane(ids[(index + delta + ids.length) % ids.length]);
@@ -1116,7 +1130,7 @@ export function WorkspaceScreen() {
     return () => window.removeEventListener('keydown', handle)
   // closePane reads current state and is intentionally rebound with the other workspace values.
   // oxlint-disable-next-line react-hooks/exhaustive-deps
-  }, [activePaneId, focusNextAttention, navigate, setActivePane, workspace, projectWorkspaces, switchWorkspace, toggleCollapse, togglePanel])
+  }, [activePaneId, focusNextAttention, navigate, setActivePane, workspace, projectWorkspaces, switchWorkspace, toggleCollapse, togglePanel, openSourceControl])
 
   // Render one terminal for a pane inside its canvas window. The docking canvas owns geometry,
   // placement and the header drag handle; this only wires the terminal + its pane actions. The

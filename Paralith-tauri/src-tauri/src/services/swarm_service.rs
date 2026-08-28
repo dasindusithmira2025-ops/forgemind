@@ -15,6 +15,7 @@
 //!
 //! The engine, its events, and its persistence are identical across both runtimes.
 
+use crate::agents::{provider_arguments, AgentInvocation};
 use crate::database::swarm::{NewSwarmTask, SwarmAgentRunCompletion};
 use crate::database::DatabaseService;
 use crate::errors::{AppError, AppResult};
@@ -199,47 +200,41 @@ impl ProviderRuntimeAdapter for ClaudeAdapter {
         context: &CompiledContextPack,
         resume_session_id: Option<&str>,
     ) -> Vec<String> {
-        let permission_mode = if agent.role.may_write_code() {
-            "acceptEdits"
-        } else {
-            // `plan` mode is interactive: it refuses verification commands and writes a plan
-            // file, which is the opposite of a headless read-only Scout/Reviewer. `dontAsk`
-            // denies everything not explicitly allowlisted below.
-            "dontAsk"
-        };
-        let mut arguments = vec![
-            "--print".into(),
-            "--model".into(),
-            agent.model_config.model_id.clone(),
-            "--effort".into(),
-            agent.model_config.reasoning_effort.clone(),
-            "--verbose".into(),
-            "--output-format".into(),
-            "stream-json".into(),
-            // `--allowedTools` is variadic in Claude's CLI. Keep the positional prompt before
-            // that option or the parser consumes the mission as another tool pattern and exits
-            // with `Input must be provided`.
-            runtime_instruction(scope, task, agent, mission, instructions, context),
-            "--permission-mode".into(),
-            permission_mode.into(),
-        ];
-        if let Some(session_id) = resume_session_id {
-            arguments.extend(["--resume".into(), session_id.into()]);
-        }
-        // Non-interactive Claude sessions cannot answer approval prompts. Allow only common
-        // local verification commands. Write roles retain acceptEdits; read-only roles remove
-        // every direct write/delegation tool and `dontAsk` denies any unlisted shell command.
-        arguments.extend([
-            "--allowedTools".into(),
-            "Bash(npm test*),Bash(npm run test*),Bash(node --test*),Bash(cargo test*),Bash(cargo check*),Bash(pnpm test*),Bash(yarn test*),Bash(bun test*),Bash(pytest*),Bash(go test*),Bash(dotnet test*),PowerShell(npm test*),PowerShell(npm run test*),PowerShell(node --test*),PowerShell(cargo test*),PowerShell(cargo check*),PowerShell(pnpm test*),PowerShell(yarn test*),PowerShell(bun test*),PowerShell(pytest*),PowerShell(go test*),PowerShell(dotnet test*)".into(),
-        ]);
-        if !agent.role.may_write_code() {
-            arguments.extend([
-                "--disallowedTools".into(),
-                "Edit,Write,NotebookEdit,Task,EnterWorktree,ExitWorktree".into(),
-            ]);
-        }
-        arguments
+        provider_arguments(&swarm_invocation(
+            AgentProvider::Claude,
+            scope,
+            task,
+            agent,
+            mission,
+            instructions,
+            context,
+            resume_session_id,
+        ))
+    }
+}
+
+/// Project a Swarm assignment onto the provider-neutral invocation shared with the Run Engine.
+/// Swarm owns the prompt (mission, role identity, operator instructions, compiled context); the
+/// provider CLI grammar lives in [`crate::agents::invocation`].
+#[allow(clippy::too_many_arguments)]
+fn swarm_invocation(
+    provider: AgentProvider,
+    scope: &SwarmRuntimeScope,
+    task: &SwarmTask,
+    agent: &SwarmAgent,
+    mission: &str,
+    instructions: &[String],
+    context: &CompiledContextPack,
+    resume_session_id: Option<&str>,
+) -> AgentInvocation {
+    AgentInvocation {
+        provider,
+        model_id: agent.model_config.model_id.clone(),
+        reasoning_effort: agent.model_config.reasoning_effort.clone(),
+        may_write: agent.role.may_write_code(),
+        working_directory: scope.project_root.clone(),
+        prompt: runtime_instruction(scope, task, agent, mission, instructions, context),
+        resume_session_id: resume_session_id.map(str::to_owned),
     }
 }
 
@@ -260,41 +255,16 @@ impl ProviderRuntimeAdapter for CodexAdapter {
         context: &CompiledContextPack,
         resume_session_id: Option<&str>,
     ) -> Vec<String> {
-        let sandbox = if agent.role.may_write_code() {
-            "workspace-write"
-        } else {
-            "read-only"
-        };
-        let prompt = runtime_instruction(scope, task, agent, mission, instructions, context);
-        // Approval, sandbox and working-directory controls are top-level Codex options. Placing
-        // them after `exec` is rejected by current CLIs before a thread can start.
-        let mut arguments = vec![
-            "--model".into(),
-            agent.model_config.model_id.clone(),
-            "-c".into(),
-            format!(
-                "model_reasoning_effort=\"{}\"",
-                agent.model_config.reasoning_effort
-            ),
-            "--ask-for-approval".into(),
-            "never".into(),
-            "--sandbox".into(),
-            sandbox.into(),
-            "--cd".into(),
-            scope.project_root.clone(),
-            "exec".into(),
-        ];
-        match resume_session_id {
-            Some(session_id) => arguments.extend([
-                "resume".into(),
-                "--json".into(),
-                "--skip-git-repo-check".into(),
-                session_id.into(),
-                prompt,
-            ]),
-            None => arguments.extend(["--json".into(), "--skip-git-repo-check".into(), prompt]),
-        }
-        arguments
+        provider_arguments(&swarm_invocation(
+            AgentProvider::Codex,
+            scope,
+            task,
+            agent,
+            mission,
+            instructions,
+            context,
+            resume_session_id,
+        ))
     }
 }
 
@@ -948,17 +918,17 @@ impl AgentRuntime for ProductionAgentRuntime {
             )?;
             // A clean process exit and arbitrary structured output are not a completion signal.
             // Both providers emit an explicit terminal result event; only that event may satisfy
-            // the scheduler's completion gate.
-            let succeeded = session.exit_code == Some(0) && provider_completed && !provider_failed;
-            let failure = if session.exit_code != Some(0) {
-                Some("provider_exit")
-            } else if provider_failed {
-                Some("provider_reported_failure")
-            } else if !provider_completed {
-                Some("completion_not_observed")
-            } else {
-                None
-            };
+            // the scheduler's completion gate. The gate itself is shared with the Run Engine.
+            let succeeded = crate::agents::provider_session_succeeded(
+                session.exit_code,
+                provider_completed,
+                provider_failed,
+            );
+            let failure = crate::agents::provider_session_failure_code(
+                session.exit_code,
+                provider_completed,
+                provider_failed,
+            );
             self.database.finish_swarm_agent_session(
                 &agent.id,
                 session_id,
@@ -1354,18 +1324,18 @@ fn runtime_scope_matches(swarm: &Swarm, scope: &SwarmRuntimeScope) -> bool {
 }
 
 #[derive(Debug, PartialEq)]
-struct NormalizedRuntimeEvent {
-    key: String,
-    kind: String,
-    summary: String,
-    level: String,
-    metadata: serde_json::Value,
+pub(crate) struct NormalizedRuntimeEvent {
+    pub(crate) key: String,
+    pub(crate) kind: String,
+    pub(crate) summary: String,
+    pub(crate) level: String,
+    pub(crate) metadata: serde_json::Value,
 }
 
 /// Convert provider-native JSONL into the small, stable event vocabulary persisted by Swarms.
 /// Unrecognized JSON is deliberately ignored: arbitrary JSON printed by a command cannot become
 /// scheduler truth simply because it happens to be syntactically valid.
-fn normalize_runtime_events(
+pub(crate) fn normalize_runtime_events(
     runtime: SwarmRuntimeKind,
     output: &[u8],
 ) -> AppResult<Vec<NormalizedRuntimeEvent>> {

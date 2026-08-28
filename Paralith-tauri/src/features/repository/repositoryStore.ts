@@ -58,6 +58,8 @@ export interface RunOperationOptions {
 
 interface RepositoryState {
   projectId?: string
+  repositoryPath?: string
+  worktreePath?: string
   loadToken: number
   load: RepositoryLoadState
   snapshot?: RepositorySnapshot
@@ -101,7 +103,7 @@ interface RepositoryState {
   commitDetailErrors: Record<string, string>
 
   reset: () => void
-  loadProject: (projectId: string) => Promise<void>
+  loadProject: (projectId: string, context?: { repositoryPath?: string; worktreePath?: string }) => Promise<void>
   refreshSnapshot: () => Promise<void>
   refreshLeases: () => Promise<void>
   refreshBranches: () => Promise<void>
@@ -153,6 +155,8 @@ export const useRepositoryStore = create<RepositoryState>((set, get) => ({
 
   reset: () => set({
     projectId: undefined,
+    repositoryPath: undefined,
+    worktreePath: undefined,
     load: { status: 'idle' },
     snapshot: undefined,
     leases: [],
@@ -191,13 +195,13 @@ export const useRepositoryStore = create<RepositoryState>((set, get) => ({
     commitDetailErrors: {},
   }),
 
-  loadProject: async (projectId) => {
-    // Switching projects must never leak the previous repository's state onto the new screen.
-    if (get().projectId !== projectId) get().reset()
+  loadProject: async (projectId, context = {}) => {
+    // Switching projects or worktrees must never leak another development context onto the screen.
+    if (get().projectId !== projectId || get().repositoryPath !== context.repositoryPath || get().worktreePath !== context.worktreePath) get().reset()
     const token = get().loadToken + 1
-    set({ projectId, loadToken: token, load: { status: 'loading' } })
+    set({ projectId, repositoryPath: context.repositoryPath, worktreePath: context.worktreePath, loadToken: token, load: { status: 'loading' } })
     try {
-      const snapshot = await native.inspectRepository(projectId)
+      const snapshot = await native.inspectRepository(projectId, context.repositoryPath, context.worktreePath)
       if (get().loadToken !== token) return
       set({ snapshot, load: { status: 'ready' } })
       // Secondary, non-blocking context. Failures here never fail the whole surface.
@@ -217,10 +221,10 @@ export const useRepositoryStore = create<RepositoryState>((set, get) => ({
   },
 
   refreshSnapshot: async () => {
-    const projectId = get().projectId
+    const { projectId, repositoryPath, worktreePath } = get()
     if (!projectId) return
     try {
-      const snapshot = await native.inspectRepository(projectId)
+      const snapshot = await native.inspectRepository(projectId, repositoryPath, worktreePath)
       if (get().projectId === projectId) set({ snapshot })
     } catch (caught) {
       set({ actionError: asNativeError(caught).message })
@@ -240,10 +244,10 @@ export const useRepositoryStore = create<RepositoryState>((set, get) => ({
   },
 
   refreshBranches: async () => {
-    const projectId = get().projectId
+    const { projectId, repositoryPath } = get()
     if (!projectId) return
     try {
-      const branches = await native.listRepositoryBranches(projectId)
+      const branches = await native.listRepositoryBranches(projectId, repositoryPath)
       if (get().projectId === projectId) set({ branches })
     } catch (caught) {
       if (get().projectId === projectId) set({ actionError: asNativeError(caught).message })
@@ -251,11 +255,11 @@ export const useRepositoryStore = create<RepositoryState>((set, get) => ({
   },
 
   refreshRemote: async () => {
-    const projectId = get().projectId
+    const { projectId, repositoryPath } = get()
     if (!projectId) return
     set({ remoteLoading: true, remoteError: undefined })
     try {
-      const projection = await native.refreshRepositoryRemoteProjection({ projectId })
+      const projection = await native.refreshRepositoryRemoteProjection({ projectId, repositoryPath })
       if (get().projectId !== projectId) return
       set({ remoteProjection: projection, remoteViews: parseRemoteProjection(projection), remoteLoading: false })
     } catch (caught) {
@@ -274,7 +278,7 @@ export const useRepositoryStore = create<RepositoryState>((set, get) => ({
     if (!projectId) return
     set({ intelligenceLoading: true, intelligenceError: undefined })
     try {
-      const intelligence = await native.getRepositoryIntelligence(projectId)
+      const intelligence = await native.getRepositoryIntelligence(projectId, get().repositoryPath)
       if (get().projectId !== projectId) return
       set({ intelligence, intelligenceLoading: false })
     } catch (caught) {
@@ -292,7 +296,7 @@ export const useRepositoryStore = create<RepositoryState>((set, get) => ({
     if (!projectId || get().intelligenceLoading) return
     set({ intelligenceLoading: true, intelligenceError: undefined })
     try {
-      const intelligence = await native.refreshRepositoryIntelligence({ projectId })
+      const intelligence = await native.refreshRepositoryIntelligence({ projectId, repositoryPath: get().repositoryPath, worktreePath: get().worktreePath })
       if (get().projectId !== projectId) return
       set({ intelligence, intelligenceLoading: false })
     } catch (caught) {
@@ -323,7 +327,7 @@ export const useRepositoryStore = create<RepositoryState>((set, get) => ({
       selectedCommit: undefined,
     })
     try {
-      const page = await native.getRepositoryHistory({ projectId, path: next.path, search: next.search, limit: HISTORY_PAGE })
+      const page = await native.getRepositoryHistory({ projectId, repositoryPath: get().repositoryPath, worktreePath: get().worktreePath, path: next.path, search: next.search, limit: HISTORY_PAGE })
       if (get().projectId !== projectId || get().loadToken !== token) return
       set({
         historyCommits: page.commits,
@@ -356,6 +360,8 @@ export const useRepositoryStore = create<RepositoryState>((set, get) => ({
     try {
       const page = await native.getRepositoryHistory({
         projectId,
+        repositoryPath: state.repositoryPath,
+        worktreePath: state.worktreePath,
         revision: state.historyRevision,
         path: state.historyScope.path,
         search: state.historyScope.search,
@@ -386,7 +392,7 @@ export const useRepositoryStore = create<RepositoryState>((set, get) => ({
       commitDetailErrors: { ...get().commitDetailErrors, [sha]: '' },
     })
     try {
-      const detail = await native.getRepositoryCommitDetail({ projectId, revision: sha })
+      const detail = await native.getRepositoryCommitDetail({ projectId, repositoryPath: get().repositoryPath, worktreePath: get().worktreePath, revision: sha })
       if (get().projectId !== projectId) return
       set({ commitDetails: { ...get().commitDetails, [sha]: detail } })
     } catch (caught) {
@@ -404,7 +410,7 @@ export const useRepositoryStore = create<RepositoryState>((set, get) => ({
       workflowRunErrors: { ...get().workflowRunErrors, [runId]: '' },
     })
     try {
-      const object = await native.getRepositoryWorkflowRunDetail({ projectId, runId })
+      const object = await native.getRepositoryWorkflowRunDetail({ projectId, repositoryPath: get().repositoryPath, runId })
       if (get().projectId !== projectId) return
       const detail = parseWorkflowRun(object)
       if (!detail) throw new Error('GitHub returned an invalid workflow run detail.')
@@ -421,7 +427,7 @@ export const useRepositoryStore = create<RepositoryState>((set, get) => ({
     if (!projectId || get().pullRequestLoading[number]) return
     set({ pullRequestLoading: { ...get().pullRequestLoading, [number]: true }, pullRequestErrors: { ...get().pullRequestErrors, [number]: '' } })
     try {
-      const object = await native.getRepositoryPullRequestDetail({ projectId, number })
+      const object = await native.getRepositoryPullRequestDetail({ projectId, repositoryPath: get().repositoryPath, number })
       if (get().projectId !== projectId) return
       const detail = parsePullRequest(object)
       if (!detail) throw new Error('GitHub returned an invalid pull request detail.')
@@ -436,7 +442,7 @@ export const useRepositoryStore = create<RepositoryState>((set, get) => ({
   fetchDiff: async (path, staged, offset, limit) => {
     const projectId = get().projectId
     if (!projectId) throw new Error('No repository loaded')
-    return native.getRepositoryDiff({ projectId, path, staged, offset, limit })
+    return native.getRepositoryDiff({ projectId, repositoryPath: get().repositoryPath, worktreePath: get().worktreePath, path, staged, offset, limit })
   },
 
   runOperation: async (operation, options = {}) => {

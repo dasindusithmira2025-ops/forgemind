@@ -1,7 +1,7 @@
 use crate::errors::{AppError, AppResult};
 use crate::models::{
     DiagnosticsSnapshot, HealthReport, ReadinessCheck, ReadinessReport, ReadinessStatus,
-    RepairSummary,
+    RepairSummary, RuntimeHealthSnapshot,
 };
 use crate::services::process_util::background_command;
 use crate::AppState;
@@ -53,6 +53,7 @@ fn build_diagnostics(state: &AppState) -> AppResult<DiagnosticsSnapshot> {
     );
     let readiness = build_readiness(state, &health, &update);
     persist_readiness(&state.app_data_directory, &readiness);
+    let runtime = build_runtime_health(state)?;
     Ok(DiagnosticsSnapshot {
         product: build.product.clone(),
         company: "Corelith Technologies".into(),
@@ -78,6 +79,7 @@ fn build_diagnostics(state: &AppState) -> AppResult<DiagnosticsSnapshot> {
             .or_else(|| update.journal.latest_backup_path.clone()),
         backup_directory: state.backup_directory.to_string_lossy().into_owned(),
         live_terminal_count: state.terminals.list_live_sessions(None).len(),
+        runtime,
         updater_endpoint_status: update.endpoint_status,
         last_update_check: update.journal.last_check_at.clone(),
         last_update_result: update.journal.last_result.clone(),
@@ -110,6 +112,39 @@ fn build_diagnostics(state: &AppState) -> AppResult<DiagnosticsSnapshot> {
         health,
         readiness,
     })
+}
+
+pub(crate) fn build_runtime_health(state: &AppState) -> AppResult<RuntimeHealthSnapshot> {
+    let (browser_views, browser_operations) = state.browser.diagnostics_counts();
+    let database_path = state.database.path();
+    let database_bytes = database_path
+        .and_then(|path| fs::metadata(path).ok())
+        .map(|metadata| metadata.len())
+        .unwrap_or(0);
+    let wal_bytes = database_path
+        .and_then(|path| fs::metadata(format!("{}-wal", path.display())).ok())
+        .map(|metadata| metadata.len())
+        .unwrap_or(0);
+    Ok(RuntimeHealthSnapshot {
+        captured_at: Utc::now().to_rfc3339(),
+        terminals: state.terminals.runtime_diagnostics(),
+        project_watchers: state.file_watch.watcher_count(),
+        watcher_subscribers: state.file_watch.subscriber_count(),
+        browser_views,
+        browser_operations,
+        knowledge_jobs: state.database.knowledge_job_diagnostics()?,
+        database_bytes,
+        wal_bytes,
+    })
+}
+
+#[tauri::command]
+pub fn get_runtime_health(
+    window: Window,
+    state: State<'_, AppState>,
+) -> AppResult<RuntimeHealthSnapshot> {
+    crate::require_main_window(&window)?;
+    build_runtime_health(&state)
 }
 
 fn readiness_check(

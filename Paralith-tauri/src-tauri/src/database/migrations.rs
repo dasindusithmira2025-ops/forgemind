@@ -1,7 +1,7 @@
 use crate::errors::{AppError, AppResult};
 use rusqlite::{params, Connection};
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 37;
+pub const CURRENT_SCHEMA_VERSION: i64 = 39;
 
 const MIGRATION_1: &str = r#"
 CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
@@ -769,6 +769,188 @@ PRAGMA user_version=11;
 COMMIT;
 "#;
 
+/// Canonical Mission Control DDL. Every column below is either read by the scheduler, filtered
+/// on by a surface, or carried into the Run Engine; the `*_json` columns hold ordered prose lists
+/// that nothing joins on. Acceptance Criteria are rows precisely because the future Proof Ledger
+/// must be able to attach evidence to one.
+const MIGRATION_39_DDL: &str = r#"
+CREATE TABLE IF NOT EXISTS missions(
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  workspace_id TEXT,
+  title TEXT NOT NULL,
+  objective TEXT NOT NULL,
+  description TEXT,
+  constraints_json TEXT NOT NULL DEFAULT '[]',
+  non_goals_json TEXT NOT NULL DEFAULT '[]',
+  risks_json TEXT NOT NULL DEFAULT '[]',
+  verification_plan TEXT,
+  status TEXT NOT NULL,
+  status_reason TEXT,
+  risk_level TEXT NOT NULL DEFAULT 'medium',
+  origin TEXT NOT NULL DEFAULT 'manual',
+  created_by TEXT NOT NULL,
+  planning_mode TEXT NOT NULL DEFAULT 'deterministic',
+  execution_mode TEXT NOT NULL DEFAULT 'auto_ready_tasks',
+  default_provider_id TEXT,
+  default_model_id TEXT,
+  default_agent_profile_id TEXT,
+  default_isolation TEXT NOT NULL DEFAULT 'isolated_worktree',
+  preflight_status TEXT NOT NULL DEFAULT 'not_started',
+  plan_revision INTEGER NOT NULL DEFAULT 0,
+  planning_run_id TEXT,
+  failure_code TEXT,
+  failure_message TEXT,
+  accepted_by TEXT,
+  accepted_at TEXT,
+  event_sequence INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  started_at TEXT,
+  completed_at TEXT,
+  cancelled_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_missions_project_status ON missions(project_id,status,updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_missions_recent ON missions(project_id,updated_at DESC,id DESC);
+CREATE INDEX IF NOT EXISTS idx_missions_schedulable ON missions(status,updated_at)
+  WHERE status IN ('running','blocked');
+
+CREATE TABLE IF NOT EXISTS mission_acceptance_criteria(
+  id TEXT PRIMARY KEY,
+  mission_id TEXT NOT NULL REFERENCES missions(id) ON DELETE CASCADE,
+  project_id TEXT NOT NULL,
+  key TEXT NOT NULL,
+  sequence INTEGER NOT NULL,
+  title TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  kind TEXT NOT NULL DEFAULT 'behavioral',
+  required INTEGER NOT NULL DEFAULT 1,
+  status TEXT NOT NULL DEFAULT 'unverified',
+  verification_hint TEXT,
+  waived_reason TEXT,
+  waived_by TEXT,
+  retired_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(mission_id,key)
+);
+CREATE INDEX IF NOT EXISTS idx_mission_criteria ON mission_acceptance_criteria(mission_id,sequence);
+
+CREATE TABLE IF NOT EXISTS mission_tasks(
+  id TEXT PRIMARY KEY,
+  mission_id TEXT NOT NULL REFERENCES missions(id) ON DELETE CASCADE,
+  project_id TEXT NOT NULL,
+  key TEXT NOT NULL,
+  title TEXT NOT NULL,
+  objective TEXT NOT NULL,
+  description TEXT,
+  focus_files_json TEXT NOT NULL DEFAULT '[]',
+  status TEXT NOT NULL,
+  status_reason TEXT,
+  sequence INTEGER NOT NULL DEFAULT 0,
+  risk_level TEXT NOT NULL DEFAULT 'medium',
+  execution_mode TEXT NOT NULL DEFAULT 'single_agent',
+  provider_id TEXT,
+  model_id TEXT,
+  agent_profile_id TEXT,
+  isolation TEXT,
+  blocker_kind TEXT,
+  blocker_message TEXT,
+  required_action TEXT,
+  current_run_id TEXT,
+  attempt_count INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  started_at TEXT,
+  completed_at TEXT,
+  UNIQUE(mission_id,key)
+);
+CREATE INDEX IF NOT EXISTS idx_mission_tasks_status ON mission_tasks(mission_id,status,sequence);
+CREATE INDEX IF NOT EXISTS idx_mission_tasks_project ON mission_tasks(project_id,status);
+
+CREATE TABLE IF NOT EXISTS mission_task_dependencies(
+  mission_id TEXT NOT NULL REFERENCES missions(id) ON DELETE CASCADE,
+  task_id TEXT NOT NULL REFERENCES mission_tasks(id) ON DELETE CASCADE,
+  depends_on_task_id TEXT NOT NULL REFERENCES mission_tasks(id) ON DELETE CASCADE,
+  PRIMARY KEY(task_id,depends_on_task_id),
+  CHECK(task_id <> depends_on_task_id)
+);
+CREATE INDEX IF NOT EXISTS idx_mission_dependencies ON mission_task_dependencies(mission_id);
+CREATE INDEX IF NOT EXISTS idx_mission_dependents ON mission_task_dependencies(depends_on_task_id);
+
+CREATE TABLE IF NOT EXISTS mission_task_criteria(
+  mission_id TEXT NOT NULL REFERENCES missions(id) ON DELETE CASCADE,
+  task_id TEXT NOT NULL REFERENCES mission_tasks(id) ON DELETE CASCADE,
+  criterion_id TEXT NOT NULL REFERENCES mission_acceptance_criteria(id) ON DELETE CASCADE,
+  PRIMARY KEY(task_id,criterion_id)
+);
+CREATE INDEX IF NOT EXISTS idx_mission_task_criteria ON mission_task_criteria(mission_id);
+CREATE INDEX IF NOT EXISTS idx_mission_criterion_tasks ON mission_task_criteria(criterion_id);
+
+CREATE TABLE IF NOT EXISTS mission_events(
+  id TEXT PRIMARY KEY,
+  mission_id TEXT NOT NULL REFERENCES missions(id) ON DELETE CASCADE,
+  project_id TEXT NOT NULL,
+  sequence INTEGER NOT NULL,
+  kind TEXT NOT NULL,
+  status TEXT,
+  task_id TEXT,
+  run_id TEXT,
+  summary TEXT NOT NULL,
+  level TEXT NOT NULL DEFAULT 'info',
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL,
+  UNIQUE(mission_id,sequence)
+);
+CREATE INDEX IF NOT EXISTS idx_mission_events_timeline ON mission_events(mission_id,sequence);
+
+CREATE TABLE IF NOT EXISTS mission_plan_revisions(
+  id TEXT PRIMARY KEY,
+  mission_id TEXT NOT NULL REFERENCES missions(id) ON DELETE CASCADE,
+  revision INTEGER NOT NULL,
+  created_by TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  snapshot_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE(mission_id,revision)
+);
+
+CREATE TABLE IF NOT EXISTS mission_preflight(
+  mission_id TEXT PRIMARY KEY REFERENCES missions(id) ON DELETE CASCADE,
+  project_id TEXT NOT NULL,
+  status TEXT NOT NULL,
+  summary TEXT NOT NULL DEFAULT '',
+  relevant_components_json TEXT NOT NULL DEFAULT '[]',
+  likely_files_json TEXT NOT NULL DEFAULT '[]',
+  architecture_memories_json TEXT NOT NULL DEFAULT '[]',
+  related_changes_json TEXT NOT NULL DEFAULT '[]',
+  test_areas_json TEXT NOT NULL DEFAULT '[]',
+  environment_json TEXT NOT NULL DEFAULT '[]',
+  risk_findings_json TEXT NOT NULL DEFAULT '[]',
+  estimated_impact TEXT NOT NULL DEFAULT 'medium',
+  planning_context_pack_id TEXT,
+  provenance_json TEXT NOT NULL DEFAULT '[]',
+  error_code TEXT,
+  error_message TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS mission_task_outputs(
+  id TEXT PRIMARY KEY,
+  mission_id TEXT NOT NULL REFERENCES missions(id) ON DELETE CASCADE,
+  task_id TEXT NOT NULL REFERENCES mission_tasks(id) ON DELETE CASCADE,
+  run_id TEXT,
+  kind TEXT NOT NULL,
+  title TEXT NOT NULL,
+  detail TEXT NOT NULL,
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_mission_task_outputs ON mission_task_outputs(mission_id,created_at);
+CREATE INDEX IF NOT EXISTS idx_mission_task_outputs_task ON mission_task_outputs(task_id,created_at);
+"#;
+
 pub fn apply(connection: &Connection) -> AppResult<()> {
     let current: i64 = connection
         .query_row("PRAGMA user_version", [], |row| row.get(0))
@@ -793,16 +975,22 @@ pub fn apply(connection: &Connection) -> AppResult<()> {
     }
     // Schema feature checks are intentional. An unsafe partial build used version 7 for the
     // placement tables; a version-only ladder would therefore skip Mission Control forever.
-    if current < 7
-        || !table_exists(connection, "missions")?
-        || !column_exists(connection, "workspaces", "system_kind")?
+    // Both repairs below rebuild the *pre-v39* Mission cluster. Once migration 39 has retired
+    // that cluster its feature checks would resurrect dropped tables and re-add a dropped column,
+    // so they only apply to a database that has not reached 39 yet.
+    if current < 39
+        && (current < 7
+            || !table_exists(connection, "missions")?
+            || !column_exists(connection, "workspaces", "system_kind")?)
     {
         migrate_v7(connection)?;
     }
     if current < 8 || !table_exists(connection, "memory_items")? {
         migrate_v8(connection)?;
     }
-    if current < 9 || !column_exists(connection, "missions", "origin_workspace_id")? {
+    if current < 39
+        && (current < 9 || !column_exists(connection, "missions", "origin_workspace_id")?)
+    {
         migrate_v9(connection)?;
     }
     if current < 10
@@ -951,6 +1139,15 @@ pub fn apply(connection: &Connection) -> AppResult<()> {
     if current < 37 || builtin_presets_missing_model_config(connection)? {
         migrate_v37(connection)?;
     }
+    if current < 38 || !table_exists(connection, "runs")? {
+        migrate_v38(connection)?;
+    }
+    if current < 39
+        || !table_exists(connection, "mission_events")?
+        || !column_exists(connection, "runs", "mission_id")?
+    {
+        migrate_v39(connection)?;
+    }
     Ok(())
 }
 
@@ -972,7 +1169,6 @@ pub fn requires_migration(connection: &Connection) -> AppResult<bool> {
         || !table_exists(connection, "ai_usage_file_checkpoints")?
         || !table_exists(connection, "ai_usage_daily")?
         || !column_exists(connection, "workspaces", "system_kind")?
-        || !column_exists(connection, "missions", "origin_workspace_id")?
         || !column_exists(connection, "workspace_placements", "preferred_monitor_id")?
         || !column_exists(connection, "agent_sessions", "agent_state")?
         || !table_exists(connection, "pane_worktrees")?
@@ -1035,7 +1231,19 @@ pub fn requires_migration(connection: &Connection) -> AppResult<bool> {
         || !table_exists(connection, "mcp_audit")?
         || !table_exists(connection, "mcp_tasks")?
         || !table_exists(connection, "knowledge_branch_merges")?
-        || !table_exists(connection, "swarm_compiled_context_packs")?)
+        || !table_exists(connection, "swarm_compiled_context_packs")?
+        || !table_exists(connection, "runs")?
+        || !table_exists(connection, "run_events")?
+        || !table_exists(connection, "run_approvals")?
+        || !table_exists(connection, "mission_events")?
+        || !table_exists(connection, "mission_acceptance_criteria")?
+        || !table_exists(connection, "mission_task_dependencies")?
+        || !table_exists(connection, "mission_task_criteria")?
+        || !table_exists(connection, "mission_plan_revisions")?
+        || !table_exists(connection, "mission_preflight")?
+        || !table_exists(connection, "mission_task_outputs")?
+        || !column_exists(connection, "runs", "mission_id")?
+        || !column_exists(connection, "runs", "mission_task_id")?)
 }
 
 fn migrate_v24(connection: &Connection) -> AppResult<()> {
@@ -2152,6 +2360,246 @@ fn migrate_v37(connection: &Connection) -> AppResult<()> {
         record_migration(connection, 37)
     })();
     finish_migration_transaction(connection, result, 37)
+}
+
+/// The canonical Run Engine (master spec §24). One durable execution primitive for every
+/// structured agent operation, replacing the per-subsystem run records that would otherwise
+/// multiply as Missions, QA and Automations arrive.
+///
+/// `runs` is deliberately typed rather than a JSON blob: every column below is queried by the
+/// scheduler, by restart reconciliation, or by the Runs/Inbox surfaces. `metadata_json` carries
+/// only strategy-specific detail nothing else filters on.
+///
+/// The partial unique index on `idempotency_key` is what makes a repeated frontend command safe:
+/// a second create with the same key collides instead of launching a second provider process.
+fn migrate_v38(connection: &Connection) -> AppResult<()> {
+    connection
+        .execute_batch("BEGIN IMMEDIATE;")
+        .map_err(AppError::database)?;
+    let result = (|| {
+        connection
+            .execute_batch(
+                r#"
+CREATE TABLE IF NOT EXISTS runs(
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  workspace_id TEXT,
+  parent_run_id TEXT REFERENCES runs(id) ON DELETE CASCADE,
+  root_run_id TEXT NOT NULL,
+  retry_of_run_id TEXT REFERENCES runs(id) ON DELETE SET NULL,
+  swarm_id TEXT,
+  swarm_task_id TEXT,
+  run_type TEXT NOT NULL,
+  execution_strategy TEXT NOT NULL,
+  isolation TEXT NOT NULL,
+  objective TEXT NOT NULL,
+  provider_id TEXT,
+  model_id TEXT,
+  reasoning_effort TEXT,
+  terminal_session_id TEXT,
+  provider_session_id TEXT,
+  working_directory TEXT,
+  worktree_path TEXT,
+  branch_name TEXT,
+  context_pack_id TEXT,
+  status TEXT NOT NULL,
+  status_reason TEXT,
+  trigger_source TEXT NOT NULL,
+  requested_by TEXT NOT NULL,
+  idempotency_key TEXT,
+  focus_files_json TEXT NOT NULL DEFAULT '[]',
+  error_code TEXT,
+  error_message TEXT,
+  result_summary TEXT,
+  event_sequence INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  queued_at TEXT,
+  started_at TEXT,
+  completed_at TEXT,
+  updated_at TEXT NOT NULL,
+  metadata_json TEXT NOT NULL DEFAULT '{}'
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_runs_idempotency
+  ON runs(project_id,idempotency_key) WHERE idempotency_key IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_runs_project_recent ON runs(project_id,created_at DESC,id DESC);
+CREATE INDEX IF NOT EXISTS idx_runs_active ON runs(status,created_at)
+  WHERE status IN ('queued','preparing','waiting_environment','waiting_approval','running','verifying','review_ready');
+CREATE INDEX IF NOT EXISTS idx_runs_attention ON runs(project_id,status,updated_at DESC)
+  WHERE status IN ('waiting_approval','review_ready');
+CREATE INDEX IF NOT EXISTS idx_runs_children ON runs(parent_run_id,created_at);
+CREATE INDEX IF NOT EXISTS idx_runs_root ON runs(root_run_id,created_at);
+CREATE INDEX IF NOT EXISTS idx_runs_swarm ON runs(swarm_id,created_at DESC) WHERE swarm_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_runs_workspace ON runs(workspace_id,created_at DESC) WHERE workspace_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS run_events(
+  id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+  project_id TEXT NOT NULL,
+  sequence INTEGER NOT NULL,
+  kind TEXT NOT NULL,
+  status TEXT,
+  summary TEXT NOT NULL,
+  level TEXT NOT NULL DEFAULT 'info',
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL,
+  UNIQUE(run_id,sequence)
+);
+CREATE INDEX IF NOT EXISTS idx_run_events_timeline ON run_events(run_id,sequence);
+
+CREATE TABLE IF NOT EXISTS run_approvals(
+  id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+  project_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  summary TEXT NOT NULL,
+  payload_json TEXT NOT NULL DEFAULT '{}',
+  status TEXT NOT NULL DEFAULT 'open',
+  decided_by TEXT,
+  decision_note TEXT,
+  created_at TEXT NOT NULL,
+  decided_at TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_run_approvals_one_open
+  ON run_approvals(run_id,kind) WHERE status='open';
+CREATE INDEX IF NOT EXISTS idx_run_approvals_open
+  ON run_approvals(project_id,status,created_at DESC);
+"#,
+            )
+            .map_err(AppError::database)?;
+        record_migration(connection, 38)
+    })();
+    finish_migration_transaction(connection, result, 38)
+}
+
+/// Rows in the abandoned v7 Mission tables, if a build we do not know about ever wrote any.
+///
+/// The forensic audit proved there is no read or write code for them anywhere outside
+/// `migrations.rs`, so this is expected to be zero everywhere. It is still checked, because
+/// "provably dead" and "safe to delete without looking" are different claims: a table with rows
+/// is preserved under a `_legacy_v7` name rather than dropped.
+fn retire_v7_table(connection: &Connection, table: &str) -> AppResult<()> {
+    if !table_exists(connection, table)? {
+        return Ok(());
+    }
+    let rows: i64 = connection
+        .query_row(&format!("SELECT count(*) FROM {table}"), [], |row| {
+            row.get(0)
+        })
+        .map_err(AppError::database)?;
+    if rows > 0 {
+        log::warn!(
+            "migration 39: {table} held {rows} row(s) from the abandoned v7 Mission schema; \
+             preserving it as {table}_legacy_v7 instead of dropping it"
+        );
+        connection
+            .execute_batch(&format!(
+                "DROP TABLE IF EXISTS {table}_legacy_v7; ALTER TABLE {table} RENAME TO {table}_legacy_v7;"
+            ))
+            .map_err(AppError::database)?;
+        return Ok(());
+    }
+    connection
+        .execute_batch(&format!("DROP TABLE {table};"))
+        .map_err(|error| {
+            AppError::new(
+                "migration_error",
+                format!("PARALITH could not retire the unused {table} table."),
+                false,
+            )
+            .detail(error.to_string())
+        })
+}
+
+/// Canonical Mission Control (master spec §22–§23).
+///
+/// **The v7 tables are retired, not evolved.** They were designed for an architecture Paralith
+/// no longer has: `mission_sessions` duplicated agent sessions, `worktrees` duplicated
+/// `repository_worktree_leases`, and `evidence_records`/`verification_*` anticipated a
+/// verification engine a later mission will design properly. None of them had a single read or
+/// write outside migrations. Evolving that shape would have meant inheriting a second worktree
+/// source of truth and a second execution record — exactly what the Run Engine exists to prevent.
+///
+/// Three deliberate corrections come with the rebuild:
+///
+/// * `missions.project_id` was `ON DELETE RESTRICT`, so a table nothing wrote could still refuse
+///   a Project deletion. It is now `ON DELETE CASCADE`, matching `runs`: a Mission is
+///   Project-scoped work and does not outlive its Project.
+/// * The dead `worktrees` table is gone. Worktree state has exactly one owner,
+///   `repository_worktree_leases`, and a Mission Task reaches it only through its Run.
+/// * The generically named `acceptance_criteria`, `task_dependencies` and
+///   `task_acceptance_criteria` become Mission-scoped names, so the schema stops reading as if
+///   Paralith had global criteria and a global task graph.
+///
+/// `runs` gains `mission_id` / `mission_task_id`. That is the whole integration: a Mission Task
+/// executes by asking the Run Engine for a Run, and the correlation lives on the Run.
+fn migrate_v39(connection: &Connection) -> AppResult<()> {
+    connection
+        .execute_batch("BEGIN IMMEDIATE;")
+        .map_err(AppError::database)?;
+    let result = (|| {
+        // Re-entrancy: `missions` and `mission_tasks` keep their names across the rebuild, so a
+        // second run must be able to tell the canonical table from the v7 one it replaced —
+        // otherwise it would retire its own output. `planning_mode` exists only on the canonical
+        // Mission, which makes it the discriminator. The repair path in `apply` re-runs
+        // migrations on partially-built databases, so this is a real case, not a hypothetical.
+        let already_rebuilt = table_exists(connection, "missions")?
+            && column_exists(connection, "missions", "planning_mode")?;
+
+        // Deepest dependents first: a parent cannot be dropped while a child still references it.
+        for table in [
+            "recovery_states",
+            "mission_sessions",
+            "task_events",
+            "evidence_records",
+            "verification_results",
+            "worktrees",
+            "task_acceptance_criteria",
+            "task_dependencies",
+            "mission_tasks",
+            "acceptance_criteria",
+            "missions",
+        ] {
+            if already_rebuilt {
+                break;
+            }
+            retire_v7_table(connection, table)?;
+        }
+
+        connection
+            .execute_batch(MIGRATION_39_DDL)
+            .map_err(|error| {
+                AppError::new(
+                    "migration_error",
+                    "PARALITH could not create the Mission Control tables.",
+                    false,
+                )
+                .detail(error.to_string())
+            })?;
+
+        // The Run Engine correlation. `ON DELETE SET NULL` keeps a Run's own history intact if a
+        // Mission is ever removed: the execution happened, and its record is not the Mission's
+        // to erase.
+        add_column_if_missing(
+            connection,
+            "runs",
+            "mission_id",
+            "TEXT REFERENCES missions(id) ON DELETE SET NULL",
+        )?;
+        add_column_if_missing(
+            connection,
+            "runs",
+            "mission_task_id",
+            "TEXT REFERENCES mission_tasks(id) ON DELETE SET NULL",
+        )?;
+        connection
+            .execute_batch(
+                "CREATE INDEX IF NOT EXISTS idx_runs_mission ON runs(mission_id,created_at DESC) WHERE mission_id IS NOT NULL;\
+                 CREATE INDEX IF NOT EXISTS idx_runs_mission_task ON runs(mission_task_id,created_at DESC) WHERE mission_task_id IS NOT NULL;",
+            )
+            .map_err(AppError::database)?;
+        record_migration(connection, 39)
+    })();
+    finish_migration_transaction(connection, result, 39)
 }
 
 fn table_exists(connection: &Connection, table: &str) -> AppResult<bool> {
@@ -4750,6 +5198,193 @@ PRAGMA user_version=26;
 
     /// Re-running the migration on an already-current database must be a no-op, which is what
     /// makes the partial-build recovery path in `apply` safe.
+    /// Migration 39 retires the abandoned v7 Mission cluster and installs the canonical one.
+    ///
+    /// The v7 tables had zero reads and zero writes anywhere in the repository, but "dead" is a
+    /// claim about code, not about rows — so the retire path is asserted from both sides: empty
+    /// tables are dropped, and non-empty ones are preserved.
+    #[test]
+    fn v39_replaces_the_dead_v7_mission_cluster_with_the_canonical_one() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", true)
+            .unwrap();
+        apply(&connection).unwrap();
+
+        for retired in [
+            "worktrees",
+            "mission_sessions",
+            "task_events",
+            "task_dependencies",
+            "task_acceptance_criteria",
+            "acceptance_criteria",
+            "evidence_records",
+            "verification_results",
+            "recovery_states",
+        ] {
+            assert!(
+                !table_exists(&connection, retired).unwrap(),
+                "{retired} is dead schema and must not survive migration 39"
+            );
+        }
+        for canonical in [
+            "missions",
+            "mission_tasks",
+            "mission_acceptance_criteria",
+            "mission_task_dependencies",
+            "mission_task_criteria",
+            "mission_events",
+            "mission_plan_revisions",
+            "mission_preflight",
+            "mission_task_outputs",
+        ] {
+            assert!(
+                table_exists(&connection, canonical).unwrap(),
+                "{canonical} must exist after migration 39"
+            );
+        }
+        // The dead `worktrees` table read as a second source of truth for worktree state. There
+        // is exactly one, and this is it.
+        assert!(table_exists(&connection, "repository_worktree_leases").unwrap());
+    }
+
+    #[test]
+    fn v39_preserves_rows_from_a_v7_mission_table_instead_of_dropping_them() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", true)
+            .unwrap();
+        schema_through_v6(&connection);
+        migrate_v7(&connection).unwrap();
+        connection.execute("INSERT INTO projects(id,name,root_path,canonical_root_path,major_languages_json,is_git_repository,has_package_json,has_lockfile,created_at,updated_at,last_opened_at) VALUES('p','Demo','/p','/p','[]',0,0,0,'t','t','t')",[]).unwrap();
+        connection.execute("INSERT INTO missions(id,project_id,title,objective,constraints_json,reference_paths_json,preferred_agent_ids_json,status,execution_mode,risk_level,permission_profile,created_at,updated_at) VALUES('m','p','Legacy','Legacy objective','[]','[]','[]','draft','manual-plan','low','observe','t','t')",[]).unwrap();
+        connection
+            .pragma_update(None, "user_version", 7_i64)
+            .unwrap();
+
+        apply(&connection).unwrap();
+
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT objective FROM missions_legacy_v7 WHERE id='m'",
+                    [],
+                    |row| row.get::<_, String>(0)
+                )
+                .unwrap(),
+            "Legacy objective"
+        );
+    }
+
+    /// The rebuilt tables keep the names the retired ones had, so a re-run has to be able to tell
+    /// its own output from what it replaced. `apply` genuinely re-runs migrations on partially
+    /// built databases, so this is the difference between a repair and a data loss.
+    #[test]
+    fn v39_is_idempotent_and_never_retires_its_own_tables() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", true)
+            .unwrap();
+        apply(&connection).unwrap();
+        connection.execute("INSERT INTO projects(id,name,root_path,canonical_root_path,major_languages_json,is_git_repository,has_package_json,has_lockfile,created_at,updated_at,last_opened_at) VALUES('p','Demo','/p','/p','[]',0,0,0,'t','t','t')",[]).unwrap();
+        connection.execute("INSERT INTO missions(id,project_id,title,objective,status,created_by,created_at,updated_at) VALUES('m','p','Keep','Keep me','draft','user','t','t')",[]).unwrap();
+
+        migrate_v39(&connection).unwrap();
+        apply(&connection).unwrap();
+
+        assert_eq!(
+            connection
+                .query_row("SELECT title FROM missions WHERE id='m'", [], |row| row
+                    .get::<_, String>(
+                    0
+                ))
+                .unwrap(),
+            "Keep"
+        );
+        assert!(!requires_migration(&connection).unwrap());
+    }
+
+    /// The audit found `missions.project_id` declared `ON DELETE RESTRICT`, so a table nothing
+    /// wrote could still refuse a Project deletion. A Mission is Project-scoped work; it does not
+    /// outlive its Project.
+    #[test]
+    fn v39_lets_a_project_be_deleted_and_takes_its_missions_with_it() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", true)
+            .unwrap();
+        apply(&connection).unwrap();
+        connection.execute("INSERT INTO projects(id,name,root_path,canonical_root_path,major_languages_json,is_git_repository,has_package_json,has_lockfile,created_at,updated_at,last_opened_at) VALUES('p','Demo','/p','/p','[]',0,0,0,'t','t','t')",[]).unwrap();
+        connection.execute("INSERT INTO missions(id,project_id,title,objective,status,created_by,created_at,updated_at) VALUES('m','p','Title','Objective','draft','user','t','t')",[]).unwrap();
+        connection.execute("INSERT INTO mission_tasks(id,mission_id,project_id,key,title,objective,status,created_at,updated_at) VALUES('t','m','p','T1','Task','Do it','planned','t','t')",[]).unwrap();
+
+        connection
+            .execute("DELETE FROM projects WHERE id='p'", [])
+            .expect("a Project must be deletable even when it has Missions");
+
+        for table in ["missions", "mission_tasks"] {
+            let remaining: i64 = connection
+                .query_row(&format!("SELECT count(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert_eq!(remaining, 0, "{table} must cascade with its Project");
+        }
+    }
+
+    /// Mission/Run correlation is the whole integration seam: a Task executes by asking the Run
+    /// Engine for a Run, and the link lives on the Run.
+    #[test]
+    fn v39_correlates_runs_with_missions_and_keeps_run_history_if_a_mission_goes_away() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", true)
+            .unwrap();
+        apply(&connection).unwrap();
+        assert!(column_exists(&connection, "runs", "mission_id").unwrap());
+        assert!(column_exists(&connection, "runs", "mission_task_id").unwrap());
+
+        connection.execute("INSERT INTO projects(id,name,root_path,canonical_root_path,major_languages_json,is_git_repository,has_package_json,has_lockfile,created_at,updated_at,last_opened_at) VALUES('p','Demo','/p','/p','[]',0,0,0,'t','t','t')",[]).unwrap();
+        connection.execute("INSERT INTO missions(id,project_id,title,objective,status,created_by,created_at,updated_at) VALUES('m','p','Title','Objective','running','user','t','t')",[]).unwrap();
+        connection.execute("INSERT INTO mission_tasks(id,mission_id,project_id,key,title,objective,status,created_at,updated_at) VALUES('t','m','p','T1','Task','Do it','running','t','t')",[]).unwrap();
+        connection.execute("INSERT INTO runs(id,project_id,root_run_id,run_type,execution_strategy,isolation,objective,status,trigger_source,requested_by,created_at,updated_at,mission_id,mission_task_id) VALUES('r','p','r','mission_task','single_agent','isolated_worktree','Do it','running','engine','mission','t','t','m','t')",[]).unwrap();
+
+        connection
+            .execute("DELETE FROM missions WHERE id='m'", [])
+            .unwrap();
+        let (mission, task): (Option<String>, Option<String>) = connection
+            .query_row(
+                "SELECT mission_id,mission_task_id FROM runs WHERE id='r'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("the Run itself must survive: the execution happened");
+        assert_eq!(mission, None);
+        assert_eq!(task, None);
+    }
+
+    #[test]
+    fn v39_rejects_a_self_dependency_at_the_database_level() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", true)
+            .unwrap();
+        apply(&connection).unwrap();
+        connection.execute("INSERT INTO projects(id,name,root_path,canonical_root_path,major_languages_json,is_git_repository,has_package_json,has_lockfile,created_at,updated_at,last_opened_at) VALUES('p','Demo','/p','/p','[]',0,0,0,'t','t','t')",[]).unwrap();
+        connection.execute("INSERT INTO missions(id,project_id,title,objective,status,created_by,created_at,updated_at) VALUES('m','p','Title','Objective','draft','user','t','t')",[]).unwrap();
+        connection.execute("INSERT INTO mission_tasks(id,mission_id,project_id,key,title,objective,status,created_at,updated_at) VALUES('t','m','p','T1','Task','Do it','planned','t','t')",[]).unwrap();
+
+        assert!(
+            connection
+                .execute(
+                    "INSERT INTO mission_task_dependencies(mission_id,task_id,depends_on_task_id) VALUES('m','t','t')",
+                    [],
+                )
+                .is_err(),
+            "the schema must refuse a self-dependency even if application validation is bypassed"
+        );
+    }
+
     #[test]
     fn v31_is_idempotent() {
         let connection = Connection::open_in_memory().unwrap();
@@ -5025,14 +5660,26 @@ PRAGMA user_version=26;
                 .query_row("PRAGMA user_version", [], |row| row.get(0))
                 .unwrap();
             assert_eq!(version, CURRENT_SCHEMA_VERSION);
+            // Migration 39 retires the abandoned v7 Mission schema. A row from it cannot be
+            // carried into the canonical shape — the two models disagree about what a Mission is
+            // — so it is preserved verbatim under a legacy name instead of being destroyed.
             assert_eq!(
                 connection
-                    .query_row("SELECT title FROM missions WHERE id='m'", [], |row| row
-                        .get::<_, String>(
-                        0
-                    ))
+                    .query_row(
+                        "SELECT title FROM missions_legacy_v7 WHERE id='m'",
+                        [],
+                        |row| row.get::<_, String>(0)
+                    )
                     .unwrap(),
                 "Keep"
+            );
+            assert_eq!(
+                connection
+                    .query_row("SELECT count(*) FROM missions", [], |row| row
+                        .get::<_, i64>(0))
+                    .unwrap(),
+                0,
+                "the canonical Mission table must start empty"
             );
             if starting_version >= 8 {
                 assert_eq!(
@@ -5360,5 +6007,100 @@ PRAGMA user_version=26;
                 .unwrap(),
             36
         );
+    }
+    #[test]
+    fn v38_adds_the_run_engine_forward_only_and_preserves_existing_rows() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", true)
+            .unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL); CREATE TABLE projects(id TEXT PRIMARY KEY); CREATE TABLE workspaces(id TEXT PRIMARY KEY); INSERT INTO projects VALUES('project'); PRAGMA user_version=37;",
+            )
+            .unwrap();
+
+        migrate_v38(&connection).unwrap();
+
+        for table in ["runs", "run_events", "run_approvals"] {
+            assert!(
+                table_exists(&connection, table).unwrap(),
+                "{table} is missing"
+            );
+        }
+        assert_eq!(
+            connection
+                .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            38
+        );
+        // Pre-existing user data is untouched by a purely additive migration.
+        assert_eq!(
+            connection
+                .query_row("SELECT count(*) FROM projects", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+    }
+
+    #[test]
+    fn v38_is_idempotent_so_a_partially_applied_build_can_be_repaired() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", true)
+            .unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL); CREATE TABLE projects(id TEXT PRIMARY KEY); INSERT INTO projects VALUES('project'); PRAGMA user_version=37;",
+            )
+            .unwrap();
+
+        migrate_v38(&connection).unwrap();
+        connection
+            .execute(
+                "INSERT INTO runs(id,project_id,root_run_id,run_type,execution_strategy,isolation,objective,status,trigger_source,requested_by,created_at,updated_at) VALUES('run','project','run','agent_task','single_agent','shared_read_only','objective','queued','manual','user','t','t')",
+                [],
+            )
+            .unwrap();
+
+        // Re-running the migration must not drop or duplicate anything.
+        migrate_v38(&connection).unwrap();
+
+        assert_eq!(
+            connection
+                .query_row("SELECT count(*) FROM runs", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+    }
+
+    #[test]
+    fn the_run_idempotency_index_rejects_a_duplicate_key_within_one_project() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", true)
+            .unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL); CREATE TABLE projects(id TEXT PRIMARY KEY); INSERT INTO projects VALUES('project'); PRAGMA user_version=37;",
+            )
+            .unwrap();
+        migrate_v38(&connection).unwrap();
+
+        let insert = |id: &str, key: Option<&str>| {
+            connection.execute(
+                "INSERT INTO runs(id,project_id,root_run_id,run_type,execution_strategy,isolation,objective,status,trigger_source,requested_by,idempotency_key,created_at,updated_at) VALUES(?1,'project',?1,'agent_task','single_agent','shared_read_only','objective','queued','manual','user',?2,'t','t')",
+                params![id, key],
+            )
+        };
+        insert("run-a", Some("command-1")).unwrap();
+        assert!(
+            insert("run-b", Some("command-1")).is_err(),
+            "a duplicate idempotency key must be rejected by the database, not only by the engine"
+        );
+        // The index is partial: Runs without a key are never constrained against each other.
+        insert("run-c", None).unwrap();
+        insert("run-d", None).unwrap();
     }
 }

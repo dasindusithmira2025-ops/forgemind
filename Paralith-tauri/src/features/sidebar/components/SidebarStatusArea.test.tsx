@@ -17,6 +17,8 @@ const actions = {
   onToggleCollapse: vi.fn(),
   onOpenRepository: vi.fn(),
   onOpenDatabase: vi.fn(),
+  onOpenMissions: vi.fn(),
+  onOpenRuns: vi.fn(),
   onOpenMemory: vi.fn(),
   onOpenUsage: vi.fn(),
 } as unknown as SidebarActions
@@ -58,7 +60,7 @@ describe('SidebarStatusArea', () => {
 
   it('names every destination it offers, rather than hiding them behind hover tooltips', () => {
     render(<SidebarStatusArea actions={actions} />)
-    for (const name of ['Source Control', 'Database', 'Memory', 'Usage']) {
+    for (const name of ['Source Control', 'Database', 'Missions', 'Runs', 'Memory', 'Usage']) {
       expect(screen.getByRole('button', { name })).toBeInTheDocument()
     }
     fireEvent.click(screen.getByRole('button', { name: 'Source Control' }))

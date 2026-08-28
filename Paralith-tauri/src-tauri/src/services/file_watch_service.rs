@@ -34,6 +34,7 @@ const DEBOUNCE: Duration = Duration::from_millis(150);
 const MAX_PENDING: usize = 400;
 
 pub const PROJECT_FILE_CHANGED_EVENT: &str = "project-file-changed";
+const PROJECT_SESSION_SUBSCRIBER: &str = "__project_session__";
 
 struct ProjectWatch {
     /// Window labels currently subscribed to this Project's changes.
@@ -46,7 +47,7 @@ struct ProjectWatch {
 #[derive(Clone)]
 pub struct FileWatchService {
     database: Arc<DatabaseService>,
-    app: AppHandle,
+    app: Option<AppHandle>,
     ledger: SelfWriteLedger,
     watchers: Arc<Mutex<HashMap<PathBuf, ProjectWatch>>>,
     /// Present in the running application. Database Studio re-extracts only when a batch actually
@@ -65,7 +66,20 @@ impl FileWatchService {
     pub fn new(database: Arc<DatabaseService>, app: AppHandle, ledger: SelfWriteLedger) -> Self {
         Self {
             database,
-            app,
+            app: Some(app),
+            ledger,
+            watchers: Arc::new(Mutex::new(HashMap::new())),
+            database_studio: None,
+            knowledge: None,
+            code: None,
+        }
+    }
+
+    #[cfg(test)]
+    pub fn new_for_tests(database: Arc<DatabaseService>, ledger: SelfWriteLedger) -> Self {
+        Self {
+            database,
+            app: None,
             ledger,
             watchers: Arc::new(Mutex::new(HashMap::new())),
             database_studio: None,
@@ -98,6 +112,33 @@ impl FileWatchService {
     /// Ensure a watcher exists for the Project and register `window_label` as a subscriber. The
     /// second and later windows for a Project reuse the single existing watcher.
     pub fn watch(&self, project_id: &str, window_label: &str) -> AppResult<()> {
+        self.watch_for_subscriber(project_id, window_label)
+    }
+
+    /// Ensure the Project session itself owns a watcher. Renderer surfaces may still subscribe,
+    /// but Memory, Code Graph, and Database Studio do not depend on any surface being mounted.
+    pub fn ensure_project_session_watch(&self, project_id: &str) -> AppResult<()> {
+        self.watch_for_subscriber(project_id, PROJECT_SESSION_SUBSCRIBER)
+    }
+
+    /// Release the session-owned subscription. Window subscriptions, if any remain, keep using
+    /// the same OS watcher until they unsubscribe or their window is destroyed.
+    pub fn release_project_session_watch(&self, project_id: &str) {
+        self.unwatch(project_id, PROJECT_SESSION_SUBSCRIBER);
+    }
+
+    /// Re-establish watchers for Projects that were already open in the restored main session.
+    pub fn ensure_open_project_session_watches(&self) -> AppResult<usize> {
+        let sessions = self.database.list_open_project_sessions()?;
+        let mut established = 0usize;
+        for session in sessions {
+            self.ensure_project_session_watch(&session.project_id)?;
+            established += 1;
+        }
+        Ok(established)
+    }
+
+    fn watch_for_subscriber(&self, project_id: &str, subscriber: &str) -> AppResult<()> {
         let project = self.database.get_project(project_id)?;
         let root = canonicalize_plain(Path::new(&project.root_path)).map_err(|error| {
             AppError::new(
@@ -110,10 +151,10 @@ impl FileWatchService {
         })?;
         let mut watchers = self.watchers.lock();
         if let Some(existing) = watchers.get(&root) {
-            existing.subscribers.lock().insert(window_label.to_owned());
+            existing.subscribers.lock().insert(subscriber.to_owned());
             return Ok(());
         }
-        let subscribers = Arc::new(Mutex::new(HashSet::from([window_label.to_owned()])));
+        let subscribers = Arc::new(Mutex::new(HashSet::from([subscriber.to_owned()])));
         let (sender, receiver) = std::sync::mpsc::channel::<Event>();
         let mut watcher = notify::recommended_watcher(move |result: notify::Result<Event>| {
             if let Ok(event) = result {
@@ -172,6 +213,45 @@ impl FileWatchService {
         for root in empty {
             watchers.remove(&root);
         }
+    }
+
+    pub fn watcher_count(&self) -> usize {
+        self.watchers.lock().len()
+    }
+
+    pub fn subscriber_count(&self) -> usize {
+        self.watchers
+            .lock()
+            .values()
+            .map(|watch| watch.subscribers.lock().len())
+            .sum()
+    }
+
+    #[cfg(test)]
+    fn subscriber_count_for_project(&self, project_id: &str) -> AppResult<usize> {
+        let project = self.database.get_project(project_id)?;
+        let root = canonicalize_plain(Path::new(&project.root_path))?;
+        Ok(self
+            .watchers
+            .lock()
+            .get(&root)
+            .map(|watch| watch.subscribers.lock().len())
+            .unwrap_or(0))
+    }
+
+    #[cfg(test)]
+    pub fn dispatch_changes_for_test(&self, project_id: &str, changes: Vec<ProjectFileChange>) {
+        let subscribers = Arc::new(Mutex::new(HashSet::new()));
+        let mut pending: HashMap<String, (FileChangeKind, ChangeOrigin)> = changes
+            .into_iter()
+            .map(|change| (change.relative_path, (change.kind, change.origin)))
+            .collect();
+        let sinks = ChangeSinks {
+            database_studio: self.database_studio.clone(),
+            knowledge: self.knowledge.clone(),
+            code: self.code.clone(),
+        };
+        flush(&self.app, project_id, &subscribers, &mut pending, &sinks);
     }
 
     fn deregister(
@@ -269,7 +349,7 @@ struct ChangeSinks {
 }
 
 fn flush(
-    app: &AppHandle,
+    app: &Option<AppHandle>,
     project_id: &str,
     subscribers: &Arc<Mutex<HashSet<String>>>,
     pending: &mut HashMap<String, (FileChangeKind, ChangeOrigin)>,
@@ -309,7 +389,9 @@ fn flush(
         if let Some(knowledge) = &sinks.knowledge {
             // Enqueue only. Impact analysis and any staleness write happen on the lifecycle worker,
             // because this thread must return to coalescing the next burst immediately.
-            if let Err(error) = knowledge.handle_changed_paths(project_id, &paths) {
+            if let Err(error) =
+                knowledge.handle_file_change_batch(project_id, &external_changes(&changes))
+            {
                 log::warn!("knowledge impact analysis not queued: {}", error.message);
             }
         }
@@ -336,11 +418,22 @@ fn flush(
         changes: external,
     };
     let targets: Vec<String> = subscribers.lock().iter().cloned().collect();
+    let Some(app) = app else {
+        return;
+    };
     for label in targets {
         if let Some(window) = app.get_webview_window(&label) {
             let _ = window.emit(PROJECT_FILE_CHANGED_EVENT, &batch);
         }
     }
+}
+
+fn external_changes(changes: &[ProjectFileChange]) -> Vec<ProjectFileChange> {
+    changes
+        .iter()
+        .filter(|change| !change.origin.is_self_write())
+        .cloned()
+        .collect()
 }
 
 /// Translate a raw notify event into zero or more `(relative_path, kind, origin)` changes, dropping
@@ -451,6 +544,7 @@ fn watcher_failed(error: impl std::fmt::Display, project_id: &str) -> AppError {
 mod tests {
     use super::*;
     use notify::event::{CreateKind, ModifyKind, RemoveKind, RenameMode};
+    use uuid::Uuid;
 
     fn root() -> PathBuf {
         PathBuf::from(if cfg!(windows) { r"C:\proj" } else { "/proj" })
@@ -671,5 +765,77 @@ mod tests {
         }
         assert_eq!(pending.len(), 1);
         assert_eq!(pending["hot.txt"], FileChangeKind::Modified);
+    }
+
+    fn project_at(root: &Path) -> crate::models::Project {
+        let now = chrono::Utc::now().to_rfc3339();
+        let root_path = crate::services::project_service::display_path(root);
+        crate::models::Project {
+            id: Uuid::new_v4().to_string(),
+            name: "watch-fixture".into(),
+            root_path: root_path.clone(),
+            canonical_root_path: if cfg!(windows) {
+                root_path.to_lowercase()
+            } else {
+                root_path
+            },
+            git_branch: None,
+            detected_framework: None,
+            package_manager: None,
+            major_languages: Vec::new(),
+            is_git_repository: false,
+            has_package_json: false,
+            has_lockfile: false,
+            created_at: now.clone(),
+            updated_at: now.clone(),
+            last_opened_at: now,
+        }
+    }
+
+    #[test]
+    fn project_session_watcher_is_idempotent_and_independent_of_code_surface() {
+        let database = Arc::new(DatabaseService::in_memory().unwrap());
+        let root = std::fs::canonicalize(std::env::temp_dir())
+            .unwrap()
+            .join(format!("paralith-watch-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let project = database.upsert_project(&project_at(&root)).unwrap();
+        let service = FileWatchService::new_for_tests(database, SelfWriteLedger::default());
+
+        service.ensure_project_session_watch(&project.id).unwrap();
+        assert_eq!(service.watcher_count(), 1);
+        assert_eq!(
+            service.subscriber_count_for_project(&project.id).unwrap(),
+            1
+        );
+
+        service.ensure_project_session_watch(&project.id).unwrap();
+        assert_eq!(
+            service.watcher_count(),
+            1,
+            "repeat opens reuse one native watcher"
+        );
+        assert_eq!(
+            service.subscriber_count_for_project(&project.id).unwrap(),
+            1,
+            "repeat opens do not add duplicate session subscribers"
+        );
+
+        service.watch(&project.id, "main").unwrap();
+        assert_eq!(service.watcher_count(), 1);
+        assert_eq!(
+            service.subscriber_count_for_project(&project.id).unwrap(),
+            2,
+            "Code Surface subscribes to the existing Project watcher"
+        );
+        service.unwatch(&project.id, "main");
+        assert_eq!(
+            service.subscriber_count_for_project(&project.id).unwrap(),
+            1,
+            "the Project session keeps Memory watching after Code Surface unmounts"
+        );
+        service.release_project_session_watch(&project.id);
+        assert_eq!(service.watcher_count(), 0);
+        let _ = std::fs::remove_dir_all(root);
     }
 }
