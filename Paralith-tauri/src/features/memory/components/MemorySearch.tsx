@@ -34,7 +34,7 @@ function ResultRow({ result }: { result: SearchResult }) {
             className="memory-search-title"
             onClick={() => {
               void open((result.itemId ?? result.id) as string)
-              void setView('document')
+              void setView('knowledge')
             }}
           >
             {result.title}

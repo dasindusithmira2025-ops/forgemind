@@ -63,7 +63,7 @@ function Row({ entry }: { entry: TimelineEntry }) {
             className="memory-timeline-title"
             onClick={() => {
               void open(entry.itemId as string)
-              void setView('document')
+              void setView('knowledge')
             }}
           >
             {entry.itemTitle ?? entry.summary}

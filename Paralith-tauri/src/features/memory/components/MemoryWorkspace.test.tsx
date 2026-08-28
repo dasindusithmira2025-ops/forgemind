@@ -5,7 +5,7 @@ import type { MemoryView } from '../memoryStore'
 import { MemoryViewTabs } from './MemoryWorkspace'
 
 function ViewTabsHarness() {
-  const [view, setView] = useState<MemoryView>('document')
+  const [view, setView] = useState<MemoryView>('overview')
   return <MemoryViewTabs view={view} onSelect={setView} />
 }
 
@@ -13,11 +13,13 @@ describe('MemoryViewTabs', () => {
   it('exposes one selected tab and its controlled panel id', () => {
     render(<ViewTabsHarness />)
 
-    const documentTab = screen.getByRole('tab', { name: 'Document' })
+    const overviewTab = screen.getByRole('tab', { name: 'Overview' })
+    const knowledgeTab = screen.getByRole('tab', { name: 'Knowledge' })
     const graphTab = screen.getByRole('tab', { name: 'Graph' })
-    expect(documentTab).toHaveAttribute('aria-selected', 'true')
-    expect(documentTab).toHaveAttribute('aria-controls', 'memory-panel-document')
-    expect(documentTab).toHaveAttribute('tabindex', '0')
+    expect(overviewTab).toHaveAttribute('aria-selected', 'true')
+    expect(overviewTab).toHaveAttribute('aria-controls', 'memory-panel-overview')
+    expect(overviewTab).toHaveAttribute('tabindex', '0')
+    expect(knowledgeTab).toHaveAttribute('aria-selected', 'false')
     expect(graphTab).toHaveAttribute('aria-selected', 'false')
     expect(graphTab).toHaveAttribute('tabindex', '-1')
   })
@@ -25,19 +27,19 @@ describe('MemoryViewTabs', () => {
   it('supports roving focus with arrow, Home, and End keys', () => {
     render(<ViewTabsHarness />)
 
-    const documentTab = screen.getByRole('tab', { name: 'Document' })
-    fireEvent.keyDown(documentTab, { key: 'ArrowRight' })
     const overviewTab = screen.getByRole('tab', { name: 'Overview' })
+    fireEvent.keyDown(overviewTab, { key: 'ArrowRight' })
+    const knowledgeTab = screen.getByRole('tab', { name: 'Knowledge' })
+    expect(knowledgeTab).toHaveFocus()
+    expect(knowledgeTab).toHaveAttribute('aria-selected', 'true')
+
+    fireEvent.keyDown(knowledgeTab, { key: 'End' })
+    const searchTab = screen.getByRole('tab', { name: 'Search' })
+    expect(searchTab).toHaveFocus()
+    expect(searchTab).toHaveAttribute('aria-selected', 'true')
+
+    fireEvent.keyDown(searchTab, { key: 'Home' })
     expect(overviewTab).toHaveFocus()
     expect(overviewTab).toHaveAttribute('aria-selected', 'true')
-
-    fireEvent.keyDown(overviewTab, { key: 'End' })
-    const activityTab = screen.getByRole('tab', { name: 'Activity' })
-    expect(activityTab).toHaveFocus()
-    expect(activityTab).toHaveAttribute('aria-selected', 'true')
-
-    fireEvent.keyDown(activityTab, { key: 'Home' })
-    expect(documentTab).toHaveFocus()
-    expect(documentTab).toHaveAttribute('aria-selected', 'true')
   })
 })

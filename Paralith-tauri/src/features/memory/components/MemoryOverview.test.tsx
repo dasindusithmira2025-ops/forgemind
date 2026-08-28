@@ -185,6 +185,8 @@ describe('MemoryOverview', () => {
     })
     render(<MemoryOverview />)
     expect(screen.getByRole('region', { name: 'something new' })).toBeInTheDocument()
-    expect(screen.getByText('A future finding')).toBeInTheDocument()
+    expect(
+      within(screen.getByRole('region', { name: 'something new' })).getByText('A future finding'),
+    ).toBeInTheDocument()
   })
 })

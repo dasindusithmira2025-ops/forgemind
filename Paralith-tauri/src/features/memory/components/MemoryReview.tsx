@@ -113,7 +113,7 @@ function ConflictRow({ item }: { item: ReviewItem }) {
           className="memory-review-side-link"
           onClick={() => {
             void open(itemId)
-            void setView('document')
+            void setView('knowledge')
           }}
         >
           {label}
@@ -175,7 +175,7 @@ function MemoryIssueRow({ item }: { item: ReviewItem }) {
               className="memory-review-side-link"
               onClick={() => {
                 void open(item.itemId as string)
-                void setView('document')
+                void setView('knowledge')
               }}
             >
               {item.title}

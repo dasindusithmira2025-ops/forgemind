@@ -34,7 +34,7 @@ function EntryRow({ entry }: { entry: ContextEntry }) {
             className="memory-context-title"
             onClick={() => {
               void open(entry.itemId)
-              void setView('document')
+              void setView('knowledge')
             }}
           >
             {entry.title}

@@ -107,7 +107,7 @@ function JobRow({ job }: { job: KnowledgeJob }) {
                           type="button"
                           onClick={() => {
                             void open(itemId)
-                            void setView('document')
+                            void setView('knowledge')
                           }}
                         >
                           {titleOf(itemId)}
