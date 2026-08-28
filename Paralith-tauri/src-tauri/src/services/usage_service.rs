@@ -27,6 +27,7 @@ use std::time::{Duration, Instant};
 // model attribution rather than silently mixing old model-less records into the breakdown.
 const PARSER_VERSION: u8 = 3;
 const LIVE_USAGE_TIMEOUT: Duration = Duration::from_secs(12);
+const CODEX_APP_SERVER_ARGS: [&str; 5] = ["-s", "read-only", "-a", "never", "app-server"];
 /// Upper bound on a single analytics query. The UI offers 7/30/90; this only stops a malformed
 /// request from turning into an unbounded scan.
 const MAX_HISTORY_DAYS: u32 = 400;
@@ -842,8 +843,10 @@ fn fetch_codex_usage(
         )
     })?;
     let mut command = Command::new(executable);
+    // `untrusted` was removed from the Codex CLI approval-policy enum. The app-server has no
+    // interactive approval channel, so `never` is the supported non-blocking equivalent.
     command
-        .args(["-s", "read-only", "-a", "untrusted", "app-server"])
+        .args(CODEX_APP_SERVER_ARGS)
         .env("CODEX_HOME", &codex_home)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -1121,6 +1124,15 @@ fn update_freshness(snapshot: &mut ProviderUsageSnapshot) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn codex_app_server_uses_supported_non_interactive_approval_policy() {
+        assert_eq!(
+            CODEX_APP_SERVER_ARGS,
+            ["-s", "read-only", "-a", "never", "app-server"]
+        );
+    }
+
     #[test]
     fn claude_records_ignore_malformed_and_negative_data() {
         assert!(parse_claude_record(&serde_json::json!({"type":"assistant","timestamp":"bad","message":{"id":"x","usage":{"input_tokens":1}}})).is_none());
