@@ -512,8 +512,31 @@ export interface KnowledgeJob {
 
 export interface AnalyzeImpactPayload {
   paths: string[]
+  /** Structured changes in current jobs. Omitted by pre-intelligence-loop rows. */
+  changes?: ChangedPath[]
   /** What moved the paths — `file change`, a commit subject, a merge. */
   trigger: string
+}
+
+export type FileChangeKind = 'created' | 'modified' | 'deleted'
+
+export interface ChangedPath {
+  path: string
+  kind: FileChangeKind
+}
+
+export interface ChangeUnderstanding {
+  changedPaths: ChangedPath[]
+  changeKind: string
+  beforeSummary: string | null
+  afterSummary: string | null
+  affectedSymbols: string[]
+  affectedProjectFacts: string[]
+  affectedMemoryIds: string[]
+  contradictedMemoryIds: string[]
+  candidateNewKnowledge: string[]
+  confidence: number
+  evidence: string[]
 }
 
 /** A memory the policy saw and deliberately left alone, with the reason it refused. */
@@ -524,8 +547,38 @@ export interface SkippedHit {
 
 export interface ImpactOutcome {
   pathsAnalyzed: number
+  understandings: ChangeUnderstanding[]
   markedStale: string[]
+  superseded: string[]
+  learned: string[]
+  needsReview: string[]
   skipped: SkippedHit[]
+}
+
+export interface AnalyzeProjectPayload {
+  /** Older empty payloads are accepted by Rust via its serde default. */
+  trigger: string
+}
+
+export interface AnalyzeProjectOutcome {
+  filesScanned: number
+  factsFound: number
+  factsChanged: number
+  candidatesQueued: number
+  revision: number
+}
+
+export interface ExtractHandoffPayload {
+  handoffId: string
+}
+
+export interface CandidateOutcome {
+  processed: number
+  autoAccepted: number
+  queuedForReview: number
+  rejected: number
+  duplicatesIgnored: number
+  conflictsOpened: number
 }
 
 /** Emitted when a lifecycle job changed something a knowledge surface displays. */
