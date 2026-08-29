@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { paralith } from "@/content/products";
 import { site } from "@/content/site";
-import { Arrow, Band, GoLink, Rail, SectionHead } from "@/components/primitives";
+import { Arrow, Band, Em, GoLink, Rail, SectionHead } from "@/components/primitives";
 import { ProductFilm } from "@/components/ProductFilm";
 import paralithPoster from "../../../../public/media/paralith-showcase-poster.jpg";
 
@@ -32,7 +32,7 @@ export default function ParalithPage() {
                 <span className="tag tag-accent">{paralith.status}</span>
               </div>
 
-              <h1 className="reveal-wipe font-display mt-7 text-[length:var(--step-hero)] leading-[0.92] font-semibold tracking-[-0.045em]">
+              <h1 className="reveal-wipe mt-7 text-[length:var(--step-hero)]">
                 {paralith.wordmark}
               </h1>
 
@@ -67,17 +67,36 @@ export default function ParalithPage() {
             />
           </div>
 
-          <dl
-            className="mt-12 grid grid-cols-2 gap-x-8 gap-y-6 border-t pt-9 md:grid-cols-5"
-            style={{ borderColor: "var(--hair)" }}
+          {/* The graticule above the specification: five checkable facts, five
+              ticks, the first one lit — the current release is the live
+              value on the plate. */}
+          <ul
+            className="ticks reveal mt-12"
+            aria-hidden="true"
+            style={{ "--d": "80ms" } as React.CSSProperties}
           >
-            {paralith.facts.map((fact) => (
-              <div key={fact.label}>
-                <dt className="mono text-[var(--ink-3)]">{fact.label}</dt>
-                <dd className="mono-plain mt-2 text-[15px] text-[var(--ink)]">{fact.value}</dd>
-              </div>
+            {paralith.facts.map((fact, i) => (
+              <li key={fact.label} data-on={i === 0 ? "" : undefined} />
             ))}
-          </dl>
+          </ul>
+
+          {/* The specification as one machined plate: the five facts share a
+              single raised panel with hairline seams between them, the same
+              cut as the spec sheet on the products index. */}
+          <div
+            className="panel reveal mt-7 p-6 sm:p-8"
+            style={{ "--d": "160ms" } as React.CSSProperties}
+          >
+            <span className="panel-rim" aria-hidden="true" />
+            <dl className="grid grid-cols-2 gap-x-8 gap-y-6 md:grid-cols-5">
+              {paralith.facts.map((fact) => (
+                <div key={fact.label}>
+                  <dt className="mono text-[var(--ink-3)]">{fact.label}</dt>
+                  <dd className="mono-plain mt-2 text-[15px] text-[var(--ink)]">{fact.value}</dd>
+                </div>
+              ))}
+            </dl>
+          </div>
         </div>
       </section>
 
@@ -85,7 +104,7 @@ export default function ParalithPage() {
         <Rail index="01" datum="What it does">
           <SectionHead
             eyebrow="Capabilities"
-            heading="Six things it does that a chat window cannot."
+            heading={<>Six things it does that a chat window <Em>cannot.</Em></>}
             lead={paralith.full}
             className="mb-14"
           />
@@ -112,17 +131,19 @@ export default function ParalithPage() {
         <Rail index="02" datum="Availability">
           <SectionHead
             eyebrow="Platforms"
-            heading="Windows today."
+            heading={<>Windows <Em>today.</Em></>}
             lead="Paralith builds, signs and publishes one Stable channel, and that channel is Windows. The other platforms are not released, so they are not offered."
             className="mb-12"
           />
 
-          <ul className="grid grid-cols-1 gap-x-12 sm:grid-cols-3">
+          {/* Each platform is a readout, so each sits in a recessed bay: the
+              channel state is a value on an instrument, lit amber where the
+              channel is live and quiet ink where it is not. */}
+          <ul className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             {paralith.platforms.map((platform) => (
               <li
                 key={platform.name}
-                className="reveal flex items-baseline justify-between gap-4 border-t py-6"
-                style={{ borderColor: "var(--hair-strong)" }}
+                className="bay reveal flex items-baseline justify-between gap-4 p-5 sm:p-6"
               >
                 <span className="font-display text-[length:var(--step-sub)] leading-none font-semibold tracking-[-0.028em]">
                   {platform.name}
@@ -130,7 +151,7 @@ export default function ParalithPage() {
                 <span
                   className="mono"
                   style={{
-                    color: platform.state === "Available" ? "var(--ink)" : "var(--ink-3)",
+                    color: platform.state === "Available" ? "var(--accent)" : "var(--ink-3)",
                   }}
                 >
                   {platform.state}
@@ -139,7 +160,7 @@ export default function ParalithPage() {
             ))}
           </ul>
 
-          <div className="mt-12 grid grid-cols-1 gap-x-16 gap-y-6 lg:grid-cols-12">
+          <div className="mt-14 grid grid-cols-1 gap-x-16 gap-y-6 lg:grid-cols-12">
             <h3 className="text-[length:var(--step-sub)] lg:col-span-5">
               Updates are signed and verified.
             </h3>

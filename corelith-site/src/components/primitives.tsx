@@ -6,7 +6,7 @@ export type Tone = "ground" | "recessed";
 /**
  * Sections outside a numbered sequence pass a dash for their index. A dash is
  * the absence of an ordinal, so it is rendered as absence — printing it left a
- * stray mark floating beside the accent dot on every unnumbered page.
+ * stray mark floating beside the tick on every unnumbered page.
  */
 export const hasOrdinal = (index: string) => /[0-9a-z]/i.test(index);
 
@@ -16,12 +16,12 @@ const toneClass: Record<Tone, string> = {
 };
 
 /**
- * A page is a stack of bands, and there are two of them: white, and white with
- * the faintest cool shift. The site does not flip to a dark band for contrast —
- * white / black / white / black is template design, and it is what stopped the
- * previous version reading as one company.
+ * A page is a stack of rooms, and there are two of them: the panel room
+ * #101318, and the channel #0B0E12 cut into it. The channel is where systems
+ * live — capabilities, delivery, research — so a reader learns that a darker
+ * band means "inside the machine" without being told.
  *
- * `lit` places the atmosphere behind a band. Opt-in rather than default,
+ * `lit` places the amber atmosphere behind a band. Opt-in rather than default,
  * because light everywhere is light nowhere.
  */
 export function Band({
@@ -36,7 +36,6 @@ export function Band({
   tone?: Tone;
   tight?: boolean;
   lit?: boolean;
-  /** Places the two blooms, as CSS custom properties. */
   bloom?: CSSProperties;
   id?: string;
   className?: string;
@@ -57,11 +56,9 @@ export function Band({
 /**
  * The section marker.
  *
- * An accent dot, an ordinal and the section name, held in the margin beside the
- * content on wide screens and folded above it on narrow ones. It replaces the
- * drafting rail the previous system carried: same job — telling the reader
- * where they are in a sequence — without dressing the page as a technical
- * drawing to do it.
+ * An amber tick, an index and the section name, held in the margin beside the
+ * content on wide screens and folded above it on narrow ones. The tick is the
+ * instrument stroke that opens every measured thing on this site.
  */
 export function Rail({
   index,
@@ -77,10 +74,7 @@ export function Rail({
   return (
     <div className={`shell rail ${className}`}>
       <div className="rail-mark">
-        <span
-          aria-hidden="true"
-          className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--accent)]"
-        />
+        <span aria-hidden="true" className="tick" />
         {hasOrdinal(index) ? <span className="index">{index}</span> : null}
         <span className="mono text-[var(--ink-3)]">{datum}</span>
       </div>
@@ -142,27 +136,28 @@ export function GoLink({
 }
 
 /**
- * The emphasis phrase. Tint only — same family, weight and size as the words
- * around it. `Em` is Corelith blue; `EmLight` is the step above it, used where
- * a headline runs black → light blue → blue and the middle term would shout if
- * it were full strength.
+ * The emphasis phrase. Instrument amber, same family, weight and size as the
+ * words around it. Tint only — it is the single place display type is allowed
+ * to carry colour, and it is the identity.
  */
 export function Em({ children }: { children: ReactNode }) {
   return <span className="em">{children}</span>;
 }
 
+/**
+ * The quiet middle step of the emphasis ramp. A headline that runs ink →
+ * quiet amber → amber states the palette in one gesture; the light step is
+ * what stops a fully-amber second line reading as a shout.
+ */
 export function EmLight({ children }: { children: ReactNode }) {
   return <span className="em-light">{children}</span>;
 }
-
 /**
  * A centred section opening: heading, then one supporting sentence held to a
  * reading measure under it.
- *
  * Centred rather than ranged left because a section that begins in the middle
  * of the page announces itself as a new subject, and this site needs that more
  * than it needs another left margin. The band beneath it can then be composed
- * freely — a grid, a plate, a field — without fighting an off-centre heading.
  */
 export function SectionIntro({
   heading,

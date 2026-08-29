@@ -135,7 +135,7 @@ function CapabilityCore({
       // The skin's presence is its opacity. There is no second variable
       // tracking it, so the two can never disagree.
       const hullMaterial = hull.current.material as THREE.MeshPhysicalMaterial;
-      const wanted = target.hull * (dark ? 0.1 : 0.22);
+      const wanted = target.hull * (dark ? 0.14 : 0.22);
       hullMaterial.opacity += (wanted - hullMaterial.opacity) * ease;
       hull.current.visible = hullMaterial.opacity > 0.004;
     }
@@ -203,7 +203,7 @@ function CapabilityCore({
       <mesh ref={hull} scale={2.06} frustumCulled={false}>
         <sphereGeometry args={[1, 48, 32]} />
         <meshPhysicalMaterial
-          color={dark ? "#93a8c8" : "#ffffff"}
+          color={dark ? "#d9a53f" : "#ffffff"}
           transparent
           opacity={0}
           roughness={0.16}

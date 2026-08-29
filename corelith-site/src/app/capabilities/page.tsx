@@ -27,7 +27,9 @@ export default function CapabilitiesPage() {
           {/* Each capability gets its whole argument here rather than a card:
               the proposition, what is delivered, and the position that
               distinguishes it. A reader deciding whether to make contact needs
-              the argument, not a summary of it. */}
+              the argument, not a summary of it. The builds sit in one recessed
+              bay per article — a readout well under the argument, the same cut
+              on every one, so the six articles read as one instrument. */}
           {capabilities.map((capability) => (
             <article
               key={capability.slug}
@@ -54,18 +56,20 @@ export default function CapabilitiesPage() {
                 </div>
 
                 <div className="lg:col-span-7">
-                  <p className="mono text-[var(--ink-3)]">What we build</p>
-                  <ul className="mt-5 grid grid-cols-1 gap-x-10 sm:grid-cols-2">
-                    {capability.builds.map((item) => (
-                      <li
-                        key={item}
-                        className="border-t py-3.5 text-[15px] leading-[1.5] text-[var(--ink-2)]"
-                        style={{ borderColor: "var(--hair)" }}
-                      >
-                        {item}
-                      </li>
-                    ))}
-                  </ul>
+                  <div className="bay p-6 sm:p-7">
+                    <p className="mono text-[var(--ink-3)]">What we build</p>
+                    <ul className="mt-5 grid grid-cols-1 gap-x-10 sm:grid-cols-2">
+                      {capability.builds.map((item) => (
+                        <li
+                          key={item}
+                          className="border-t py-3.5 text-[15px] leading-[1.5] text-[var(--ink-2)]"
+                          style={{ borderColor: "var(--hair)" }}
+                        >
+                          {item}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
                 </div>
               </div>
             </article>

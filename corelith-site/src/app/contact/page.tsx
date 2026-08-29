@@ -55,14 +55,23 @@ export default function ContactPage() {
         measure={site.presence}
       />
 
+      {/* Four routes into the same room, cut as one instrument: each channel a
+          seam row, the email a machine value in its recessed well, the address
+          a live control. One treatment on all four — no card grid, no channel
+          hierarchy the content does not support. */}
       <Band tone="ground">
         <Rail index="01" datum="Channels">
-          {channels.map((channel) => (
+          {channels.map((channel, i) => (
             <div
               key={channel.id}
               id={channel.id}
               className="reveal grid grid-cols-1 gap-x-12 gap-y-4 border-t py-9 md:grid-cols-12"
-              style={{ borderColor: "var(--hair-strong)" }}
+              style={
+                {
+                  borderColor: "var(--hair-strong)",
+                  "--d": `${i * 60}ms`,
+                } as React.CSSProperties
+              }
             >
               <div className="md:col-span-4">
                 <span className="index">{channel.index}</span>
@@ -75,7 +84,7 @@ export default function ContactPage() {
                 <div className="mt-5 flex flex-wrap items-center gap-x-6 gap-y-3">
                   <a
                     href={`mailto:${channel.email}`}
-                    className="mono-plain text-[15px] text-[var(--ink)] underline underline-offset-4"
+                    className="bay mono-plain inline-block px-4 py-2.5 text-[15px] text-[var(--ink)] no-underline transition-colors duration-[var(--t-base)] hover:text-[var(--accent)]"
                   >
                     {channel.email}
                   </a>

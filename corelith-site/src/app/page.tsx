@@ -19,12 +19,14 @@ const delay = (ms: number) => ({ "--d": `${ms}ms` }) as CSSProperties;
 /**
  * The homepage.
  *
- * White throughout, with the light in the room coming from two soft blue blooms
+ * Graphite throughout, with the light in the room coming from two amber blooms
  * rather than from a coloured band. Sections open centred and then compose
- * freely underneath — a split hero, a field around a plate, a large product
- * plate, an editorial list, a diagram that transforms, a film. The page never
- * flips to a dark band for contrast: white / black / white / black is template
- * design, and it is what stopped the previous version reading as one company.
+ * freely underneath — a split hero with the field set into a machined housing,
+ * a thesis cut into the floor, a large product plate, an editorial list, a
+ * diagram that transforms, a film. The page never flips to a light band for
+ * contrast: the rooms alternate between the panel room and the channel cut
+ * into it, and the one solid amber plate is reserved for the footer's full
+ * stop.
  */
 export default function HomePage() {
   return (
@@ -46,9 +48,13 @@ export default function HomePage() {
 /* -------------------------------------------------------------------------- */
 
 /**
- * The hero: a statement on the left, the Corelith Field on a lit plate on the
- * right. Two grid tracks, so the headline can never end up reading across a
- * piece of geometry — that is a layout boundary, not a z-index arrangement.
+ * The hero: a statement on the left, the Corelith Field in a machined housing
+ * on the right. Two grid tracks, so the headline can never end up reading across
+ * a piece of geometry — that is a layout boundary, not a z-index arrangement.
+ *
+ * The housing is the one fastened plate on the page: a raised panel, the field
+ * set into a recessed bay the way a screen sits in a chassis, and a tick ruler
+ * along its foot — ten sections on this page, and the first one is lit.
  */
 function Hero() {
   return (
@@ -94,7 +100,7 @@ function Hero() {
             </p>
 
             <div className="reveal mt-9 flex flex-wrap items-center gap-3" style={delay(280)}>
-              <Link href="/start-a-project" className="btn btn-accent">
+              <Link href="/start-a-project" className="btn btn-primary">
                 Start a project
                 <Arrow />
               </Link>
@@ -106,10 +112,29 @@ function Hero() {
 
           {/* Its own track, its own box. On a phone it follows the words: an
               object above the headline pushes the sentence the page exists to
-              make below the fold. */}
+              make below the fold.
+
+              The plate adds 52px of chassis — bezel, ruler, gap — on top of the
+              height the composition was tuned around, so the field itself keeps
+              exactly the canvas it had. */}
           <div className="order-last lg:col-span-5">
-            <div className="reveal h-[clamp(300px,72vw,400px)] w-full lg:h-[min(54svh,470px)]">
-              <CorelithField parallax className="h-full w-full" />
+            <div className="reveal panel flex h-[calc(clamp(300px,72vw,400px)+52px)] w-full flex-col p-4 lg:h-[calc(min(54svh,470px)+52px)]">
+              <span className="panel-rim" aria-hidden="true" />
+              <span className="fastener left-2 top-2" aria-hidden="true" />
+              <span className="fastener right-2 top-2" aria-hidden="true" />
+              <span className="fastener bottom-2 left-2" aria-hidden="true" />
+              <span className="fastener bottom-2 right-2" aria-hidden="true" />
+
+              <div className="bay relative flex-1 overflow-hidden">
+                <CorelithField parallax className="h-full w-full" />
+              </div>
+
+              {/* The page's own ruler: ten sections, this is the first. */}
+              <ul className="ticks mt-3" aria-hidden="true">
+                {Array.from({ length: 10 }, (_, i) => (
+                  <li key={i} data-on={i === 0 ? "" : undefined} />
+                ))}
+              </ul>
             </div>
           </div>
         </div>
@@ -120,7 +145,11 @@ function Hero() {
 
 /* -------------------------------------------------------------------------- */
 
-/** The thesis, given a quiet screen of its own. */
+/**
+ * The thesis, given a quiet screen of its own — and because a thesis is a
+ * position rather than a feature, it is cut into the floor: a recessed channel
+ * holding the two halves of the argument side by side.
+ */
 function Statement() {
   return (
     <Band tone="ground">
@@ -132,16 +161,20 @@ function Statement() {
             </>
           }
         />
-        <div className="mx-auto mt-14 grid max-w-[var(--measure)] grid-cols-1 gap-10 md:grid-cols-2 md:gap-16">
-          {philosophy.body.map((paragraph, i) => (
-            <p
-              key={i}
-              className="reveal text-[17px] leading-[1.68] text-[var(--ink-2)]"
-              style={delay(180 + i * 90)}
-            >
-              {paragraph}
-            </p>
-          ))}
+        <div className="mx-auto mt-14 max-w-[var(--measure)]">
+          <div className="bay">
+            <div className="grid grid-cols-1 gap-10 px-[clamp(24px,4vw,56px)] py-[clamp(30px,4vw,52px)] md:grid-cols-2 md:gap-16">
+              {philosophy.body.map((paragraph, i) => (
+                <p
+                  key={i}
+                  className="reveal text-[17px] leading-[1.68] text-[var(--ink-2)]"
+                  style={delay(180 + i * 90)}
+                >
+                  {paragraph}
+                </p>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
     </Band>
@@ -186,6 +219,14 @@ function Capabilities() {
             All six capabilities
           </Link>
         </p>
+
+        {/* Four ways in, of six capabilities. The lit ticks are the four on
+            the screen above; the ruler says what the sentence does not have to. */}
+        <ul className="ticks mt-7 justify-center" aria-hidden="true">
+          {Array.from({ length: 6 }, (_, i) => (
+            <li key={i} data-on={i < 4 ? "" : undefined} />
+          ))}
+        </ul>
       </div>
     </section>
   );
@@ -199,6 +240,10 @@ function Capabilities() {
  * One large plate, the name under it at display size, and the engineering
  * decisions in an editorial row beneath. A case study about systems work that
  * leads with a grid of thumbnails is describing the last five percent of it.
+ *
+ * The screenshot sits in a machined bezel and keeps its own white ground inside
+ * it: that plate is the asset's, not the page's — the product is the lit thing
+ * in the dark room.
  */
 function SelectedWork() {
   const study = caseStudies[0];
@@ -217,17 +262,17 @@ function SelectedWork() {
         />
 
         <figure className="reveal">
-          <div
-            className="overflow-hidden"
-            style={{ borderRadius: "var(--r-xl)", border: "1px solid var(--hair)" }}
-          >
-            <Image
-              src={paralithPoster}
-              alt="The Paralith workspace: several agent sessions running against one repository."
-              className="block aspect-[3/2] w-full bg-white object-contain"
-              sizes="(min-width: 1400px) 1256px, 92vw"
-              placeholder="blur"
-            />
+          <div className="panel p-2.5">
+            <span className="panel-rim" aria-hidden="true" />
+            <div className="overflow-hidden" style={{ borderRadius: "var(--r-sm)" }}>
+              <Image
+                src={paralithPoster}
+                alt="The Paralith workspace: several agent sessions running against one repository."
+                className="block aspect-[3/2] w-full bg-white object-contain"
+                sizes="(min-width: 1400px) 1256px, 92vw"
+                placeholder="blur"
+              />
+            </div>
           </div>
         </figure>
 
@@ -276,12 +321,15 @@ function SelectedWork() {
           </div>
         </div>
 
-        <div
-          className="reveal mt-16 grid grid-cols-1 gap-6 border-t pt-10 md:grid-cols-12 md:gap-12"
-          style={{ borderColor: "var(--hair)" }}
-        >
-          <h3 className="text-[length:var(--step-sub)] md:col-span-5">{clientWorkNote.heading}</h3>
-          <p className="text-[var(--ink-2)] md:col-span-7">{clientWorkNote.body}</p>
+        {/* An aside is cut into the floor rather than ruled off, the same as
+            the thesis above it: the channel is where the notes live. */}
+        <div className="reveal mt-16">
+          <div className="bay grid grid-cols-1 gap-6 px-[clamp(24px,3vw,44px)] py-[clamp(24px,3vw,40px)] md:grid-cols-12 md:gap-12">
+            <h3 className="text-[length:var(--step-sub)] md:col-span-5">
+              {clientWorkNote.heading}
+            </h3>
+            <p className="text-[var(--ink-2)] md:col-span-7">{clientWorkNote.body}</p>
+          </div>
         </div>
       </div>
     </Band>
@@ -295,7 +343,9 @@ function SelectedWork() {
  *
  * The one place on the homepage where a list is the right composition: six
  * comparable things, read in order, with a hairline between them. The row tints
- * on hover rather than drawing a border, so nothing here is a box at rest.
+ * on hover rather than drawing a border, so nothing here is a box at rest. The
+ * list opens on a datum rather than a bare rule — six measured entries, and the
+ * amber end of the seam is where the counting starts.
  */
 function Services() {
   return (
@@ -311,32 +361,35 @@ function Services() {
           className="mb-[clamp(44px,5vw,72px)]"
         />
 
-        <ul className="mx-auto max-w-[var(--measure)]">
-          {capabilities.map((capability, i) => (
-            <li
-              key={capability.slug}
-              className="reveal border-t"
-              style={{ borderColor: "var(--hair)", ...delay(i * 60) }}
-            >
-              <Link
-                href={`/capabilities/${capability.slug}`}
-                className="group -mx-[clamp(12px,1.6vw,24px)] grid grid-cols-1 items-baseline gap-x-8 gap-y-2.5 rounded-[var(--r-lg)] px-[clamp(12px,1.6vw,24px)] py-9 transition-colors duration-[320ms] hover:bg-[var(--surface)] md:grid-cols-12"
+        <div className="mx-auto max-w-[var(--measure)]">
+          <hr className="datum-rule" />
+          <ul>
+            {capabilities.map((capability, i) => (
+              <li
+                key={capability.slug}
+                className={`reveal ${i === 0 ? "" : "border-t"}`}
+                style={{ borderColor: "var(--hair)", ...delay(i * 60) }}
               >
-                <span className="index-lg md:col-span-1">{capability.index}</span>
-                <span className="font-display text-[length:var(--step-sub)] leading-[1.1] font-semibold tracking-[-0.025em] text-[var(--ink)] transition-colors duration-[320ms] group-hover:text-[var(--accent)] md:col-span-4">
-                  {capability.name}
-                </span>
-                <span className="text-[15px] leading-[1.65] text-[var(--ink-2)] md:col-span-6">
-                  {capability.brief}
-                </span>
-                <span className="text-[var(--ink-3)] transition-[transform,color] duration-[320ms] group-hover:translate-x-1.5 group-hover:text-[var(--accent)] md:col-span-1 md:justify-self-end">
-                  <Arrow />
-                </span>
-              </Link>
-            </li>
-          ))}
-          <li className="border-t" style={{ borderColor: "var(--hair)" }} />
-        </ul>
+                <Link
+                  href={`/capabilities/${capability.slug}`}
+                  className="group -mx-[clamp(12px,1.6vw,24px)] grid grid-cols-1 items-baseline gap-x-8 gap-y-2.5 rounded-[var(--r-lg)] px-[clamp(12px,1.6vw,24px)] py-9 transition-colors duration-[320ms] hover:bg-[var(--surface-2)] md:grid-cols-12"
+                >
+                  <span className="index-lg md:col-span-1">{capability.index}</span>
+                  <span className="font-display text-[length:var(--step-sub)] leading-[1.1] font-semibold tracking-[-0.025em] text-[var(--ink)] transition-colors duration-[320ms] group-hover:text-[var(--accent)] md:col-span-4">
+                    {capability.name}
+                  </span>
+                  <span className="text-[15px] leading-[1.65] text-[var(--ink-2)] md:col-span-6">
+                    {capability.brief}
+                  </span>
+                  <span className="text-[var(--ink-3)] transition-[transform,color] duration-[320ms] group-hover:translate-x-1.5 group-hover:text-[var(--accent)] md:col-span-1 md:justify-self-end">
+                    <Arrow />
+                  </span>
+                </Link>
+              </li>
+            ))}
+            <li className="border-t" style={{ borderColor: "var(--hair)" }} />
+          </ul>
+        </div>
       </div>
     </Band>
   );
@@ -373,6 +426,10 @@ function HowWeBuild() {
  * Paralith, shown with real product material. There is no abstract object in
  * this section on purpose — a company that builds software should be able to
  * show the software.
+ *
+ * The film is already a machined plate in its own right — rim, caption bar —
+ * so it is mounted directly rather than set into a second bezel: a plate
+ * inside a plate reads as a shadow box, not as a chassis.
  */
 function Products() {
   return (
@@ -441,6 +498,9 @@ function Products() {
  * Research. The only generative graphic on the site that carries no
  * interaction: many lines of enquiry, most of which thin out, a few of which
  * carry through to a result. Drawn once on the server, and it does not move.
+ *
+ * The plot sits in a recessed bay — the same cut as the thesis — so the fan
+ * reads as something plotted on an instrument rather than drawn on the page.
  */
 function Research() {
   return (
@@ -457,7 +517,9 @@ function Research() {
         />
 
         <div className="reveal mx-auto max-w-[var(--measure)]">
-          <ResearchTraces className="h-[clamp(110px,14vw,170px)] w-full" />
+          <div className="bay px-[clamp(20px,4vw,64px)] py-[clamp(24px,4vw,44px)]">
+            <ResearchTraces className="h-[clamp(110px,14vw,170px)] w-full" />
+          </div>
         </div>
 
         <ul className="mx-auto mt-12 max-w-[var(--measure)]">
@@ -492,6 +554,11 @@ function Research() {
 
 /* -------------------------------------------------------------------------- */
 
+/**
+ * Six positions, one bank of plates. Each principle is a machined panel because
+ * each one is something a change can be held against — a fixed reference, not a
+ * floating aspiration.
+ */
 function Principles() {
   return (
     <Band tone="recessed" id="principles">
@@ -506,13 +573,14 @@ function Principles() {
           className="mb-[clamp(44px,5vw,72px)]"
         />
 
-        <dl className="mx-auto grid max-w-[var(--measure)] grid-cols-1 gap-x-16 md:grid-cols-2">
+        <dl className="mx-auto grid max-w-[var(--measure)] grid-cols-1 gap-x-16 gap-y-5 md:grid-cols-2">
           {principles.map((principle, i) => (
             <div
               key={principle.index}
-              className="reveal border-t py-9"
-              style={{ borderColor: "var(--hair)", ...delay(i * 55) }}
+              className="reveal panel p-6"
+              style={delay(i * 55)}
             >
+              <span className="panel-rim" aria-hidden="true" />
               <dt className="flex items-baseline gap-4">
                 <span className="index-lg">{principle.index}</span>
                 <span className="font-display text-[length:var(--step-sub)] leading-[1.18] font-semibold tracking-[-0.025em] text-[var(--ink)]">
@@ -532,7 +600,12 @@ function Principles() {
 
 /* -------------------------------------------------------------------------- */
 
-/** The closing statement gets the second-largest type on the site and its own light. */
+/**
+ * The closing statement gets the second-largest type on the site and its own
+ * light. The amber stays in the lamp and the footer's plate below it — this
+ * room stays graphite, and the ruler under the sentence closes the measurement
+ * the hero opened: ten sections, the last one lit.
+ */
 function ClosingCta() {
   return (
     <section className="on-ground relative flex min-h-[64vh] items-center overflow-hidden">
@@ -565,8 +638,15 @@ function ClosingCta() {
           Tell us what you are trying to build. We will tell you what it takes, what it costs to
           own, and whether we are the right people for it.
         </p>
+
+        <ul className="reveal ticks mt-10 justify-center" style={delay(260)} aria-hidden="true">
+          {Array.from({ length: 10 }, (_, i) => (
+            <li key={i} data-on={i === 9 ? "" : undefined} />
+          ))}
+        </ul>
+
         <div
-          className="reveal mt-11 flex flex-wrap items-center justify-center gap-3"
+          className="reveal mt-9 flex flex-wrap items-center justify-center gap-3"
           style={delay(300)}
         >
           <Link href="/start-a-project" className="btn btn-accent">
