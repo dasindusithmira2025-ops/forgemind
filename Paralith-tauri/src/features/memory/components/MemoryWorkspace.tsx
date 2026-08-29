@@ -3,6 +3,7 @@ import {
   Activity,
   Compass,
   GitBranch,
+  History,
   Layers,
   ListChecks,
   Network,
@@ -36,6 +37,7 @@ const VIEWS: { value: MemoryView; label: string; icon: ReactNode }[] = [
   { value: 'activity', label: 'Activity', icon: <Activity size={13} aria-hidden /> },
   { value: 'review', label: 'Review', icon: <ListChecks size={13} aria-hidden /> },
   { value: 'context', label: 'Context', icon: <Layers size={13} aria-hidden /> },
+  { value: 'timeline', label: 'Timeline', icon: <History size={13} aria-hidden /> },
   { value: 'search', label: 'Search', icon: <Search size={13} aria-hidden /> },
 ]
 
