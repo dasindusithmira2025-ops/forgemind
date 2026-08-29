@@ -43,6 +43,7 @@ terminal-output/
 .env.*
 !.env.example
 Paralith-tauri/release/private/
+Paralith-tauri/pat.txt
 Paralith-tauri/release/local/
 Paralith-tauri/release/test-keys/
 
