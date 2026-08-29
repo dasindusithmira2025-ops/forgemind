@@ -133,10 +133,10 @@ function FieldObject({
       <mesh scale={FIELD_RADIUS * 1.022} frustumCulled={false}>
         <sphereGeometry args={[1, 64, 48]} />
         <meshBasicMaterial
-          color={dark ? "#5b7ba8" : "#ffffff"}
+          color={dark ? "#4a3818" : "#ffffff"}
           side={THREE.BackSide}
           transparent
-          opacity={dark ? 0.45 : 0.7}
+          opacity={dark ? 0.5 : 0.7}
           depthWrite={false}
         />
       </mesh>
@@ -146,7 +146,7 @@ function FieldObject({
           field of dots read as a form rather than as noise. */}
       <mesh scale={FIELD_RADIUS * 0.985} frustumCulled={false}>
         <sphereGeometry args={[1, 64, 48]} />
-        <meshStandardMaterial color={dark ? "#10161f" : "#eef1f6"} roughness={1} metalness={0} />
+        <meshStandardMaterial color={dark ? "#1c222b" : "#eef1f6"} roughness={1} metalness={0} />
       </mesh>
 
       <points ref={points} material={material} frustumCulled={false}>

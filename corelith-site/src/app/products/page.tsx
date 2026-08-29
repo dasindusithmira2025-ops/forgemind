@@ -24,6 +24,10 @@ export default function ProductsPage() {
 
       <Band tone="ground">
         <div className="shell">
+          {/* The facts are a specification, so they sit on a machined plate:
+              one .panel carrying the whole readout, the rim span first inside
+              it, the rows kept as bare hairline seams rather than nested
+              cards. A spec sheet is one plate, not a grid of tiles. */}
           {products.map((product) => (
             <article
               key={product.slug}
@@ -31,7 +35,7 @@ export default function ProductsPage() {
             >
               <div className="lg:col-span-5">
                 <div className="flex items-center gap-3">
-                  <h2 className="font-display text-[length:var(--step-page)] leading-none font-semibold tracking-[-0.028em]">
+                  <h2 className="text-[length:var(--step-page)] leading-none">
                     {product.wordmark}
                   </h2>
                   <span className="tag tag-accent">{product.status}</span>
@@ -45,29 +49,37 @@ export default function ProductsPage() {
                 </GoLink>
               </div>
 
-              <dl className="lg:col-span-7">
-                {product.facts.map((fact) => (
-                  <div
-                    key={fact.label}
-                    className="grid grid-cols-2 gap-6 border-t py-4"
-                    style={{ borderColor: "var(--hair)" }}
-                  >
-                    <dt className="mono text-[var(--ink-3)]">{fact.label}</dt>
-                    <dd className="mono-plain text-[15px] text-[var(--ink)]">{fact.value}</dd>
-                  </div>
-                ))}
-                <div className="grid grid-cols-2 gap-6 border-t border-b py-4" style={{ borderColor: "var(--hair)" }}>
-                  <dt className="mono text-[var(--ink-3)]">Platforms</dt>
-                  <dd className="flex flex-col gap-1.5">
-                    {product.platforms.map((platform) => (
-                      <span key={platform.name} className="mono-plain text-[15px]">
-                        <span className="text-[var(--ink)]">{platform.name}</span>
-                        <span className="text-[var(--ink-3)]"> — {platform.state.toLowerCase()}</span>
-                      </span>
+              <div className="lg:col-span-7">
+                <div className="panel p-6 sm:p-8">
+                  <span className="panel-rim" aria-hidden="true" />
+                  <dl>
+                    {product.facts.map((fact, i) => (
+                      <div
+                        key={fact.label}
+                        className={`grid grid-cols-2 gap-6 py-4 ${i === 0 ? "" : "border-t"}`}
+                        style={{ borderColor: "var(--hair)" }}
+                      >
+                        <dt className="mono text-[var(--ink-3)]">{fact.label}</dt>
+                        <dd className="mono-plain text-[15px] text-[var(--ink)]">{fact.value}</dd>
+                      </div>
                     ))}
-                  </dd>
+                    <div
+                      className="grid grid-cols-2 gap-6 border-t py-4"
+                      style={{ borderColor: "var(--hair)" }}
+                    >
+                      <dt className="mono text-[var(--ink-3)]">Platforms</dt>
+                      <dd className="flex flex-col gap-1.5">
+                        {product.platforms.map((platform) => (
+                          <span key={platform.name} className="mono-plain text-[15px]">
+                            <span className="text-[var(--ink)]">{platform.name}</span>
+                            <span className="text-[var(--ink-3)]"> — {platform.state.toLowerCase()}</span>
+                          </span>
+                        ))}
+                      </dd>
+                    </div>
+                  </dl>
                 </div>
-              </dl>
+              </div>
             </article>
           ))}
         </div>

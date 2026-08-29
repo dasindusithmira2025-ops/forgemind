@@ -3,170 +3,104 @@
 
 /* ============================================================================
    CORELITH TECHNOLOGIES — VISUAL SYSTEM
+   GRAPHITE INSTRUMENT
 
-   White + black + blue. Nothing else.
+   A control room, not a brochure. Deep graphite rooms, machined panels with
+   stepped metal edges, one amber signal colour — the light on an instrument
+   that means "this is live". No blue anywhere.
 
-   1. LIGHT IS THE GROUND. The canonical Corelith surface is white. Depth comes
-      from one blue atmosphere far below the threshold where a viewer could name
-      it as colour — light entering a room, never a gradient graphic.
-   2. TYPE AND SPACE CARRY HIERARCHY. Black headings, generous air, thin
-      separators. Not seven shades of grey.
-   3. THE BLUE IS THE IDENTITY. One blue, #246BFD, used for the emphasis phrase,
-      links, focus, state and section markers. Never purple, never a gradient,
-      never a glow.
-   4. DARK MODE IS THE SAME LANGUAGE AT NIGHT. Deep graphite, near-white ink,
-      the same blue lifted for contrast. Not a second, louder design.
+   1. THE ROOM IS DARK. The canonical Corelith surface is graphite #101318 —
+      a room with the lights down, not a black void. Recessed bands (#0B0E12)
+      are channels cut into it.
+   2. THE PANEL IS THE UNIT. Content sits on machined plates: raised surface,
+      inset bevel edge (light top-left, dark bottom-right), hairline seam.
+      Depth is metal, not glow.
+   3. THE AMBER IS THE SIGNAL. One value, #FFB224 — instrument amber. Live
+      state, links, focus, section markers, the emphasis phrase. Never a
+      gradient, never a glow. A second, quieter weight #F0C75E steps a display
+      line without shouting.
+   4. THE GRATICULE IS THE MARKER. Ticks, rulers and index labels — the
+      drafting vernacular of measured work — replace the previous dot-mark.
+      An ordinal is real when the section is part of a sequence.
+   5. THE PLATE CLOSES THE PAGE. The footer is one solid amber machine-plate:
+      the single inversion, the same in every theme, the page's full stop.
    ========================================================================== */
 
-/* --- ROLES: LIGHT --------------------------------------------------------
-   Ink ramp measures 19.6:1 / 6.4:1 / 4.7:1 on white; the blue measures 4.6:1,
-   so it clears AA at body size wherever it appears rather than only at display
-   scale. */
+/* --- ROLES: LIGHT ----------------------------------------------------------
+   Contrast: ink 16.8:1 / ink-2 8.9:1 / ink-3 6.1:1 on #101318. The amber
+   measures 9.4:1 on graphite and 3.05:1 on its own plate, where it is only
+   used for rules and marks, never text below display size. */
 :root {
-  color-scheme: light;
+  color-scheme: dark;
 
-  --ground: #ffffff;
-  --ground-soft: #f7f9fc;
-  --surface: #ffffff;
-  --surface-2: #fbfcfe;
+  --ground: #101318;
+  --ground-soft: #0b0e12;
+  --surface: #161b22;
+  --surface-2: #1c222b;
+  --surface-3: #222a35;
 
-  --ink: #080a0e;
-  --ink-2: #565f6e;
-  --ink-3: #6c7584;
+  --ink: #f3f5f8;
+  --ink-2: #aab4c0;
+  --ink-3: #818d9c;
 
-  /* CORELITH BLUE. One value, chosen and locked. */
-  --accent: #246bfd;
-  --accent-strong: #1b57d6;
-  /* The second voice. A headline reads black / light blue / blue across its
-     lines, which is the whole colour system of the page in one gesture. */
-  --accent-light: #7fb0f8;
-  --accent-soft: rgba(36, 107, 253, 0.08);
-  --accent-softer: rgba(36, 107, 253, 0.045);
-  --accent-knockout: #ffffff;
+  /* INSTRUMENT AMBER. One value, chosen and locked. */
+  --accent: #ffb224;
+  --accent-strong: #ffc75c;
+  --accent-deep: #c98a10;
+  /* The second voice: a quieter amber for the middle step of a display line. */
+  --accent-soft: rgba(255, 178, 36, 0.14);
+  --accent-softer: rgba(255, 178, 36, 0.07);
+  --accent-knockout: #191104;
 
-  /* The emphasis phrase is the blue. It is the single place display type is
-     allowed to carry colour, and it is what makes the headline Corelith's
-     rather than anyone's. */
+  /* The emphasis phrase is the amber. The single place display type carries
+     colour, and it is what makes the headline Corelith's. */
   --em-ink: var(--accent);
 
-  --hair: rgba(12, 20, 35, 0.08);
-  --hair-strong: rgba(12, 20, 35, 0.14);
-  --hair-faint: rgba(12, 20, 35, 0.045);
+  --hair: rgba(226, 232, 240, 0.08);
+  --hair-strong: rgba(226, 232, 240, 0.15);
+  --hair-faint: rgba(226, 232, 240, 0.045);
 
-  /* Atmosphere. Light entering the page, not a component. If a viewer can name
-     the hue, it is turned up too far. */
-  --bloom-a: rgba(36, 107, 253, 0.20);
-  --bloom-b: rgba(36, 107, 253, 0.12);
+  /* The machined edge. One light edge, one dark edge: raised metal. */
+  --edge-light: rgba(255, 255, 255, 0.07);
+  --edge-dark: rgba(0, 0, 0, 0.44);
+
+  /* Atmosphere. Amber entering a dark room from one corner — below the
+     threshold where a viewer could name it as colour. */
+  --bloom-a: rgba(255, 178, 36, 0.05);
+  --bloom-b: rgba(255, 178, 36, 0.03);
 
   /* Depth is contact, not glow. */
-  --shadow-sm: 0 1px 2px rgba(12, 20, 35, 0.04), 0 2px 8px -3px rgba(12, 20, 35, 0.06);
-  --shadow-md: 0 1px 2px rgba(12, 20, 35, 0.04), 0 14px 36px -16px rgba(12, 20, 35, 0.14);
-  --shadow-lg: 0 2px 4px rgba(12, 20, 35, 0.03), 0 40px 80px -32px rgba(12, 20, 35, 0.18);
-  --shadow-pill: 0 1px 2px rgba(12, 20, 35, 0.05), 0 10px 30px -12px rgba(12, 20, 35, 0.16);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5), 0 2px 10px -4px rgba(0, 0, 0, 0.55);
+  --shadow-md: 0 1px 2px rgba(0, 0, 0, 0.5), 0 16px 40px -18px rgba(0, 0, 0, 0.8);
+  --shadow-lg: 0 2px 4px rgba(0, 0, 0, 0.45), 0 44px 88px -36px rgba(0, 0, 0, 0.9);
+  --shadow-pill: 0 1px 2px rgba(0, 0, 0, 0.5), 0 12px 34px -14px rgba(0, 0, 0, 0.85);
 
-  --scrim: rgba(255, 255, 255, 0.82);
+  --scrim: rgba(16, 19, 24, 0.86);
 
   /* The 3D visuals read these so the objects can never drift out of step with
      the page. Points, connections, surface, and the state accent. */
-  --viz-point: #586274;
-  --viz-line: rgba(12, 20, 35, 0.28);
-  --viz-surface: rgba(255, 255, 255, 0.55);
+  --viz-point: #8f9aa8;
+  --viz-line: rgba(243, 245, 248, 0.26);
+  --viz-surface: rgba(34, 42, 53, 0.6);
 }
 
-/* --- ROLES: DARK ---------------------------------------------------------
-   Deep graphite with a cool cast. 17.4:1 / 7.9:1 / 5.3:1, and the blue lifted
-   to 6.6:1 so it stays a link colour rather than a smudge. */
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    color-scheme: dark;
-
-    --ground: #080b10;
-    --ground-soft: #0c1017;
-    --surface: #11161f;
-    --surface-2: #171d28;
-
-    --ink: #f2f5fa;
-    --ink-2: #9aa4b5;
-    --ink-3: #7b8698;
-
-    --accent: #5b93ff;
-    --accent-strong: #85aeff;
-    --accent-light: #9cc0ff;
-    --accent-soft: rgba(91, 147, 255, 0.14);
-    --accent-softer: rgba(91, 147, 255, 0.07);
-    --accent-knockout: #060810;
-
-    --hair: rgba(255, 255, 255, 0.09);
-    --hair-strong: rgba(255, 255, 255, 0.16);
-    --hair-faint: rgba(255, 255, 255, 0.05);
-
-    --bloom-a: rgba(91, 147, 255, 0.22);
-    --bloom-b: rgba(91, 147, 255, 0.12);
-
-    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5);
-    --shadow-md: 0 1px 2px rgba(0, 0, 0, 0.4), 0 18px 44px -20px rgba(0, 0, 0, 0.85);
-    --shadow-lg: 0 2px 4px rgba(0, 0, 0, 0.4), 0 48px 96px -36px rgba(0, 0, 0, 0.95);
-    --shadow-pill: 0 1px 2px rgba(0, 0, 0, 0.5), 0 12px 34px -14px rgba(0, 0, 0, 0.9);
-
-    --scrim: rgba(8, 11, 16, 0.82);
-
-    --viz-line: rgba(255, 255, 255, 0.24);
-    --viz-surface: rgba(190, 208, 240, 0.10);
-  }
-}
-
-:root[data-theme="dark"] {
-  color-scheme: dark;
-
-  --ground: #080b10;
-  --ground-soft: #0c1017;
-  --surface: #11161f;
-  --surface-2: #171d28;
-
-  --ink: #f2f5fa;
-  --ink-2: #9aa4b5;
-  --ink-3: #7b8698;
-
-  --accent: #5b93ff;
-  --accent-strong: #85aeff;
-  --accent-light: #9cc0ff;
-  --accent-soft: rgba(91, 147, 255, 0.14);
-  --accent-softer: rgba(91, 147, 255, 0.07);
-  --accent-knockout: #060810;
-
-  --hair: rgba(255, 255, 255, 0.09);
-  --hair-strong: rgba(255, 255, 255, 0.16);
-  --hair-faint: rgba(255, 255, 255, 0.05);
-
-  --bloom-a: rgba(91, 147, 255, 0.22);
-  --bloom-b: rgba(91, 147, 255, 0.12);
-
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5);
-  --shadow-md: 0 1px 2px rgba(0, 0, 0, 0.4), 0 18px 44px -20px rgba(0, 0, 0, 0.85);
-  --shadow-lg: 0 2px 4px rgba(0, 0, 0, 0.4), 0 48px 96px -36px rgba(0, 0, 0, 0.95);
-  --shadow-pill: 0 1px 2px rgba(0, 0, 0, 0.5), 0 12px 34px -14px rgba(0, 0, 0, 0.9);
-
-  --scrim: rgba(8, 11, 16, 0.82);
-
-  --viz-line: rgba(255, 255, 255, 0.24);
-  --viz-surface: rgba(190, 208, 240, 0.10);
-}
+/* --- ROLES: ON THE PLATE ---------------------------------------------------
+   The amber machine-plate inverts the system once: dark ink on amber, the
+   hair a cut line. Scoped to .on-plate in system.css. */
 
 /* --- SCALE ---------------------------------------------------------------
-   The headline does half the work of the page, so display runs large and
-   everything below it stays deliberately quiet. */
+   The headline does half the work of the page. Archivo runs wide and heavy
+   at display size and stays legible at 15px. */
 :root {
   --step-mono: 0.8125rem;
   --step-fine: 0.9375rem;
   --step-body: clamp(1.0625rem, 1.03rem + 0.16vw, 1.125rem);
   --step-lead: clamp(1.0625rem, 1.0rem + 0.28vw, 1.1875rem);
   --step-sub: clamp(1.375rem, 1.16rem + 0.92vw, 1.9375rem);
-  /* Section headings. Big and heavy: on a white page with this much air, a
-     heading that is merely large reads as timid. */
+  /* Section headings. Set heavy and wide — signage, not whisper. */
   --step-head: clamp(2rem, 1.34rem + 2.9vw, 3.25rem);
   --step-page: clamp(2.25rem, 1.5rem + 3.3vw, 3.5rem);
-  /* 76px at the top end, which is where a three-line statement still holds
-     inside seven of twelve columns. */
+  /* 76px at the top end. Archivo's width needs the extra leading at scale. */
   --step-hero: clamp(2.625rem, 1.1rem + 5vw, 4.75rem);
 
   --shell: 1400px;
@@ -174,19 +108,17 @@
   --measure-text: 620px;
   --gutter: clamp(22px, 5vw, 72px);
 
-  /* Air. A band carries roughly a third of a viewport of nothing above and
-     below its content — the whitespace is the composition. */
   --band: clamp(76px, 8vw, 136px);
   --band-tight: clamp(56px, 6vw, 96px);
 
-  --r-xs: 8px;
-  --r-sm: 10px;
-  --r-md: 14px;
-  --r-lg: 20px;
-  --r-xl: 28px;
+  /* Instrument geometry: tight radii. Metal is cut, not molded. */
+  --r-xs: 4px;
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --r-xl: 18px;
   --r-full: 999px;
 
-  /* Calm, decisive, no overshoot. Nothing bounces. */
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-inout: cubic-bezier(0.65, 0, 0.35, 1);
   --t-fast: 180ms;
@@ -204,6 +136,7 @@
   --color-ground-soft: var(--ground-soft);
   --color-surface: var(--surface);
   --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
   --color-ink: var(--ink);
   --color-ink-2: var(--ink-2);
   --color-ink-3: var(--ink-3);
@@ -212,10 +145,11 @@
   --color-em-ink: var(--em-ink);
   --color-accent-knockout: var(--accent-knockout);
 
-  /* One family in two roles. Components address a role, not a typeface. */
-  --font-sans: var(--font-geist), ui-sans-serif, system-ui, sans-serif;
-  --font-display: var(--font-geist), ui-sans-serif, system-ui, sans-serif;
-  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+  /* Two voices. Archivo Expanded for signage, Inter for the control
+     room's running text, JetBrains Mono for machine values only. */
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-archivo), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains), ui-monospace, monospace;
 
   --radius-xs: var(--r-xs);
   --radius-sm: var(--r-sm);
@@ -237,17 +171,9 @@
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
-    /* A theme swap is a change of room, not a page flash. Suppressed for the
-       first paint by the [data-boot] attribute the inline script removes. */
     transition:
       background-color var(--t-slow) var(--ease-inout),
       color var(--t-slow) var(--ease-inout);
-  }
-
-  html[data-boot] *,
-  html[data-boot] *::before,
-  html[data-boot] *::after {
-    transition: none !important;
   }
 
   body {
@@ -259,26 +185,28 @@
     overflow-x: clip;
   }
 
-  /* Display type is optically tight on a short leading: a headline is a shape
-     on the page before it is a sentence. Headings are black. */
+  /* Display type is signage: wide, heavy, tight leading. Archivo carries it
+     so the voice is industrial, not editorial. */
   h1,
   h2,
   h3,
   h4 {
     font-family: var(--font-display);
-    font-weight: 700;
-    letter-spacing: -0.022em;
-    line-height: 1.06;
+    font-weight: 800;
+    font-stretch: 125%;
+    letter-spacing: -0.014em;
+    line-height: 1.04;
     color: var(--ink);
     text-wrap: balance;
   }
 
   /* The statement runs at 76px on a single leading. At that size the line box
-     is the shape of the block, and anything looser stops being a block. */
+     is the shape of the block. */
   h1 {
-    font-weight: 600;
-    letter-spacing: -0.028em;
-    line-height: 1;
+    font-weight: 800;
+    font-stretch: 125%;
+    letter-spacing: -0.02em;
+    line-height: 0.98;
   }
 
   p {
@@ -301,11 +229,14 @@
     height: 10px;
   }
   ::-webkit-scrollbar-track {
-    background: transparent;
+    background: var(--ground-soft);
   }
   ::-webkit-scrollbar-thumb {
-    background: var(--hair-strong);
-    border: 3px solid var(--ground);
+    background: var(--surface-3);
+    border: 2px solid var(--ground-soft);
     border-radius: var(--r-full);
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--ink-3);
   }
 }

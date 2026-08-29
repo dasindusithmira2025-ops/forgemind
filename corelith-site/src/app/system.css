@@ -1,14 +1,17 @@
 /* ============================================================================
    CORELITH — SYSTEM LAYER
+   GRAPHITE INSTRUMENT
 
    The primitives every page is assembled from.
 
-   1. THE WHITE SHEET. Sections are fields of air, not boxes. Depth is one blue
-      atmosphere behind the content and a hairline where a division is real.
-   2. THE EMPHASIS PHRASE. One phrase per headline is set in Corelith blue. One
-      per page carries it at display scale; the rest of the page is black.
-   3. RESTRAINT IS THE CHROME. Moderate radii, hairline borders, no glow, no
-      glass except where an element genuinely floats over moving content.
+   1. THE DARK ROOM. Sections are rooms, not boxes. Depth is a channel of
+      deeper graphite behind the content and a seam where a division is real.
+   2. THE MACHINED PANEL. Where content needs a container, the container is
+      metal: raised surface, stepped bevel edge, hairline. Read "chassis",
+      never "card".
+   3. THE GRATICULE MARKS SEQUENCE. Index labels, tick rulers and datum lines
+      are the only decorative language on the site — and they are not
+      decorative, they encode order.
    ========================================================================== */
 
 @layer components {
@@ -41,10 +44,10 @@
   }
 
   /* --- Grounds ------------------------------------------------------------
-     Two rooms, and the difference between them is almost nothing: white, and
-     white with the faintest cool shift. The site does not alternate light and
-     dark bands for excitement — that is template design, and it is what made
-     the previous version read as a sequence of unrelated pages. */
+     Two rooms: the panel room #101318, and the channel cut into it #0B0E12.
+     The channel is where systems live — capabilities, delivery, research —
+     and it is always the same depth, so a reader learns that a darker band
+     means "inside the machine" without being told. */
 
   .on-ground {
     background-color: var(--ground);
@@ -55,28 +58,34 @@
     background-color: var(--ground-soft);
   }
 
-  /* --- The closing block ---------------------------------------------------
-     The one dark surface on the site, and it is the footer in both themes.
-     A page that ends on white ends by running out; a page that ends on a dark
-     block has been closed. It is the same block at night, so the identity does
-     not change with the theme — which is exactly why it is allowed to be the
-     only inversion anywhere. */
-  .on-close {
-    --ground: #0a0d13;
-    --ground-soft: #0a0d13;
-    --surface: rgba(255, 255, 255, 0.04);
-    --surface-2: rgba(255, 255, 255, 0.07);
-    --ink: #f4f6fa;
-    --ink-2: #9aa4b5;
-    --ink-3: #7b8698;
-    --accent: #5b93ff;
-    --accent-strong: #85aeff;
-    --accent-light: #9cc0ff;
-    --accent-soft: rgba(91, 147, 255, 0.16);
-    --accent-knockout: #0a0d13;
-    --hair: rgba(255, 255, 255, 0.09);
-    --hair-strong: rgba(255, 255, 255, 0.16);
-    --hair-faint: rgba(255, 255, 255, 0.05);
+  /* --- The plate footer ----------------------------------------------------
+     The one amber surface on the site, and it is the footer in every theme.
+     Ink is cut dark, hair is a die line, the amber reads as a finished
+     machine part. Because it is the single inversion and always in the same
+     place, it reads as a full stop, not as a theme. */
+  .on-plate {
+    --ground: #ffb224;
+    --ground-soft: #f0a81c;
+    --surface: rgba(25, 17, 4, 0.05);
+    --surface-2: rgba(25, 17, 4, 0.09);
+    --surface-3: rgba(25, 17, 4, 0.13);
+    --ink: #191104;
+    --ink-2: #453310;
+    --ink-3: #5c4416;
+    --accent: #191104;
+    --accent-strong: #000000;
+    --accent-light: #453310;
+    --accent-soft: rgba(25, 17, 4, 0.08);
+    --accent-softer: rgba(25, 17, 4, 0.045);
+    --accent-knockout: #ffb224;
+    --em-ink: #191104;
+    --hair: rgba(25, 17, 4, 0.16);
+    --hair-strong: rgba(25, 17, 4, 0.28);
+    --hair-faint: rgba(25, 17, 4, 0.1);
+    --edge-light: rgba(255, 220, 130, 0.5);
+    --edge-dark: rgba(90, 60, 8, 0.3);
+    --shadow-sm: 0 1px 2px rgba(90, 60, 8, 0.2);
+    --shadow-md: 0 14px 36px -16px rgba(90, 60, 8, 0.45);
 
     position: relative;
     background-color: var(--ground);
@@ -84,9 +93,9 @@
   }
 
   /* --- Atmosphere ---------------------------------------------------------
-     The light in the room. Two blooms of one blue, both far below the threshold
-     where a viewer would name them as colour, positioned by custom properties
-     so a section places its own light rather than inheriting a decoration. */
+     The amber lamp in the corner of the room. Both blooms sit far below the
+     threshold where a viewer would name them as colour; on a dark ground a
+     little light carries a long way, so the values are quartered. */
 
   .bloom {
     position: absolute;
@@ -101,8 +110,7 @@
     content: "";
     position: absolute;
     border-radius: 50%;
-    /* Wide enough that neither bloom ever shows an edge. A visible boundary is
-       what turns light into a gradient graphic. */
+    /* Wide enough that neither bloom ever shows an edge. */
     filter: blur(130px);
   }
 
@@ -122,14 +130,13 @@
     background: radial-gradient(circle, var(--bloom-b) 0%, transparent 68%);
   }
 
-  /* Content sitting above the light. */
   .lit {
     position: relative;
     z-index: 1;
   }
 
-  /* A hairline that fades at both ends rather than stopping. Divisions on this
-     site are seams, not rules drawn across the page. */
+  /* A hairline that fades at both ends rather than stopping. Divisions are
+     seams, not rules drawn across the page. */
   .seam {
     height: 1px;
     border: 0;
@@ -142,9 +149,10 @@
     );
   }
 
-  /* --- The section marker -------------------------------------------------
-     An ordinal and the section name, held in the margin beside the content on
-     wide screens and folded above it on narrow ones. */
+  /* --- The graticule rail ---------------------------------------------------
+     The section marker. An index label and the section name, held in the
+     margin beside the content on wide screens and folded above it on narrow
+     ones. The tick rule under it is a ruler: it says this page is measured. */
 
   .rail {
     display: grid;
@@ -154,7 +162,7 @@
 
   @media (min-width: 1120px) {
     .rail {
-      grid-template-columns: 152px 1fr;
+      grid-template-columns: 168px 1fr;
       gap: clamp(40px, 5vw, 88px);
       align-items: start;
     }
@@ -172,20 +180,66 @@
       top: 120px;
       flex-direction: column;
       align-items: flex-start;
-      gap: 12px;
+      gap: 10px;
     }
+  }
+
+  /* The tick. A short instrument stroke that opens every section marker. */
+  .tick {
+    width: 22px;
+    height: 2px;
+    background: var(--accent);
+    flex-shrink: 0;
+  }
+
+  /* The tick ruler: a row of instrument strokes fading out. Used under a
+     datum line or a section opening; reads as a ruler, not a pattern. */
+  .ticks {
+    display: flex;
+    gap: 10px;
+    height: 8px;
+    align-items: flex-end;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .ticks li,
+  .ticks span {
+    width: 1px;
+    background: var(--hair-strong);
+    flex-shrink: 0;
+  }
+
+  .ticks li:nth-child(5n + 1),
+  .ticks span:nth-child(5n + 1) {
+    height: 8px;
+    background: var(--ink-3);
+  }
+
+  .ticks li:not(:nth-child(5n + 1)),
+  .ticks span:not(:nth-child(5n + 1)) {
+    height: 4px;
+  }
+
+  /* The lit tick: the current position in a measured sequence. */
+  .ticks li[data-on],
+  .ticks span[data-on] {
+    height: 8px;
+    width: 2px;
+    background: var(--accent);
   }
 
   /* --- Micro type ---------------------------------------------------------
      `.mono` is the eyebrow and it is deliberately NOT monospaced. A page that
-     sets every label in a console face reads as a developer tool no matter what
-     else it does. */
+     sets every label in a console face reads as a developer tool no matter
+     what else it does. */
 
   .mono {
     font-family: var(--font-sans);
     font-size: var(--step-fine);
-    font-weight: 500;
-    letter-spacing: 0.1em;
+    font-weight: 550;
+    letter-spacing: 0.14em;
     text-transform: uppercase;
     line-height: 1.4;
   }
@@ -194,60 +248,58 @@
      measurements. Never a label, never a heading, never navigation. */
   .mono-plain {
     font-family: var(--font-mono);
-    font-size: var(--step-fine);
+    font-size: var(--step-mono);
     letter-spacing: -0.01em;
     line-height: 1.55;
     font-variant-numeric: tabular-nums;
     text-transform: none;
   }
 
-  /* The section ordinal. Metadata, set as metadata. */
+  /* The section ordinal. A machined index: zero-padded, tabular, quiet. */
   .index {
-    font-family: var(--font-display);
-    font-size: var(--step-fine);
+    font-family: var(--font-mono);
+    font-size: var(--step-mono);
     font-weight: 500;
-    letter-spacing: 0.04em;
-    color: var(--ink-3);
-    font-variant-numeric: tabular-nums;
-  }
-
-  /* The ordinal where it is the composition rather than a footnote — the
-     capability field, where a number is one of four things on a whole screen. */
-  .index-lg {
-    font-family: var(--font-display);
-    font-size: var(--step-fine);
-    font-weight: 500;
-    letter-spacing: 0.12em;
+    letter-spacing: 0.08em;
     color: var(--accent);
     font-variant-numeric: tabular-nums;
   }
 
-  /* The emphasis phrase. Corelith blue, same family, same weight, same size.
-     It is the only colour display type is allowed to carry, and it is the
-     identity.
+  /* The ordinal where it is the composition rather than a footnote — the
+     capability field, where a number is one of four things on a screen. */
+  .index-lg {
+    font-family: var(--font-display);
+    font-size: var(--step-fine);
+    font-weight: 700;
+    font-stretch: 125%;
+    letter-spacing: 0.14em;
+    color: var(--accent);
+    font-variant-numeric: tabular-nums;
+  }
 
-     Two weights of it. A headline that runs black → light blue → blue states
-     the entire palette in one gesture, and the light step is what stops a
-     fully-blue second line reading as a shout. */
+  /* The emphasis phrase. Instrument amber, same family, same weight, same
+     size. The only colour display type carries, and the identity. A headline
+     that runs ink → quiet amber → amber states the palette in one gesture. */
   .em {
     color: var(--accent);
   }
 
   .em-light {
-    color: var(--accent-light);
+    color: var(--accent-light, var(--accent-strong));
   }
 
   /* --- The note ------------------------------------------------------------
-     A small outlined pill under a statement: where the company operates, what
+     A small outlined chip under a statement: where the company operates, what
      a section is, what state something is in. It is a label, never a control,
      so it has no hover and never contains a link. */
+
   .note {
     display: inline-flex;
     align-items: center;
     gap: 8px;
-    padding: 7px 15px;
+    padding: 7px 14px;
     border: 1px solid var(--hair-strong);
-    border-radius: var(--r-full);
+    border-radius: var(--r-xs);
     background-color: var(--surface);
     color: var(--ink-2);
     font-size: 13.5px;
@@ -257,21 +309,21 @@
   }
 
   /* --- The visual panel ----------------------------------------------------
-     Spatial graphics are framed rather than floated. A rendered object dropped
-     straight onto a white page has no edge, so it reads as something that
-     failed to load; inside a panel with its own light it reads as a plate.
+     Spatial graphics sit on machined plates: a recessed bay with a bevel and
+     its own lamp — the same room the page is lit in, one stop up. */
 
-     The light is a broad white bloom behind the object and a very faint cool
-     wash across the plate — the same room the page is lit in, one stop up. */
   .viz-panel {
     position: relative;
     isolation: isolate;
     overflow: hidden;
     border: 1px solid var(--hair);
-    border-radius: var(--r-xl);
+    border-radius: var(--r-md);
     background:
       radial-gradient(120% 90% at 18% 12%, var(--accent-softer) 0%, transparent 55%),
       linear-gradient(155deg, var(--surface) 0%, var(--ground-soft) 100%);
+    box-shadow:
+      inset 0 1px 0 var(--edge-light),
+      inset 0 -1px 0 var(--edge-dark);
   }
 
   .viz-panel::before {
@@ -279,19 +331,9 @@
     position: absolute;
     inset: -20%;
     z-index: 0;
-    background: radial-gradient(closest-side, rgba(255, 255, 255, 0.9), transparent 72%);
+    background: radial-gradient(closest-side, rgba(255, 196, 92, 0.07), transparent 72%);
     filter: blur(28px);
     pointer-events: none;
-  }
-
-  :root[data-theme="dark"] .viz-panel::before {
-    background: radial-gradient(closest-side, rgba(120, 160, 235, 0.16), transparent 72%);
-  }
-
-  @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) .viz-panel::before {
-      background: radial-gradient(closest-side, rgba(120, 160, 235, 0.16), transparent 72%);
-    }
   }
 
   .viz-panel > * {
@@ -299,8 +341,8 @@
     z-index: 1;
   }
 
-  /* The caption on a panel. Two-tone, because the object it names is the
-     company's and the second word is the part that means something. */
+  /* The caption on a panel. Two-tone: the object it names is the company's,
+     and the second word is the part that means something. */
   .viz-caption {
     position: absolute;
     bottom: 18px;
@@ -310,7 +352,7 @@
     text-align: center;
     font-size: 13.5px;
     font-weight: 500;
-    color: var(--accent-light);
+    color: var(--ink-3);
   }
 
   .viz-caption strong {
@@ -318,9 +360,103 @@
     color: var(--accent);
   }
 
+  /* --- The machined panel ----------------------------------------------------
+     The signature container. A raised plate of graphite with a stepped bevel
+     edge: one light stroke top-left, one dark stroke bottom-right, a hairline
+     rim. This is "chassis", not "card" — the inner bevel is what makes the
+     surface read as metal rather than as paper. */
+
+  .panel {
+    position: relative;
+    background: linear-gradient(180deg, var(--surface-2) 0%, var(--surface) 100%);
+    border: 1px solid var(--hair);
+    border-radius: var(--r-md);
+    box-shadow:
+      inset 0 1px 0 var(--edge-light),
+      inset 0 -1px 0 var(--edge-dark),
+      var(--shadow-sm);
+  }
+
+  /* The panel's stepped bevel rim, drawn where a flat border cannot go.
+     Rendered as a span.panel-rim (aria-hidden) inside a .panel. */
+  .panel-rim {
+    position: absolute;
+    inset: -1px;
+    border-radius: inherit;
+    padding: 1px;
+    background: linear-gradient(
+      145deg,
+      var(--edge-light),
+      transparent 40%,
+      transparent 60%,
+      var(--edge-dark)
+    );
+    -webkit-mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    mask-composite: exclude;
+    pointer-events: none;
+  }
+
+  /* A recessed bay: the same geometry cut down instead of raised. */
+  .bay {
+    background-color: var(--ground-soft);
+    border: 1px solid var(--hair);
+    border-radius: var(--r-md);
+    box-shadow:
+      inset 0 1px 3px rgba(0, 0, 0, 0.35),
+      inset 0 -1px 0 var(--edge-light);
+  }
+
+  /* The corner fastener — a machined screw, one per panel corner where the
+     composition calls for it. Rationed; most panels carry none. Position via
+     Tailwind (e.g. top-3 left-3). */
+  .fastener {
+    position: absolute;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, var(--surface-3), var(--ground-soft) 80%);
+    box-shadow:
+      inset 0 1px 1px rgba(0, 0, 0, 0.6),
+      0 0 0 1px var(--hair-faint);
+  }
+
+  .fastener::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 1px;
+    right: 1px;
+    height: 1px;
+    background: var(--hair-strong);
+    transform: translateY(-50%) rotate(38deg);
+  }
+
+  .panel-hover {
+    transition:
+      border-color var(--t-base) var(--ease),
+      box-shadow var(--t-base) var(--ease),
+      transform var(--t-base) var(--ease);
+  }
+
+  .panel-hover:hover {
+    border-color: var(--hair-strong);
+    box-shadow:
+      inset 0 1px 0 var(--edge-light),
+      inset 0 -1px 0 var(--edge-dark),
+      0 0 0 1px var(--accent-softer),
+      var(--shadow-md);
+    transform: translateY(-3px);
+  }
+
   /* --- The fact ------------------------------------------------------------
-     A checkable value about the thing beside it, as a quiet stack rather than a
-     metric tile. No border, no card, no icon. */
+     A checkable value about the thing beside it, as a quiet stack rather
+     than a metric tile. No border, no card, no icon — a tick and the value. */
 
   .dim {
     display: flex;
@@ -333,8 +469,9 @@
     content: "";
     width: 5px;
     height: 5px;
-    border-radius: 50%;
+    border-radius: 1px;
     background: var(--accent);
+    transform: rotate(45deg);
     flex-shrink: 0;
   }
 
@@ -356,15 +493,30 @@
     background: var(--hair-strong);
   }
 
+  /* The datum line: a seam with a readout at its origin. The system's own
+     convention for "here is a measurement you can check". */
+  .datum-rule {
+    height: 1px;
+    border: 0;
+    background: linear-gradient(
+      to right,
+      var(--accent-deep),
+      var(--hair-strong) 22%,
+      var(--hair-strong) 100%
+    );
+  }
+
   /* --- Surfaces ------------------------------------------------------------
-     A sheet is a soft raised plane. Used sparingly: most of this site is
-     content on the sheet of the page itself, not content inside boxes. */
+     `.sheet` is retained as the quiet member of the family for dense
+     internals; `.panel` is the composed one. */
 
   .sheet {
     background-color: var(--surface);
     border: 1px solid var(--hair);
-    border-radius: var(--r-lg);
-    box-shadow: var(--shadow-sm);
+    border-radius: var(--r-sm);
+    box-shadow:
+      inset 0 1px 0 var(--edge-light),
+      var(--shadow-sm);
   }
 
   .sheet-hover {
@@ -376,12 +528,14 @@
 
   .sheet-hover:hover {
     border-color: var(--hair-strong);
-    box-shadow: var(--shadow-md);
+    box-shadow:
+      inset 0 1px 0 var(--edge-light),
+      var(--shadow-md);
     transform: translateY(-3px);
   }
 
-  /* Backdrop blur is used in exactly one place — the navigation — because that
-     is the only element that genuinely sits over moving content. */
+  /* Backdrop blur is used in exactly one place — the navigation — because
+     that is the only element that genuinely sits over moving content. */
   .glass {
     background-color: var(--scrim);
     backdrop-filter: saturate(1.06) blur(18px);
@@ -389,8 +543,8 @@
   }
 
   /* --- Buttons -------------------------------------------------------------
-     Moderate radius, not pills. Three weights, one geometry. No glow, no
-     bounce — the movement is the arrow shifting and the surface deepening. */
+     Instrument geometry: tight radii, machined edges. Three weights, one
+     language. The primary control is amber — the lamp that means "go". */
 
   .btn {
     display: inline-flex;
@@ -400,11 +554,11 @@
     min-height: 46px;
     padding: 12px 24px;
     border: 1px solid transparent;
-    border-radius: var(--r-full);
+    border-radius: var(--r-sm);
     font-family: var(--font-sans);
     font-size: var(--step-fine);
-    font-weight: 500;
-    letter-spacing: 0.002em;
+    font-weight: 550;
+    letter-spacing: 0.01em;
     line-height: 1;
     white-space: nowrap;
     cursor: pointer;
@@ -421,26 +575,37 @@
     cursor: not-allowed;
   }
 
-  /* The strongest action on the page: solid ink with the ground knocked out. */
+  /* The strongest action: the amber lamp. Cut ink on a lit instrument. */
   .btn-primary {
-    background-color: var(--ink);
-    color: var(--ground);
+    background-color: var(--accent);
+    color: var(--accent-knockout);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.28),
+      inset 0 -1px 0 rgba(90, 60, 8, 0.35),
+      var(--shadow-pill);
   }
 
   .btn-primary:hover:not(:disabled) {
-    background-color: var(--accent);
-    color: #ffffff;
+    background-color: var(--accent-strong);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.34),
+      inset 0 -1px 0 rgba(90, 60, 8, 0.3),
+      0 0 0 4px var(--accent-softer),
+      var(--shadow-md);
   }
 
   /* Used where the action is the identity rather than the instruction: the
      closing statement, and the intake form's submit. */
   .btn-accent {
-    background-color: var(--accent);
-    color: #ffffff;
+    background-color: var(--ink);
+    color: var(--ground);
+    box-shadow:
+      inset 0 1px 0 var(--edge-light),
+      var(--shadow-sm);
   }
 
   .btn-accent:hover:not(:disabled) {
-    background-color: var(--accent-strong);
+    background-color: #ffffff;
   }
 
   .btn-secondary {
@@ -494,15 +659,16 @@
     text-decoration-color: var(--accent);
   }
 
-  /* Arrow link. The mark rides in its own round well, which is what makes it
-     read as a control rather than as punctuation. */
+  /* Arrow link. The mark rides in a machined well — a recessed square, not
+     a circle — which is what makes it read as a control rather than as
+     punctuation. */
   .link-go {
     display: inline-flex;
     align-items: center;
     gap: 12px;
     color: var(--ink);
     text-decoration: none;
-    font-weight: 500;
+    font-weight: 550;
     font-size: var(--step-fine);
     transition: color var(--t-base) var(--ease);
   }
@@ -514,7 +680,7 @@
     width: 32px;
     height: 32px;
     flex-shrink: 0;
-    border-radius: 50%;
+    border-radius: var(--r-xs);
     border: 1px solid var(--hair-strong);
     transition:
       border-color var(--t-base) var(--ease),
@@ -536,15 +702,17 @@
     transform: translateX(4px);
   }
 
-  /* --- Fields --------------------------------------------------------------- */
+  /* --- Fields ---------------------------------------------------------------
+     Controls are machined bays: recessed, hairline rim, amber focus ring. */
 
   .field {
     width: 100%;
     min-height: 50px;
     padding: 13px 16px;
-    background-color: var(--surface);
+    background-color: var(--ground-soft);
     border: 1px solid var(--hair-strong);
     border-radius: var(--r-sm);
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.3);
     color: var(--ink);
     font-family: var(--font-sans);
     font-size: var(--step-body);
@@ -561,12 +729,16 @@
   .field:focus {
     outline: none;
     border-color: var(--accent);
-    box-shadow: 0 0 0 3px var(--accent-soft);
+    box-shadow:
+      inset 0 1px 3px rgba(0, 0, 0, 0.3),
+      0 0 0 3px var(--accent-soft);
   }
 
   .field[aria-invalid="true"] {
-    border-color: #d4483c;
-    box-shadow: 0 0 0 3px rgba(212, 72, 60, 0.12);
+    border-color: #ff6a4d;
+    box-shadow:
+      inset 0 1px 3px rgba(0, 0, 0, 0.3),
+      0 0 0 3px rgba(255, 106, 77, 0.14);
   }
 
   select.field {
@@ -582,15 +754,17 @@
     padding-right: 44px;
   }
 
-  /* --- Tag ------------------------------------------------------------------ */
+  /* --- Tag ------------------------------------------------------------------
+     An outlined chip for machine-adjacent values: a capability id, a
+     discipline, a status. Square-cornered like everything machined. */
 
   .tag {
     display: inline-flex;
     align-items: center;
     gap: 8px;
-    padding: 6px 13px;
+    padding: 6px 12px;
     border: 1px solid var(--hair);
-    border-radius: var(--r-full);
+    border-radius: var(--r-xs);
     background-color: transparent;
     color: var(--ink-2);
     font-family: var(--font-sans);
@@ -603,7 +777,128 @@
   .tag-accent {
     border-color: transparent;
     background-color: var(--accent-soft);
-    color: var(--accent-strong);
+    color: var(--accent);
+  }
+
+  /* --- Navigation ----------------------------------------------------------
+     The rail's own controls: a trigger, a machined dropdown, a burger. Kept
+     in the system layer because the header is chrome, and chrome belongs to
+     the system, not to a page. */
+
+  .nav-trigger {
+    display: inline-flex;
+    align-items: center;
+    padding: 8px 14px;
+    border-radius: var(--r-sm);
+    font-size: 15px;
+    font-weight: 500;
+    letter-spacing: 0.004em;
+    color: var(--ink-2);
+    transition:
+      color var(--t-fast) var(--ease),
+      background-color var(--t-fast) var(--ease);
+  }
+
+  .nav-trigger:hover,
+  .nav-trigger.is-active {
+    color: var(--ink);
+  }
+
+  .nav-trigger.is-active {
+    position: relative;
+  }
+
+  /* The active section is marked by a tick beneath the trigger — the same
+     instrument stroke that opens every section marker on the site. */
+  .nav-trigger.is-active::after {
+    content: "";
+    position: absolute;
+    bottom: -2px;
+    left: 14px;
+    right: 14px;
+    height: 2px;
+    background: var(--accent);
+    border-radius: 1px;
+  }
+
+  .nav-panel-link {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    padding: 12px 14px;
+    border-radius: var(--r-sm);
+    transition: background-color var(--t-fast) var(--ease);
+  }
+
+  .nav-panel-link:hover,
+  .nav-panel-link:focus-visible,
+  .nav-panel-link.is-active {
+    background-color: var(--surface-2);
+  }
+
+  .nav-panel-link.is-active .index-mini {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  /* The machined index chip: a small stamped plate carrying the ordinal. */
+  .index-mini {
+    display: inline-grid;
+    place-items: center;
+    width: 34px;
+    height: 34px;
+    flex-shrink: 0;
+    border: 1px solid var(--hair-strong);
+    border-radius: var(--r-xs);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--ink-3);
+    font-variant-numeric: tabular-nums;
+    transition:
+      border-color var(--t-fast) var(--ease),
+      color var(--t-fast) var(--ease);
+  }
+
+  .nav-burger {
+    display: inline-grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    border: 1px solid var(--hair-strong);
+    border-radius: var(--r-sm);
+    color: var(--ink);
+    transition:
+      border-color var(--t-fast) var(--ease),
+      background-color var(--t-fast) var(--ease);
+  }
+
+  .nav-burger:hover {
+    border-color: var(--accent);
+  }
+
+  .nav-burger-box {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .nav-burger-bar {
+    width: 20px;
+    height: 2px;
+    background: currentColor;
+    border-radius: 1px;
+    transition:
+      transform var(--t-base) var(--ease),
+      opacity var(--t-base) var(--ease);
+  }
+
+  .nav-burger-bar[data-open]:first-child {
+    transform: translateY(4px) rotate(45deg);
+  }
+
+  .nav-burger-bar[data-open]:last-child {
+    transform: translateY(-4px) rotate(-45deg);
   }
 }
 
@@ -619,15 +914,16 @@
      or an unexpected re-render fails to a readable page rather than a blank
      one. */
   .reveal {
-    transition:
-      opacity var(--t-slow) var(--ease),
-      transform var(--t-slow) var(--ease);
-    transition-delay: var(--d, 0ms);
+    opacity: 0;
+    transform: translateY(14px);
   }
 
   [data-reveal] .reveal {
     opacity: 0;
     transform: translateY(18px);
+    transition:
+      opacity var(--t-slow) var(--ease) var(--d, 0ms),
+      transform var(--t-slow) var(--ease) var(--d, 0ms);
   }
 
   .reveal[data-inview] {
@@ -639,15 +935,16 @@
      the body gesture, so a headline settles last. Opacity and transform only —
      a clipped element reports zero intersection area and would never reveal. */
   .reveal-wipe {
-    transition:
-      opacity var(--t-scene) var(--ease),
-      transform var(--t-scene) var(--ease);
-    transition-delay: var(--d, 0ms);
+    opacity: 0;
+    transform: translateY(10px);
   }
 
   [data-reveal] .reveal-wipe {
     opacity: 0;
-    transform: translateY(0.34em);
+    transform: translateY(26px);
+    transition:
+      opacity var(--t-scene) var(--ease) var(--d, 0ms),
+      transform var(--t-scene) var(--ease) var(--d, 0ms);
   }
 
   .reveal-wipe[data-inview] {
@@ -656,9 +953,9 @@
   }
 
   .reveal-rule {
+    transform: scaleX(0);
     transform-origin: left;
-    transition: transform var(--t-scene) var(--ease);
-    transition-delay: var(--d, 0ms);
+    transition: transform var(--t-scene) var(--ease) var(--d, 0ms);
   }
 
   [data-reveal] .reveal-rule {
@@ -674,23 +971,13 @@
      transformation is ninety transitions and no animation loop. The per-node
      delay is what makes the arrangement resolve rather than snap. */
   .proc-node {
-    transition:
-      cx var(--t-scene) var(--ease),
-      cy var(--t-scene) var(--ease),
-      r var(--t-base) var(--ease),
-      fill var(--t-base) var(--ease),
-      opacity var(--t-base) var(--ease);
-    transition-delay: calc(var(--i, 0) * 7ms);
+    opacity: 0;
+    transform: translate(var(--nx, 0), calc(var(--ny, 0) + 12px)) scale(0.86);
   }
 
   .proc-edge {
-    transition:
-      x1 var(--t-scene) var(--ease),
-      y1 var(--t-scene) var(--ease),
-      x2 var(--t-scene) var(--ease),
-      y2 var(--t-scene) var(--ease),
-      opacity var(--t-base) var(--ease);
-    transition-delay: calc(var(--i, 0) * 7ms);
+    opacity: 0;
+    stroke-dashoffset: 1;
   }
 
   .no-scrollbar {
@@ -702,27 +989,23 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-    scroll-behavior: auto !important;
-  }
-
-  .reveal,
-  .reveal-wipe,
-  .reveal-rule {
+  [data-reveal] .reveal,
+  [data-reveal] .reveal-wipe {
     opacity: 1;
     transform: none;
+    transition: none;
   }
 
-  /* The delivery system still changes state — it simply arrives there rather
-     than travelling. Removing the transition is correct here; removing the
-     control would remove the information. */
-  .proc-node,
-  .proc-edge {
-    transition-delay: 0ms !important;
+  .reveal-rule {
+    transform: none;
+    transition: none;
+  }
+
+  .nav-burger-bar {
+    transition: none;
+  }
+
+  html {
+    scroll-behavior: auto;
   }
 }

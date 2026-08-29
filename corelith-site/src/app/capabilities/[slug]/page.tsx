@@ -43,6 +43,16 @@ export default async function CapabilityPage({ params }: { params: Promise<{ slu
         title={capability.name}
         lead={capability.proposition}
         measure={`Core state / ${capability.core}`}
+        aside={
+          /* The which-capability readout: one tick ruler across the six, the
+             current ordinal lit. The page has already named itself in words;
+             this is the instrument saying the same thing. */
+          <ul className="ticks mt-7" aria-hidden="true">
+            {capabilities.map((item) => (
+              <li key={item.slug} data-on={item.slug === capability.slug ? true : undefined} />
+            ))}
+          </ul>
+        }
       />
 
       {/* The object in the state this capability actually names, beside the
@@ -75,8 +85,8 @@ export default async function CapabilityPage({ params }: { params: Promise<{ slu
                 debug readout, and the words two columns left already say what
                 it means. */}
             <div className="lg:sticky lg:top-28 lg:col-span-5">
-              <div className="relative aspect-square w-full max-w-[440px]">
-                <CapabilityCore state={capability.core} className="absolute inset-0 h-full w-full" />
+              <div className="viz-panel aspect-square w-full max-w-[440px]">
+                <CapabilityCore state={capability.core} className="h-full w-full" />
               </div>
             </div>
           </div>
@@ -84,16 +94,22 @@ export default async function CapabilityPage({ params }: { params: Promise<{ slu
       </Band>
 
       {/* Technical surface, grouped. Not a logo wall: the point is which layers
-          of a system Corelith works at, not which brands it can name. */}
+          of a system Corelith works at, not which brands it can name. Each
+          group is a machined plate — the one surface in this system that can
+          sit in a channel band and still read as raised, so the stack reads
+          as the machine's interior rather than a list. */}
       <Band tone="recessed">
         <Rail index="02" datum="Technical surface">
           <SectionHead eyebrow="Stack" heading="Technology follows the problem." className="mb-12" />
-          <div className="grid grid-cols-1 gap-x-12 gap-y-10 md:grid-cols-3">
-            {capability.stack.map((group) => (
-              <div key={group.heading} className="reveal">
-                <h3 className="mono border-b pb-3 text-[var(--ink-3)]" style={{ borderColor: "var(--hair-strong)" }}>
-                  {group.heading}
-                </h3>
+          <div className="grid grid-cols-1 gap-x-6 gap-y-6 sm:grid-cols-2 lg:grid-cols-3">
+            {capability.stack.map((group, i) => (
+              <div
+                key={group.heading}
+                className="panel reveal p-6"
+                style={{ "--d": `${i * 70}ms` } as React.CSSProperties}
+              >
+                <span className="panel-rim" aria-hidden="true" />
+                <h3 className="mono text-[var(--ink-3)]">{group.heading}</h3>
                 <ul className="mt-4 flex flex-col gap-2">
                   {group.items.map((item) => (
                     <li key={item} className="text-[16px] text-[var(--ink)]">
@@ -114,7 +130,7 @@ export default async function CapabilityPage({ params }: { params: Promise<{ slu
             heading="Three situations we get called into."
             className="mb-12"
           />
-          <div className="grid grid-cols-1 gap-x-12 gap-y-10 md:grid-cols-3">
+          <div className="grid grid-cols-1 gap-x-12 gap-y-10 md:grid-cols-2">
             {capability.application.map((item, i) => (
               <div
                 key={item.heading}
