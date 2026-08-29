@@ -194,7 +194,7 @@ fn build_readiness(
             Some("Check the Windows profile permissions for the PARALITH app-data directory."),
         ),
     });
-    let expected_identifier = &update.build.app_identifier;
+    let expected_identifier = crate::build_info::runtime_identifier();
     let actual_identifier = state
         .app_data_directory
         .file_name()

@@ -204,14 +204,21 @@ fn spawn_runtime_health_logger(state: AppState) {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let mut context = tauri::generate_context!();
-    // Development and packaged builds deliberately share the configured product identity and
-    // runtime state. The single-instance guard below prevents two backends from owning the same
-    // database or native resources concurrently.
-    context.config_mut().identifier = build_info::runtime_identifier().into();
-    startup_diagnostic(
-        "runtime-identity",
-        "configured product identity active; single-instance protection is enabled",
-    );
+    if cfg!(debug_assertions) {
+        // Tauri derives its Windows single-instance mutex, WebView2 profile and platform data
+        // directories from this identifier. Scoping it before Builder::build lets an installed
+        // release and `tauri dev` coexist without creating a second public product or build flavor.
+        context.config_mut().identifier = build_info::runtime_identifier().into();
+        startup_diagnostic(
+            "runtime-isolation",
+            "local development identity active; installed application resources are not shared",
+        );
+    } else {
+        startup_diagnostic(
+            "runtime-isolation",
+            "release identity active; production single-instance protection is enabled",
+        );
+    }
     let mut builder = tauri::Builder::default();
     // Single-instance guard MUST be the first registered plugin. A second PARALITH launch
     // hands its argv/cwd to the already-running instance (which just refocuses) and then exits,
@@ -277,17 +284,21 @@ pub fn run() {
                 ),
                 backup_base: &backup_base,
             };
-            let mut legacy_migration = database::legacy_migration::migrate_legacy_stable(
-                edition,
-                migration_roots,
-                env!("CARGO_PKG_VERSION"),
-            );
+            let mut legacy_migration = if cfg!(debug_assertions) {
+                database::legacy_migration::local_development_not_applicable(migration_roots)
+            } else {
+                database::legacy_migration::migrate_legacy_stable(
+                    edition,
+                    migration_roots,
+                    env!("CARGO_PKG_VERSION"),
+                )
+            };
             // Logging is initialized after the one-time profile migration so the new log file
             // cannot make the destination look non-empty or race legacy log preservation.
             if let Err(error) = app.handle().plugin(build_logger().build()) {
                 eprintln!("PARALITH: file logging unavailable: {error}");
             }
-            startup_diagnostic("persistence", "configured runtime directories resolved");
+            startup_diagnostic("persistence", "isolated runtime directories resolved");
             let database_path = data_dir.join(database::backup::DATABASE_FILENAME);
             let restored = database::backup::apply_staged_restore(&data_dir, &database_path)
                 .unwrap_or_else(|error| {
