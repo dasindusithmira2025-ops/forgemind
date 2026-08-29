@@ -16,12 +16,14 @@ describe('MemoryViewTabs', () => {
     const overviewTab = screen.getByRole('tab', { name: 'Overview' })
     const knowledgeTab = screen.getByRole('tab', { name: 'Knowledge' })
     const graphTab = screen.getByRole('tab', { name: 'Graph' })
+    const timelineTab = screen.getByRole('tab', { name: 'Timeline' })
     expect(overviewTab).toHaveAttribute('aria-selected', 'true')
     expect(overviewTab).toHaveAttribute('aria-controls', 'memory-panel-overview')
     expect(overviewTab).toHaveAttribute('tabindex', '0')
     expect(knowledgeTab).toHaveAttribute('aria-selected', 'false')
     expect(graphTab).toHaveAttribute('aria-selected', 'false')
     expect(graphTab).toHaveAttribute('tabindex', '-1')
+    expect(timelineTab).toHaveAttribute('aria-controls', 'memory-panel-timeline')
   })
 
   it('supports roving focus with arrow, Home, and End keys', () => {
