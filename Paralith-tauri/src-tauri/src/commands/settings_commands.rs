@@ -5,13 +5,13 @@ use crate::services;
 use crate::AppState;
 use tauri::{AppHandle, Emitter, State, Window};
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_settings(window: Window, state: State<'_, AppState>) -> AppResult<AppSettings> {
     crate::require_main_window(&window)?;
     state.database.get_settings()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn save_settings(
     settings: AppSettings,
     window: Window,
@@ -24,7 +24,7 @@ pub fn save_settings(
 /// Read the persisted theme id. Unlike full settings this is callable from any window (including
 /// detached workspace windows) so every renderer can reconcile against the durable source of truth
 /// on startup without needing main-window privileges.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_theme_preference(state: State<'_, AppState>) -> AppResult<String> {
     Ok(state.database.get_settings()?.theme_id)
 }
@@ -33,7 +33,7 @@ pub fn get_theme_preference(state: State<'_, AppState>) -> AppResult<String> {
 /// UI lives there, and this is the single authoritative write. The `theme-changed` event reaches all
 /// windows (main + detached + secondary-monitor) so they apply the new theme immediately; receivers
 /// never re-emit, so there is no feedback loop.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn set_theme_preference(
     theme_id: String,
     window: Window,
@@ -53,7 +53,7 @@ pub fn set_theme_preference(
 
 /// Read the sidebar's persisted view preferences. Callable from any window: every window that
 /// draws a sidebar needs them, and unlike full settings they carry nothing privileged.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_sidebar_preferences(state: State<'_, AppState>) -> AppResult<SidebarPreferences> {
     let settings = state.database.get_settings()?;
     Ok(SidebarPreferences {
@@ -69,7 +69,7 @@ pub fn get_sidebar_preferences(state: State<'_, AppState>) -> AppResult<SidebarP
 /// rewrites the whole settings blob, so a detached window could not use it and a sidebar toggle
 /// would race any concurrent settings edit over unrelated fields. Receivers never re-emit, so
 /// there is no feedback loop.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn set_sidebar_preferences(
     preferences: SidebarPreferences,
     app: AppHandle,
@@ -106,7 +106,7 @@ pub fn set_sidebar_preferences(
 ///
 /// Callable from any window: it is a presentation-only change to windows this application already
 /// owns, and detached windows apply their own theme on startup.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn apply_window_chrome(chrome: services::window_chrome::WindowChrome, app: AppHandle) {
     services::window_chrome::apply_to_all(&app, &chrome);
 }

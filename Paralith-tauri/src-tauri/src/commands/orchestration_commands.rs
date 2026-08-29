@@ -13,7 +13,7 @@ use crate::orchestration::registry::CapabilityDescriptor;
 use crate::AppState;
 use tauri::{State, Window};
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn orchestrator_create_session(
     request: CreateSessionRequest,
     window: Window,
@@ -23,7 +23,7 @@ pub fn orchestrator_create_session(
     state.orchestrator.create_session(request)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn orchestrator_get_session(
     session_id: String,
     window: Window,
@@ -33,7 +33,7 @@ pub fn orchestrator_get_session(
     state.orchestrator.session_view(&session_id)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn orchestrator_list_sessions(
     project_id: Option<String>,
     window: Window,
@@ -43,7 +43,7 @@ pub fn orchestrator_list_sessions(
     state.orchestrator.list_sessions(project_id.as_deref(), 100)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn orchestrator_list_interrupted_sessions(
     window: Window,
     state: State<'_, AppState>,
@@ -52,7 +52,7 @@ pub fn orchestrator_list_interrupted_sessions(
     state.orchestrator.list_interrupted()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn orchestrator_send_message(
     session_id: String,
     content: String,
@@ -71,7 +71,7 @@ pub fn orchestrator_send_message(
         .record_user_turn(&session_id, &content, input, transcript_confidence)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn orchestrator_list_capabilities(
     session_id: String,
     window: Window,
@@ -81,7 +81,7 @@ pub fn orchestrator_list_capabilities(
     state.orchestrator.list_capabilities(&session_id)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn orchestrator_execute_capability(
     request: ExecuteCapabilityRequest,
     window: Window,
@@ -91,7 +91,7 @@ pub fn orchestrator_execute_capability(
     state.orchestrator.execute_capability(request)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn orchestrator_pause_session(
     session_id: String,
     window: Window,
@@ -101,7 +101,7 @@ pub fn orchestrator_pause_session(
     state.orchestrator.pause(&session_id)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn orchestrator_resume_session(
     session_id: String,
     window: Window,
@@ -111,7 +111,7 @@ pub fn orchestrator_resume_session(
     state.orchestrator.resume(&session_id)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn orchestrator_cancel_session(
     session_id: String,
     window: Window,

@@ -374,7 +374,6 @@ pub enum CapabilityDomain {
     Git,
     Agents,
     Swarms,
-    Missions,
     Memory,
     Settings,
     App,

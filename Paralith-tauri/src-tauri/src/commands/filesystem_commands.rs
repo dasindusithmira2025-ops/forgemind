@@ -191,7 +191,7 @@ pub async fn search_project_files(
 
 /// Register the calling window as a subscriber to this Project's file-change events. Idempotent:
 /// re-invoking from the same window is safe and does not create a second watcher.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn watch_project_files(
     project_id: String,
     window: Window,
@@ -201,7 +201,7 @@ pub fn watch_project_files(
     state.file_watch.watch(&project_id, window.label())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn unwatch_project_files(
     project_id: String,
     window: Window,

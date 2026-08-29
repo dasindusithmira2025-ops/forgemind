@@ -8,10 +8,12 @@
 import { StrictMode, Suspense, lazy, type ReactElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import '@xterm/xterm/css/xterm.css'
 import '../src/index.css'
 import { applyTheme } from '../src/theme/applyTheme'
 import { coerceThemeId, resolveTheme } from '../src/theme/registry'
 import { useAppStore } from '../src/stores/appStore'
+import { useThemeStore } from '../src/theme/themeStore'
 import { settings } from './fixtures'
 
 const ProjectLauncher = lazy(() => import('../src/screens/ProjectLauncher').then((m) => ({ default: m.ProjectLauncher })))
@@ -59,6 +61,7 @@ const scale = params.get('scale') ?? '1'
 const surface = SURFACES[surfaceId]
 
 applyTheme(resolveTheme(themeId, true), coerceThemeId(themeId))
+useThemeStore.getState().applySelection(coerceThemeId(themeId))
 document.documentElement.dataset.density = density
 document.documentElement.style.setProperty('--ui-scale', scale)
 useAppStore.getState().setSettings({ ...settings, uiDensity: density, uiScale: Number(scale) } as never)

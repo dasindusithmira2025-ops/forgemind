@@ -32,7 +32,7 @@ fn require_project_scope(window: &Window, state: &AppState, project_id: &str) ->
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn open_project(
     path: String,
     window: Window,
@@ -53,7 +53,7 @@ pub fn open_project(
     Ok(stored)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_project(
     project_id: String,
     window: Window,
@@ -63,13 +63,13 @@ pub fn get_project(
     state.database.get_project(&project_id)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_recent_projects(window: Window, state: State<'_, AppState>) -> AppResult<Vec<Project>> {
     crate::require_main_window(&window)?;
     state.database.list_recent_projects()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_projects_overview(
     window: Window,
     state: State<'_, AppState>,
@@ -78,7 +78,7 @@ pub fn list_projects_overview(
     state.database.list_projects_overview()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn remove_project_from_recent(
     project_id: String,
     window: Window,
@@ -89,7 +89,7 @@ pub fn remove_project_from_recent(
 }
 
 /// Re-point a moved Project at `path`, repairing project-root-relative pane directories.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn relocate_project(
     project_id: String,
     path: String,
@@ -101,7 +101,7 @@ pub fn relocate_project(
     state.database.relocate_project(&project_id, &inspected)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn validate_working_directory(
     project_root: String,
     working_directory: String,

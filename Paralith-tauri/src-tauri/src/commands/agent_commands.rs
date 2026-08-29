@@ -40,7 +40,7 @@ pub async fn detect_agents(
     .map_err(blocking_task_error)?
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_agent_profiles(
     window: Window,
     state: State<'_, AppState>,
@@ -49,7 +49,7 @@ pub fn list_agent_profiles(
     state.database.list_agent_profiles()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_agent_sessions(
     workspace_id: String,
     window: Window,
@@ -71,7 +71,7 @@ pub async fn reconcile_agent_resume_sessions(
         .map_err(blocking_task_error)?
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_agent_resume_sessions(
     include_dismissed: bool,
     window: Window,
@@ -94,7 +94,7 @@ pub async fn resume_agent_session(
         .map_err(blocking_task_error)?
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn dismiss_agent_resume_session(
     terminal_session_id: String,
     window: Window,
@@ -104,7 +104,7 @@ pub fn dismiss_agent_resume_session(
     state.database.dismiss_agent_resume(&terminal_session_id)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn dismiss_all_agent_resume_sessions(
     window: Window,
     state: State<'_, AppState>,
@@ -113,7 +113,7 @@ pub fn dismiss_all_agent_resume_sessions(
     state.database.dismiss_all_agent_resumes()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn remove_agent_resume_session(
     terminal_session_id: String,
     window: Window,
@@ -168,7 +168,7 @@ fn blocking_task_error(error: impl std::fmt::Display) -> AppError {
     .layer("agent_detector")
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn save_custom_shell(
     name: String,
     path: String,
@@ -196,7 +196,7 @@ pub fn save_custom_shell(
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn validate_custom_executable(
     path: String,
     window: Window,

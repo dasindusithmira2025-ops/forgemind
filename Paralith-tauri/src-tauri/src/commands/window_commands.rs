@@ -18,7 +18,7 @@ use tauri::{
 
 // ---- Open Project sessions ----------------------------------------------------------------
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_open_projects(
     window: Window,
     state: State<'_, AppState>,
@@ -27,7 +27,7 @@ pub fn list_open_projects(
     state.windows.list_open_projects()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn open_project_session(
     project_id: String,
     make_active: bool,
@@ -40,7 +40,7 @@ pub fn open_project_session(
     state.windows.list_open_projects()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn set_active_project(
     project_id: String,
     window: Window,
@@ -52,7 +52,7 @@ pub fn set_active_project(
     state.windows.list_open_projects()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn close_project_session(
     project_id: String,
     swarm_behavior: Option<ProjectCloseSwarmBehavior>,
@@ -68,7 +68,7 @@ pub fn close_project_session(
     state.windows.list_open_projects()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn set_project_last_active(
     project_id: String,
     workspace_id: Option<String>,
@@ -82,7 +82,7 @@ pub fn set_project_last_active(
         .set_project_last_active(&project_id, workspace_id.as_deref(), pane_id.as_deref())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn set_project_expanded(
     project_id: String,
     expanded: bool,
@@ -95,7 +95,7 @@ pub fn set_project_expanded(
 
 // ---- Placements ---------------------------------------------------------------------------
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_workspace_placements(
     project_id: String,
     window: Window,
@@ -105,7 +105,7 @@ pub fn list_workspace_placements(
     state.windows.list_placements(&project_id)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_workspace_placement(
     workspace_id: String,
     window: Window,
@@ -119,7 +119,7 @@ pub fn get_workspace_placement(
 
 /// A renderer claims the exclusive interactive lease for a Workspace (e.g. on window focus).
 /// The window is identified by the trusted caller label, never a renderer argument.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn claim_workspace_lease(
     workspace_id: String,
     window: Window,
@@ -502,7 +502,7 @@ pub fn move_workspace_to_monitor(
 /// Persist a user-driven native move/resize. The trusted caller label must be the detached
 /// window for this Workspace; coordinates are read from the native window, never supplied by
 /// the renderer.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn persist_workspace_window_geometry(
     workspace_id: String,
     app: AppHandle,
@@ -604,7 +604,7 @@ pub fn list_monitors(
     Ok(collect_monitors(&app, &state)?.0)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn set_monitor_alias(
     monitor_key: String,
     alias: String,

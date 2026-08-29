@@ -52,13 +52,6 @@ pub struct AppState {
     /// Owns the isolated embedded development-browser child webviews (one per Workspace).
     browser: services::BrowserService,
     swarms: services::SwarmService,
-    /// The canonical Run Engine: the single durable execution primitive every structured agent
-    /// operation goes through. Owns its own scheduler thread and reconciles interrupted Runs at
-    /// startup, so a Run outlives any pane, window or renderer reload.
-    runs: services::RunService,
-    /// Mission Control: the orchestration layer directly above the Run Engine. It owns Mission
-    /// and Task lifecycle and asks the Run Engine to execute; it never executes anything itself.
-    missions: services::MissionService,
     /// Authoritative runtime layer for open-Project sessions, Workspace placement, exclusive
     /// interactive leases, handoff coordination, and monitor state.
     windows: WindowRegistry,
@@ -201,17 +194,52 @@ fn spawn_runtime_health_logger(state: AppState) {
         });
 }
 
+/// Route every panic through the file logger before the default hook runs.
+///
+/// Panics in worker threads unwind silently and a panic on the Tauri event loop takes the
+/// whole application down. Without a hook both look identical from the outside: the window
+/// disappears and `paralith.log` ends mid-sentence, so a user-reported crash is not
+/// reconstructable. Logging thread, location and payload first makes every crash diagnosable
+/// from the support bundle alone.
+fn install_panic_logger() {
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let thread = std::thread::current();
+        let name = thread.name().unwrap_or("<unnamed>").to_owned();
+        let location = info
+            .location()
+            .map(|location| format!("{}:{}", location.file(), location.line()))
+            .unwrap_or_else(|| "<unknown>".to_owned());
+        let payload = info
+            .payload()
+            .downcast_ref::<&str>()
+            .map(|payload| (*payload).to_owned())
+            .or_else(|| info.payload().downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "<non-string panic payload>".to_owned());
+        log::error!("panic thread={name} at {location}: {payload}");
+        default_hook(info);
+    }));
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    install_panic_logger();
     let mut context = tauri::generate_context!();
-    // Development and packaged builds deliberately share the configured product identity and
-    // runtime state. The single-instance guard below prevents two backends from owning the same
-    // database or native resources concurrently.
-    context.config_mut().identifier = build_info::runtime_identifier().into();
-    startup_diagnostic(
-        "runtime-identity",
-        "configured product identity active; single-instance protection is enabled",
-    );
+    if cfg!(debug_assertions) {
+        // Tauri derives its Windows single-instance mutex, WebView2 profile and platform data
+        // directories from this identifier. Scoping it before Builder::build lets an installed
+        // release and `tauri dev` coexist without creating a second public product or build flavor.
+        context.config_mut().identifier = build_info::runtime_identifier().into();
+        startup_diagnostic(
+            "runtime-isolation",
+            "local development identity active; installed application resources are not shared",
+        );
+    } else {
+        startup_diagnostic(
+            "runtime-isolation",
+            "release identity active; production single-instance protection is enabled",
+        );
+    }
     let mut builder = tauri::Builder::default();
     // Single-instance guard MUST be the first registered plugin. A second PARALITH launch
     // hands its argv/cwd to the already-running instance (which just refocuses) and then exits,
@@ -277,17 +305,21 @@ pub fn run() {
                 ),
                 backup_base: &backup_base,
             };
-            let mut legacy_migration = database::legacy_migration::migrate_legacy_stable(
-                edition,
-                migration_roots,
-                env!("CARGO_PKG_VERSION"),
-            );
+            let mut legacy_migration = if cfg!(debug_assertions) {
+                database::legacy_migration::local_development_not_applicable(migration_roots)
+            } else {
+                database::legacy_migration::migrate_legacy_stable(
+                    edition,
+                    migration_roots,
+                    env!("CARGO_PKG_VERSION"),
+                )
+            };
             // Logging is initialized after the one-time profile migration so the new log file
             // cannot make the destination look non-empty or race legacy log preservation.
             if let Err(error) = app.handle().plugin(build_logger().build()) {
                 eprintln!("PARALITH: file logging unavailable: {error}");
             }
-            startup_diagnostic("persistence", "configured runtime directories resolved");
+            startup_diagnostic("persistence", "isolated runtime directories resolved");
             let database_path = data_dir.join(database::backup::DATABASE_FILENAME);
             let restored = database::backup::apply_staged_restore(&data_dir, &database_path)
                 .unwrap_or_else(|error| {
@@ -443,56 +475,7 @@ pub fn run() {
                 knowledge.clone(),
                 context.clone(),
             );
-            // The Run Engine owns a background scheduler thread of its own for the same reason
-            // the Swarm engine does: Runs must keep progressing regardless of which window or
-            // view is focused, and must survive the renderer entirely.
-            let runs = services::RunService::new(
-                database.clone(),
-                app.handle().clone(),
-                detector.clone(),
-                terminals.clone(),
-                repository.clone(),
-                context.clone(),
-                swarms.clone(),
-            );
-            // Mission Control sits above the Run Engine and shares its services. The planner
-            // reads the code graph, Memory, Git and the Context Fabric; it retrieves nothing of
-            // its own.
-            let missions = services::MissionService::new(
-                database.clone(),
-                app.handle().clone(),
-                runs.clone(),
-                swarms.clone(),
-                services::mission_planner::MissionPlanner::new(
-                    code.clone(),
-                    memory.clone(),
-                    repository.clone(),
-                    context.clone(),
-                ),
-            );
             if !recovery_mode {
-                // Reconcile before anything can observe stale rows: a Run that claimed a live
-                // provider process when the previous process died must be marked interrupted,
-                // never left displaying activity nothing is producing.
-                match runs.reconcile_after_restart() {
-                    Ok(0) => {}
-                    Ok(count) => {
-                        log::warn!("{count} Run(s) were interrupted by the previous shutdown")
-                    }
-                    Err(error) => {
-                        log::warn!("run reconciliation skipped: {}", error.message)
-                    }
-                }
-                // Strictly after the Run Engine: Mission Tasks derive their state from Run
-                // rows, so recovering Missions first would read a `running` Run that no process
-                // backs and conclude the Task was fine.
-                match missions.reconcile_after_restart() {
-                    Ok(0) => {}
-                    Ok(count) => log::warn!("{count} Mission(s) were reconciled after restart"),
-                    Err(error) => {
-                        log::warn!("mission reconciliation skipped: {}", error.message)
-                    }
-                }
                 match repository.recover_on_startup() {
                     Ok(interrupted) if !interrupted.is_empty() => log::warn!(
                         "{} interrupted repository operation(s) require recovery",
@@ -556,8 +539,6 @@ pub fn run() {
                 file_watch,
                 browser,
                 swarms,
-                runs,
-                missions,
                 windows,
                 orchestrator,
                 log_directory,
@@ -641,31 +622,6 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            commands::create_mission,
-            commands::update_mission_draft,
-            commands::prepare_mission,
-            commands::start_mission,
-            commands::cancel_mission,
-            commands::revise_mission_plan,
-            commands::accept_mission,
-            commands::retry_mission_task,
-            commands::start_mission_task,
-            commands::complete_manual_mission_task,
-            commands::waive_acceptance_criterion,
-            commands::list_missions,
-            commands::get_mission_detail,
-            commands::get_mission_activity,
-            commands::get_mission_plan_revisions,
-            commands::get_mission_runs,
-            commands::get_mission_task_outputs,
-            commands::create_run,
-            commands::cancel_run,
-            commands::retry_run,
-            commands::resolve_run_approval,
-            commands::list_runs,
-            commands::get_run_detail,
-            commands::run_inbox_summary,
-            commands::default_run_isolation,
             commands::open_project,
             commands::get_project,
             commands::list_recent_projects,
@@ -901,18 +857,15 @@ pub fn run() {
                     {
                         log::error!("install-on-exit failed: {error}");
                     }
-                    // Stop the Run scheduler before terminating processes so it cannot observe
-                    // a half-torn-down world and record a spurious failure on the way out.
-                    state.runs.shutdown();
-                    state.missions.shutdown();
+                    // Terminate interactive processes on the way out so no orphaned PTY or
+                    // child process survives the application after the exit is confirmed.
                     let _ = state.terminals.terminate_all_sessions();
                 }
             }
+
             RunEvent::Exit => {
                 startup_diagnostic("shutdown", "runtime exited");
                 if let Some(state) = app_handle.try_state::<AppState>() {
-                    state.runs.shutdown();
-                    state.missions.shutdown();
                     let _ = state.terminals.terminate_all_sessions();
                 }
             }

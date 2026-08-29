@@ -94,17 +94,10 @@ export function SwarmsSidebarSection({
           ))}
         </ul>
       ) : list.length === 0 ? (
-        <div className="ws-empty">
-          <p>No Swarms yet for this Project.</p>
-          <button
-            type="button"
-            className="button button-secondary"
-            onClick={() => navigate(`/swarms/${projectId}?new=1`)}
-          >
-            <Plus size={14} />
-            Create a Swarm
-          </button>
-        </div>
+        // A capability with nothing running earns one line, not a block. The section header
+        // already carries the "+" that creates a Swarm, so repeating it as a full-width button
+        // under a paragraph only reserved sidebar height for a feature that is not in use.
+        <p className="sb-no-match">No active Swarms</p>
       ) : visible.length === 0 ? (
         <p className="sb-no-match">No Swarm matches the filter.</p>
       ) : (

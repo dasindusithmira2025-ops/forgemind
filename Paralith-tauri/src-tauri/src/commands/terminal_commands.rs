@@ -49,7 +49,7 @@ pub async fn create_terminal_session(
     Ok(session)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn write_terminal_input(
     session_id: String,
     data: Vec<u8>,
@@ -67,7 +67,7 @@ pub fn write_terminal_input(
     state.terminals.write_input(&session_id, &data)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn resize_terminal_session(
     session_id: String,
     cols: u16,
@@ -115,7 +115,7 @@ pub async fn terminate_workspace_sessions(
     .map_err(blocking_task_error)?
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_live_sessions(
     workspace_id: Option<String>,
     window: Window,
@@ -137,7 +137,7 @@ pub fn list_live_sessions(
     Ok(state.terminals.list_live_sessions(workspace_id.as_deref()))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn subscribe_terminal_output(
     workspace_id: String,
     window: Window,
@@ -151,7 +151,7 @@ pub fn subscribe_terminal_output(
         .subscribe_output(window.label(), &workspace_id))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn unsubscribe_terminal_output(
     workspace_id: String,
     window: Window,
@@ -163,7 +163,7 @@ pub fn unsubscribe_terminal_output(
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn terminal_session_status(
     session_id: String,
     window: Window,
@@ -199,7 +199,7 @@ pub async fn restore_workspace_sessions(
     .map_err(blocking_task_error)?
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn reset_restoration_circuit(
     workspace_id: String,
     pane_id: String,

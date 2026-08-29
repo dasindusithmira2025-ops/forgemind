@@ -288,12 +288,34 @@ export function TerminalPane({ assignment, session, deferred = false, active, ma
     return registerTerminalDropTarget(assignment.id, { element, getSessionId: () => sessionRef.current })
   }, [assignment.id])
 
+  // Progressive disclosure: the resting header carries only what identifies the pane. Everything
+  // technical — the working directory, the process, why an agent is waiting — is one hover away.
+  // It is a CSS-only reveal so hovering a header never rerenders a pane or its terminal.
+  const stateLabel = agentState ? agentStateLabel(agentState.state) : sessionStateLabel(currentSession, deferred)
+  const stateKey = agentState?.state ?? currentSession?.status ?? 'loading'
+
   return <article ref={paneRef} className={`terminal-pane ${active ? 'active' : ''} ${maximized ? 'maximized' : ''} ${bell ? 'bell' : ''} ${agentState ? `agent-${agentState.state}` : ''}`} onMouseDown={onFocus} data-pane-id={assignment.id}>
     <header className={`terminal-header ${onHeaderPointerDown ? 'draggable' : ''}`} onPointerDown={onHeaderPointerDown}>
-      <span className={`terminal-status status-${agentState?.state ?? currentSession?.status ?? 'loading'}`} aria-label={agentState ? agentStateLabel(agentState.state) : currentSession?.status ?? 'starting'} title={agentState?.reason} />
-      <div className="terminal-title"><strong>{assignment.title}</strong><span>{providerLabel(assignment.provider)}{agentState ? ` · ${agentStateLabel(agentState.state)}` : ''}</span></div>
-      <span className="terminal-path" title={assignment.workingDirectory}>{assignment.workingDirectory}</span>
+      <span className={`terminal-status status-${stateKey}`} aria-label={stateLabel} title={agentState?.reason} />
+      <div className="terminal-title">
+        <strong title={assignment.title}>{assignment.title}</strong>
+        <span className="terminal-context">
+          {/* Provider is wrapped so a narrow pane can drop it and keep the state word, which is
+              the half of this line that changes and the half worth the pixels. */}
+          <span className="terminal-provider">{providerLabel(assignment.provider)}<i aria-hidden>·</i></span>
+          <em className={`terminal-state-word state-${stateKey}`}>{stateLabel}</em>
+        </span>
+      </div>
       {agentState?.attentionSince && <span className="agent-attention-badge" title={`${agentState.source}: ${agentState.reason}`}>Needs review</span>}
+      <div className="terminal-inspect" role="note" aria-hidden>
+        <dl>
+          <dt>Directory</dt><dd className="mono">{assignment.workingDirectory}</dd>
+          <dt>Provider</dt><dd>{providerLabel(assignment.provider)}</dd>
+          <dt>State</dt><dd>{stateLabel}{agentState?.reason ? ` — ${agentState.reason}` : ''}</dd>
+          {currentSession?.processId !== undefined && <><dt>Process</dt><dd className="mono">PID {currentSession.processId}</dd></>}
+          {currentSession?.startedAt && <><dt>Started</dt><dd>{formatStarted(currentSession.startedAt)}</dd></>}
+        </dl>
+      </div>
       <div className="terminal-controls">
         <Button variant="ghost" icon={<Search size={14} />} aria-label="Search terminal" onClick={() => setSearchOpen(true)} />
         <Button variant="ghost" icon={maximized ? <Minimize2 size={14} /> : <Maximize2 size={14} />} aria-label={maximized ? 'Restore pane' : 'Maximize pane'} onClick={onMaximize} />
@@ -307,6 +329,24 @@ export function TerminalPane({ assignment, session, deferred = false, active, ma
     {!currentSession && deferred && <div className="terminal-recovery"><strong>Terminal paused to reduce resource usage</strong><span>Its place in the saved layout is kept. Resume it whenever you need it.</span><button onMouseDown={(event) => event.stopPropagation()} onClick={onRestart}><RotateCw size={12} />Resume terminal</button></div>}
     {currentSession && currentSession.status !== 'running' && <div className="terminal-recovery"><strong>{terminalStateTitle(currentSession)}</strong><span>{terminalStateDetail(currentSession)}</span><button onMouseDown={(event) => event.stopPropagation()} onClick={onRestart}><RotateCw size={12} />Open fresh session</button></div>}
   </article>
+}
+
+/** The label shown when no agent runtime state exists — the process is all we honestly know. */
+function sessionStateLabel(session: TerminalSession | undefined, deferred: boolean) {
+  if (deferred) return 'Paused'
+  if (!session) return 'Starting'
+  if (session.status === 'running') return 'Running'
+  return session.status[0].toUpperCase() + session.status.slice(1)
+}
+
+/** Elapsed session time, coarse on purpose: a pane header is not a stopwatch. */
+function formatStarted(startedAt: string) {
+  const started = Date.parse(startedAt)
+  if (!Number.isFinite(started)) return startedAt
+  const minutes = Math.max(0, Math.round((Date.now() - started) / 60_000))
+  if (minutes < 1) return 'Just now'
+  if (minutes < 60) return `${minutes}m ago`
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m ago`
 }
 
 function agentStateLabel(state: AgentActivityState) {

@@ -138,7 +138,7 @@ pub(crate) fn build_runtime_health(state: &AppState) -> AppResult<RuntimeHealthS
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_runtime_health(
     window: Window,
     state: State<'_, AppState>,
@@ -194,7 +194,7 @@ fn build_readiness(
             Some("Check the Windows profile permissions for the PARALITH app-data directory."),
         ),
     });
-    let expected_identifier = &update.build.app_identifier;
+    let expected_identifier = crate::build_info::runtime_identifier();
     let actual_identifier = state
         .app_data_directory
         .file_name()

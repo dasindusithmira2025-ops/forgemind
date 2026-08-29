@@ -175,7 +175,7 @@ pub async fn execute_repository_operation(
     Ok(record)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn cancel_repository_operation(
     project_id: String,
     operation_id: String,
@@ -186,7 +186,7 @@ pub fn cancel_repository_operation(
     state.repository.cancel(&project_id, &operation_id)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_repository_operation(
     project_id: String,
     operation_id: String,
@@ -206,7 +206,7 @@ pub fn get_repository_operation(
     Ok(operation)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_repository_policy(
     project_id: String,
     window: Window,
@@ -222,7 +222,7 @@ pub fn get_repository_policy(
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn save_repository_policy(
     configuration: RepositoryPolicyConfiguration,
     human_id: String,
@@ -240,7 +240,7 @@ pub fn save_repository_policy(
     Ok(configuration)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_repository_approvals(
     project_id: String,
     pending_only: bool,
@@ -289,7 +289,7 @@ pub async fn decide_repository_approval(
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_repository_worktree_leases(
     project_id: String,
     window: Window,
