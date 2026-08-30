@@ -7,6 +7,7 @@ import { useRepositoryStore } from '../../repository/repositoryStore'
 import { ChangesSection } from '../../repository/components/ChangesSection'
 import { PullRequestsSection } from '../../repository/components/PullRequestsSection'
 import { AgentActionDialog, type AgentActionRequest } from '../../repository/components/AgentActionDialog'
+import { HistorySection } from '../../repository/components/HistorySection'
 
 /**
  * Workspace-scoped Source Control. The persisted surface kind is still `diff` for compatibility,
@@ -17,12 +18,13 @@ export function DiffSurface({ projectId, projectRootPath, workspaceId }: { proje
   const loadProject = useRepositoryStore((state) => state.loadProject)
   const activeProjectId = useRepositoryStore((state) => state.projectId)
   const activeWorktreePath = useRepositoryStore((state) => state.worktreePath)
+  const loadHistory = useRepositoryStore((state) => state.loadHistory)
   const load = useRepositoryStore((state) => state.load)
   const [workspace, setWorkspace] = useState<Workspace>()
   const [workspaceError, setWorkspaceError] = useState('')
   const [agentRequest, setAgentRequest] = useState<AgentActionRequest>()
   const [agents, setAgents] = useState<AgentProfile[]>([])
-  const [view, setView] = useState<'changes' | 'review'>('changes')
+  const [view, setView] = useState<'changes' | 'graph' | 'review'>('changes')
 
   useEffect(() => {
     let live = true
@@ -44,6 +46,10 @@ export function DiffSurface({ projectId, projectRootPath, workspaceId }: { proje
     void loadProject(projectId, { repositoryPath: projectRootPath, worktreePath })
   }, [projectId, projectRootPath, worktreePath, loadProject])
 
+  useEffect(() => {
+    if (view === 'graph') void loadHistory()
+  }, [view, loadHistory])
+
   if (workspaceError) {
     return <div className="surface-status"><ErrorNotice message={workspaceError} /></div>
   }
@@ -58,11 +64,12 @@ export function DiffSurface({ projectId, projectRootPath, workspaceId }: { proje
     <div className="diff-surface">
       <div className="source-control-tabs" role="tablist" aria-label="Source Control views">
         <button type="button" role="tab" aria-selected={view === 'changes'} className={view === 'changes' ? 'active' : ''} onClick={() => setView('changes')}>Changes</button>
+        <button type="button" role="tab" aria-selected={view === 'graph'} className={view === 'graph' ? 'active' : ''} onClick={() => setView('graph')}>Graph</button>
         <button type="button" role="tab" aria-selected={view === 'review'} className={view === 'review' ? 'active' : ''} onClick={() => setView('review')}>Review</button>
       </div>
-      {view === 'changes'
-        ? <ChangesSection onNavigate={(section) => { if (section === 'pull-requests') setView('review') }} onRequestAgentWorktree={setAgentRequest} />
-        : <PullRequestsSection onRequestAgentWorktree={setAgentRequest} />}
+      {view === 'changes' && <ChangesSection onNavigate={(section) => { if (section === 'pull-requests') setView('review') }} onRequestAgentWorktree={setAgentRequest} />}
+      {view === 'graph' && <HistorySection />}
+      {view === 'review' && <PullRequestsSection onRequestAgentWorktree={setAgentRequest} />}
       {agentRequest && (
         <AgentActionDialog
           request={agentRequest}
