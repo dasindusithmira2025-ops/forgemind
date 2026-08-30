@@ -328,6 +328,45 @@ const memoryDetail = {
   filePath: '.paralith/memory/adr-14-token-rotation.md',
 }
 
+/** Explorer + editor fixtures. Deliberately dot-folder heavy: the system-folder pile-up at the top
+ * of the tree is exactly the hierarchy problem the Files surface has to solve. */
+function fileEntry(name: string, kind: 'file' | 'directory', extra: Record<string, unknown> = {}) {
+  return { name, relativePath: name, kind, size: 2048, modifiedMs: 1_760_000_000_000, isSymlink: false, symlinkBroken: false, isHidden: false, readonly: false, ...extra }
+}
+
+const projectListing = {
+  projectId: project.id,
+  relativePath: '',
+  truncated: false,
+  totalEntries: 12,
+  entries: [
+    fileEntry('.agents', 'directory'),
+    fileEntry('.claude', 'directory'),
+    fileEntry('.git', 'directory', { isHidden: true }),
+    fileEntry('.github', 'directory'),
+    fileEntry('.paralith', 'directory'),
+    fileEntry('src', 'directory'),
+    fileEntry('src-tauri', 'directory'),
+    fileEntry('scripts', 'directory'),
+    fileEntry('CLAUDE.md', 'file'),
+    fileEntry('package.json', 'file'),
+    fileEntry('vite.config.ts', 'file'),
+    fileEntry('tsconfig.app.json', 'file', { readonly: true }),
+  ],
+}
+
+const projectFile = {
+  projectId: project.id,
+  relativePath: 'package.json',
+  content: JSON.stringify({ name: 'paralith', version: '0.4.17' }, null, 2),
+  sha256: 'f1e2d3',
+  size: 52,
+  encoding: 'utf8',
+  lineEnding: 'lf',
+  binary: false,
+  readonly: false,
+}
+
 export const FIXTURES: Record<string, unknown> = {
   get_startup_status: { recoveryMode: false },
   get_settings: settings,
@@ -378,6 +417,11 @@ export const FIXTURES: Record<string, unknown> = {
     { providerId: 'claude', providerDisplayName: 'Claude', modelId: 'sonnet-5', displayName: 'Sonnet 5', description: 'Fast implementation and review.', available: true, deprecated: false, coding: true, planning: true, review: true, toolUse: true, vision: true, supportedReasoningEfforts: ['low', 'medium', 'high'], supportedExecutionModes: ['ask', 'trusted'], recommendedRoles: ['builder'], authenticated: true },
     { providerId: 'codex', providerDisplayName: 'Codex', modelId: 'gpt-5.6', displayName: 'GPT 5.6', description: 'Focused implementation and verification.', available: true, deprecated: false, coding: true, planning: false, review: true, toolUse: true, vision: false, supportedReasoningEfforts: ['low', 'medium', 'high'], supportedExecutionModes: ['ask', 'restricted'], recommendedRoles: ['builder', 'debugger'], authenticated: true },
   ],
+  list_project_directory: projectListing,
+  read_project_file: projectFile,
+  search_project_files: { projectId: project.id, files: ['src/App.tsx', 'src/index.css', 'src-tauri/src/main.rs', 'package.json'], truncated: false },
+  watch_project_files: null,
+  unwatch_project_files: null,
   inspect_repository: repositorySnapshot,
   list_repository_branches: [
     { name: 'feat/database-studio', isCurrent: true, isRemote: false, ahead: 3, behind: 0, upstream: 'origin/feat/database-studio', lastCommitAt: NOW, lastCommitSummary: 'feat(dbstudio): professional Database Studio UI' },

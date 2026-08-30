@@ -45,6 +45,8 @@ export interface CodeSurfaceState {
   tabs: EditorTab[]
   activePath?: string
   expanded: string[]
+  /** Most-recently opened file paths, newest first. Drives the editor's empty state. */
+  recent: string[]
   explorerWidth: number
   quickOpen: boolean
   comparing?: string
@@ -74,9 +76,15 @@ export interface CodeSurfaceState {
 
 const MIN_EXPLORER = 180
 const MAX_EXPLORER = 560
+const MAX_RECENT = 8
 
 export function isDirty(tab: EditorTab): boolean {
   return tab.status === 'ready' && !tab.binary && !tab.readonly && tab.content !== tab.baseContent
+}
+
+/** Newest-first, de-duplicated, capped. Pure so the empty state's ordering is testable. */
+export function noteRecent(recent: string[], path: string): string[] {
+  return [path, ...recent.filter((item) => item !== path)].slice(0, MAX_RECENT)
 }
 
 export function baseName(path: string): string {
@@ -97,6 +105,7 @@ interface PersistedUi {
   openPaths: string[]
   activePath?: string
   expanded: string[]
+  recent?: string[]
   explorerWidth: number
 }
 
@@ -122,6 +131,7 @@ function savePersisted(state: CodeSurfaceState): void {
       openPaths: state.tabs.map((tab) => tab.path),
       activePath: state.activePath,
       expanded: state.expanded,
+      recent: state.recent,
       explorerWidth: state.explorerWidth,
     }
     localStorage.setItem(persistKey(state.workspaceId), JSON.stringify(ui))
@@ -146,6 +156,7 @@ export const useEditorStore = create<CodeSurfaceState>((set, get) => {
     tabs: [],
     activePath: undefined,
     expanded: [],
+    recent: [],
     explorerWidth: 260,
     quickOpen: false,
     comparing: undefined,
@@ -159,6 +170,7 @@ export const useEditorStore = create<CodeSurfaceState>((set, get) => {
         tabs: [],
         activePath: undefined,
         expanded: persisted?.expanded ?? [],
+        recent: persisted?.recent ?? [],
         explorerWidth: clampExplorer(persisted?.explorerWidth ?? 260),
         quickOpen: false,
         comparing: undefined,
@@ -181,7 +193,7 @@ export const useEditorStore = create<CodeSurfaceState>((set, get) => {
       const { projectId } = get()
       const existing = get().tabs.find((tab) => tab.path === path)
       if (existing) {
-        set({ activePath: path })
+        set((state) => ({ activePath: path, recent: noteRecent(state.recent, path) }))
         if (!options?.preview && existing.preview) patchTab(path, { preview: false })
         afterMutation()
         return
@@ -206,7 +218,7 @@ export const useEditorStore = create<CodeSurfaceState>((set, get) => {
           saving: false,
           preview,
         }
-        return { tabs: [...withoutStalePreview, loadingTab], activePath: path }
+        return { tabs: [...withoutStalePreview, loadingTab], activePath: path, recent: noteRecent(state.recent, path) }
       })
       try {
         const file = await native.readProjectFile(projectId, path)

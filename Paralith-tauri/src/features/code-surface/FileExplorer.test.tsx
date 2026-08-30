@@ -85,6 +85,26 @@ describe('FileExplorer', () => {
     expect(revealItemInDir).toHaveBeenCalledWith('/proj/src')
   })
 
+  it('groups dot/system entries behind one disclosure row without removing access to them', async () => {
+    listProjectDirectory.mockResolvedValueOnce(listing('', [
+      entry({ name: '.git', relativePath: '.git', kind: 'directory' }),
+      entry({ name: '.github', relativePath: '.github', kind: 'directory' }),
+      entry({ name: 'src', relativePath: 'src', kind: 'directory' }),
+    ]))
+    render(<FileExplorer projectId="p1" projectRootPath="/proj" onOpenFile={vi.fn()} onDeletedPath={vi.fn()} />)
+
+    // Dot folders no longer dominate the top of the tree...
+    expect(await screen.findByText('src')).toBeInTheDocument()
+    expect(screen.queryByText('.git')).not.toBeInTheDocument()
+
+    // ...but they are one click away, never removed.
+    const toggle = screen.getByText('2 hidden items')
+    expect(toggle.closest('button')).toHaveAttribute('aria-expanded', 'false')
+    fireEvent.click(toggle)
+    expect(screen.getByText('.git')).toBeInTheDocument()
+    expect(screen.getByText('.github')).toBeInTheDocument()
+  })
+
   it('surfaces a reveal failure instead of silently doing nothing', async () => {
     vi.mocked(revealItemInDir).mockRejectedValueOnce({ message: 'path does not exist' })
     listProjectDirectory.mockResolvedValueOnce(listing('', [entry({ name: 'a.ts', relativePath: 'a.ts', kind: 'file' })]))

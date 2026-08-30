@@ -16,7 +16,7 @@ vi.mock('../../native/commands', () => ({
   },
 }))
 
-const { useEditorStore, isDirty, nextActivePath, baseName } = await import('./editorStore')
+const { useEditorStore, isDirty, nextActivePath, baseName, noteRecent } = await import('./editorStore')
 
 function fileContents(overrides: Partial<FileContents>): FileContents {
   return {
@@ -219,5 +219,14 @@ describe('pure helpers', () => {
   it('baseName extracts the file name', () => {
     expect(baseName('src/deep/file.ts')).toBe('file.ts')
     expect(baseName('root.md')).toBe('root.md')
+  })
+
+  it('noteRecent keeps the newest first, de-duplicated and capped', () => {
+    expect(noteRecent(['b.ts', 'c.ts'], 'a.ts')).toEqual(['a.ts', 'b.ts', 'c.ts'])
+    // Reopening an already-recent file moves it to the front rather than duplicating it.
+    expect(noteRecent(['a.ts', 'b.ts'], 'b.ts')).toEqual(['b.ts', 'a.ts'])
+    const many = Array.from({ length: 12 }, (_, index) => `f${index}.ts`)
+    expect(noteRecent(many, 'new.ts')).toHaveLength(8)
+    expect(noteRecent(many, 'new.ts')[0]).toBe('new.ts')
   })
 })

@@ -12,22 +12,27 @@
 }
 
 /* --- Navigation bar ------------------------------------------------------------------------ */
+/* Browser chrome is exactly one pane header tall, matching the Files header and a terminal pane
+ * header, so three surfaces side by side line up on the same baseline. Everything past the four
+ * controls a developer actually reaches for - back, forward, reload, location - lives in the
+ * overflow rather than adding a second row of permanent icons. */
 .browser-navbar {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-2) var(--space-2);
+  height: var(--pane-header-height);
+  padding: 0 var(--space-1) 0 var(--space-2);
   background: var(--surface);
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--border-subtle);
 }
-.browser-nav-group { display: inline-flex; align-items: center; gap: 2px; }
+.browser-nav-group { display: inline-flex; align-items: center; gap: 1px; }
 .browser-navbar button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: var(--icon-btn);
-  height: var(--icon-btn);
+  width: var(--control-h-sm);
+  height: var(--control-h-sm);
   color: var(--muted);
   background: transparent;
   border: 0;
@@ -41,15 +46,8 @@
 .browser-stop { color: var(--danger, var(--text)) !important; }
 
 .browser-inspect.is-active { color: var(--text-strong); background: var(--accent-soft, var(--surface-hover)); }
-.browser-inspect.is-active::after {
-  content: '';
-  position: absolute;
-  margin-top: 22px;
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--accent-edge);
-}
+.browser-nav-menu { width: 214px; }
+.browser-nav-menu button:disabled { color: var(--disabled); cursor: default; }
 
 /* --- Address bar ---------------------------------------------------------------------------- */
 .browser-address {
@@ -58,15 +56,16 @@
   display: flex;
   align-items: center;
   gap: var(--space-1);
-  height: var(--icon-btn);
+  height: var(--control-h-xs);
   padding: 0 var(--space-1) 0 var(--space-2);
-  background: var(--bg);
+  background: var(--bg-input);
   border: 1px solid var(--border);
-  border-radius: var(--radius-md, var(--radius-sm));
+  border-radius: var(--radius-sm);
 }
-.browser-address:focus-within { border-color: var(--accent); }
+.browser-address:hover { border-color: var(--border-hover); }
+.browser-address:focus-within { border-color: var(--border-strong); }
 .browser-address.is-secure { border-color: var(--border); }
-.browser-lock { font-size: var(--font-xs); color: var(--success, var(--muted)); }
+.browser-lock { flex: 0 0 auto; color: var(--success); }
 .browser-address input {
   flex: 1 1 auto;
   min-width: 0;
@@ -75,11 +74,11 @@
   background: transparent;
   border: 0;
   outline: none;
-  font-size: var(--font-sm);
+  font-size: var(--font-xs);
   font-family: var(--font-mono, monospace);
 }
 .browser-address input::placeholder { color: var(--faint); }
-.browser-address-menu { width: var(--control-h-xs) !important; height: var(--control-h-xs) !important; }
+.browser-address-menu { width: 20px !important; height: 20px !important; }
 .browser-loading-dot {
   flex: 0 0 auto;
   width: 12px;
@@ -92,11 +91,13 @@
 @keyframes browser-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .browser-loading-dot { animation: none; } }
 
-.browser-zoom { display: inline-flex; align-items: center; }
+/* Only shown while zoom is off 100%, so it reports a real deviation instead of sitting there as
+ * permanent low-value metadata. */
 .browser-zoom-level {
   width: auto !important;
   min-width: 38px;
-  font-size: var(--font-xs);
+  padding: 0 var(--space-1);
+  font-size: var(--font-2xs);
   color: var(--muted);
 }
 
@@ -158,8 +159,7 @@
   .browser-viewport-status-spinner { animation: none; }
 }
 
-.browser-unsupported,
-.browser-start {
+.browser-unsupported {
   position: absolute;
   inset: 0;
   display: flex;
@@ -171,8 +171,19 @@
   text-align: center;
   color: var(--muted);
 }
-.browser-start h3 { color: var(--text-strong); font-size: var(--font-md); }
-.browser-start p { max-width: 42ch; font-size: var(--font-sm); }
+.browser-start {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-5);
+  overflow: auto;
+  color: var(--muted);
+}
+.browser-start h3 { color: var(--text); font-size: var(--font-sm); font-weight: 650; }
+.browser-start p { max-width: 52ch; font-size: var(--font-xs); color: var(--faint); line-height: var(--lh-body); }
 .browser-start-ports,
 .browser-quickopen-ports {
   display: grid;

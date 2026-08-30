@@ -5,6 +5,8 @@ import {
   Ban,
   Copy,
   ExternalLink,
+  Lock,
+  MoreHorizontal,
   MousePointerSquareDashed,
   RotateCw,
   Search,
@@ -76,6 +78,7 @@ export function BrowserSurface({ active, context, onSendToAgent }: BrowserSurfac
   const boundsFrame = useRef(0)
   const browserOperations = useRef<Promise<void>>(Promise.resolve())
   const [quickOpen, setQuickOpen] = useState(false)
+  const [navMenu, setNavMenu] = useState(false)
 
   const url = currentEntry(store.history)
   // The native webview is composited above all HTML, so an open overlay (usage roster, dialog…) can
@@ -317,7 +320,7 @@ export function BrowserSurface({ active, context, onSendToAgent }: BrowserSurfac
           className={`browser-address ${store.secure ? 'is-secure' : ''}`}
           onSubmit={(event) => { event.preventDefault(); go(store.input) }}
         >
-          {store.secure ? <span className="browser-lock" title="Secure connection">🔒</span> : null}
+          {store.secure ? <Lock className="browser-lock" size={12} aria-label="Secure connection" /> : null}
           <input
             ref={addressRef}
             type="text"
@@ -336,6 +339,11 @@ export function BrowserSurface({ active, context, onSendToAgent }: BrowserSurfac
         </form>
 
         <div className="browser-nav-group">
+          {/* Zoom only earns permanent chrome once it is off 100% — otherwise it reads as a
+            * silent claim that something is wrong with the page scale. */}
+          {store.zoom !== 1 && (
+            <button type="button" className="browser-zoom-level" title="Reset zoom (Ctrl+0)" aria-label="Reset zoom" onClick={() => applyZoom(store.resetZoom())}>{Math.round(store.zoom * 100)}%</button>
+          )}
           <button
             type="button"
             className={`browser-inspect ${store.inspecting ? 'is-active' : ''}`}
@@ -345,11 +353,33 @@ export function BrowserSurface({ active, context, onSendToAgent }: BrowserSurfac
             disabled={!canInspect}
             onClick={toggleInspect}
           ><MousePointerSquareDashed size={15} /></button>
-          <button type="button" title="Open in system browser" aria-label="Open externally" disabled={!url} onClick={() => url && void openUrl(displayUrl(url)).catch(() => undefined)}><ExternalLink size={15} /></button>
-          <div className="browser-zoom" role="group" aria-label="Zoom">
-            <button type="button" title="Zoom out (Ctrl+-)" aria-label="Zoom out" onClick={() => applyZoom(store.zoomOut())}><ZoomOut size={14} /></button>
-            <button type="button" className="browser-zoom-level" title="Reset zoom (Ctrl+0)" aria-label="Reset zoom" onClick={() => applyZoom(store.resetZoom())}>{Math.round(store.zoom * 100)}%</button>
-            <button type="button" title="Zoom in (Ctrl++)" aria-label="Zoom in" onClick={() => applyZoom(store.zoomIn())}><ZoomIn size={14} /></button>
+          <div className="menu-wrap">
+            <button
+              type="button"
+              title="More browser actions"
+              aria-label="More browser actions"
+              aria-haspopup="menu"
+              aria-expanded={navMenu}
+              onClick={() => setNavMenu((value) => !value)}
+            ><MoreHorizontal size={15} /></button>
+            {navMenu && (
+              <>
+                <button className="context-scrim" aria-label="Close menu" onClick={() => setNavMenu(false)} />
+                <div
+                  className="context-popover browser-nav-menu"
+                  role="menu"
+                  onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); setNavMenu(false) } }}
+                >
+                  <button role="menuitem" disabled={!url} onClick={() => { setNavMenu(false); if (url) void openUrl(displayUrl(url)).catch(() => undefined) }}>
+                    <ExternalLink size={14} aria-hidden />Open in system browser
+                  </button>
+                  <span className="menu-separator" />
+                  <button role="menuitem" onClick={() => applyZoom(useBrowserSessionStore.getState().zoomIn())}><ZoomIn size={14} aria-hidden />Zoom in</button>
+                  <button role="menuitem" onClick={() => applyZoom(useBrowserSessionStore.getState().zoomOut())}><ZoomOut size={14} aria-hidden />Zoom out</button>
+                  <button role="menuitem" onClick={() => applyZoom(useBrowserSessionStore.getState().resetZoom())}>Reset zoom · {Math.round(store.zoom * 100)}%</button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       </div>

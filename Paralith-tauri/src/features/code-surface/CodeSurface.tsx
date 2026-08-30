@@ -1,10 +1,10 @@
 import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react'
-import { AlertTriangle, FileX2, PanelLeft, Save, SaveAll } from 'lucide-react'
+import { AlertTriangle, FileX2, PanelLeft, Save, SaveAll, Search } from 'lucide-react'
 import './codeSurface.css'
 import { native } from '../../native/commands'
 import { onProjectFileChanged } from '../../native/events'
 import { ErrorNotice } from '../../components/ui/ErrorNotice'
-import { isDirty, useEditorStore } from './editorStore'
+import { baseName, isDirty, useEditorStore, type EditorTab } from './editorStore'
 import { parentDir, useExplorerStore } from './explorerStore'
 import { FileExplorer } from './FileExplorer'
 import { EditorTabs } from './EditorTabs'
@@ -38,6 +38,7 @@ export function CodeSurface({ projectId, projectRootPath, workspaceId, active }:
   const quickOpen = useEditorStore((state) => state.quickOpen)
   const comparing = useEditorStore((state) => state.comparing)
   const setComparing = useEditorStore((state) => state.setComparing)
+  const recent = useEditorStore((state) => state.recent)
   const explorerWidth = useEditorStore((state) => state.explorerWidth)
   const setExplorerWidth = useEditorStore((state) => state.setExplorerWidth)
   const [cursor, setCursor] = useState({ line: 1, column: 1 })
@@ -167,6 +168,10 @@ export function CodeSurface({ projectId, projectRootPath, workspaceId, active }:
       )}
 
       <div className="code-editor-pane">
+        {/* No open document means no document chrome: an empty 34px header holding two disabled
+          * icons is exactly the wasted surface this redesign is removing. The narrow layout keeps
+          * it, because that is where the explorer drawer toggle lives. */}
+        {(tabs.length > 0 || narrow) && (
         <div className="code-editor-header">
           {narrow && (
             <button
@@ -185,12 +190,13 @@ export function CodeSurface({ projectId, projectRootPath, workspaceId, active }:
             <button title="Save all (Ctrl+Shift+S)" aria-label="Save all files" disabled={!tabs.some(isDirty)} onClick={() => void saveAll()}><SaveAll size={14} /></button>
           </div>
         </div>
+        )}
 
-        {activeTab && <Breadcrumbs path={activeTab.path} />}
+        {activeTab && <FileBar tab={activeTab} cursor={cursor} />}
 
         <div className="code-editor-body">
           {!activeTab ? (
-            <EmptyEditor />
+            <EmptyEditor recent={recent} onOpen={(path) => void openFile(path)} onQuickOpen={() => setQuickOpen(true)} />
           ) : activeTab.status === 'loading' ? (
             <div className="code-editor-loading" aria-label="Opening file" />
           ) : activeTab.status === 'error' ? (
@@ -232,19 +238,6 @@ export function CodeSurface({ projectId, projectRootPath, workspaceId, active }:
           )}
         </div>
 
-        <div className="code-statusbar">
-          {activeTab && activeTab.status === 'ready' && !activeTab.binary && (
-            <>
-              <span>Ln {cursor.line}, Col {cursor.column}</span>
-              <span>{lineEndingLabel(activeTab.lineEnding)}</span>
-              <span>{encodingLabel(activeTab.encoding)}</span>
-              {activeTab.readonly && <span className="code-status-flag">Read-only</span>}
-              {isDirty(activeTab) && <span className="code-status-flag">Unsaved</span>}
-            </>
-          )}
-          <span className="code-status-spacer" />
-          <span>{tabs.filter(isDirty).length} unsaved</span>
-        </div>
       </div>
 
       {comparing && activeTab?.incoming && !activeTab.incoming.deleted && (
@@ -309,25 +302,59 @@ function ConflictBanner({ reason, deleted, onCompare, onReload, onKeep, onSave, 
   )
 }
 
-function Breadcrumbs({ path }: { path: string }) {
-  const segments = path.split('/')
+/** One thin row carrying the file's path and its buffer facts. This replaces the separate editor
+ * status bar: workspace-level state belongs in the app's global status bar, so a second permanent
+ * footer inside the surface was only costing vertical room. */
+function FileBar({ tab, cursor }: { tab: EditorTab; cursor: { line: number; column: number } }) {
+  const segments = tab.path.split('/')
+  const ready = tab.status === 'ready' && !tab.binary
   return (
-    <div className="code-breadcrumbs" aria-label="File path">
-      {segments.map((segment, index) => (
-        <span key={index}>
-          {segment}
-          {index < segments.length - 1 && <span className="code-breadcrumb-sep">›</span>}
-        </span>
-      ))}
+    <div className="code-filebar">
+      <div className="code-breadcrumbs" aria-label="File path" title={tab.path}>
+        {segments.map((segment, index) => (
+          <span key={index}>
+            {segment}
+            {index < segments.length - 1 && <span className="code-breadcrumb-sep">›</span>}
+          </span>
+        ))}
+      </div>
+      {ready && (
+        <div className="code-filebar-meta">
+          {isDirty(tab) && <span className="code-status-flag">Unsaved</span>}
+          {tab.readonly && <span className="code-status-flag">Read-only</span>}
+          <span>Ln {cursor.line}, Col {cursor.column}</span>
+          <span>{lineEndingLabel(tab.lineEnding)}</span>
+          <span>{encodingLabel(tab.encoding)}</span>
+        </div>
+      )}
     </div>
   )
 }
 
-function EmptyEditor() {
+/** Quiet but useful: the two ways in, plus the files this workspace actually touched. Deliberately
+ * not a welcome dashboard — the editor is a work surface, not a landing page. */
+function EmptyEditor({ recent, onOpen, onQuickOpen }: { recent: string[]; onOpen: (path: string) => void; onQuickOpen: () => void }) {
   return (
     <div className="code-editor-empty">
-      <h3>No file open</h3>
-      <p>Select a file in the Explorer, or press <kbd>Ctrl</kbd>+<kbd>P</kbd> to search files.</p>
+      <div className="code-empty-actions">
+        <span className="code-empty-hint">Select a file in the Explorer</span>
+        <button type="button" className="code-empty-quickopen" onClick={onQuickOpen}>
+          <Search size={13} aria-hidden />
+          Quick Open
+          <kbd>Ctrl</kbd><kbd>P</kbd>
+        </button>
+      </div>
+      {recent.length > 0 && (
+        <div className="code-empty-recent">
+          <span className="code-empty-label">Recently opened</span>
+          {recent.slice(0, 5).map((path) => (
+            <button key={path} type="button" title={path} onClick={() => onOpen(path)}>
+              <span className="code-empty-recent-name">{baseName(path)}</span>
+              <span className="code-empty-recent-path">{path}</span>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

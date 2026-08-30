@@ -71,7 +71,6 @@ export function SurfaceTabBar({ surfaces, activeSurface, onSelect, onClose, onRe
           )
         })}
       </div>
-      <span className="tool-panel-spacer" />
       <div className="surface-add-wrap menu-wrap">
         <button
           type="button"

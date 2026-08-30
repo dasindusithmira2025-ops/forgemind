@@ -35,8 +35,8 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-  background: var(--bg);
-  border-left: 1px solid var(--border);
+  background: var(--canvas);
+  border-left: 1px solid var(--border-faint);
 }
 .workspace-surface-host.is-panel-max .workspace-tool-panel {
   grid-column: 1;
@@ -55,20 +55,28 @@
   flex-direction: column;
 }
 
-/* Surface tab strip: tabs scroll horizontally rather than wrapping so it degrades gracefully on a
- * narrow panel, and the "+" button (outside the scroller) never gets pushed off-screen. */
+/* Surface switcher. A compact segmented control rather than a full-height tab rail: one small
+ * active chip beside a wide empty bar reads as unfinished, and a bright accent underline is not a
+ * navigation design. Active state is carried by the ladder (surface-4 chip + strong text), leaving
+ * the accent free for the things that actually mean "focused" or "needs you". Tabs scroll rather
+ * than wrap so a narrow panel degrades gracefully and never pushes the "+" off-screen. */
 .surface-tab-bar {
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width: 0;
   display: flex;
-  align-items: stretch;
+  align-items: center;
+  gap: 1px;
+  padding: 2px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
 }
 .surface-tabs {
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width: 0;
   display: flex;
-  align-items: stretch;
-  gap: 2px;
+  align-items: center;
+  gap: 1px;
   overflow-x: auto;
   scrollbar-width: none;
 }
@@ -77,32 +85,33 @@
   position: relative;
   display: inline-flex;
   align-items: center;
-  gap: var(--space-2);
-  padding: 0 var(--space-2) 0 var(--space-3);
-  height: var(--pane-header-height);
+  gap: 6px;
+  height: var(--control-h-xs);
+  padding: 0 var(--space-1) 0 var(--space-2);
   color: var(--muted);
   background: transparent;
   border: 0;
-  border-bottom: 2px solid transparent;
+  border-radius: var(--radius-sm);
   font-size: var(--font-xs);
+  font-weight: 550;
   white-space: nowrap;
   cursor: pointer;
   transition: color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out);
 }
-.surface-tab:hover { color: var(--text); background: var(--surface-hover); }
-.surface-tab.is-active { color: var(--text-strong); border-bottom-color: var(--accent-edge); }
+.surface-tab:hover { color: var(--text); background: var(--surface-3); }
+.surface-tab.is-active { color: var(--text-strong); background: var(--surface-4); }
 .surface-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .surface-tab-label { pointer-events: none; }
 .surface-tab-close {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   color: var(--faint);
   background: transparent;
   border: 0;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-xs);
   opacity: 0;
   cursor: pointer;
 }
@@ -116,8 +125,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: var(--icon-btn);
-  height: var(--icon-btn);
+  width: var(--control-h-xs);
+  height: var(--control-h-xs);
   color: var(--muted);
   background: transparent;
   border: 0;
@@ -126,10 +135,8 @@
 }
 .surface-add-btn:hover { color: var(--text); background: var(--surface-hover); }
 .surface-add-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.surface-picker { width: 180px; left: 0; right: auto; }
+.surface-picker { width: 180px; left: 0; right: auto; top: calc(var(--control-h-xs) + 8px); }
 .surface-picker-empty { display: block; padding: 0 9px; min-height: var(--control-h); display: flex; align-items: center; color: var(--faint); font-size: var(--font-sm); }
-
-.tool-panel-spacer { flex: 0 0 auto; }
 
 /* Empty-state chooser, shown when the panel has zero open surfaces. */
 .surface-empty-state {
@@ -138,13 +145,13 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: var(--space-5);
-  padding: var(--space-6);
+  gap: var(--space-4);
+  padding: var(--space-5);
   width: 100%;
 }
 .surface-empty-heading { text-align: center; }
-.surface-empty-heading h2 { font-size: var(--font-md); font-weight: 650; color: var(--text-strong); }
-.surface-empty-heading p { margin-top: 4px; font-size: var(--font-sm); color: var(--muted); }
+.surface-empty-heading h2 { font-size: var(--font-sm); font-weight: 650; color: var(--text); }
+.surface-empty-heading p { margin-top: 3px; font-size: var(--font-xs); color: var(--faint); }
 .surface-empty-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(140px, 180px));
@@ -233,9 +240,16 @@
   align-items: center;
   gap: var(--space-2);
   height: var(--pane-header-height);
-  padding: 0 4px 0 var(--space-3);
+  padding: 0 4px 0 var(--space-2);
   background: var(--surface);
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--border-subtle);
+  transition: background var(--dur-fast) var(--ease-out);
+}
+/* The state edge, identical to `.terminal-pane.active > .terminal-header`: whichever work surface
+ * holds focus — terminal, Files or Browser — is marked the same way. */
+.workspace-tool-panel:focus-within .tool-panel-header {
+  background: var(--surface-3);
+  box-shadow: inset 2px 0 0 var(--accent-edge);
 }
 .tool-panel-title {
   flex: 1 1 auto;
@@ -248,7 +262,7 @@
   letter-spacing: .06em;
   color: var(--faint);
 }
-.tool-panel-actions { display: inline-flex; align-items: center; gap: 2px; }
+.tool-panel-actions { margin-left: auto; display: inline-flex; align-items: center; gap: 2px; }
 .tool-panel-actions button {
   display: inline-flex;
   align-items: center;
