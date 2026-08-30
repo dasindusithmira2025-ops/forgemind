@@ -74,8 +74,8 @@ export function HistorySection() {
             <input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search subject or SHA"
-              aria-label="Search commits"
+              placeholder="Filter by commit subject"
+              aria-label="Filter commits by subject"
               spellCheck={false}
             />
             {search && (
