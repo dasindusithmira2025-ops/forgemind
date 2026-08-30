@@ -6,7 +6,7 @@ use tauri::{Emitter, State};
 /// Historical token consumption for the Usage analytics surface. This is deliberately a different
 /// command from `get_ai_usage_snapshots`: that one reports live subscription quota, this one
 /// reports observed tokens. Merging them would conflate a rate limit with a consumption total.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_ai_usage_history(
     state: State<'_, AppState>,
     days: u32,
@@ -14,7 +14,7 @@ pub fn get_ai_usage_history(
     state.usage.history(days)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_ai_usage_snapshots(state: State<'_, AppState>) -> Vec<ProviderUsageSnapshot> {
     state.usage.snapshots()
 }
@@ -41,7 +41,7 @@ pub async fn refresh_ai_usage(
     Ok(snapshots)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_ai_usage_diagnostics(state: State<'_, AppState>) -> Vec<AiUsageDiagnostics> {
     state.usage.diagnostics()
 }

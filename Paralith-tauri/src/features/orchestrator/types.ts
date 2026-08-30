@@ -50,7 +50,6 @@ export type CapabilityDomain =
   | 'git'
   | 'agents'
   | 'swarms'
-  | 'missions'
   | 'memory'
   | 'settings'
   | 'app'

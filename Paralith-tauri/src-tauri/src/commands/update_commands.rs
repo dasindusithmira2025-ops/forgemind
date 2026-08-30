@@ -9,13 +9,13 @@ use crate::{
 };
 use tauri::{AppHandle, Manager, State, Window};
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_update_status(window: Window, state: State<'_, AppState>) -> AppResult<UpdateStatus> {
     crate::require_main_window(&window)?;
     Ok(state.updates.status())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_startup_status(window: Window, state: State<'_, AppState>) -> AppResult<StartupStatus> {
     crate::require_main_window(&window)?;
     Ok(state.updates.startup_status())
@@ -41,7 +41,7 @@ pub async fn download_update(
     state.updates.download().await
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn assess_safe_restart(
     window: Window,
     state: State<'_, AppState>,
@@ -99,14 +99,14 @@ pub fn install_update_on_exit(
     Ok(state.updates.status())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn retry_update(window: Window, state: State<'_, AppState>) -> AppResult<UpdateStatus> {
     crate::require_main_window(&window)?;
     state.updates.retry()?;
     Ok(state.updates.status())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn confirm_healthy_startup(
     window: Window,
     state: State<'_, AppState>,
@@ -140,7 +140,7 @@ pub fn confirm_healthy_startup(
     Ok(state.updates.status())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn stage_database_backup_restore(
     window: Window,
     state: State<'_, AppState>,

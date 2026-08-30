@@ -196,21 +196,6 @@ impl TerminalManager {
         }
     }
 
-    /// Real persistence, no Tauri handle. Used by the real-provider canary, which drives the
-    /// production execution path (PTY ownership, session records, exit reaping) without a window.
-    /// Only frontend event emission is absent, and no engine decision depends on it.
-    #[cfg(test)]
-    pub(crate) fn headless(database: Arc<DatabaseService>) -> Self {
-        Self {
-            sessions: Arc::new(RwLock::new(HashMap::new())),
-            output_subscriptions: Arc::new(RwLock::new(HashMap::new())),
-            creating: Arc::new(Mutex::new(HashSet::new())),
-            database: Some(database),
-            app_handle: None,
-            counters: Arc::new(TerminalRuntimeCounters::default()),
-        }
-    }
-
     pub fn create_session(&self, mut request: CreateTerminalRequest) -> AppResult<TerminalSession> {
         prepare_exact_provider_identity(&mut request);
         let machine_protocol = is_machine_protocol_workspace(&request.workspace_id);
@@ -1122,9 +1107,15 @@ impl TerminalManager {
     }
 
     pub fn list_live_sessions(&self, workspace_id: Option<&str>) -> Vec<TerminalSession> {
-        self.sessions
-            .read()
-            .values()
+        // Snapshot the handles and release the map lock before touching any session. Cloning a
+        // 64 KiB `output_tail` per session under `sessions.read()` holds the map for as long as
+        // every copy takes, and `parking_lot`'s writer preference then parks the exit watcher's
+        // `sessions.write()` plus every reader queued behind it until this returns, so a single
+        // status poll stalls the whole terminal surface. The handles are `Arc`: this costs a
+        // refcount bump and moves the copying outside the lock.
+        let handles: Vec<Arc<TerminalHandle>> = self.sessions.read().values().cloned().collect();
+        handles
+            .into_iter()
             .filter_map(|handle| {
                 let mut metadata = handle.metadata.read().clone();
                 if workspace_id.is_some_and(|workspace_id| workspace_id != metadata.workspace_id) {

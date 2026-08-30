@@ -28,7 +28,7 @@ async fn run_blocking<T: Send + 'static>(
         })?
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_swarm_presets(
     window: Window,
     state: State<'_, AppState>,
@@ -75,7 +75,7 @@ pub async fn list_swarm_model_registry(
         })?
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_swarm_execution_defaults(
     project_id: String,
     swarm_id: String,
@@ -85,7 +85,7 @@ pub fn get_swarm_execution_defaults(
     crate::require_main_window(&window)?;
     state.swarms.execution_defaults(&project_id, &swarm_id)
 }
-#[tauri::command]
+#[tauri::command(async)]
 pub fn save_swarm_execution_defaults(
     project_id: String,
     swarm_id: String,
@@ -98,7 +98,7 @@ pub fn save_swarm_execution_defaults(
         .swarms
         .save_execution_defaults(&project_id, &swarm_id, &defaults)
 }
-#[tauri::command]
+#[tauri::command(async)]
 pub fn apply_swarm_execution_defaults(
     project_id: String,
     swarm_id: String,
@@ -111,7 +111,7 @@ pub fn apply_swarm_execution_defaults(
         .swarms
         .apply_execution_defaults(&project_id, &swarm_id, &member_ids)
 }
-#[tauri::command]
+#[tauri::command(async)]
 pub fn validate_swarm_member_model_config(
     project_id: String,
     swarm_id: String,
@@ -124,7 +124,7 @@ pub fn validate_swarm_member_model_config(
         .swarms
         .validate_member_model_config(&project_id, &swarm_id, &member_id)
 }
-#[tauri::command]
+#[tauri::command(async)]
 pub fn update_swarm_member_model_config(
     project_id: String,
     swarm_id: String,
@@ -159,7 +159,7 @@ pub async fn preview_swarm_launch(
         })?
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn save_swarm_preset(
     request: SavePresetRequest,
     window: Window,
@@ -169,7 +169,7 @@ pub fn save_swarm_preset(
     state.swarms.save_preset(&request)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn delete_swarm_preset(
     preset_id: String,
     window: Window,
@@ -179,7 +179,7 @@ pub fn delete_swarm_preset(
     state.swarms.delete_preset(&preset_id)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn create_swarm(
     request: CreateSwarmRequest,
     window: Window,
@@ -189,7 +189,7 @@ pub fn create_swarm(
     state.swarms.create_swarm(&request)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_swarms(
     project_id: String,
     include_archived: bool,
@@ -200,7 +200,7 @@ pub fn list_swarms(
     state.swarms.list_swarms(&project_id, include_archived)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_swarm_detail(
     project_id: String,
     swarm_id: String,
@@ -211,7 +211,7 @@ pub fn get_swarm_detail(
     state.swarms.get_detail(&project_id, &swarm_id)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn rename_swarm(
     project_id: String,
     swarm_id: String,
@@ -231,28 +231,10 @@ pub async fn start_swarm(
     state: State<'_, AppState>,
 ) -> AppResult<()> {
     crate::require_main_window(&window)?;
-    // A Swarm launch is now represented as a Run, so its status, cancellation and history share
-    // one model with every other execution in Paralith. The Swarm engine still owns everything
-    // below the launch — worker scheduling, the task graph, completion gates.
-    //
-    // The launch itself stays synchronous. `SwarmService::start_swarm` is where launch validation
-    // lives, and its typed refusals must reach the user on this call rather than appearing as a
-    // failed Run a scheduler tick later.
+    // The launch stays synchronous. `SwarmService::start_swarm` is where launch validation lives,
+    // and its typed refusals must reach the user on this call.
     let swarms = state.swarms.clone();
-    let runs = state.runs.clone();
-    run_blocking(move || {
-        let swarm = swarms.get_detail(&project_id, &swarm_id)?.swarm;
-        let run = runs.start_swarm(&project_id, &swarm_id, &swarm.mission, "user")?;
-        match swarms.start_swarm(&project_id, &swarm_id) {
-            Ok(()) => Ok(()),
-            Err(error) => {
-                // Do not leave a queued Run behind for a launch that was refused.
-                let _ = runs.abandon_launch(&run.id, &error);
-                Err(error)
-            }
-        }
-    })
-    .await
+    run_blocking(move || swarms.start_swarm(&project_id, &swarm_id)).await
 }
 
 #[tauri::command]
@@ -292,7 +274,7 @@ pub async fn stop_swarm(
     run_blocking(move || swarms.stop_swarm(&project_id, &swarm_id, hard)).await
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn archive_swarm(
     project_id: String,
     swarm_id: String,
@@ -329,7 +311,7 @@ pub async fn export_swarm_report(
     run_blocking(move || swarms.export_report(&project_id, &swarm_id, &destination)).await
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn set_swarm_priority(
     project_id: String,
     swarm_id: String,
@@ -406,7 +388,7 @@ pub async fn focus_swarm_agent_terminal(
     run_blocking(move || swarms.focus_agent_terminal(&project_id, &swarm_id, &agent_id)).await
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_swarm_command_draft(
     project_id: String,
     swarm_id: String,
@@ -417,7 +399,7 @@ pub fn get_swarm_command_draft(
     state.swarms.get_command_draft(&project_id, &swarm_id)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn save_swarm_command_draft(
     project_id: String,
     swarm_id: String,

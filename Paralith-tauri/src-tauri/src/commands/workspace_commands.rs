@@ -9,7 +9,7 @@ use crate::AppState;
 use std::path::Path;
 use tauri::{State, Window};
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_layout_preset(count: usize, variant: String) -> AppResult<LayoutNode> {
     if !matches!(
         (count, variant.as_str()),
@@ -48,7 +48,7 @@ mod tests {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn split_layout_pane(
     mut layout: LayoutNode,
     pane_id: String,
@@ -67,14 +67,14 @@ pub fn split_layout_pane(
     Ok(layout)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn remove_layout_pane(layout: LayoutNode, pane_id: String) -> AppResult<LayoutNode> {
     let layout = layout.remove_pane(&pane_id)?;
     layout.validate()?;
     Ok(layout)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn save_workspace(
     mut request: WorkspaceSaveRequest,
     window: Window,
@@ -106,7 +106,7 @@ pub fn save_workspace(
     state.database.save_workspace(&request)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_workspace(
     workspace_id: String,
     window: Window,
@@ -119,7 +119,7 @@ pub fn get_workspace(
 }
 
 /// Read the persisted docking-canvas layout (floating panes + metadata) and its revision.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_workspace_canvas_layout(
     workspace_id: String,
     window: Window,
@@ -133,7 +133,7 @@ pub fn get_workspace_canvas_layout(
 
 /// Persist a committed docking-canvas layout as one atomic, revision-checked operation. This is
 /// the only mutation the renderer uses for pane movement; pointer motion is never sent here.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn save_workspace_canvas_layout(
     request: SaveWorkspaceCanvasLayoutRequest,
     window: Window,
@@ -145,7 +145,7 @@ pub fn save_workspace_canvas_layout(
     state.database.save_workspace_canvas_layout(&request)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_workspaces_for_project(
     project_id: String,
     window: Window,
@@ -155,7 +155,7 @@ pub fn list_workspaces_for_project(
     state.database.list_workspaces_for_project(&project_id)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn suggest_workspace_name(
     project_id: String,
     window: Window,
@@ -165,7 +165,7 @@ pub fn suggest_workspace_name(
     state.database.suggest_workspace_name(&project_id)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_recent_workspaces(
     window: Window,
     state: State<'_, AppState>,
@@ -174,7 +174,7 @@ pub fn list_recent_workspaces(
     state.database.list_recent_workspaces()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn remove_recent_workspace(
     workspace_id: String,
     window: Window,
@@ -184,7 +184,7 @@ pub fn remove_recent_workspace(
     state.database.remove_from_recent(&workspace_id)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn delete_workspace_configuration(
     workspace_id: String,
     window: Window,
@@ -197,7 +197,7 @@ pub fn delete_workspace_configuration(
     state.database.delete_workspace_configuration(&workspace_id)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn rename_workspace(
     workspace_id: String,
     name: String,
@@ -210,7 +210,7 @@ pub fn rename_workspace(
 
 /// Persist a user-chosen sidebar order for one Project's Workspaces. `ordered_ids` must
 /// contain exactly that Project's visible Workspaces.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn reorder_workspaces(
     project_id: String,
     ordered_ids: Vec<String>,
@@ -223,7 +223,7 @@ pub fn reorder_workspaces(
 
 /// Copy a Workspace's saved layout and Pane configuration under a new id and unique name.
 /// No live Terminal Sessions are copied — the duplicate starts closed.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn duplicate_workspace(
     workspace_id: String,
     window: Window,
@@ -235,7 +235,7 @@ pub fn duplicate_workspace(
 
 /// Record a Workspace as its Project's most recently active, so a later Project switch can
 /// restore it. Does not launch or stop any Terminal Sessions.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn set_last_active_workspace(
     workspace_id: String,
     window: Window,

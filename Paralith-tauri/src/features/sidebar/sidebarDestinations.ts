@@ -4,14 +4,12 @@ import {
   ChartColumnBig,
   Database,
   GitBranch,
-  PlayCircle,
   Settings,
-  Target,
   type LucideIcon,
 } from 'lucide-react'
 import type { SidebarActions } from './sidebarTypes'
 
-export type DestinationId = 'source' | 'database' | 'missions' | 'runs' | 'memory' | 'usage'
+export type DestinationId = 'source' | 'database' | 'memory' | 'usage'
 
 export interface SidebarDestination {
   id: DestinationId | 'diagnostics' | 'settings'
@@ -42,8 +40,6 @@ export function sidebarDestinations(actions: SidebarActions): SidebarDestination
       run: actions.onOpenRepository,
     },
     { id: 'database', label: 'Database', hint: 'Inspect schema and query this project', Icon: Database, run: actions.onOpenDatabase },
-    { id: 'missions', label: 'Missions', hint: 'Plan and review Project work', Icon: Target, run: actions.onOpenMissions },
-    { id: 'runs', label: 'Runs', hint: 'Inspect durable agent execution', Icon: PlayCircle, run: actions.onOpenRuns },
     { id: 'memory', label: 'Memory', hint: 'Context Fabric — what this project knows', Icon: BrainCircuit, run: actions.onOpenMemory },
     { id: 'usage', label: 'Usage', hint: 'Provider token consumption on this machine', Icon: ChartColumnBig, run: actions.onOpenUsage },
   ])

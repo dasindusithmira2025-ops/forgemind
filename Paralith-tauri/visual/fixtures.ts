@@ -37,20 +37,57 @@ function pane(id: string, title: string, provider: string, order: number) {
   }
 }
 
-const panes = [
-  pane('pane-1', 'Architect', 'claude', 0),
-  pane('pane-2', 'Builder', 'codex', 1),
-  pane('pane-3', 'Reviewer', 'claude', 2),
-  pane('pane-4', 'Shell', 'powershell', 3),
+/** The roster the harness deals from. `?panes=N` takes the first N; N above the list repeats it. */
+const PANE_ROSTER: Array<[string, string]> = [
+  ['Architect', 'claude'],
+  ['Builder', 'codex'],
+  ['Reviewer', 'claude'],
+  ['Shell', 'powershell'],
+  ['Memory Backend', 'codex'],
+  ['Test Runner', 'powershell'],
+  ['Migration Agent', 'claude'],
+  ['Docs Sweep', 'codex'],
 ]
 
-const layout = {
-  type: 'split', direction: 'horizontal', sizes: [50, 50],
-  children: [
-    { type: 'split', direction: 'vertical', sizes: [50, 50], children: [{ type: 'pane', paneId: 'pane-1' }, { type: 'pane', paneId: 'pane-3' }] },
-    { type: 'split', direction: 'vertical', sizes: [50, 50], children: [{ type: 'pane', paneId: 'pane-2' }, { type: 'pane', paneId: 'pane-4' }] },
-  ],
+/**
+ * `?panes=N` (1..8) renders the Workspace with N terminals so the pane system can be checked at
+ * the counts that actually stress it — one lead agent, a pair, and a six-agent swarm. Without the
+ * param the fixture stays the hand-authored 2x2 it has always been, so every existing harness URL
+ * and screenshot keeps rendering exactly what it did before.
+ */
+const paneCount = (() => {
+  const raw = Number(new URLSearchParams(globalThis.location?.search ?? '').get('panes'))
+  return Number.isInteger(raw) && raw >= 1 && raw <= 8 ? raw : 0
+})()
+
+const panes = paneCount
+  ? Array.from({ length: paneCount }, (_, index) =>
+      pane(`pane-${index + 1}`, PANE_ROSTER[index % PANE_ROSTER.length][0], PANE_ROSTER[index % PANE_ROSTER.length][1], index),
+    )
+  : [
+      pane('pane-1', 'Architect', 'claude', 0),
+      pane('pane-2', 'Builder', 'codex', 1),
+      pane('pane-3', 'Reviewer', 'claude', 2),
+      pane('pane-4', 'Shell', 'powershell', 3),
+    ]
+
+/** An even split tree, deliberately naive — it is the "before" shape the presets improve on. */
+function evenLayout(ids: string[]): unknown {
+  if (ids.length === 1) return { type: 'pane', paneId: ids[0] }
+  const half = Math.ceil(ids.length / 2)
+  const children = [evenLayout(ids.slice(0, half)), evenLayout(ids.slice(half))]
+  return { type: 'split', direction: ids.length > 2 ? 'horizontal' : 'vertical', sizes: [50, 50], children }
 }
+
+const layout = paneCount
+  ? evenLayout(panes.map((item) => item.id))
+  : {
+      type: 'split', direction: 'horizontal', sizes: [50, 50],
+      children: [
+        { type: 'split', direction: 'vertical', sizes: [50, 50], children: [{ type: 'pane', paneId: 'pane-1' }, { type: 'pane', paneId: 'pane-3' }] },
+        { type: 'split', direction: 'vertical', sizes: [50, 50], children: [{ type: 'pane', paneId: 'pane-2' }, { type: 'pane', paneId: 'pane-4' }] },
+      ],
+    }
 
 export const workspace = {
   id: 'ws-main', projectId: project.id, name: 'Database Studio', normalizedName: 'database-studio',
@@ -71,12 +108,14 @@ function session(paneId: string, title: string, provider: string, status: string
   }
 }
 
-export const sessions = [
-  session('pane-1', 'Architect', 'claude', 'running'),
-  session('pane-2', 'Builder', 'codex', 'running'),
-  session('pane-3', 'Reviewer', 'claude', 'running'),
-  session('pane-4', 'Shell', 'powershell', 'running'),
-]
+export const sessions = paneCount
+  ? panes.map((item) => session(item.id, item.title, item.provider, 'running'))
+  : [
+      session('pane-1', 'Architect', 'claude', 'running'),
+      session('pane-2', 'Builder', 'codex', 'running'),
+      session('pane-3', 'Reviewer', 'claude', 'running'),
+      session('pane-4', 'Shell', 'powershell', 'running'),
+    ]
 
 export const settings = {
   sidebarOpen: true, sidebarWidth: 252, sidebarGroupBy: 'project', sidebarSortMode: 'manual',
@@ -355,6 +394,7 @@ export const FIXTURES: Record<string, unknown> = {
   list_workspace_placements: [],
   list_live_sessions: sessions,
   get_workspace_canvas_layout: { revision: 1, canvasJson: null },
+  save_workspace_canvas_layout: { revision: 2 },
   open_project_session: [
     { projectId: project.id, project, isActive: true, lastWorkspaceId: workspace.id, openedAt: NOW },
     { projectId: project2.id, project: project2, isActive: false, lastWorkspaceId: workspace3.id, openedAt: NOW },

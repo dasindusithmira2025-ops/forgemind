@@ -66,7 +66,7 @@ fn require_database_project_scope(
         .validate_workspace_caller(workspace_id, window.label(), true)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn database_discover_sources(
     request: DatabaseProjectRequest,
     window: Window,
@@ -78,7 +78,7 @@ pub fn database_discover_sources(
         .discover_sources(&request.project_id, request.force)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn database_list_sources(
     request: DatabaseProjectRequest,
     window: Window,
@@ -88,7 +88,7 @@ pub fn database_list_sources(
     state.database_studio.list_sources(&request.project_id)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn database_publish_canvas_state(
     request: PublishDatabaseCanvasStateRequest,
     window: Window,
@@ -114,7 +114,7 @@ fn human_actor() -> DatabaseActor {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn database_get_source(
     request: SourceScopedRequest,
     window: Window,
@@ -126,7 +126,7 @@ pub fn database_get_source(
         .source_detail(&request.project_id, &request.source_id)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn database_get_schema(
     request: GetDatabaseSchemaRequest,
     window: Window,
@@ -136,7 +136,7 @@ pub fn database_get_schema(
     state.database_studio.get_schema(&request)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn database_get_object(
     request: GetDatabaseObjectRequest,
     window: Window,
@@ -146,7 +146,7 @@ pub fn database_get_object(
     state.database_studio.get_object(&request)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn database_compare(
     request: CompareDatabaseRequest,
     window: Window,
@@ -158,7 +158,7 @@ pub fn database_compare(
         .compare(&request.project_id, request.mode)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn database_list_migrations(
     request: ListDatabaseMigrationsRequest,
     window: Window,
@@ -168,7 +168,7 @@ pub fn database_list_migrations(
     state.database_studio.list_migrations(&request)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn database_list_usage(
     request: ListDatabaseUsageRequest,
     window: Window,
@@ -178,7 +178,7 @@ pub fn database_list_usage(
     state.database_studio.list_usage(&request)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn database_list_issues(
     request: ListDatabaseIssuesRequest,
     window: Window,
@@ -188,7 +188,7 @@ pub fn database_list_issues(
     state.database_studio.list_issues(&request)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn database_introspect_sqlite_file(
     request: IntrospectSqliteFileRequest,
     window: Window,
@@ -198,7 +198,7 @@ pub fn database_introspect_sqlite_file(
     state.database_studio.introspect_sqlite_file(&request)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn database_create_draft(
     request: CreateDatabaseDraftRequest,
     window: Window,
@@ -208,7 +208,7 @@ pub fn database_create_draft(
     state.database_studio.create_draft(&request, human_actor())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn database_list_designs(
     request: SourceScopedRequest,
     window: Window,
@@ -220,7 +220,7 @@ pub fn database_list_designs(
         .list_designs(&request.project_id, &request.source_id)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn database_get_design(
     request: GetDatabaseDesignRequest,
     window: Window,
@@ -230,7 +230,7 @@ pub fn database_get_design(
     state.database_studio.get_design(&request)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn database_apply_design_operation(
     request: ApplyDatabaseDesignOperationRequest,
     window: Window,
@@ -242,7 +242,7 @@ pub fn database_apply_design_operation(
         .apply_design_operation(&request, human_actor())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn database_approve_design(
     request: DecideDatabaseDesignRequest,
     window: Window,
@@ -254,7 +254,7 @@ pub fn database_approve_design(
         .decide_design(&request, DesignDecision::Approve, human_actor())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn database_reject_design(
     request: DecideDatabaseDesignRequest,
     window: Window,
@@ -266,7 +266,7 @@ pub fn database_reject_design(
         .decide_design(&request, DesignDecision::Reject, human_actor())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn database_archive_design(
     request: DecideDatabaseDesignRequest,
     window: Window,
@@ -278,7 +278,7 @@ pub fn database_archive_design(
         .decide_design(&request, DesignDecision::Archive, human_actor())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn database_save_layout(
     request: SaveDatabaseLayoutRequest,
     window: Window,
@@ -288,7 +288,7 @@ pub fn database_save_layout(
     state.database_studio.save_layout(&request)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn database_get_layout(
     request: GetDatabaseLayoutRequest,
     window: Window,
@@ -298,7 +298,7 @@ pub fn database_get_layout(
     state.database_studio.get_layout(&request)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn database_build_context_pack(
     request: BuildDatabaseContextPackRequest,
     window: Window,
@@ -308,14 +308,14 @@ pub fn database_build_context_pack(
     state.database_studio.build_context_pack(&request)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn database_adapter_support(
     state: State<'_, AppState>,
 ) -> AppResult<Vec<DatabaseAdapterSupport>> {
     Ok(state.database_studio.adapter_support())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn database_implement_design(
     request: ImplementDatabaseDesignRequest,
     window: Window,
