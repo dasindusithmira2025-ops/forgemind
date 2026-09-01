@@ -99,3 +99,68 @@ export function layoutGraph(graph: KnowledgeGraph): PositionedNode[] {
     }
   })
 }
+
+/**
+ * Reduce a graph to the slice worth drawing first.
+ *
+ * The backend returns everything that matches the request, which for a mature project is hundreds
+ * of nodes — a picture with every label on it is a picture with no information in it. Prominence
+ * here uses only properties the backend already computed: how connected a node is, how important
+ * the project considers it, and whether it is current. Nothing is invented and nothing is
+ * permanently hidden; the caller offers the full graph as an explicit choice.
+ *
+ * The focus node, when there is one, is always kept: a focused view that dropped its own subject
+ * would be nonsense.
+ */
+export function curateGraph(graph: KnowledgeGraph, limit: number): KnowledgeGraph {
+  if (graph.nodes.length <= limit) return graph
+  const ranked = [...graph.nodes].sort(
+    (left, right) => nodeWeight(right) - nodeWeight(left) || left.id.localeCompare(right.id),
+  )
+  const kept = new Set<string>()
+  if (graph.focusId) kept.add(graph.focusId)
+  for (const node of ranked) {
+    if (kept.size >= limit) break
+    kept.add(node.id)
+  }
+  return {
+    ...graph,
+    nodes: graph.nodes.filter((node) => kept.has(node.id)),
+    edges: graph.edges.filter((edge) => kept.has(edge.source) && kept.has(edge.target)),
+    truncated: true,
+  }
+}
+
+/** How much of the picture one node earns. Memory outranks overlays; connection outranks size. */
+function nodeWeight(node: GraphNode): number {
+  const kindWeight = node.kind === 'memory' ? 6 : 0
+  const qualityWeight =
+    node.quality === 'canonical' ? 4 : node.quality === 'verified' ? 3 : node.quality === 'superseded' ? -4 : 0
+  // A focused graph carries hop distance, and a nearer node is more relevant to what was asked.
+  const distancePenalty = node.distance == null ? 0 : node.distance * 2
+  return kindWeight + node.degree * 2 + node.importance * 3 + qualityWeight - distancePenalty
+}
+
+/**
+ * Bounding box of a laid-out graph, so a "fit" control can frame real content rather than the
+ * fixed coordinate space most of which is usually empty.
+ */
+export function graphBounds(nodes: PositionedNode[]): {
+  x: number
+  y: number
+  width: number
+  height: number
+} | null {
+  if (nodes.length === 0) return null
+  let minX = Infinity
+  let minY = Infinity
+  let maxX = -Infinity
+  let maxY = -Infinity
+  for (const node of nodes) {
+    minX = Math.min(minX, node.x - node.r)
+    minY = Math.min(minY, node.y - node.r)
+    maxX = Math.max(maxX, node.x + node.r)
+    maxY = Math.max(maxY, node.y + node.r)
+  }
+  return { x: minX, y: minY, width: Math.max(1, maxX - minX), height: Math.max(1, maxY - minY) }
+}

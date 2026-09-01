@@ -1,4 +1,5 @@
 pub mod agent_commands;
+pub mod brain_commands;
 pub mod browser_commands;
 pub mod code_commands;
 pub mod database_commands;

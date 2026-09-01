@@ -22,6 +22,7 @@ const closeProjectSession = vi.fn()
 const getSidebarPreferences = vi.fn()
 const setSidebarPreferences = vi.fn()
 const inspectRepository = vi.fn()
+const saveWorkspace = vi.fn()
 
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn() }))
 vi.mock('@tauri-apps/plugin-opener', () => ({ openPath: vi.fn() }))
@@ -51,7 +52,7 @@ vi.mock('../native/commands', () => ({
   asNativeError: (error: unknown) => ({ message: String(error) }),
   native: {
     getProject: vi.fn(async () => project), getWorkspace: (...args: unknown[]) => getWorkspace(...args),
-    saveWorkspace: vi.fn(async (request: WorkspaceSaveRequest) => ({ ...request, normalizedName: request.name.toLowerCase(), id: request.id ?? 'workspace', createdAt: '', updatedAt: '', lastOpenedAt: '' })),
+    saveWorkspace: (...args: unknown[]) => saveWorkspace(...args),
     listRecentWorkspaces: (...args: unknown[]) => listRecentWorkspaces(...args),
     listWorkspacesForProject: (...args: unknown[]) => listWorkspacesForProject(...args),
     setLastActiveWorkspace: vi.fn().mockResolvedValue(undefined),
@@ -60,6 +61,9 @@ vi.mock('../native/commands', () => ({
     renameWorkspace: vi.fn(), removeRecentWorkspace: vi.fn(), deleteWorkspaceConfiguration: vi.fn(), relocateProject: vi.fn(), openProject: vi.fn(),
     detectAgents: vi.fn().mockResolvedValue([]), detectShells: vi.fn().mockResolvedValue([{ id: 'shell', name: 'PowerShell', executablePath: 'C:\\pwsh.exe', args: [], available: true, source: 'detected' }]),
     listLiveSessions: vi.fn().mockResolvedValue([]),
+    // Hydration awaits the handoff completion before probing providers; without it the creation
+    // control would never leave its "detecting" state under test.
+    completeWorkspaceHandoff: vi.fn().mockResolvedValue(undefined),
     subscribeTerminalOutput: vi.fn().mockResolvedValue([]), unsubscribeTerminalOutput: vi.fn().mockResolvedValue(undefined),
     restoreWorkspaceSessions: (...args: unknown[]) => restoreWorkspace(...args),
     createTerminalSession: (...args: unknown[]) => createTerminalSession(...args), terminateTerminalSession: vi.fn(), terminateWorkspaceSessions: (...args: unknown[]) => terminateWorkspace(...args),
@@ -102,6 +106,7 @@ describe('Workspace screen', () => {
     inspectRepository.mockResolvedValue({ projectId: 'project', repositoryPath: 'C:\\fixture', worktreePath: 'C:\\fixture', branch: 'main', headSha: '0123456789012345678901234567890123456789', upstream: 'origin/main', ahead: 0, behind: 0, remotes: ['origin'], files: [], health: { gitAvailable: true, worktreeValid: true, bare: false, shallow: false, mergeInProgress: false, rebaseInProgress: false, cherryPickInProgress: false, revertInProgress: false, indexLocked: false, submodulesPresent: false, gitLfsAvailable: true, warnings: [] }, capturedAt: '' })
     restoreWorkspace.mockResolvedValue({ workspaceId: 'workspace', sessions: [session], deferredPaneIds: [], failures: [], budget: 4 })
     createTerminalSession.mockResolvedValue(session)
+    saveWorkspace.mockImplementation(async (request: WorkspaceSaveRequest) => ({ ...request, normalizedName: request.name.toLowerCase(), id: request.id ?? 'workspace', createdAt: '', updatedAt: '', lastOpenedAt: '' }))
     terminateWorkspace.mockResolvedValue(undefined)
     reorderWorkspaces.mockResolvedValue(undefined)
     saveSettings.mockImplementation(async (value) => value)
@@ -323,6 +328,26 @@ describe('Workspace screen', () => {
     expect(createTerminalSession).not.toHaveBeenCalled()
 
     fireEvent.mouseDown(pane)
+    await waitFor(() => expect(createTerminalSession).toHaveBeenCalledTimes(1))
+  })
+
+  it('creates a pane beside the focused context without opening a picker', async () => {
+    renderWorkspace()
+    await screen.findByTestId('terminal-pane')
+    const create = await screen.findByRole('button', { name: 'Terminal' })
+    await waitFor(() => expect(create).toBeEnabled())
+
+    fireEvent.click(create)
+
+    await waitFor(() => expect(saveWorkspace).toHaveBeenCalled())
+    const request = saveWorkspace.mock.calls.at(-1)![0] as WorkspaceSaveRequest
+    expect(request.layout).toMatchObject({ type: 'split' })
+    expect(request.panes).toHaveLength(2)
+    // The new pane inherits the target's directory, which is how a worktree context is carried.
+    expect(request.panes[1].workingDirectory).toBe(workspace.panes[0].workingDirectory)
+    expect(request.activePaneId).toBe(request.panes[1].id)
+    // No modal stood between the click and the running terminal.
+    expect(screen.queryByText('Choose terminal')).toBeNull()
     await waitFor(() => expect(createTerminalSession).toHaveBeenCalledTimes(1))
   })
 

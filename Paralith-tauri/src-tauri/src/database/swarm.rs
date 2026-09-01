@@ -81,7 +81,12 @@ impl DatabaseService {
         Ok(())
     }
 
-    #[cfg(test)]
+    /// The exact context one execution attempt received.
+    ///
+    /// Immutable and attempt-scoped: this is the pack that was handed to the agent, not what the
+    /// compiler would produce today. Brain's agent-run context inspector reads it, which is why it
+    /// is no longer test-only — a delivered context nobody can read back is an audit trail that
+    /// exists only in principle.
     pub fn swarm_compiled_context_pack(
         &self,
         agent_run_id: &str,

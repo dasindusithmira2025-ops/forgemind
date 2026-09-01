@@ -5,12 +5,16 @@
 //! remain strongly typed and independently tested; only this transport seam uses `Value`, with an
 //! explicit operation allow-list and immediate typed deserialization before any work runs.
 
-use super::{code_commands, intelligence_commands, memory_commands, semantic_commands};
+use super::{
+    brain_commands, code_commands, intelligence_commands, memory_commands, semantic_commands,
+};
 use crate::errors::{AppError, AppResult};
+use crate::models::brain::{BrainQuery, BrainRetainRequest};
 use crate::models::context::ContextRequest;
 use crate::models::graph::GraphRequest;
 use crate::models::intelligence::{
     DecideCandidateRequest, ResolveConflictRequest, TimelineRequest,
+    TimelineRequest as BrainTimelineRequest,
 };
 use crate::models::memory::{
     AttachSourceRequest, SaveClaimRequest, SaveMemoryRequest, SaveRelationRequest,
@@ -698,6 +702,139 @@ pub fn fabric_semantic(
                     state,
                 )
                 .await?,
+            )
+        }
+        _ => Err(unsupported),
+    })
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BrainTextArgs {
+    project_id: String,
+    query: String,
+    limit: Option<usize>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BrainSubjectArgs {
+    project_id: String,
+    subject: String,
+    limit: Option<usize>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BrainRunArgs {
+    project_id: String,
+    agent_run_id: String,
+}
+
+/// Paralith Brain over the same bounded transport the other Context Fabric domains use.
+///
+/// A separate domain rather than more operations on `fabric_memory`: Brain is the *universal*
+/// contract — the CLI and the MCP server speak the same vocabulary — and keeping it addressable on
+/// its own seam is what makes "which operations can an external agent reach" a question with a
+/// one-file answer.
+#[tauri::command(async)]
+pub fn fabric_brain(
+    operation: String,
+    payload: Value,
+    window: Window,
+    state: State<'_, AppState>,
+) -> FabricFuture<'_> {
+    let unsupported = unsupported_operation("Brain", &operation);
+    fabric_routes!(operation.as_str(), {
+        "brain_ask" => encode(
+            brain_commands::brain_ask(decode_request::<BrainQuery>(payload)?, window, state).await?,
+        ),
+        "brain_search" => {
+            let args: BrainTextArgs = decode(payload)?;
+            encode(
+                brain_commands::brain_search(
+                    args.project_id,
+                    args.query,
+                    args.limit,
+                    window,
+                    state,
+                )
+                .await?,
+            )
+        }
+        "brain_recall" => {
+            let args: BrainSubjectArgs = decode(payload)?;
+            encode(
+                brain_commands::brain_recall(
+                    args.project_id,
+                    args.subject,
+                    args.limit,
+                    window,
+                    state,
+                )
+                .await?,
+            )
+        }
+        "brain_systems" => {
+            let args: ProjectArgs = decode(payload)?;
+            encode(brain_commands::brain_systems(args.project_id, window, state).await?)
+        }
+        "brain_sources" => {
+            let args: ProjectItemArgs = decode(payload)?;
+            encode(
+                brain_commands::brain_sources(args.project_id, args.item_id, window, state).await?,
+            )
+        }
+        "brain_related" => {
+            let args: ProjectItemArgs = decode(payload)?;
+            encode(
+                brain_commands::brain_related(args.project_id, args.item_id, window, state).await?,
+            )
+        }
+        "brain_history" => encode(
+            brain_commands::brain_history(
+                decode_request::<BrainTimelineRequest>(payload)?,
+                window,
+                state,
+            )
+            .await?,
+        ),
+        "brain_context" => encode(
+            brain_commands::brain_context(decode_request::<ContextRequest>(payload)?, window, state)
+                .await?,
+        ),
+        "brain_run_context" => {
+            let args: BrainRunArgs = decode(payload)?;
+            encode(
+                brain_commands::brain_run_context(
+                    args.project_id,
+                    args.agent_run_id,
+                    window,
+                    state,
+                )
+                .await?,
+            )
+        }
+        "brain_remember" => encode(
+            brain_commands::brain_remember(
+                decode_request::<BrainRetainRequest>(payload)?,
+                window,
+                state,
+            )
+            .await?,
+        ),
+        "brain_correct" => encode(
+            brain_commands::brain_correct(
+                decode_request::<BrainRetainRequest>(payload)?,
+                window,
+                state,
+            )
+            .await?,
+        ),
+        "brain_forget" => {
+            let args: ProjectItemArgs = decode(payload)?;
+            encode(
+                brain_commands::brain_forget(args.project_id, args.item_id, window, state).await?,
             )
         }
         _ => Err(unsupported),

@@ -2,10 +2,13 @@ import { describe, expect, it } from 'vitest'
 import {
   claimTone,
   healthWarning,
+  knowledgeGroupLabel,
+  knowledgeGroups,
   qualityLabel,
   qualityTone,
   relativeAge,
   sourceLabel,
+  supersessionPair,
 } from './memoryPresentation'
 import { QUALITY_ORDER, type MemorySource } from './memoryTypes'
 
@@ -132,5 +135,54 @@ describe('healthWarning', () => {
     )
     // An untrusted memory without evidence is simply a working note, not a warning.
     expect(healthWarning({ ...base, quality: 'working', sourceCount: 0 })).toBeNull()
+  })
+})
+
+
+describe('knowledgeGroups', () => {
+  it('orders categories by what a reader looks for first, not alphabetically', () => {
+    const groups = knowledgeGroups([
+      { memoryType: 'note' },
+      { memoryType: 'decision' },
+      { memoryType: 'component' },
+    ])
+    expect(groups.map((group) => group.label)).toEqual(['Systems', 'Decisions', 'Notes'])
+  })
+
+  it('folds related types into one category rather than one heading per type', () => {
+    const groups = knowledgeGroups([
+      { memoryType: 'bug' },
+      { memoryType: 'incident' },
+      { memoryType: 'risk' },
+    ])
+    expect(groups).toHaveLength(1)
+    expect(groups[0].label).toBe('Known issues')
+    expect(groups[0].items).toHaveLength(3)
+  })
+
+  it('keeps a type this build has no category for rather than dropping it', () => {
+    const groups = knowledgeGroups([{ memoryType: 'a_future_type' }])
+    expect(groups.map((group) => group.label)).toEqual(['Other'])
+    expect(knowledgeGroupLabel('a_future_type')).toBe('Other')
+  })
+
+  it('omits categories with nothing in them', () => {
+    expect(knowledgeGroups([{ memoryType: 'decision' }]).map((group) => group.key)).toEqual([
+      'decisions',
+    ])
+  })
+})
+
+describe('supersessionPair', () => {
+  it('splits the sentence the lifecycle actually records', () => {
+    expect(supersessionPair('JWT localStorage superseded by HTTP-only sessions')).toEqual({
+      from: 'JWT localStorage',
+      to: 'HTTP-only sessions',
+    })
+  })
+
+  it('refuses to invent a lineage from a sentence that does not describe one', () => {
+    expect(supersessionPair('Rotation policy')).toBeNull()
+    expect(supersessionPair('superseded by nothing before it')).toBeNull()
   })
 })

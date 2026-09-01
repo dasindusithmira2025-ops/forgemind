@@ -40,7 +40,7 @@ export function sidebarDestinations(actions: SidebarActions): SidebarDestination
       run: actions.onOpenRepository,
     },
     { id: 'database', label: 'Database', hint: 'Inspect schema and query this project', Icon: Database, run: actions.onOpenDatabase },
-    { id: 'memory', label: 'Memory', hint: 'Context Fabric — what this project knows', Icon: BrainCircuit, run: actions.onOpenMemory },
+    { id: 'memory', label: 'Brain', hint: 'What this project knows, and why', Icon: BrainCircuit, run: actions.onOpenMemory },
     { id: 'usage', label: 'Usage', hint: 'Provider token consumption on this machine', Icon: ChartColumnBig, run: actions.onOpenUsage },
   ])
 }

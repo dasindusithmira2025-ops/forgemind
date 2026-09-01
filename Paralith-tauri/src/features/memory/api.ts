@@ -33,6 +33,16 @@ import type {
   SetMemoryQualityRequest,
 } from './memoryTypes'
 import type {
+  BrainAnswer,
+  BrainQuery,
+  BrainRelated,
+  BrainRetainOutcome,
+  BrainRetainRequest,
+  BrainSource,
+  BrainSystem,
+  CompiledContextPack,
+} from './brainTypes'
+import type {
   AgentHandoff,
   DecideCandidateRequest,
   EmbeddingHealth,
@@ -50,7 +60,7 @@ import type {
 } from './intelligenceTypes'
 
 function invokeFabric<T>(
-  command: 'fabric_memory' | 'fabric_intelligence',
+  command: 'fabric_memory' | 'fabric_intelligence' | 'fabric_brain',
   operation: string,
   payload: unknown = {},
 ) {
@@ -62,6 +72,9 @@ const invokeMemory = <T>(operation: string, payload?: unknown) =>
 
 const invokeIntelligence = <T>(operation: string, payload?: unknown) =>
   invokeFabric<T>('fabric_intelligence', operation, payload)
+
+const invokeBrain = <T>(operation: string, payload?: unknown) =>
+  invokeFabric<T>('fabric_brain', operation, payload)
 
 export const memoryApi = {
   list: (projectId: string, limit?: number) =>
@@ -167,4 +180,41 @@ export const intelligenceApi = {
   /** Core health plus the intelligence counts, each carrying the query that lists it. */
   healthReport: (projectId: string) =>
     invokeIntelligence<KnowledgeHealthReport>('knowledge_health_report', { projectId }),
+}
+
+/**
+ * Paralith Brain.
+ *
+ * The universal boundary: the desktop renderer, the CLI, and the MCP server all call the same
+ * `BrainGateway` behind these operations, so a question asked here and a question asked by an
+ * external agent are answered by one implementation rather than two that drift.
+ *
+ * Kept as a third object rather than folded into `memoryApi` because Brain is a *contract*, not a
+ * surface. Everything above is how the Context Fabric is administered; this is how it is used.
+ */
+export const brainApi = {
+  /** Answer a question about this project from what it has actually learned. */
+  ask: (request: BrainQuery) => invokeBrain<BrainAnswer>('brain_ask', { request }),
+  /** Retrieval without the composed prose — what an agent wants when it will reason itself. */
+  recall: (projectId: string, subject: string, limit?: number) =>
+    invokeBrain<BrainSource[]>('brain_recall', { projectId, subject, limit }),
+  /** The systems this project's knowledge is organized around. Empty when nothing is known. */
+  systems: (projectId: string) => invokeBrain<BrainSystem[]>('brain_systems', { projectId }),
+  /** The provenance behind one memory: where each statement came from. */
+  sources: (projectId: string, itemId: string) =>
+    invokeBrain<BrainSource[]>('brain_sources', { projectId, itemId }),
+  related: (projectId: string, itemId: string) =>
+    invokeBrain<BrainRelated[]>('brain_related', { projectId, itemId }),
+  /** The exact context one agent run received, read back from the immutable per-attempt record. */
+  runContext: (projectId: string, agentRunId: string) =>
+    invokeBrain<CompiledContextPack | null>('brain_run_context', { projectId, agentRunId }),
+  /** Propose something for Brain to retain. Enters the candidate funnel; never canonical directly. */
+  remember: (request: BrainRetainRequest) =>
+    invokeBrain<BrainRetainOutcome>('brain_remember', { request }),
+  /** Propose a correction. Same funnel, so conflict detection can see it as a contradiction. */
+  correct: (request: BrainRetainRequest) =>
+    invokeBrain<BrainRetainOutcome>('brain_correct', { request }),
+  /** Stop carrying a memory forward. Archives — history and evidence remain. */
+  forget: (projectId: string, itemId: string) =>
+    invokeBrain<void>('brain_forget', { projectId, itemId }),
 }

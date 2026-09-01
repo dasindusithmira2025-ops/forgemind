@@ -1,16 +1,26 @@
-import { useMemo } from 'react'
-import { Pin, Search } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { ChevronDown, ChevronRight, Filter, Pin } from 'lucide-react'
 import { useMemoryStore, visibleMemories } from '../memoryStore'
-import { qualityLabel, qualityTone, relativeAge } from '../memoryPresentation'
+import {
+  knowledgeGroups,
+  qualityLabel,
+  qualityTone,
+  relativeAge,
+  type KnowledgeGroup,
+} from '../memoryPresentation'
 import type { MemorySearchHit, MemorySummary } from '../memoryTypes'
 
 /**
- * Left rail: the query box and the memory list.
+ * Knowledge navigator: the filter box and the project's knowledge, grouped by what kind of truth
+ * it is.
  *
- * The list is the same component whether it is showing everything or showing search results — the
- * store decides which rows to hand over. What changes is the secondary line: a plain row shows its
- * summary, a search hit shows the matched snippet and why it matched, so retrieval is never
- * opaque even at the list level.
+ * The grouping is the difference between a notes list and a project-truth browser. A flat list of
+ * two hundred titles answers "what exists"; sections answer "what kind of thing does this project
+ * know", which is the question someone opening Knowledge is actually asking. Grouping is derived
+ * from the memory type the backend already stores — nothing here classifies anything itself.
+ *
+ * While a filter is active the grouping collapses to a single ranked result list, because a
+ * ranked search split across eight headings is not ranked any more.
  */
 export function MemoryList() {
   const query = useMemoryStore((state) => state.query)
@@ -22,49 +32,94 @@ export function MemoryList() {
   const activeId = useMemoryStore((state) => state.activeId)
   const open = useMemoryStore((state) => state.open)
   const drafts = useMemoryStore((state) => state.drafts)
+  const [collapsed, setCollapsed] = useState<string[]>([])
 
   const rows = useMemo(() => visibleMemories({ query, results, items }), [query, results, items])
   const isSearch = Boolean(query.trim())
+  const groups = useMemo(() => (isSearch ? [] : knowledgeGroups(rows)), [rows, isSearch])
+
+  const toggleGroup = (key: string) =>
+    setCollapsed((current) =>
+      current.includes(key) ? current.filter((value) => value !== key) : [...current, key],
+    )
+
+  const renderRow = (row: MemorySummary) => (
+    <MemoryRow
+      key={row.id}
+      row={row}
+      active={row.id === activeId}
+      searchHit={isSearch}
+      // A draft parked on a memory the user has navigated away from is marked here, so
+      // unsaved work is visible from the list rather than only on reopening it.
+      hasDraft={row.id !== activeId && row.id in drafts}
+      onOpen={() => void open(row.id)}
+    />
+  )
 
   return (
     <div className="memory-list">
-      <div className="memory-search">
-        <Search size={13} aria-hidden />
+      <div className="memory-filter">
+        <Filter size={12} aria-hidden />
         <input
           type="search"
           value={query}
           onChange={(event) => void setQuery(event.target.value)}
-          placeholder="Search memory, or type:decision tag:auth"
-          aria-label="Search memory"
+          placeholder="Filter knowledge"
+          aria-label="Filter knowledge"
           spellCheck={false}
         />
       </div>
 
       {listLoading || searching ? (
         <p className="memory-list-state" role="status">
-          {searching ? 'Searching…' : 'Loading memory…'}
+          {searching ? 'Searching…' : 'Loading knowledge…'}
         </p>
       ) : rows.length === 0 ? (
         <p className="memory-list-state">
-          {isSearch ? 'No memory matches that query.' : 'No memory yet for this project.'}
+          {isSearch
+            ? 'Nothing here matches that filter.'
+            : 'Paralith is building its understanding. Knowledge appears here as project evidence is analyzed, or as you capture it yourself.'}
         </p>
+      ) : isSearch ? (
+        <ul className="memory-rows">{rows.map(renderRow)}</ul>
       ) : (
-        <ul className="memory-rows">
-          {rows.map((row) => (
-            <MemoryRow
-              key={row.id}
-              row={row}
-              active={row.id === activeId}
-              searchHit={isSearch}
-              // A draft parked on a memory the user has navigated away from is marked here, so
-              // unsaved work is visible from the list rather than only on reopening it.
-              hasDraft={row.id !== activeId && row.id in drafts}
-              onOpen={() => void open(row.id)}
-            />
+        <div className="memory-groups">
+          {groups.map((group) => (
+            <GroupSection
+              key={group.key}
+              group={group}
+              open={!collapsed.includes(group.key)}
+              onToggle={() => toggleGroup(group.key)}
+            >
+              {group.items.map(renderRow)}
+            </GroupSection>
           ))}
-        </ul>
+        </div>
       )}
     </div>
+  )
+}
+
+function GroupSection({
+  group,
+  open,
+  onToggle,
+  children,
+}: {
+  group: KnowledgeGroup
+  open: boolean
+  onToggle: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <section className="memory-group">
+      <button type="button" className="memory-group-head" aria-expanded={open} onClick={onToggle}>
+        {open ? <ChevronDown size={12} aria-hidden /> : <ChevronRight size={12} aria-hidden />}
+        <span>{group.label}</span>
+        <span className="memory-count tnum">{group.items.length}</span>
+      </button>
+      {open && <ul className="memory-rows">{children}</ul>}
+    </section>
   )
 }
 
@@ -101,8 +156,11 @@ function MemoryRow({
         </span>
         <span className="memory-row-body">{hit?.snippet || row.summary || 'No summary yet.'}</span>
         <span className="memory-row-meta">
-          <span className="memory-type-chip">{row.memoryType}</span>
-          {row.tags.slice(0, 3).map((tag) => (
+          {row.staleReason && <span className="memory-row-state is-stale">needs review</span>}
+          {row.quality === 'superseded' && (
+            <span className="memory-row-state is-superseded">superseded</span>
+          )}
+          {row.tags.slice(0, 2).map((tag) => (
             <span key={tag} className="memory-tag-chip">
               #{tag}
             </span>

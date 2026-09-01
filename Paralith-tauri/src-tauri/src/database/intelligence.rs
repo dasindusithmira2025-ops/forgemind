@@ -1432,3 +1432,35 @@ fn hydrate_candidates(
     }
     Ok(candidates)
 }
+
+impl DatabaseService {
+    /// Which memories the intelligence layer has attributed to which canonical entity.
+    ///
+    /// The link exists because an accepted candidate keeps both its `entity_id` and the `item_id`
+    /// of the memory it became. Reading it back is what lets Brain group knowledge by *subject*
+    /// rather than by memory type — "everything we know about the Context Compiler" instead of
+    /// "every memory of type component".
+    ///
+    /// Returns `(entity_id, canonical_name, entity_kind, item_id)` rows, Project-scoped on both
+    /// sides of the join so a memory can never be attributed to another Project's entity.
+    pub fn entity_memory_links(
+        &self,
+        project_id: &str,
+    ) -> AppResult<Vec<(String, String, String, String)>> {
+        let connection = self.connection.lock();
+        let mut statement = connection.prepare(
+            "SELECT DISTINCT e.id, e.canonical_name, e.kind, c.item_id \
+             FROM knowledge_entities e \
+             JOIN knowledge_candidates c ON c.entity_id = e.id \
+             JOIN memory_items m ON m.id = c.item_id \
+             WHERE e.project_id = ?1 AND c.project_id = ?1 AND m.project_id = ?1 \
+               AND c.item_id IS NOT NULL AND m.state != 'archived'",
+        )?;
+        let rows = statement
+            .query_map(params![project_id], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+}

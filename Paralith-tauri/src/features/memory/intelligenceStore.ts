@@ -61,8 +61,16 @@ interface IntelligenceState {
   timeline: TimelineEntry[]
   timelineLoading: boolean
   timelineFilters: TimelineFilters
+  /** Whether bookkeeping events (revisions, claim edits, declined candidates) are included.
+   * Off by default: they are real, but they bury the events that changed what the project
+   * believes. Held in the store so leaving Activity and returning keeps the reading. */
+  timelineShowAll: boolean
   actors: string[]
 
+  /** Whether the workspace-wide search overlay is open. Search is a capability reachable from
+   * every surface rather than a mode you have to navigate to, so its open state lives here and
+   * not in one pane's local state. */
+  searchOpen: boolean
   query: string
   searching: boolean
   results: SearchResult[]
@@ -83,8 +91,11 @@ interface IntelligenceState {
   decide: (action: 'accept' | 'reject', candidateIds?: string[]) => Promise<void>
   resolveConflict: (conflictId: string, resolution: ConflictResolution) => Promise<void>
   setTimelineFilters: (patch: Partial<TimelineFilters>) => Promise<void>
+  setTimelineShowAll: (showAll: boolean) => void
   refreshTimeline: () => Promise<void>
   setQuery: (query: string) => void
+  openSearch: (query?: string) => Promise<void>
+  closeSearch: () => void
   runSearch: (query?: string) => Promise<void>
   refreshHealth: () => Promise<void>
   clearError: () => void
@@ -102,7 +113,9 @@ const EMPTY = {
   timeline: [] as TimelineEntry[],
   timelineLoading: false,
   timelineFilters: DEFAULT_TIMELINE_FILTERS,
+  timelineShowAll: false,
   actors: [] as string[],
+  searchOpen: false,
   query: '',
   searching: false,
   results: [] as SearchResult[],
@@ -243,6 +256,8 @@ export const useIntelligenceStore = create<IntelligenceState>((set, get) => ({
     await get().refreshTimeline()
   },
 
+  setTimelineShowAll: (showAll) => set({ timelineShowAll: showAll }),
+
   refreshTimeline: async () => {
     const { projectId, timelineFilters, loadToken } = get()
     if (!projectId) return
@@ -266,6 +281,17 @@ export const useIntelligenceStore = create<IntelligenceState>((set, get) => ({
   },
 
   setQuery: (query) => set({ query }),
+
+  /** Open the overlay, optionally running a query immediately — this is how a health count or a
+   * saved example turns into results without the user retyping it. */
+  openSearch: async (query) => {
+    set({ searchOpen: true })
+    if (query === undefined) return
+    set({ query })
+    await get().runSearch(query)
+  },
+
+  closeSearch: () => set({ searchOpen: false }),
 
   runSearch: async (query) => {
     const { projectId, loadToken } = get()

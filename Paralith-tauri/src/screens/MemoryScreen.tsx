@@ -6,10 +6,10 @@ import { Button } from '../components/ui/Button'
 import { ErrorNotice } from '../components/ui/ErrorNotice'
 import { asNativeError, native } from '../native/commands'
 import { useAppStore } from '../stores/appStore'
-import { MemoryWorkspace } from '../features/memory/components/MemoryWorkspace'
+import { BrainWorkspace } from '../features/memory/components/BrainWorkspace'
 
 /**
- * Project-level route hosting the Context Fabric. Mirrors `DatabaseScreen`
+ * Project-level route hosting Paralith Brain. Mirrors `DatabaseScreen`
  * exactly: the same full-screen titlebar and Back pattern, and the same project-name resolution
  * from the active session or a fresh lookup.
  */
@@ -48,7 +48,7 @@ export function MemoryScreen() {
           Back
         </Button>
         <Brand compact />
-        <h1>Memory</h1>
+        <h1>Brain</h1>
         <div className="titlebar-spacer" />
         <span className="repo-shell-project" title={projectName}>
           {projectName}
@@ -60,7 +60,7 @@ export function MemoryScreen() {
           <Button onClick={() => navigate('/')}>Return to launcher</Button>
         </div>
       ) : projectId ? (
-        <MemoryWorkspace projectId={projectId} />
+        <BrainWorkspace projectId={projectId} projectName={projectName} />
       ) : (
         <div className="centered-error">
           <ErrorNotice message="No project selected." />

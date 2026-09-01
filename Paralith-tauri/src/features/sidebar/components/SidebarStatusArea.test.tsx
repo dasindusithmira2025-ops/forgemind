@@ -58,7 +58,7 @@ describe('SidebarStatusArea', () => {
 
   it('names every destination it offers, rather than hiding them behind hover tooltips', () => {
     render(<SidebarStatusArea actions={actions} />)
-    for (const name of ['Source Control', 'Database', 'Memory', 'Usage']) {
+    for (const name of ['Source Control', 'Database', 'Brain', 'Usage']) {
       expect(screen.getByRole('button', { name })).toBeInTheDocument()
     }
     fireEvent.click(screen.getByRole('button', { name: 'Source Control' }))

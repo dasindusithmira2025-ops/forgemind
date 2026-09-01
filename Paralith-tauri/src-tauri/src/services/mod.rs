@@ -1,6 +1,7 @@
 pub mod agent_detector;
 pub mod agent_handoff;
 pub mod agent_resume;
+pub mod brain_gateway;
 pub mod browser_service;
 pub mod code_intelligence;
 pub mod code_parser;
@@ -32,6 +33,7 @@ pub mod window_registry;
 
 pub use agent_detector::AgentDetector;
 pub use agent_resume::AgentResumeService;
+pub use brain_gateway::BrainGateway;
 pub use browser_service::BrowserService;
 pub use code_intelligence::CodeIntelligence;
 pub use context_compiler::ContextCompiler;

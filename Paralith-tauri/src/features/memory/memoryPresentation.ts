@@ -138,3 +138,79 @@ export function healthWarning(input: {
   }
   return null
 }
+
+/**
+ * Knowledge categories.
+ *
+ * Grouping is a *presentation* of the memory type the backend already stores — this table never
+ * invents a classification, and an unrecognised type falls through to "Other" rather than being
+ * dropped, so a newer backend vocabulary cannot make this build hide knowledge.
+ */
+const KNOWLEDGE_GROUPS: { key: string; label: string; types: string[] }[] = [
+  { key: 'systems', label: 'Systems', types: ['component'] },
+  { key: 'decisions', label: 'Decisions', types: ['decision'] },
+  { key: 'conventions', label: 'Conventions', types: ['convention'] },
+  { key: 'constraints', label: 'Constraints', types: ['constraint', 'requirement'] },
+  { key: 'issues', label: 'Known issues', types: ['bug', 'incident', 'risk'] },
+  { key: 'security', label: 'Security', types: ['security'] },
+  { key: 'performance', label: 'Performance', types: ['performance'] },
+  { key: 'operations', label: 'Operations', types: ['runbook'] },
+  { key: 'research', label: 'Research', types: ['research'] },
+  { key: 'notes', label: 'Notes', types: ['note'] },
+]
+
+const GROUP_BY_TYPE = new Map(
+  KNOWLEDGE_GROUPS.flatMap((group) => group.types.map((type) => [type, group.key] as const)),
+)
+
+export interface KnowledgeGroup<T = { memoryType: string }> {
+  key: string
+  label: string
+  items: T[]
+}
+
+/** The group a memory type belongs to, for callers that need one row's category. */
+export function knowledgeGroupLabel(memoryType: string): string {
+  const key = GROUP_BY_TYPE.get(memoryType)
+  return KNOWLEDGE_GROUPS.find((group) => group.key === key)?.label ?? 'Other'
+}
+
+/**
+ * Split rows into knowledge categories, in a fixed reading order, dropping empty ones.
+ *
+ * Order matters and is not alphabetical: systems and decisions are what someone opening a
+ * project's knowledge looks for first, and free-form notes are what they look for last.
+ */
+export function knowledgeGroups<T extends { memoryType: string }>(rows: T[]): KnowledgeGroup<T>[] {
+  const buckets = new Map<string, T[]>()
+  for (const row of rows) {
+    const key = GROUP_BY_TYPE.get(row.memoryType) ?? 'other'
+    const existing = buckets.get(key)
+    if (existing) existing.push(row)
+    else buckets.set(key, [row])
+  }
+  const groups: KnowledgeGroup<T>[] = []
+  for (const group of KNOWLEDGE_GROUPS) {
+    const items = buckets.get(group.key)
+    if (items?.length) groups.push({ key: group.key, label: group.label, items })
+  }
+  const other = buckets.get('other')
+  if (other?.length) groups.push({ key: 'other', label: 'Other', items: other })
+  return groups
+}
+
+/**
+ * Split a recorded supersession into its two sides.
+ *
+ * The lifecycle writes these events as `"<old> superseded by <new>"` (knowledge_lifecycle.rs), so
+ * this reads a real recorded sentence rather than guessing a relationship. Anything that does not
+ * match that shape returns null and the caller renders the summary as written — a lineage arrow
+ * drawn from a sentence that never described one would be a fabrication.
+ */
+export function supersessionPair(summary: string): { from: string; to: string } | null {
+  const match = /^(.+?)\s+superseded by\s+(.+)$/i.exec(summary.trim())
+  if (!match) return null
+  const [, from, to] = match
+  if (!from.trim() || !to.trim()) return null
+  return { from: from.trim(), to: to.trim() }
+}

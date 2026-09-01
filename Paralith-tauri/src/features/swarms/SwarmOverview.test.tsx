@@ -10,6 +10,25 @@ const focusSwarmAgentTerminal = vi.fn(async (..._args: unknown[]) => 'swarm-runt
 const retrySwarmTest = vi.fn(async (..._args: unknown[]) => undefined)
 const generateSwarmFixTask = vi.fn(async (..._args: unknown[]) => undefined)
 
+const runContext = vi.fn(async (..._args: unknown[]) => ({
+  id: 'pack-1', projectId: 'p1', taskId: 'task', agentRunId: 'run-1',
+  compilerVersion: '2', createdAt: new Date().toISOString(),
+  pack: {
+    projectId: 'p1', task: 'Implement the capture pipeline',
+    budgetTokens: 6000, usedTokens: 2400,
+    sections: [{ kind: 'architecture', label: 'ARCHITECTURE', entries: [{
+      itemId: 'm1', title: 'Notification recovery procedure', memoryType: 'procedure',
+      quality: 'verified', section: 'architecture', text: 'Reattach before replay.',
+      tokens: 120, score: 4.2, stale: false,
+      reasons: [{ source: 'file', detail: 'src/notify.rs', weight: 2 }],
+    }] }],
+    rejected: [{ itemId: 'm2', title: 'Legacy replay design', score: 1.1, reason: 'superseded' }],
+    conflicts: [], candidatesConsidered: 31, elapsedMs: 12,
+    compiledAt: new Date().toISOString(), handoffs: [], cached: false, semanticUsed: false,
+  },
+}))
+
+vi.mock('../memory/api', () => ({ brainApi: { runContext: (...args: unknown[]) => runContext(...args) } }))
 vi.mock('@tauri-apps/plugin-dialog', () => ({ confirm: vi.fn(async () => true), save: vi.fn(async () => null) }))
 vi.mock('@tauri-apps/plugin-fs', () => ({ writeTextFile: vi.fn(async () => undefined) }))
 vi.mock('../../native/commands', () => ({
@@ -49,7 +68,7 @@ const detail = {
   lifecycleHistory: [],
   runtimeSessions: [{ id: 'run', swarmId: 's1', projectId: 'p1', agentId: 'builder', taskId: 'task', runtime: 'codex', providerSessionId: 'thread', terminalSessionId: 'terminal', state: 'running', resumable: true, workingDirectory: 'C:/project/.worktrees/builder', usage: {}, failureClass: null, startedAt: now, updatedAt: now, endedAt: null }],
   evidence: [], tests: [], reviews: [],
-  memories: [{ id: 'context', swarmId: 's1', taskId: 'task', agentId: 'builder', memoryItemId: 'memory', revisionId: 'revision-123456789', title: 'Notification recovery procedure', memoryType: 'procedure', state: 'verified', summary: 'Reattach before replay.', context: 'Reattach before replay.', confidence: .9, sourceUris: ['file:///docs/recovery.md'], loadedAt: now }],
+  agentRuns: [{ id: 'run-1', swarmRunId: 'srun-1', swarmId: 's1', memberId: 'builder', taskId: 'task', attempt: 1, status: 'running', requestedProviderId: 'openai', requestedModelId: 'codex', resolvedProviderId: 'openai', resolvedModelId: 'codex', reasoningEffort: 'medium', fallbackUsed: false, filesChanged: [], evidenceIds: [], createdAt: now, updatedAt: now }],
 } as unknown as SwarmDetail
 
 describe('SwarmOverview live backend projection', () => {
@@ -68,7 +87,7 @@ describe('SwarmOverview live backend projection', () => {
     expect(screen.queryByText('42%')).not.toBeInTheDocument()
   })
 
-  it('supports Chat, Activity, Work Memory, targeted drafts, and the real terminal action', async () => {
+  it('supports Chat, Activity, Work Context, targeted drafts, and the real terminal action', async () => {
     const { container } = render(<MemoryRouter><SwarmOverview detail={detail} /></MemoryRouter>)
     await userEvent.click(screen.getByRole('button', { name: 'Chat' }))
     expect(screen.getByText('Implement the capture pipeline')).toBeInTheDocument()
@@ -78,9 +97,15 @@ describe('SwarmOverview live backend projection', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Terminals' }))
     expect(screen.getByText('Codex · running')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Open full terminal' })).toBeInTheDocument()
-    await userEvent.click(screen.getByRole('button', { name: 'Memory' }))
+    // Context is the relocated Brain surface: the pack this attempt actually received, read back
+    // from the immutable record — including what was retrieved and then cut, which is the half a
+    // context debugger exists for.
+    await userEvent.click(screen.getByRole('button', { name: 'Context' }))
+    await waitFor(() => expect(runContext).toHaveBeenCalledWith('p1', 'run-1'))
     expect(screen.getByText('Notification recovery procedure')).toBeInTheDocument()
-    expect(screen.getByText(/revision-123/)).toBeInTheDocument()
+    expect(screen.getByText(/2,400/)).toBeInTheDocument()
+    expect(screen.getByText('Legacy replay design')).toBeInTheDocument()
+    expect(screen.getByText('Superseded')).toBeInTheDocument()
 
     await userEvent.click(screen.getByRole('button', { name: 'Canvas' }))
     await userEvent.click(container.querySelector('.swarm-agent-node.role-builder') as HTMLElement)

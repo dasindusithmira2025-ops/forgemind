@@ -1,22 +1,47 @@
 /**
  * Knowledge graph surface.
  *
- * Node placement lives in `memoryGraphLayout.ts` — this component owns interaction (focus, depth,
- * overlays, edge filtering, pan and zoom) and nothing about where a node sits.
+ * Node placement lives in `memoryGraphLayout.ts` — this component owns interaction (curation,
+ * focus, depth, overlays, edge filtering, labelling, pan and zoom) and nothing about where a node
+ * sits.
+ *
+ * The governing rule is progressive exploration rather than "render everything". A project with
+ * three hundred memories drawn at once is a picture with no information in it, so the default view
+ * is a curated slice of the most connected, most important, most current knowledge, the full graph
+ * is one explicit click away, and labels are spent on the nodes that carry the structure instead
+ * of on every circle simultaneously. Selecting a node dims everything it is not connected to,
+ * which is what turns a web into a neighbourhood.
  */
-import { useCallback, useMemo, useRef, useState } from 'react'
-import { Crosshair, Loader2, Minus, Plus, RotateCcw } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Crosshair, Expand, Loader2, Maximize2, Minus, Plus, RotateCcw, Search } from 'lucide-react'
 import { Button } from '../../../components/ui/Button'
 import { useMemoryStore } from '../memoryStore'
 import { GRAPH_EDGE_KINDS } from '../memoryTypes'
 import type { GraphEdge, GraphNode, GraphNodeKind } from '../memoryTypes'
-import { layoutGraph, VIEW_SIZE } from '../memoryGraphLayout'
+import { curateGraph, graphBounds, layoutGraph, VIEW_SIZE } from '../memoryGraphLayout'
 
-function nodeClass(node: GraphNode, selectedId?: string): string {
+/** How many nodes the curated default draws before the full graph has to be asked for. */
+const CURATED_NODES = 40
+
+/** How many nodes carry a permanent label. Beyond this, a label appears on selection or match. */
+const LABELLED_NODES = 18
+
+/** Fit never zooms past this. A handful of nodes filling the canvas at 4x reads as a diagram of
+ * four circles, not as a project's knowledge. */
+const MAX_FIT_ZOOM = 2
+
+function nodeClass(
+  node: GraphNode,
+  selectedId: string | undefined,
+  dimmed: boolean,
+  matched: boolean,
+): string {
   const classes = ['memory-graph-node', `is-${node.kind}`]
   if (node.stale) classes.push('is-stale')
   if (node.quality) classes.push(`q-${node.quality}`)
   if (node.itemId && node.itemId === selectedId) classes.push('is-selected')
+  if (dimmed) classes.push('is-dim')
+  if (matched) classes.push('is-match')
   return classes.join(' ')
 }
 
@@ -31,11 +56,21 @@ export function MemoryGraph() {
   const health = useMemoryStore((state) => state.health)
 
   const [hiddenKinds, setHiddenKinds] = useState<string[]>([])
+  const [showAll, setShowAll] = useState(false)
+  const [highlight, setHighlight] = useState('')
   const [zoom, setZoom] = useState(1)
   const [pan, setPan] = useState({ x: 0, y: 0 })
   const drag = useRef<{ x: number; y: number; panX: number; panY: number } | null>(null)
 
-  const positioned = useMemo(() => (graph ? layoutGraph(graph) : []), [graph])
+  // Curation happens before layout so the picture is laid out for what is drawn, not for a
+  // hundred nodes most of which are not on screen.
+  const drawn = useMemo(
+    () => (graph ? (showAll ? graph : curateGraph(graph, CURATED_NODES)) : undefined),
+    [graph, showAll],
+  )
+  const hiddenCount = (graph?.nodes.length ?? 0) - (drawn?.nodes.length ?? 0)
+
+  const positioned = useMemo(() => (drawn ? layoutGraph(drawn) : []), [drawn])
   const byId = useMemo(
     () => new Map(positioned.map((node) => [node.id, node] as const)),
     [positioned],
@@ -43,12 +78,49 @@ export function MemoryGraph() {
 
   const edges = useMemo(
     () =>
-      (graph?.edges ?? []).filter(
+      (drawn?.edges ?? []).filter(
         (edge) =>
           !hiddenKinds.includes(edge.kind) && byId.has(edge.source) && byId.has(edge.target),
       ),
-    [graph, hiddenKinds, byId],
+    [drawn, hiddenKinds, byId],
   )
+
+  const selectedNodeId = useMemo(
+    () => positioned.find((node) => node.itemId && node.itemId === activeId)?.id,
+    [positioned, activeId],
+  )
+
+  /** The selected node and everything one edge away from it. Empty when nothing is selected. */
+  const neighbourhood = useMemo(() => {
+    if (!selectedNodeId) return null
+    const near = new Set<string>([selectedNodeId])
+    for (const edge of edges) {
+      if (edge.source === selectedNodeId) near.add(edge.target)
+      if (edge.target === selectedNodeId) near.add(edge.source)
+    }
+    return near
+  }, [selectedNodeId, edges])
+
+  const matches = useMemo(() => {
+    const needle = highlight.trim().toLowerCase()
+    if (!needle) return null
+    return new Set(
+      positioned
+        .filter((node) => node.label.toLowerCase().includes(needle))
+        .map((node) => node.id),
+    )
+  }, [highlight, positioned])
+
+  /** Nodes that always carry a label: the structural ones plus anything currently in play. */
+  const labelled = useMemo(() => {
+    const ranked = [...positioned]
+      .sort((left, right) => right.degree - left.degree || right.importance - left.importance)
+      .slice(0, LABELLED_NODES)
+    const keep = new Set(ranked.map((node) => node.id))
+    if (neighbourhood) for (const id of neighbourhood) keep.add(id)
+    if (matches) for (const id of matches) keep.add(id)
+    return keep
+  }, [positioned, neighbourhood, matches])
 
   const toggleKind = (kind: string) =>
     setHiddenKinds((current) =>
@@ -71,10 +143,40 @@ export function MemoryGraph() {
     [open, setGraphControls],
   )
 
-  const resetView = () => {
+  const resetView = useCallback(() => {
     setZoom(1)
     setPan({ x: 0, y: 0 })
-  }
+  }, [])
+
+  /** Frame what is actually drawn rather than the fixed coordinate space it is drawn inside. */
+  const fitView = useCallback(() => {
+    const bounds = graphBounds(positioned)
+    if (!bounds) return resetView()
+    const padding = 70
+    const next = Math.min(
+      MAX_FIT_ZOOM,
+      Math.max(0.25, VIEW_SIZE / Math.max(bounds.width + padding, bounds.height + padding)),
+    )
+    setZoom(next)
+    setPan({
+      x: VIEW_SIZE / 2 - (bounds.x + bounds.width / 2),
+      y: VIEW_SIZE / 2 - (bounds.y + bounds.height / 2),
+    })
+  }, [positioned, resetView])
+
+  // Frame the graph the first time each payload is drawn. Without this the first paint is a small
+  // cluster in the middle of a large empty canvas and the user's first action is always a zoom.
+  // Keyed on the payload and the curation choice, so panning and zooming afterwards is never
+  // fought by a refit.
+  const framed = useRef<{ graph: unknown; showAll: boolean }>(undefined)
+  useEffect(() => {
+    const key = { graph, showAll }
+    if (!graph || positioned.length === 0) return
+    const previous = framed.current
+    if (previous && previous.graph === graph && previous.showAll === showAll) return
+    framed.current = key
+    fitView()
+  }, [graph, showAll, positioned, fitView])
 
   return (
     <div className="memory-graph">
@@ -104,7 +206,28 @@ export function MemoryGraph() {
               <option value={3}>3 hops</option>
             </select>
           </label>
+          {controls.focusItemId && controls.depth < 3 && (
+            <Button
+              variant="ghost"
+              icon={<Expand size={13} />}
+              onClick={() => void setGraphControls({ depth: controls.depth + 1 })}
+            >
+              Expand
+            </Button>
+          )}
         </div>
+
+        <label className="memory-graph-find">
+          <Search size={12} aria-hidden />
+          <input
+            type="search"
+            value={highlight}
+            onChange={(event) => setHighlight(event.target.value)}
+            placeholder="Highlight"
+            aria-label="Highlight nodes by name"
+            spellCheck={false}
+          />
+        </label>
 
         <div className="memory-graph-legend" role="group" aria-label="Edge kinds">
           {GRAPH_EDGE_KINDS.map(({ kind, label }) => (
@@ -147,6 +270,7 @@ export function MemoryGraph() {
             aria-label="Zoom in"
             onClick={() => setZoom((value) => Math.min(4, value * 1.25))}
           />
+          <Button variant="ghost" icon={<Maximize2 size={13} />} aria-label="Fit to content" onClick={fitView} />
           <Button variant="ghost" icon={<RotateCcw size={13} />} aria-label="Reset view" onClick={resetView} />
         </div>
       </div>
@@ -201,51 +325,76 @@ export function MemoryGraph() {
                 const from = byId.get(edge.source)
                 const to = byId.get(edge.target)
                 if (!from || !to) return null
+                const dim = Boolean(
+                  neighbourhood && edge.source !== selectedNodeId && edge.target !== selectedNodeId,
+                )
                 return (
                   <line
                     key={edge.id}
-                    className={`memory-graph-edge is-${edge.kind}`}
+                    className={`memory-graph-edge is-${edge.kind}${dim ? ' is-dim' : ''}`}
                     x1={from.x}
                     y1={from.y}
                     x2={to.x}
                     y2={to.y}
-                    strokeOpacity={0.25 + edge.confidence * 0.55}
+                    strokeOpacity={dim ? 0.08 : 0.25 + edge.confidence * 0.55}
                   >
                     <title>{edgeTitle(edge, from, to)}</title>
                   </line>
                 )
               })}
-              {positioned.map((node) => (
-                <g
-                  key={node.id}
-                  className={nodeClass(node, activeId)}
-                  role={node.itemId ? 'button' : undefined}
-                  tabIndex={node.itemId ? 0 : undefined}
-                  aria-label={`${node.label}${node.stale ? ', needs verification' : ''}`}
-                  onClick={() => selectNode(node)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' || event.key === ' ') {
-                      event.preventDefault()
-                      selectNode(node)
-                    }
-                  }}
-                >
-                  <circle cx={node.x} cy={node.y} r={node.r} />
-                  <text x={node.x} y={node.y + node.r + 12} textAnchor="middle">
-                    {node.label.length > 28 ? `${node.label.slice(0, 27)}…` : node.label}
-                  </text>
-                  <title>
-                    {node.label}
-                    {node.sublabel ? ` — ${node.sublabel}` : ''}
-                  </title>
-                </g>
-              ))}
+              {positioned.map((node) => {
+                const dim = Boolean(
+                  (neighbourhood && !neighbourhood.has(node.id)) || (matches && !matches.has(node.id)),
+                )
+                return (
+                  <g
+                    key={node.id}
+                    className={nodeClass(node, activeId, dim, Boolean(matches?.has(node.id)))}
+                    role={node.itemId ? 'button' : undefined}
+                    tabIndex={node.itemId ? 0 : undefined}
+                    aria-label={`${node.label}${node.stale ? ', needs verification' : ''}`}
+                    onClick={() => selectNode(node)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault()
+                        selectNode(node)
+                      }
+                    }}
+                  >
+                    <circle cx={node.x} cy={node.y} r={node.r} />
+                    {labelled.has(node.id) && (
+                      <text
+                        x={node.x}
+                        y={node.y + node.r + 11 / zoom}
+                        textAnchor="middle"
+                        style={{ fontSize: 11 / zoom, strokeWidth: 3 / zoom }}
+                      >
+                        {node.label.length > 24 ? `${node.label.slice(0, 23)}…` : node.label}
+                      </text>
+                    )}
+                    <title>
+                      {node.label}
+                      {node.sublabel ? ` — ${node.sublabel}` : ''}
+                    </title>
+                  </g>
+                )
+              })}
             </g>
           </svg>
         )}
       </div>
 
       <div className="memory-graph-foot">
+        {hiddenCount > 0 && (
+          <button type="button" className="memory-graph-more" onClick={() => setShowAll(true)}>
+            Showing the {positioned.length} most connected · draw all {graph?.nodes.length}
+          </button>
+        )}
+        {showAll && (graph?.nodes.length ?? 0) > CURATED_NODES && (
+          <button type="button" className="memory-graph-more" onClick={() => setShowAll(false)}>
+            Back to the most connected
+          </button>
+        )}
         {graph?.truncated && (
           <span className="memory-graph-warn">
             Showing part of the graph. Focus a memory to see its full neighbourhood.
