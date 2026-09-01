@@ -328,6 +328,274 @@ const memoryDetail = {
   filePath: '.paralith/memory/adr-14-token-rotation.md',
 }
 
+// ---- Knowledge intelligence ------------------------------------------------------------------
+// The Memory workspace reads from two Rust services, both reached through one command each with
+// the operation in the arguments (see `stub-core.ts`). Ages are relative to now so the surfaces
+// render the recency wording they actually ship with rather than a frozen "4mo ago" everywhere.
+
+const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString()
+
+const knowledgeGraph = {
+  focusId: null,
+  truncated: false,
+  nodes: [
+    { id: 'memory:mem-1', kind: 'memory', label: 'ADR 14: Token Rotation', sublabel: 'decision', itemId: 'mem-1', memoryType: 'decision', quality: 'canonical', importance: 0.9, stale: false, degree: 5, distance: null },
+    { id: 'memory:mem-2', kind: 'memory', label: 'Auth Service', sublabel: 'component', itemId: 'mem-2', memoryType: 'component', quality: 'supported', importance: 0.7, stale: false, degree: 4, distance: null },
+    { id: 'memory:mem-3', kind: 'memory', label: 'ADR 9: Static Sessions', sublabel: 'decision', itemId: 'mem-3', memoryType: 'decision', quality: 'superseded', importance: 0.3, stale: true, degree: 2, distance: null },
+    { id: 'memory:mem-4', kind: 'memory', label: 'Terminal Lifecycle', sublabel: 'convention', itemId: 'mem-4', memoryType: 'convention', quality: 'working', importance: 0.5, stale: false, degree: 2, distance: null },
+    { id: 'memory:mem-5', kind: 'memory', label: 'Context Fabric', sublabel: 'component', itemId: 'mem-5', memoryType: 'component', quality: 'verified', importance: 0.85, stale: false, degree: 4, distance: null },
+    { id: 'memory:mem-6', kind: 'memory', label: 'Project-scoped filesystem guard', sublabel: 'security', itemId: 'mem-6', memoryType: 'security', quality: 'canonical', importance: 0.8, stale: false, degree: 3, distance: null },
+    { id: 'memory:mem-7', kind: 'memory', label: 'Agent Runtime', sublabel: 'component', itemId: 'mem-7', memoryType: 'component', quality: 'supported', importance: 0.75, stale: false, degree: 3, distance: null },
+    { id: 'memory:mem-8', kind: 'memory', label: 'Updater channel separation', sublabel: 'constraint', itemId: 'mem-8', memoryType: 'constraint', quality: 'verified', importance: 0.6, stale: false, degree: 1, distance: null },
+  ],
+  edges: [
+    { id: 'g1', source: 'memory:mem-1', target: 'memory:mem-3', kind: 'relation', label: 'supersedes', confidence: 1, directed: true },
+    { id: 'g2', source: 'memory:mem-2', target: 'memory:mem-1', kind: 'relation', label: 'implements', confidence: 0.9, directed: true },
+    { id: 'g3', source: 'memory:mem-5', target: 'memory:mem-7', kind: 'relation', label: 'supports', confidence: 0.8, directed: true },
+    { id: 'g4', source: 'memory:mem-5', target: 'memory:mem-1', kind: 'link', label: '', confidence: 0.6, directed: true },
+    { id: 'g5', source: 'memory:mem-6', target: 'memory:mem-2', kind: 'relation', label: 'constrains', confidence: 0.9, directed: true },
+    { id: 'g6', source: 'memory:mem-7', target: 'memory:mem-4', kind: 'link', label: '', confidence: 0.5, directed: true },
+    { id: 'g7', source: 'memory:mem-5', target: 'memory:mem-8', kind: 'link', label: '', confidence: 0.5, directed: true },
+    { id: 'g8', source: 'memory:mem-1', target: 'memory:mem-6', kind: 'link', label: '', confidence: 0.4, directed: true },
+  ],
+}
+
+const knowledgeHealth = {
+  total: 186,
+  byQuality: [['canonical', 24], ['verified', 41], ['supported', 62], ['observed', 42], ['superseded', 17]],
+  byType: [['component', 48], ['decision', 31], ['convention', 27], ['constraint', 22]],
+  stale: 2,
+  orphans: 6,
+  missingEvidence: 9,
+  brokenLinks: 3,
+  contradictedClaims: 1,
+  staleCanonical: 1,
+}
+
+const knowledgeHealthReport = {
+  ...knowledgeHealth,
+  understandingRevision: 12,
+  understandingGeneratedAt: NOW,
+  metrics: [
+    { key: 'stale_canonical', label: 'Stale canonical knowledge', count: 1, query: 'is:memory quality:canonical stale:true', severity: 'alert' },
+    { key: 'open_conflicts', label: 'Unresolved conflicts', count: 1, query: 'is:conflict', severity: 'alert' },
+    { key: 'missing_evidence', label: 'Knowledge without evidence', count: 9, query: 'is:memory evidence:none', severity: 'warn' },
+    { key: 'orphans', label: 'Unconnected knowledge', count: 6, query: 'is:memory is:orphan', severity: 'neutral' },
+    { key: 'contradicted_claims', label: 'Contradicted claims', count: 1, query: 'is:claim status:contradicted', severity: 'warn' },
+    { key: 'broken_links', label: 'Broken links', count: 3, query: 'is:memory links:broken', severity: 'neutral' },
+  ],
+}
+
+const knowledgeUnderstanding = {
+  projectId: project.id,
+  revision: 12,
+  generatedAt: NOW,
+  filesScanned: 9063,
+  groups: [
+    { dimension: 'desktop_runtime', facts: [{ dimension: 'desktop_runtime', value: 'Tauri', detail: '2.11', confidence: 0.98, evidence: [{ path: 'src-tauri/tauri.conf.json', kind: 'config', excerpt: null }] }] },
+    { dimension: 'language', facts: [
+      { dimension: 'language', value: 'TypeScript', detail: '5.9', confidence: 0.97, evidence: [{ path: 'tsconfig.json', kind: 'manifest', excerpt: null }, { path: 'src/main.tsx', kind: 'file', excerpt: null }] },
+      { dimension: 'language', value: 'Rust', detail: '2021 edition', confidence: 0.96, evidence: [{ path: 'src-tauri/Cargo.toml', kind: 'manifest', excerpt: 'edition = 2021' }] },
+    ] },
+    { dimension: 'framework', facts: [{ dimension: 'framework', value: 'React', detail: '19.0.0', confidence: 0.95, evidence: [{ path: 'package.json', kind: 'manifest', excerpt: 'react: 19.0.0' }] }] },
+    { dimension: 'database', facts: [{ dimension: 'database', value: 'SQLite', detail: 'rusqlite', confidence: 0.93, evidence: [{ path: 'src-tauri/src/db/mod.rs', kind: 'file', excerpt: null }] }] },
+    { dimension: 'test_system', facts: [{ dimension: 'test_system', value: 'Vitest', detail: null, confidence: 0.9, evidence: [{ path: 'package.json', kind: 'manifest', excerpt: null }] }] },
+    { dimension: 'build_system', facts: [{ dimension: 'build_system', value: 'Vite', detail: '7', confidence: 0.9, evidence: [{ path: 'vite.config.ts', kind: 'config', excerpt: null }] }] },
+    { dimension: 'ci_system', facts: [{ dimension: 'ci_system', value: 'GitHub Actions', detail: '4 workflows', confidence: 0.88, evidence: [{ path: '.github/workflows/release.yml', kind: 'config', excerpt: null }] }] },
+  ],
+}
+
+const knowledgeTimeline = [
+  { id: 'tl-1', projectId: project.id, at: ago(14), kind: 'quality_changed', summary: 'JWT localStorage superseded by HTTP-only sessions', detail: 'src/auth/session.rs changed', actor: 'system', itemId: 'mem-3', itemTitle: null, entityId: null, memoryType: 'decision', branchName: 'main', taskId: null },
+  { id: 'tl-2', projectId: project.id, at: ago(18), kind: 'candidate_accepted', summary: 'Project-session watcher owns Memory lifecycle', detail: null, actor: 'system', itemId: 'mem-6', itemTitle: 'Project-session watcher owns Memory lifecycle', entityId: null, memoryType: 'component', branchName: 'main', taskId: null },
+  { id: 'tl-3', projectId: project.id, at: ago(42), kind: 'candidate_accepted', summary: 'ContextCompiler excludes superseded truth', detail: null, actor: 'system', itemId: 'mem-5', itemTitle: 'ContextCompiler excludes superseded truth', entityId: null, memoryType: 'component', branchName: 'main', taskId: null },
+  { id: 'tl-4', projectId: project.id, at: ago(58), kind: 'marked_stale', summary: 'ADR 9: Static Sessions', detail: 'file change: src/auth/token.rs', actor: 'system', itemId: 'mem-3', itemTitle: 'ADR 9: Static Sessions', entityId: null, memoryType: 'decision', branchName: 'main', taskId: null },
+  { id: 'tl-5', projectId: project.id, at: ago(75), kind: 'memory_revised', summary: 'ADR 14: Token Rotation', detail: 'rev 4', actor: 'user', itemId: 'mem-1', itemTitle: 'ADR 14: Token Rotation', entityId: null, memoryType: 'decision', branchName: 'main', taskId: null },
+  { id: 'tl-6', projectId: project.id, at: ago(96), kind: 'understanding_updated', summary: 'Project re-read', detail: 'revision 12, 9,063 files', actor: 'system', itemId: null, itemTitle: null, entityId: null, memoryType: null, branchName: 'main', taskId: null },
+  { id: 'tl-7', projectId: project.id, at: ago(140), kind: 'conflict_opened', summary: 'Database version', detail: 'PostgreSQL 16 vs PostgreSQL 17', actor: 'system', itemId: null, itemTitle: null, entityId: 'ent-db', memoryType: null, branchName: 'main', taskId: null },
+  { id: 'tl-8', projectId: project.id, at: ago(1520), kind: 'verified', summary: 'Updater channel separation', detail: 'canonical', actor: 'user', itemId: 'mem-8', itemTitle: 'Updater channel separation', entityId: null, memoryType: 'constraint', branchName: 'main', taskId: null },
+  { id: 'tl-9', projectId: project.id, at: ago(1610), kind: 'claim_changed', summary: 'Access tokens expire after 15 minutes.', detail: 'contradicted', actor: 'system', itemId: 'mem-1', itemTitle: 'ADR 14: Token Rotation', entityId: null, memoryType: 'decision', branchName: 'main', taskId: null },
+]
+
+const knowledgeCandidate = {
+  id: 'cand-1',
+  projectId: project.id,
+  kind: 'api_surface',
+  subject: 'Session middleware',
+  predicate: 'uses',
+  object: 'HTTP-only cookies',
+  statement: 'Session cookies may have replaced bearer tokens in the auth middleware.',
+  suggestedMemoryType: 'decision',
+  confidence: 0.62,
+  origin: 'model',
+  riskClass: 'high',
+  status: 'pending',
+  entityId: null,
+  itemId: null,
+  branchName: 'main',
+  createdBy: 'analyzer',
+  dedupHash: 'h1',
+  decisionReason: 'High-risk architecture change: confirmed by a person before it becomes project truth.',
+  evidence: [
+    { path: 'src/auth/session.rs', kind: 'file', excerpt: 'set_cookie(SameSite::Strict, HttpOnly)' },
+    { path: 'src/auth/middleware.rs', kind: 'file', excerpt: null },
+  ],
+  createdAt: NOW,
+  decidedAt: null,
+}
+
+const knowledgeReviewQueue = {
+  total: 4,
+  truncated: false,
+  sections: [
+    {
+      section: 'conflict',
+      label: 'Conflicting understanding',
+      bulkActionable: false,
+      items: [{
+        section: 'conflict', id: 'conf-1', title: 'Database version', detail: '', riskClass: 'high', candidate: null, itemId: null, createdAt: NOW,
+        conflict: {
+          id: 'conf-1', projectId: project.id, subjectEntityId: 'ent-db', subject: 'Database', predicate: 'version',
+          leftItemId: 'mem-5', leftClaimId: null, leftLabel: 'Current knowledge', leftValue: 'PostgreSQL 16',
+          rightItemId: null, rightClaimId: null, rightLabel: 'New evidence', rightValue: 'PostgreSQL 17',
+          classification: 'direct_contradiction', confidence: 0.81, status: 'open', resolution: null,
+          detail: 'Both were classified as the active database version fact, and neither is scoped to a branch.',
+          createdAt: NOW, resolvedAt: null,
+        },
+      }],
+    },
+    {
+      section: 'high_risk_candidate',
+      label: 'Waiting on a person',
+      bulkActionable: false,
+      items: [{ section: 'high_risk_candidate', id: 'cand-1', title: knowledgeCandidate.statement, detail: '', riskClass: 'high', candidate: knowledgeCandidate, conflict: null, itemId: null, createdAt: NOW }],
+    },
+    {
+      section: 'stale_canonical',
+      label: 'Stale canonical knowledge',
+      bulkActionable: false,
+      items: [{ section: 'stale_canonical', id: 'mem-3', title: 'ADR 9: Static Sessions', detail: 'AuthService.rotate() changed since this was verified', riskClass: 'high', candidate: null, conflict: null, itemId: 'mem-3', createdAt: NOW }],
+    },
+    {
+      section: 'candidate',
+      label: 'New knowledge',
+      bulkActionable: true,
+      items: [
+        { section: 'candidate', id: 'cand-2', title: '', detail: '', riskClass: 'routine', conflict: null, itemId: null, createdAt: NOW, candidate: { ...knowledgeCandidate, id: 'cand-2', statement: 'GET /api/sessions is an API surface exposed by the auth router.', riskClass: 'routine', origin: 'deterministic', confidence: 0.88, decisionReason: null, evidence: [{ path: 'src/routes.ts', kind: 'file', excerpt: null }] } },
+        { section: 'candidate', id: 'cand-3', title: '', detail: '', riskClass: 'routine', conflict: null, itemId: null, createdAt: NOW, candidate: { ...knowledgeCandidate, id: 'cand-3', statement: 'The release workflow signs updater artifacts before publishing.', riskClass: 'routine', origin: 'deterministic', confidence: 0.84, decisionReason: null, evidence: [{ path: '.github/workflows/release.yml', kind: 'config', excerpt: null }] } },
+      ],
+    },
+  ],
+}
+
+const knowledgeJobs = [
+  { id: 'job-1', projectId: project.id, kind: 'analyze_impact', status: 'complete', payload: JSON.stringify({ paths: ['src/auth/session.rs'], trigger: 'file change' }), attempts: 1, maxAttempts: 3, dedupKey: null, result: JSON.stringify({ pathsAnalyzed: 1, understandings: [], markedStale: ['mem-3'], superseded: [], learned: ['mem-2'], needsReview: [], skipped: [{ itemId: 'mem-4', reason: 'not yet load-bearing: quality below supported' }] }), error: null, createdAt: NOW, startedAt: NOW, finishedAt: NOW },
+  { id: 'job-2', projectId: project.id, kind: 'analyze_project', status: 'complete', payload: JSON.stringify({ trigger: 'session start' }), attempts: 1, maxAttempts: 3, dedupKey: null, result: JSON.stringify({ filesScanned: 9063, factsFound: 41, factsChanged: 3, candidatesQueued: 5, revision: 12 }), error: null, createdAt: NOW, startedAt: NOW, finishedAt: NOW },
+  { id: 'job-3', projectId: project.id, kind: 'process_candidates', status: 'complete', payload: '{}', attempts: 1, maxAttempts: 3, dedupKey: null, result: JSON.stringify({ processed: 5, autoAccepted: 2, queuedForReview: 3, rejected: 0, duplicatesIgnored: 1, conflictsOpened: 1 }), error: null, createdAt: NOW, startedAt: NOW, finishedAt: NOW },
+  { id: 'job-4', projectId: project.id, kind: 'analyze_impact', status: 'failed', payload: JSON.stringify({ paths: ['src/db/schema.rs'], trigger: 'commit 91df2ab' }), attempts: 3, maxAttempts: 3, dedupKey: null, result: null, error: 'The Project folder is unavailable.', createdAt: NOW, startedAt: NOW, finishedAt: NOW },
+  { id: 'job-5', projectId: project.id, kind: 'analyze_impact', status: 'queued', payload: JSON.stringify({ paths: ['src/features/memory/api.ts'], trigger: 'file change' }), attempts: 0, maxAttempts: 3, dedupKey: null, result: null, error: null, createdAt: NOW, startedAt: null, finishedAt: null },
+]
+
+const contextPack = {
+  projectId: project.id,
+  task: 'Fix authentication middleware',
+  budgetTokens: 12000,
+  usedTokens: 6482,
+  candidatesConsidered: 41,
+  elapsedMs: 38,
+  compiledAt: NOW,
+  cached: false,
+  semanticUsed: false,
+  compilerVersion: '3',
+  handoffs: [],
+  conflicts: [{ leftItemId: 'mem-1', leftTitle: 'ADR 14: Token Rotation', rightItemId: 'mem-3', rightTitle: 'ADR 9: Static Sessions' }],
+  sections: [
+    { kind: 'task_contract', label: 'Task contract', entries: [
+      { itemId: 'ctx-1', title: 'Fix authentication middleware', memoryType: 'note', quality: 'working', section: 'task_contract', text: '', tokens: 320, score: 3.2, stale: false, reasons: [{ source: 'explicit', detail: 'the task as written', weight: 3.2 }], sourceType: 'task', sourceUris: [] },
+    ] },
+    { kind: 'architecture', label: 'Architecture', entries: [
+      { itemId: 'mem-2', title: 'Auth Service', memoryType: 'component', quality: 'supported', section: 'architecture', text: '', tokens: 1410, score: 2.4, stale: false, confidence: 0.6, reasons: [{ source: 'file', detail: 'cites src/auth/session.rs', weight: 1.5 }, { source: 'lexical', detail: 'matches "authentication"', weight: 0.9 }], sourceType: 'memory', sourceUris: ['src/auth/service.rs'] },
+      { itemId: 'mem-5', title: 'Context Fabric', memoryType: 'component', quality: 'verified', section: 'architecture', text: '', tokens: 980, score: 1.6, stale: false, confidence: 0.9, reasons: [{ source: 'relation', detail: 'related to Auth Service', weight: 1.6 }], sourceType: 'memory', sourceUris: [] },
+    ] },
+    { kind: 'constraints', label: 'Constraints', entries: [
+      { itemId: 'mem-6', title: 'Project-scoped filesystem guard', memoryType: 'security', quality: 'canonical', section: 'constraints', text: '', tokens: 1103, score: 2.1, stale: false, confidence: 0.95, reasons: [{ source: 'standing', detail: 'canonical project knowledge', weight: 2.1 }], sourceType: 'memory', sourceUris: [] },
+    ] },
+    { kind: 'code', label: 'Relevant code', entries: [
+      { itemId: 'ctx-2', title: 'src/auth/middleware.rs', memoryType: 'note', quality: 'observed', section: 'code', text: '', tokens: 1928, score: 1.9, stale: false, reasons: [{ source: 'file', detail: 'named by the task', weight: 1.9 }], sourceType: 'file', sourceUris: ['src/auth/middleware.rs'] },
+    ] },
+    { kind: 'predecessors', label: 'Decisions', entries: [
+      { itemId: 'mem-1', title: 'ADR 14: Token Rotation', memoryType: 'decision', quality: 'canonical', section: 'predecessors', text: '', tokens: 741, score: 1.87, stale: false, confidence: 0.9, reasons: [{ source: 'file', detail: 'cites src/auth/token.rs', weight: 0.9 }, { source: 'lexical', detail: 'matches "authentication"', weight: 0.97 }], sourceType: 'memory', sourceUris: [] },
+    ] },
+  ],
+  rejected: [
+    { itemId: 'mem-3', title: 'ADR 9: Static Sessions', score: 1.2, reason: 'superseded' },
+    { itemId: 'mem-9', title: 'Legacy token-budget rule', score: 0.9, reason: 'stale' },
+    { itemId: 'mem-10', title: 'Browser rendering notes', score: 0.4, reason: 'budget' },
+    { itemId: 'mem-11', title: 'Release assembly runbook', score: 0.3, reason: 'budget' },
+  ],
+  diagnostics: {
+    providerCandidates: { lexical: 28, relation: 9, file: 4 },
+    deduplicatedCandidates: 3,
+    staleCandidates: 2,
+    truncatedEntries: 0,
+    semanticStatus: 'disabled',
+    providerErrors: [],
+  },
+}
+
+const knowledgeSearchResponse = {
+  total: 4,
+  truncated: false,
+  elapsedMs: 7,
+  semanticUsed: false,
+  parsed: { expression: { node: 'all' }, diagnostics: [] },
+  results: [
+    { domain: 'memory', id: 'mem-1', itemId: 'mem-1', title: 'ADR 14: Token Rotation', excerpt: 'Refresh tokens rotate after every use and the whole family is invalidated on reuse.', matchReason: 'lexical', score: 2.4, memoryType: 'decision', quality: 'canonical', stale: false, confidence: 0.9, branchName: null, updatedAt: NOW },
+    { domain: 'memory', id: 'mem-3', itemId: 'mem-3', title: 'ADR 9: Static Sessions', excerpt: 'Sessions were fixed-lifetime with no rotation. Replaced by ADR 14.', matchReason: 'lexical', score: 1.1, memoryType: 'decision', quality: 'superseded', stale: true, confidence: 0.4, branchName: null, updatedAt: NOW },
+    { domain: 'fact', id: 'fact-1', itemId: null, title: 'Rust — 2021 edition', excerpt: 'src-tauri/Cargo.toml', matchReason: 'filter', score: 0.9, memoryType: null, quality: null, stale: false, confidence: 0.96, branchName: null, updatedAt: NOW },
+    { domain: 'conflict', id: 'conf-1', itemId: null, title: 'Database — version', excerpt: 'PostgreSQL 16 vs PostgreSQL 17', matchReason: 'filter', score: 0.8, memoryType: null, quality: null, stale: false, confidence: 0.81, branchName: null, updatedAt: NOW },
+  ],
+}
+
+/** Explorer + editor fixtures. Deliberately dot-folder heavy: the system-folder pile-up at the top
+ * of the tree is exactly the hierarchy problem the Files surface has to solve. */
+function fileEntry(name: string, kind: 'file' | 'directory', extra: Record<string, unknown> = {}) {
+  return { name, relativePath: name, kind, size: 2048, modifiedMs: 1_760_000_000_000, isSymlink: false, symlinkBroken: false, isHidden: false, readonly: false, ...extra }
+}
+
+const projectListing = {
+  projectId: project.id,
+  relativePath: '',
+  truncated: false,
+  totalEntries: 12,
+  entries: [
+    fileEntry('.agents', 'directory'),
+    fileEntry('.claude', 'directory'),
+    fileEntry('.git', 'directory', { isHidden: true }),
+    fileEntry('.github', 'directory'),
+    fileEntry('.paralith', 'directory'),
+    fileEntry('src', 'directory'),
+    fileEntry('src-tauri', 'directory'),
+    fileEntry('scripts', 'directory'),
+    fileEntry('CLAUDE.md', 'file'),
+    fileEntry('package.json', 'file'),
+    fileEntry('vite.config.ts', 'file'),
+    fileEntry('tsconfig.app.json', 'file', { readonly: true }),
+  ],
+}
+
+const projectFile = {
+  projectId: project.id,
+  relativePath: 'package.json',
+  content: JSON.stringify({ name: 'paralith', version: '0.4.17' }, null, 2),
+  sha256: 'f1e2d3',
+  size: 52,
+  encoding: 'utf8',
+  lineEnding: 'lf',
+  binary: false,
+  readonly: false,
+}
+
 export const FIXTURES: Record<string, unknown> = {
   get_startup_status: { recoveryMode: false },
   get_settings: settings,
@@ -378,6 +646,11 @@ export const FIXTURES: Record<string, unknown> = {
     { providerId: 'claude', providerDisplayName: 'Claude', modelId: 'sonnet-5', displayName: 'Sonnet 5', description: 'Fast implementation and review.', available: true, deprecated: false, coding: true, planning: true, review: true, toolUse: true, vision: true, supportedReasoningEfforts: ['low', 'medium', 'high'], supportedExecutionModes: ['ask', 'trusted'], recommendedRoles: ['builder'], authenticated: true },
     { providerId: 'codex', providerDisplayName: 'Codex', modelId: 'gpt-5.6', displayName: 'GPT 5.6', description: 'Focused implementation and verification.', available: true, deprecated: false, coding: true, planning: false, review: true, toolUse: true, vision: false, supportedReasoningEfforts: ['low', 'medium', 'high'], supportedExecutionModes: ['ask', 'restricted'], recommendedRoles: ['builder', 'debugger'], authenticated: true },
   ],
+  list_project_directory: projectListing,
+  read_project_file: projectFile,
+  search_project_files: { projectId: project.id, files: ['src/App.tsx', 'src/index.css', 'src-tauri/src/main.rs', 'package.json'], truncated: false },
+  watch_project_files: null,
+  unwatch_project_files: null,
   inspect_repository: repositorySnapshot,
   list_repository_branches: [
     { name: 'feat/database-studio', isCurrent: true, isRemote: false, ahead: 3, behind: 0, upstream: 'origin/feat/database-studio', lastCommitAt: NOW, lastCommitSummary: 'feat(dbstudio): professional Database Studio UI' },
@@ -424,6 +697,21 @@ export const FIXTURES: Record<string, unknown> = {
     ['supersedes', 'contradicts', 'supports', 'depends_on', 'implements', 'documents', 'derived_from', 'related_to'],
     ['file', 'commit', 'command', 'test', 'run', 'task', 'url', 'note'],
   ],
+  memory_graph: knowledgeGraph,
+  memory_health: knowledgeHealth,
+  memory_jobs: knowledgeJobs,
+  memory_job_cancel: false,
+  context_compile: contextPack,
+  knowledge_understanding: knowledgeUnderstanding,
+  knowledge_analyze_project: true,
+  knowledge_review_queue: knowledgeReviewQueue,
+  knowledge_decide_candidates: [],
+  knowledge_resolve_conflict: [],
+  knowledge_timeline: knowledgeTimeline,
+  knowledge_timeline_actors: ['system', 'user', 'agent:implementer'],
+  knowledge_search: knowledgeSearchResponse,
+  knowledge_semantic_health: { mode: 'disabled', provider: 'disabled', model: '', dimensions: 0, available: false, detail: 'Lexical and structured search are unaffected.' },
+  knowledge_health_report: knowledgeHealthReport,
 }
 
 /** The empty shape a screen expects when a command has no fixture. */

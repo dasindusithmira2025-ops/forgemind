@@ -1,15 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { openPath, revealItemInDir } from '@tauri-apps/plugin-opener'
-import {
-  ChevronRight,
-  Folder,
-  FolderOpen,
-  FilePlus2,
-  FolderPlus,
-  RefreshCw,
-  ChevronsDownUp,
-  Link2Off,
-} from 'lucide-react'
+import { ChevronRight, Folder, FolderOpen, Link2Off, MoreHorizontal, Plus } from 'lucide-react'
 import { asNativeError, native } from '../../native/commands'
 import type { DirectoryEntry } from '../../native/types'
 import { ErrorNotice } from '../../components/ui/ErrorNotice'
@@ -47,7 +38,17 @@ export function FileExplorer({ projectId, projectRootPath, activePath, onOpenFil
   const [menu, setMenu] = useState<MenuState>()
   const [prompt, setPrompt] = useState<PromptState>()
   const [actionError, setActionError] = useState('')
+  // Which toolbar menu is open. Two menus rather than five permanent icon buttons: creation is the
+  // primary action, everything else is maintenance and lives in the overflow.
+  const [toolbarMenu, setToolbarMenu] = useState<'add' | 'more'>()
+  // Directories whose dot/system group is expanded, keyed by the directory's relative path.
+  const [hiddenOpen, setHiddenOpen] = useState<string[]>([])
   const containerRef = useRef<HTMLDivElement>(null)
+
+  const toggleHiddenGroup = useCallback(
+    (base: string) => setHiddenOpen((current) => (current.includes(base) ? current.filter((item) => item !== base) : [...current, base])),
+    [],
+  )
 
   useEffect(() => {
     void load('')
@@ -172,7 +173,7 @@ export function FileExplorer({ projectId, projectRootPath, activePath, onOpenFil
   )
 
   // Flatten the currently-visible tree for roving keyboard navigation.
-  const visibleRows = useMemo(() => flattenVisible('', listings, expanded), [listings, expanded])
+  const visibleRows = useMemo(() => flattenVisible('', listings, expanded, hiddenOpen), [listings, expanded, hiddenOpen])
 
   const onRowKeyDown = useCallback(
     (event: React.KeyboardEvent, entry: DirectoryEntry, depth: number) => {
@@ -213,11 +214,43 @@ export function FileExplorer({ projectId, projectRootPath, activePath, onOpenFil
     <div className="code-explorer" ref={containerRef} onContextMenu={(event) => event.preventDefault()}>
       <div className="code-explorer-toolbar">
         <span className="code-explorer-title">Explorer</span>
-        <div className="code-explorer-tools">
-          <button title="New file" aria-label="New file" onClick={() => setPrompt({ kind: 'create-file', parent: '', initialValue: '' })}><FilePlus2 size={14} /></button>
-          <button title="New folder" aria-label="New folder" onClick={() => setPrompt({ kind: 'create-folder', parent: '', initialValue: '' })}><FolderPlus size={14} /></button>
-          <button title="Refresh" aria-label="Refresh explorer" onClick={() => void refresh('')}><RefreshCw size={14} /></button>
-          <button title="Collapse all" aria-label="Collapse all folders" onClick={collapseAll}><ChevronsDownUp size={14} /></button>
+        <div className="code-explorer-tools menu-wrap">
+          <button
+            title="New…"
+            aria-label="New"
+            aria-haspopup="menu"
+            aria-expanded={toolbarMenu === 'add'}
+            onClick={() => setToolbarMenu((current) => (current === 'add' ? undefined : 'add'))}
+          ><Plus size={15} /></button>
+          <button
+            title="More actions"
+            aria-label="More explorer actions"
+            aria-haspopup="menu"
+            aria-expanded={toolbarMenu === 'more'}
+            onClick={() => setToolbarMenu((current) => (current === 'more' ? undefined : 'more'))}
+          ><MoreHorizontal size={15} /></button>
+          {toolbarMenu && (
+            <>
+              <button className="context-scrim" aria-label="Close menu" onClick={() => setToolbarMenu(undefined)} />
+              <div
+                className="context-popover code-explorer-toolbar-menu"
+                role="menu"
+                onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); setToolbarMenu(undefined) } }}
+              >
+                {toolbarMenu === 'add' ? (
+                  <>
+                    <button role="menuitem" onClick={() => { setToolbarMenu(undefined); setPrompt({ kind: 'create-file', parent: '', initialValue: '' }) }}>New File</button>
+                    <button role="menuitem" onClick={() => { setToolbarMenu(undefined); setPrompt({ kind: 'create-folder', parent: '', initialValue: '' }) }}>New Folder</button>
+                  </>
+                ) : (
+                  <>
+                    <button role="menuitem" onClick={() => { setToolbarMenu(undefined); void refresh('') }}>Refresh</button>
+                    <button role="menuitem" onClick={() => { setToolbarMenu(undefined); collapseAll() }}>Collapse all</button>
+                  </>
+                )}
+              </div>
+            </>
+          )}
         </div>
       </div>
       {actionError && <div className="code-explorer-error"><ErrorNotice message={actionError} /></div>}
@@ -231,7 +264,10 @@ export function FileExplorer({ projectId, projectRootPath, activePath, onOpenFil
         ) : (
           <Tree
             entries={rootEntries}
+            base=""
             depth={0}
+            hiddenOpen={hiddenOpen}
+            onToggleHidden={toggleHiddenGroup}
             listings={listings}
             loading={loading}
             expanded={expanded}
@@ -283,9 +319,26 @@ export function FileExplorer({ projectId, projectRootPath, activePath, onOpenFil
   )
 }
 
+/** Dot/system entries are split out of the main listing so `.git`, `.github`, `.claude` and friends
+ * stop dominating the top of every project. They are grouped behind one disclosure row per
+ * directory — de-emphasised, never removed, and always one click away. `isHidden` alone is not
+ * enough: on Windows a dot-directory usually carries no hidden FS attribute. */
+function partitionEntries(entries: DirectoryEntry[]): { shown: DirectoryEntry[]; hidden: DirectoryEntry[] } {
+  const shown: DirectoryEntry[] = []
+  const hidden: DirectoryEntry[] = []
+  for (const entry of entries) (entry.isHidden || entry.name.startsWith('.') ? hidden : shown).push(entry)
+  return { shown, hidden }
+}
+
+const INDENT_PX = 14
+
 interface TreeProps {
   entries: DirectoryEntry[]
+  /** Relative path of the directory these entries belong to; keys its hidden-group disclosure. */
+  base: string
   depth: number
+  hiddenOpen: string[]
+  onToggleHidden: (base: string) => void
   listings: Record<string, DirectoryEntry[]>
   loading: Record<string, boolean>
   expanded: string[]
@@ -297,43 +350,68 @@ interface TreeProps {
 }
 
 function Tree(props: TreeProps) {
+  const { shown, hidden } = partitionEntries(props.entries)
+  const groupOpen = props.hiddenOpen.includes(props.base)
+  const indent = `calc(var(--space-2) + ${props.depth * INDENT_PX}px)`
+
+  const renderEntry = (entry: DirectoryEntry) => {
+    const isDir = entry.kind === 'directory'
+    const isOpen = props.expanded.includes(entry.relativePath)
+    const Icon = isDir ? (isOpen ? FolderOpen : Folder) : iconForFile(entry.name)
+    const active = entry.relativePath === props.activePath
+    const childrenLoading = isDir && isOpen && props.loading[entry.relativePath] && !props.listings[entry.relativePath]
+    return (
+      <div key={entry.relativePath} role="treeitem" aria-expanded={isDir ? isOpen : undefined} aria-selected={active}>
+        <button
+          data-explorer-row
+          className={`code-explorer-row ${isDir ? 'is-dir' : ''} ${active ? 'is-active' : ''} ${entry.isHidden || entry.name.startsWith('.') ? 'is-hidden-file' : ''}`}
+          style={{ paddingLeft: indent }}
+          tabIndex={-1}
+          title={entry.symlinkBroken ? `Broken symbolic link — ${entry.relativePath}` : entry.relativePath}
+          onClick={() => props.onOpen(entry, { preview: true })}
+          onDoubleClick={() => props.onOpen(entry)}
+          onKeyDown={(event) => props.onKeyDown(event, entry, props.depth)}
+          onContextMenu={(event) => { event.preventDefault(); props.onContextMenu(entry, event.clientX, event.clientY) }}
+        >
+          {isDir ? <ChevronRight size={13} className={`code-chevron ${isOpen ? 'is-open' : ''}`} /> : <span className="code-chevron-spacer" />}
+          <Icon size={14} className="code-file-icon" />
+          <span className="code-row-name">{entry.name}</span>
+          {entry.symlinkBroken && <Link2Off size={12} className="code-row-flag" />}
+          {entry.readonly && !isDir && <span className="code-row-badge" title="Read-only">RO</span>}
+        </button>
+        {isDir && isOpen && (
+          childrenLoading ? (
+            <div className="code-explorer-skeleton child" style={{ paddingLeft: `${(props.depth + 1) * INDENT_PX + 12}px` }}>{Array.from({ length: 3 }).map((_, index) => <span key={index} />)}</div>
+          ) : (
+            <Tree
+              {...props}
+              entries={props.listings[entry.relativePath] ?? []}
+              base={entry.relativePath}
+              depth={props.depth + 1}
+            />
+          )
+        )}
+      </div>
+    )
+  }
+
   return (
     <>
-      {props.entries.map((entry) => {
-        const isDir = entry.kind === 'directory'
-        const isOpen = props.expanded.includes(entry.relativePath)
-        const Icon = isDir ? (isOpen ? FolderOpen : Folder) : iconForFile(entry.name)
-        const active = entry.relativePath === props.activePath
-        const childrenLoading = isDir && isOpen && props.loading[entry.relativePath] && !props.listings[entry.relativePath]
-        return (
-          <div key={entry.relativePath} role="treeitem" aria-expanded={isDir ? isOpen : undefined} aria-selected={active}>
-            <button
-              data-explorer-row
-              className={`code-explorer-row ${active ? 'is-active' : ''} ${entry.isHidden ? 'is-hidden-file' : ''}`}
-              style={{ paddingLeft: `calc(var(--space-2) + ${props.depth * 12}px)` }}
-              tabIndex={-1}
-              title={entry.symlinkBroken ? 'Broken symbolic link' : entry.relativePath}
-              onClick={() => props.onOpen(entry, { preview: true })}
-              onDoubleClick={() => props.onOpen(entry)}
-              onKeyDown={(event) => props.onKeyDown(event, entry, props.depth)}
-              onContextMenu={(event) => { event.preventDefault(); props.onContextMenu(entry, event.clientX, event.clientY) }}
-            >
-              {isDir ? <ChevronRight size={13} className={`code-chevron ${isOpen ? 'is-open' : ''}`} /> : <span className="code-chevron-spacer" />}
-              <Icon size={14} className="code-file-icon" />
-              <span className="code-row-name">{entry.name}</span>
-              {entry.symlinkBroken && <Link2Off size={12} className="code-row-flag" />}
-              {entry.readonly && !isDir && <span className="code-row-badge" title="Read-only">RO</span>}
-            </button>
-            {isDir && isOpen && (
-              childrenLoading ? (
-                <div className="code-explorer-skeleton child" style={{ paddingLeft: `${(props.depth + 1) * 12 + 12}px` }}>{Array.from({ length: 3 }).map((_, index) => <span key={index} />)}</div>
-              ) : (
-                <Tree {...props} entries={props.listings[entry.relativePath] ?? []} depth={props.depth + 1} />
-              )
-            )}
-          </div>
-        )
-      })}
+      {shown.map(renderEntry)}
+      {hidden.length > 0 && (
+        <button
+          type="button"
+          className="code-explorer-hidden-toggle"
+          style={{ paddingLeft: indent }}
+          aria-expanded={groupOpen}
+          title={hidden.map((entry) => entry.name).join(', ')}
+          onClick={() => props.onToggleHidden(props.base)}
+        >
+          <ChevronRight size={13} className={`code-chevron ${groupOpen ? 'is-open' : ''}`} />
+          <span>{hidden.length} hidden {hidden.length === 1 ? 'item' : 'items'}</span>
+        </button>
+      )}
+      {groupOpen && hidden.map(renderEntry)}
     </>
   )
 }
@@ -369,13 +447,18 @@ function ExplorerMenu({ entry, x, y, onClose, onAction }: { entry: DirectoryEntr
 }
 
 interface FlatRow { entry: DirectoryEntry; depth: number }
-function flattenVisible(base: string, listings: Record<string, DirectoryEntry[]>, expanded: string[], depth = 0): FlatRow[] {
+/** Mirrors exactly what `Tree` renders (including the hidden-group ordering) so the roving
+ * keyboard index always lines up with the rendered `[data-explorer-row]` elements. */
+function flattenVisible(base: string, listings: Record<string, DirectoryEntry[]>, expanded: string[], hiddenOpen: string[], depth = 0): FlatRow[] {
   const rows: FlatRow[] = []
-  for (const entry of listings[base] ?? []) {
+  const { shown, hidden } = partitionEntries(listings[base] ?? [])
+  const walk = (entry: DirectoryEntry) => {
     rows.push({ entry, depth })
     if (entry.kind === 'directory' && expanded.includes(entry.relativePath)) {
-      rows.push(...flattenVisible(entry.relativePath, listings, expanded, depth + 1))
+      rows.push(...flattenVisible(entry.relativePath, listings, expanded, hiddenOpen, depth + 1))
     }
   }
+  for (const entry of shown) walk(entry)
+  if (hiddenOpen.includes(base)) for (const entry of hidden) walk(entry)
   return rows
 }

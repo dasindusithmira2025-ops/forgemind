@@ -10,10 +10,11 @@ import { asNativeError, native } from '../../native/commands'
 import { useSwarmStore } from './swarmStore'
 import { SWARM_PHASES, isActiveLifecycle, lifecycleLabel, lifecycleTone, phaseIndex, roleLabel, roleTarget, runtimeLabel } from './swarmPresentation'
 import { SwarmRowMenu } from './SwarmRowMenu'
+import { BrainRunContext } from '../memory/components/BrainRunContext'
 
 type PrimaryView = 'canvas' | 'chat' | 'activity' | 'work'
-type WorkTab = 'overview' | 'tasks' | 'history' | 'terminals' | 'changes' | 'tests' | 'memory' | 'evidence'
-const WORK_TABS: WorkTab[] = ['overview', 'tasks', 'history', 'terminals', 'changes', 'tests', 'memory', 'evidence']
+type WorkTab = 'overview' | 'tasks' | 'history' | 'terminals' | 'changes' | 'tests' | 'context' | 'evidence'
+const WORK_TABS: WorkTab[] = ['overview', 'tasks', 'history', 'terminals', 'changes', 'tests', 'context', 'evidence']
 
 export function SwarmOverview({ detail }: { detail: SwarmDetail }) {
   const { swarm, activity, agents, tasks, connections, tests } = detail
@@ -193,7 +194,7 @@ function WorkView({ detail, tab, setTab, onAgent, onTerminal }: { detail: SwarmD
     {tab === 'terminals' && <TerminalList detail={detail} onTerminal={onTerminal} />}
     {tab === 'changes' && <ChangeList detail={detail} />}
     {tab === 'tests' && <TestList detail={detail} />}
-    {tab === 'memory' && <MemoryList detail={detail} onAgent={onAgent} />}
+    {tab === 'context' && <ContextView detail={detail} />}
     {tab === 'evidence' && <EvidenceList detail={detail} />}
   </div></section>
 }
@@ -231,7 +232,40 @@ function TestList({ detail }: { detail: SwarmDetail }) {
     {detail.tests.length === 0 && <EmptyState title="No test evidence yet" body="Running and completed checks will appear from persisted runtime events." />}
   </div>
 }
-function MemoryList({ detail, onAgent }: { detail: SwarmDetail; onAgent: (id: string) => void }) { return <div className="swarm-memory-list">{detail.memories.map((memory) => { const agent = detail.agents.find((item) => item.id === memory.agentId); const task = detail.tasks.find((item) => item.id === memory.taskId); return <article key={memory.id}><div><span>{memory.memoryType} · {memory.state}</span><strong>{memory.title}</strong><p>{memory.summary || memory.context}</p></div><dl><dt>Task</dt><dd>{task?.title ?? memory.taskId}</dd><dt>Agent</dt><dd><button type="button" onClick={() => onAgent(memory.agentId)}>{agent?.displayName ?? memory.agentId}</button></dd><dt>Revision</dt><dd><code>{memory.revisionId.slice(0, 12)}</code> · {Math.round(memory.confidence * 100)}% confidence</dd><dt>Sources</dt><dd>{memory.sourceUris.length || 'No linked sources'}</dd></dl></article> })}{detail.memories.length === 0 && <EmptyState title="No Swarm context packs recorded" body="Project Memory remains isolated to this project. A context pack appears only when a real project Memory revision is loaded into an agent task." />}</div> }
+/**
+ * Context: what each agent attempt actually knew.
+ *
+ * This replaced a list of Memory revisions loaded into the Swarm. That list said *which* memories
+ * were involved; it could not say what the agent received, what was left out, or why — which is
+ * the only reason to look at an agent's context at all. The pack rendered here is the immutable
+ * record persisted before the attempt ran.
+ */
+function ContextView({ detail }: { detail: SwarmDetail }) {
+  const runs = (detail.agentRuns ?? []).filter((run) => run.status !== 'queued')
+  const [selected, setSelected] = useState<string>()
+  const active = runs.find((run) => run.id === selected) ?? runs[0]
+  if (runs.length === 0) {
+    return <EmptyState title="No agent has run yet" body="An agent's context is recorded when an execution attempt starts. Nothing has reached execution in this Swarm." />
+  }
+  const agent = detail.agents.find((item) => item.id === active.memberId)
+  const task = detail.tasks.find((item) => item.id === active.taskId)
+  return <div className="swarm-context-view">
+    <nav className="swarm-context-runs" aria-label="Agent runs">
+      {runs.map((run) => {
+        const member = detail.agents.find((item) => item.id === run.memberId)
+        const runTask = detail.tasks.find((item) => item.id === run.taskId)
+        return <button type="button" key={run.id} className={run.id === active.id ? 'is-active' : ''} onClick={() => setSelected(run.id)}>
+          <strong>{member?.displayName ?? run.memberId}</strong>
+          <em>Attempt {run.attempt} · {run.status}</em>
+          <span>{runTask?.title ?? 'No task recorded'}</span>
+        </button>
+      })}
+    </nav>
+    <div className="swarm-context-pack">
+      <BrainRunContext projectId={detail.swarm.projectId} agentRunId={active.id} agentName={agent?.displayName} taskTitle={task?.title} />
+    </div>
+  </div>
+}
 function EvidenceList({ detail }: { detail: SwarmDetail }) { const groups = groupEvidence(detail); return <div className="swarm-evidence-list">{groups.map(([criterion, records]) => <section key={criterion}><h4>{criterion}</h4>{records.map((item) => <article key={item.id}><ShieldCheck size={15} className={item.verified ? 'tone-green' : 'tone-amber'} /><div><strong>{item.title}</strong><p>{item.summary}</p></div><span>{item.evidenceType}</span></article>)}</section>)}{detail.evidence.length === 0 && <EmptyState title="No evidence captured" body="Only real commands, tests, diffs, traces, reviews, and approvals are accepted here." />}</div> }
 
 function AgentInspector({ agent, task, readOnly = false, onClose, onMessage, onTerminal, onRetry, onValidate, onUpdate, onWork }: { agent: SwarmAgent; task?: SwarmTask; readOnly?: boolean; onClose: () => void; onMessage: () => void; onTerminal: () => void; onRetry: () => Promise<void>; onValidate: () => Promise<unknown>; onUpdate: (config: SwarmMemberModelConfig) => Promise<unknown>; onWork: (tab: WorkTab) => void }) {

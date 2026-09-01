@@ -48,7 +48,13 @@ function CandidateRow({ item }: { item: ReviewItem }) {
         <RiskBadge risk={candidate.riskClass} />
         <span className="memory-review-spacer" />
         <span className="memory-review-origin">{candidate.origin.replace(/_/g, ' ')}</span>
-        <span className="memory-review-confidence">{Math.round(candidate.confidence * 100)}%</span>
+        {/* Confidence is only shown when the pipeline actually recorded one. A rendered "0%"
+            would be a number the system never asserted. */}
+        {candidate.confidence > 0 && (
+          <span className="memory-review-confidence">
+            {Math.round(candidate.confidence * 100)}% confident
+          </span>
+        )}
       </div>
       {candidate.decisionReason && (
         <p className="memory-review-reason">{candidate.decisionReason}</p>
@@ -113,7 +119,7 @@ function ConflictRow({ item }: { item: ReviewItem }) {
           className="memory-review-side-link"
           onClick={() => {
             void open(itemId)
-            void setView('knowledge')
+            void setView('all')
           }}
         >
           {label}
@@ -135,14 +141,23 @@ function ConflictRow({ item }: { item: ReviewItem }) {
           {CONFLICT_CLASS_LABELS[conflict.classification]}
         </span>
         <span className="memory-review-spacer" />
-        <span className="memory-review-confidence">{Math.round(conflict.confidence * 100)}%</span>
+        {conflict.confidence > 0 && (
+          <span className="memory-review-confidence">
+            {Math.round(conflict.confidence * 100)}% confident
+          </span>
+        )}
       </div>
       <div className="memory-review-sides">
         {side(conflict.leftLabel, conflict.leftValue, conflict.leftItemId)}
         <span className="memory-review-versus">vs</span>
         {side(conflict.rightLabel, conflict.rightValue, conflict.rightItemId)}
       </div>
-      {conflict.detail && <p className="memory-review-reason">{conflict.detail}</p>}
+      {conflict.detail && (
+        <div className="memory-review-why">
+          <h4 className="section-label">Why this was flagged</h4>
+          <p className="memory-review-reason">{conflict.detail}</p>
+        </div>
+      )}
       <div className="memory-review-actions">
         {CONFLICT_RESOLUTIONS.map((option) => (
           <Button
@@ -175,7 +190,7 @@ function MemoryIssueRow({ item }: { item: ReviewItem }) {
               className="memory-review-side-link"
               onClick={() => {
                 void open(item.itemId as string)
-                void setView('knowledge')
+                void setView('all')
               }}
             >
               {item.title}
@@ -252,8 +267,8 @@ export function MemoryReview() {
     <section className="memory-review" aria-label="Knowledge review">
       <div className="memory-activity-bar">
         <p>
-          What the automation could not decide alone. High-risk knowledge and contradictions always
-          wait for a person; routine structural facts were already recorded.
+          What Paralith could not decide on its own. High-risk knowledge and contradictions always
+          wait for a person; routine structural facts were recorded without asking.
         </p>
         <Button
           variant="secondary"
@@ -264,19 +279,24 @@ export function MemoryReview() {
           Refresh
         </Button>
       </div>
-      <div className="memory-activity-body">
-        {loading && !review && <p className="memory-context-status">Loading review queue…</p>}
+      <div className="memory-scroll">
+        {loading && !review && <p className="memory-inline-status">Loading review queue…</p>}
         {review && review.total === 0 && (
-          <p className="memory-context-empty">
-            <Layers size={13} /> Nothing is waiting. New knowledge appears here when the automation
-            finds something it should not decide on its own.
-          </p>
+          <div className="memory-empty-state">
+            <Layers size={15} aria-hidden />
+            <h3>No review needed</h3>
+            <p>
+              Nothing is waiting. Items appear here when Paralith finds knowledge it should not
+              decide on its own — a contradiction, a high-risk claim, or trusted knowledge a source
+              change put in question.
+            </p>
+          </div>
         )}
         {review?.sections.map((group) => (
           <Group key={group.section} group={group} />
         ))}
         {review?.truncated && (
-          <p className="memory-context-status">
+          <p className="memory-inline-status">
             <GitBranch size={12} /> Showing the highest-risk items only; resolve some to see the
             rest.
           </p>

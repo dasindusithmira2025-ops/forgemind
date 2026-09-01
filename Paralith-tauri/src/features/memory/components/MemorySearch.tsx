@@ -5,19 +5,47 @@
  * Compiler's structured candidate source use. Anything the parser could not read is shown as a
  * diagnostic rather than silently narrowing the result set — a search that quietly ignores half
  * your query is worse than one that says it did.
+ *
+ * Results are grouped by the store they came out of. The grouping is not a taxonomy this file
+ * invented: every heading is a domain the backend actually returned, so an empty category cannot
+ * appear and a new one cannot be hidden.
  */
-import { useEffect, useState } from 'react'
-import { AlertCircle, Search, Sparkles } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { AlertCircle, Search } from 'lucide-react'
 import { Button } from '../../../components/ui/Button'
 import { useIntelligenceStore } from '../intelligenceStore'
 import { useMemoryStore } from '../memoryStore'
 import {
   SEARCH_DOMAIN_LABELS,
   SEARCH_EXAMPLES,
+  type SearchDomain,
   type SearchResult,
 } from '../intelligenceTypes'
 
-function ResultRow({ result }: { result: SearchResult }) {
+/** Reading order for the groups: what the project knows first, what it is unsure about last. */
+const DOMAIN_ORDER: SearchDomain[] = [
+  'memory',
+  'fact',
+  'claim',
+  'entity',
+  'conflict',
+  'candidate',
+  'handoff',
+]
+
+function groupByDomain(results: SearchResult[]): { domain: SearchDomain; rows: SearchResult[] }[] {
+  const buckets = new Map<SearchDomain, SearchResult[]>()
+  for (const row of results) {
+    const existing = buckets.get(row.domain)
+    if (existing) existing.push(row)
+    else buckets.set(row.domain, [row])
+  }
+  return [...buckets.entries()]
+    .sort(([left], [right]) => DOMAIN_ORDER.indexOf(left) - DOMAIN_ORDER.indexOf(right))
+    .map(([domain, rows]) => ({ domain, rows }))
+}
+
+function ResultRow({ result, onNavigate }: { result: SearchResult; onNavigate?: () => void }) {
   const open = useMemoryStore((state) => state.open)
   const setView = useMemoryStore((state) => state.setView)
   const openable = result.domain === 'memory' || Boolean(result.itemId)
@@ -25,16 +53,14 @@ function ResultRow({ result }: { result: SearchResult }) {
   return (
     <li className={`memory-search-result is-${result.domain}${result.stale ? ' is-stale' : ''}`}>
       <div className="memory-search-result-head">
-        <span className={`memory-search-domain is-${result.domain}`}>
-          {SEARCH_DOMAIN_LABELS[result.domain]}
-        </span>
         {openable ? (
           <button
             type="button"
             className="memory-search-title"
             onClick={() => {
               void open((result.itemId ?? result.id) as string)
-              void setView('knowledge')
+              void setView('all')
+              onNavigate?.()
             }}
           >
             {result.title}
@@ -56,7 +82,7 @@ function ResultRow({ result }: { result: SearchResult }) {
   )
 }
 
-export function MemorySearch() {
+export function MemorySearch({ onNavigate }: { onNavigate?: () => void } = {}) {
   const query = useIntelligenceStore((state) => state.query)
   const setQuery = useIntelligenceStore((state) => state.setQuery)
   const runSearch = useIntelligenceStore((state) => state.runSearch)
@@ -73,6 +99,8 @@ export function MemorySearch() {
   useEffect(() => {
     if (query.trim() === '') setRan(false)
   }, [query])
+
+  const groups = useMemo(() => groupByDomain(results), [results])
 
   const submit = () => {
     setRan(true)
@@ -93,8 +121,10 @@ export function MemorySearch() {
           <input
             type="search"
             value={query}
-            placeholder="type:decision quality:canonical stale:true"
+            placeholder="Search project intelligence, or type:decision quality:canonical"
             aria-label="Knowledge query"
+            autoComplete="off"
+            spellCheck={false}
             onChange={(event) => setQuery(event.target.value)}
           />
         </label>
@@ -113,12 +143,12 @@ export function MemorySearch() {
         </ul>
       )}
 
-      <div className="memory-activity-body">
+      <div className="memory-search-body">
         {!ran && (
           <div className="memory-search-examples">
-            <p className="memory-context-empty">
-              Search memories, claims, entities, candidates, handoffs, conflicts, and detected
-              project facts. Every example below runs.
+            <p className="memory-empty-lead">
+              Memories, claims, entities, candidates, handoffs, conflicts and detected project
+              facts are all searchable from one field. Every example below runs.
             </p>
             <ul>
               {SEARCH_EXAMPLES.map((example) => (
@@ -139,17 +169,17 @@ export function MemorySearch() {
             </ul>
             {semantic && !semantic.available && (
               <p className="memory-search-semantic">
-                <Sparkles size={12} aria-hidden /> Semantic search is off.{' '}
+                Semantic search is off.{' '}
                 {semantic.detail ?? 'Lexical and structured search are unaffected.'}
               </p>
             )}
           </div>
         )}
 
-        {ran && searching && <p className="memory-context-status">Searching…</p>}
+        {ran && searching && <p className="memory-inline-status">Searching…</p>}
 
         {ran && !searching && results.length === 0 && (
-          <p className="memory-context-empty">
+          <p className="memory-empty-lead">
             Nothing matched. Widen the query, or check the diagnostics above for anything that was
             not understood.
           </p>
@@ -161,11 +191,23 @@ export function MemorySearch() {
               {results.length} result{results.length === 1 ? '' : 's'} in {elapsed}ms
               {truncated ? ' · more available' : ''}
             </p>
-            <ul className="memory-search-results">
-              {results.map((result) => (
-                <ResultRow key={`${result.domain}-${result.id}`} result={result} />
-              ))}
-            </ul>
+            {groups.map((group) => (
+              <section key={group.domain} className="memory-search-group">
+                <h3>
+                  <span>{SEARCH_DOMAIN_LABELS[group.domain]}</span>
+                  <span className="memory-count tnum">{group.rows.length}</span>
+                </h3>
+                <ul className="memory-search-results">
+                  {group.rows.map((result) => (
+                    <ResultRow
+                      key={`${result.domain}-${result.id}`}
+                      result={result}
+                      onNavigate={onNavigate}
+                    />
+                  ))}
+                </ul>
+              </section>
+            ))}
           </>
         )}
       </div>

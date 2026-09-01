@@ -368,21 +368,16 @@ function JobRow({ job }: { job: KnowledgeJob }) {
     items.find((item) => item.id === itemId)?.title ?? 'a memory not in this list'
   const openMemory = (itemId: string) => {
     void open(itemId)
-    void setView('knowledge')
+    void setView('all')
   }
 
   return (
     <li className={`memory-job${job.status === 'failed' ? ' is-failed' : ''}`}>
       <div className="memory-job-head">
-        <StatusBadge status={job.status} />
-        <span className="memory-job-trigger">{jobTitle(kind)}</span>
-        <span className="memory-job-trigger">{displayTrigger(kind, trigger)}</span>
+        {/* What happened, in the language of the project rather than of the job table. */}
+        <span className="memory-job-title">{jobTitle(kind)}</span>
         <span className="memory-job-spacer" />
-        {job.attempts > 1 && (
-          <span className="memory-job-attempts">
-            attempt {job.attempts} of {job.maxAttempts}
-          </span>
-        )}
+        <StatusBadge status={job.status} />
         <time className="memory-job-time" dateTime={job.finishedAt ?? job.createdAt}>
           {timeOf(job)}
         </time>
@@ -392,6 +387,16 @@ function JobRow({ job }: { job: KnowledgeJob }) {
           </Button>
         )}
       </div>
+      {/* The machine vocabulary — what triggered it and how many attempts it took — is kept, but
+          it is not what a reader should have to parse first. */}
+      <p className="memory-job-origin">
+        <span className="memory-job-trigger">{displayTrigger(kind, trigger)}</span>
+        {job.attempts > 1 && (
+          <span className="memory-job-attempts">
+            attempt {job.attempts} of {job.maxAttempts}
+          </span>
+        )}
+      </p>
 
       {job.error && <p className="memory-job-error">{job.error}</p>}
       {(job.result !== null || job.status === 'complete') && (
@@ -413,8 +418,9 @@ export function MemoryActivity() {
     <section className="memory-activity" aria-label="Knowledge activity">
       <div className="memory-activity-bar">
         <p>
-          Repository changes are analyzed automatically. Knowledge that cites a changed file and is
-          load-bearing — supported or better — is flagged for re-verification.
+          Every row is real work the lifecycle ran. Knowledge that cites a changed file and is
+          load-bearing is flagged for re-verification; everything else is recorded as seen and left
+          alone.
         </p>
         <Button
           variant="secondary"
@@ -425,12 +431,12 @@ export function MemoryActivity() {
           Refresh
         </Button>
       </div>
-      <div className="memory-activity-body">
-        {loading && jobs.length === 0 && <p className="memory-context-status">Loading activity…</p>}
+      <div className="memory-scroll">
+        {loading && jobs.length === 0 && <p className="memory-inline-status">Loading activity…</p>}
         {!loading && jobs.length === 0 && (
-          <p className="memory-context-empty">
-            Nothing yet. The next change to a file this Project&rsquo;s knowledge cites will appear
-            here.
+          <p className="memory-empty-lead">
+            Nothing has run yet. The next change to a file this Project&rsquo;s knowledge cites will
+            appear here.
           </p>
         )}
         {jobs.length > 0 && (

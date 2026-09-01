@@ -3,9 +3,11 @@
  * fills the panel body and is never a full-screen mode that hides the terminal. */
 
 .code-surface { position: relative; display: flex; width: 100%; height: 100%; min-height: 0; background: var(--bg); color: var(--text); }
-.code-explorer-pane { flex: 0 0 auto; min-width: 180px; max-width: 560px; height: 100%; border-right: 1px solid var(--border); background: var(--surface); display: flex; overflow: hidden; }
-.code-explorer-resize { flex: 0 0 5px; cursor: col-resize; background: transparent; }
-.code-explorer-resize:hover { background: var(--accent-soft); }
+.code-explorer-pane { flex: 0 0 auto; min-width: 180px; max-width: 560px; height: 100%; border-right: 1px solid var(--border-subtle); background: var(--surface); display: flex; overflow: hidden; }
+/* Explorer/editor divider. Same affordance as the panel resizer so a drag handle feels the same
+ * wherever it appears in the workspace. */
+.code-explorer-resize { flex: 0 0 5px; margin-left: -3px; cursor: col-resize; background: transparent; transition: background var(--dur-fast) var(--ease-out); }
+.code-explorer-resize:hover { background: var(--accent); }
 
 /* Narrow panel: the explorer becomes an on-demand drawer over the editor so neither column is
  * crushed. The editor buffer stays mounted underneath. */
@@ -17,21 +19,35 @@
 
 /* Explorer */
 .code-explorer { display: flex; flex-direction: column; width: 100%; min-height: 0; }
-.code-explorer-toolbar { display: flex; align-items: center; justify-content: space-between; height: var(--pane-header-height); padding: 0 var(--space-2); border-bottom: 1px solid var(--border); }
+.code-explorer-toolbar { display: flex; align-items: center; justify-content: space-between; flex: 0 0 auto; height: var(--pane-header-height); padding: 0 4px 0 var(--space-3); border-bottom: 1px solid var(--border-subtle); }
 .code-explorer-title { font-size: var(--font-2xs); font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--faint); }
-.code-explorer-tools { display: inline-flex; gap: 2px; }
+.code-explorer-tools { display: inline-flex; align-items: center; gap: 1px; }
+.code-explorer-toolbar-menu { width: 168px; left: auto; right: 0; top: calc(var(--icon-btn) + 2px); }
 .code-explorer-tools button, .code-editor-actions button { display: inline-flex; align-items: center; justify-content: center; width: var(--icon-btn); height: var(--icon-btn); border: 0; background: transparent; color: var(--muted); border-radius: var(--radius-sm); cursor: pointer; }
 .code-explorer-tools button:hover, .code-editor-actions button:hover:not(:disabled) { color: var(--text); background: var(--surface-hover); }
 .code-editor-actions button:disabled { color: var(--disabled); cursor: default; }
 .code-explorer-tree { flex: 1 1 auto; overflow: auto; padding: var(--space-1) 0; }
-.code-explorer-row { display: flex; align-items: center; gap: 6px; width: 100%; height: var(--row-h-dense); padding-right: var(--space-2); border: 0; background: transparent; color: var(--text); font-size: var(--font-sm); text-align: left; cursor: pointer; }
-.code-explorer-row:hover { background: var(--surface-hover); }
+/* Hierarchy comes from weight and the four text levels, not from colour-coding file types or
+ * turning every row into a card: folders read as structure, files as content, dot/system entries
+ * as background. */
+.code-explorer-row { display: flex; align-items: center; gap: 6px; width: 100%; height: var(--row-h-dense); padding-right: var(--space-2); border: 0; background: transparent; color: var(--text-secondary); font-size: var(--font-sm); text-align: left; cursor: pointer; }
+.code-explorer-row.is-dir { color: var(--text); font-weight: 550; }
+.code-explorer-row:hover { background: var(--surface-hover); color: var(--text); }
 .code-explorer-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.code-explorer-row.is-active { background: var(--row-selected); box-shadow: inset 2px 0 0 var(--accent-edge); }
+.code-explorer-row.is-active { background: var(--row-selected); color: var(--text-strong); box-shadow: inset 2px 0 0 var(--accent-edge); }
 .code-explorer-row.is-hidden-file { color: var(--faint); }
+.code-explorer-row.is-hidden-file.is-dir { color: var(--text-muted); font-weight: 500; }
+.code-explorer-row.is-hidden-file .code-file-icon { color: var(--text-faint); }
+
+/* One disclosure row per directory collects that directory's dot/system entries. They stay one
+ * click away: the goal is hierarchy, not hiding .git from the developer who owns the repository. */
+.code-explorer-hidden-toggle { display: flex; align-items: center; gap: 6px; width: 100%; height: var(--row-h-dense); padding-right: var(--space-2); border: 0; background: transparent; color: var(--text-faint); font-size: var(--font-xs); text-align: left; cursor: pointer; }
+.code-explorer-hidden-toggle:hover { background: var(--surface-hover); color: var(--muted); }
+.code-explorer-hidden-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .code-chevron { flex: 0 0 auto; color: var(--faint); transition: transform var(--dur-fast) var(--ease-out); }
 .code-chevron.is-open { transform: rotate(90deg); }
 .code-chevron-spacer { flex: 0 0 13px; }
+.code-explorer-hidden-toggle .code-chevron { color: var(--text-faint); }
 .code-file-icon { flex: 0 0 auto; color: var(--muted); }
 .code-row-name { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .code-row-flag { color: var(--warning); }
@@ -45,28 +61,49 @@
 
 /* Editor pane */
 .code-editor-pane { flex: 1 1 auto; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-.code-editor-header { display: flex; align-items: stretch; justify-content: space-between; border-bottom: 1px solid var(--border); background: var(--surface); min-height: var(--pane-header-height); }
+.code-editor-header { display: flex; align-items: stretch; justify-content: space-between; border-bottom: 1px solid var(--border-subtle); background: var(--surface); min-height: var(--pane-header-height); }
 .code-editor-actions { display: inline-flex; align-items: center; gap: 2px; padding: 0 var(--space-2); }
 .code-tabs { display: flex; align-items: stretch; overflow-x: auto; scrollbar-width: thin; }
-.code-tab { display: inline-flex; align-items: center; gap: 6px; padding: 0 6px 0 9px; height: var(--pane-header-height); border-right: 1px solid var(--border-subtle); background: var(--surface-2); color: var(--muted); font-size: var(--font-xs); cursor: pointer; white-space: nowrap; }
-.code-tab:hover { background: var(--surface-hover); }
-.code-tab.is-active { background: var(--canvas); color: var(--text-strong); box-shadow: inset 0 -2px 0 var(--accent-edge); }
+/* Document tabs: compact, achromatic, separated by a hairline rather than a filled slab. The
+ * active tab takes the editor's own canvas colour so tab and buffer read as one surface, with the
+ * 2px state edge on top - an edge below would cut the tab off from the content it owns. */
+.code-tab { display: inline-flex; align-items: center; gap: 6px; max-width: 190px; padding: 0 4px 0 9px; height: var(--pane-header-height); border-right: 1px solid var(--border-faint); background: transparent; color: var(--muted); font-size: var(--font-xs); cursor: pointer; white-space: nowrap; }
+.code-tab:hover { background: var(--surface-hover); color: var(--text); }
+.code-tab.is-active { background: var(--canvas); color: var(--text-strong); box-shadow: inset 0 2px 0 var(--accent-edge); }
 .code-tab.is-preview .code-tab-name { font-style: italic; }
 .code-tab.is-dragging { opacity: .5; }
-.code-tab-icon { color: var(--faint); }
+.code-tab-icon { flex: 0 0 auto; color: var(--faint); }
+.code-tab-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .code-tab-close { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border: 0; background: transparent; color: var(--faint); border-radius: var(--radius-xs); cursor: pointer; }
 .code-tab-close:hover { background: var(--surface-3); color: var(--text); }
 .code-dirty-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent-strong); }
-.code-breadcrumbs { display: flex; align-items: center; gap: 4px; padding: 2px var(--space-2); font-size: var(--font-2xs); color: var(--faint); border-bottom: 1px solid var(--border-subtle); overflow: hidden; white-space: nowrap; }
+/* One thin row instead of a breadcrumb bar plus a footer status bar: path on the left, buffer
+ * facts on the right. Workspace-level state stays in the app's global status bar. */
+.code-filebar { display: flex; align-items: center; gap: var(--space-3); min-height: var(--status-height); padding: 0 var(--space-2); border-bottom: 1px solid var(--border-faint); background: var(--surface); overflow: hidden; }
+.code-filebar-meta { flex: 0 0 auto; margin-left: auto; display: flex; align-items: center; gap: var(--space-2); font-size: var(--font-2xs); color: var(--faint); white-space: nowrap; }
+.code-breadcrumbs { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 4px; font-size: var(--font-2xs); color: var(--faint); overflow: hidden; white-space: nowrap; }
 .code-breadcrumb-sep { margin: 0 4px; color: var(--disabled); }
 .code-editor-body { position: relative; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
 .code-monaco { flex: 1 1 auto; min-height: 0; }
 .code-editor-loading { flex: 1 1 auto; min-height: 120px; background: var(--canvas); }
 .code-editor-message { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-2); flex: 1 1 auto; padding: var(--space-5); color: var(--muted); text-align: center; }
 .code-editor-message.inline { flex: 0 0 auto; padding: var(--space-2); align-items: stretch; }
-.code-editor-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-1); flex: 1 1 auto; color: var(--faint); font-size: var(--font-xs); }
-.code-editor-empty h3 { color: var(--muted); font-size: var(--font-sm); font-weight: 600; }
-.code-editor-empty kbd { font-family: var(--font-mono); font-size: var(--font-xs); background: var(--surface-3); border: 1px solid var(--border); border-radius: var(--radius-xs); padding: 1px 5px; }
+/* Quiet but useful. Top-aligned rather than centred so it does not read as a full-screen welcome
+ * page occupying the whole editor. */
+.code-editor-empty { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-4); flex: 1 1 auto; padding: var(--space-5) var(--space-5) 0; color: var(--faint); font-size: var(--font-xs); overflow: auto; }
+.code-empty-actions { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
+.code-empty-hint { color: var(--muted); font-size: var(--font-sm); }
+.code-empty-quickopen { display: inline-flex; align-items: center; gap: 6px; min-height: var(--control-h-sm); padding: 0 10px; color: var(--text); background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius); font-size: var(--font-xs); cursor: pointer; }
+.code-empty-quickopen:hover { background: var(--surface-hover); border-color: var(--border-hover); }
+.code-empty-quickopen:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.code-editor-empty kbd { font-family: var(--font-mono); font-size: var(--font-2xs); color: var(--faint); background: var(--surface-3); border: 1px solid var(--border); border-radius: var(--radius-xs); padding: 1px 4px; }
+.code-empty-recent { display: flex; flex-direction: column; align-items: stretch; gap: 1px; min-width: 0; max-width: 420px; width: 100%; }
+.code-empty-label { padding: 0 var(--space-2) 4px; font-size: var(--font-2xs); font-weight: 600; letter-spacing: var(--tracking-label); text-transform: uppercase; color: var(--text-faint); }
+.code-empty-recent button { display: flex; align-items: baseline; gap: var(--space-2); min-width: 0; padding: 5px var(--space-2); border: 0; border-radius: var(--radius-sm); background: transparent; text-align: left; cursor: pointer; }
+.code-empty-recent button:hover { background: var(--surface-hover); }
+.code-empty-recent button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.code-empty-recent-name { flex: 0 0 auto; color: var(--text); font-size: var(--font-sm); }
+.code-empty-recent-path { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-faint); font-size: var(--font-2xs); }
 
 /* Conflict + notices */
 .code-conflict { display: flex; align-items: center; gap: var(--space-2); padding: 5px var(--space-2); background: var(--warning-soft); border-bottom: 1px solid var(--warning-border); color: var(--warning); font-size: var(--font-xs); }
@@ -78,10 +115,7 @@
 .code-reload-note { padding: 4px var(--space-3); background: var(--surface-2); color: var(--muted); font-size: var(--font-xs); border-bottom: 1px solid var(--border); }
 .code-readonly-note { padding: 4px var(--space-3); background: var(--surface-2); color: var(--warning); font-size: var(--font-xs); border-bottom: 1px solid var(--border); }
 
-/* Status bar */
-.code-statusbar { display: flex; align-items: center; gap: var(--space-3); height: var(--status-height); padding: 0 var(--space-3); border-top: 1px solid var(--border); background: var(--surface); color: var(--faint); font-size: var(--font-xs); }
-.code-status-spacer { flex: 1 1 auto; }
-.code-status-flag { color: var(--accent-strong); }
+.code-status-flag { color: var(--warning-text); }
 
 /* Diff overlay */
 .code-diff-overlay { position: absolute; inset: 0; z-index: 5; display: flex; flex-direction: column; background: var(--bg); }

@@ -1,7 +1,7 @@
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { MemoryOverview } from './MemoryOverview'
+import { BrainHome } from './BrainHome'
 import { useIntelligenceStore } from '../intelligenceStore'
 import type { KnowledgeHealthReport, ProjectUnderstanding } from '../intelligenceTypes'
 
@@ -16,6 +16,7 @@ vi.mock('../api', () => ({
     search: (...args: unknown[]) => searchApi(...args),
   },
   memoryApi: {},
+  brainApi: {},
 }))
 
 function understanding(patch: Partial<ProjectUnderstanding> = {}): ProjectUnderstanding {
@@ -105,16 +106,16 @@ beforeEach(() => {
   })
 })
 
-describe('MemoryOverview', () => {
+describe('BrainHome', () => {
   it('says the Project has not been read rather than showing an empty list', () => {
     useIntelligenceStore.setState({ understanding: understanding({ revision: 0, groups: [] }) })
-    render(<MemoryOverview />)
+    render(<BrainHome />)
     expect(screen.getByText(/has not been read yet/i)).toBeInTheDocument()
   })
 
   it('groups detected facts by dimension with readable labels', () => {
     useIntelligenceStore.setState({ understanding: understanding() })
-    render(<MemoryOverview />)
+    render(<BrainHome />)
     expect(screen.getByRole('region', { name: 'Frameworks' })).toBeInTheDocument()
     expect(screen.getByRole('region', { name: 'Desktop runtime' })).toBeInTheDocument()
     expect(screen.getByText('React')).toBeInTheDocument()
@@ -123,7 +124,7 @@ describe('MemoryOverview', () => {
 
   it('reveals the files behind a fact on demand', async () => {
     useIntelligenceStore.setState({ understanding: understanding() })
-    render(<MemoryOverview />)
+    render(<BrainHome />)
     expect(screen.queryByText('package.json')).not.toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: /React/ }))
     expect(screen.getByText('package.json')).toBeInTheDocument()
@@ -132,14 +133,14 @@ describe('MemoryOverview', () => {
 
   it('states the revision and how much was scanned', () => {
     useIntelligenceStore.setState({ understanding: understanding() })
-    render(<MemoryOverview />)
+    render(<BrainHome />)
     expect(screen.getByText(/revision 3/i)).toBeInTheDocument()
     expect(screen.getByText(/1,284 files scanned/i)).toBeInTheDocument()
   })
 
   it('renders every health count as a runnable query, not a score', async () => {
     useIntelligenceStore.setState({ understanding: understanding(), health: health() })
-    render(<MemoryOverview />)
+    render(<BrainHome />)
     const metrics = screen.getByRole('group', { name: /knowledge health/i })
     const stale = within(metrics).getByRole('button', { name: /stale canonical knowledge/i })
     await userEvent.click(stale)
@@ -150,7 +151,7 @@ describe('MemoryOverview', () => {
 
   it('keeps a zero count navigable rather than hiding it', () => {
     useIntelligenceStore.setState({ understanding: understanding(), health: health() })
-    render(<MemoryOverview />)
+    render(<BrainHome />)
     const metrics = screen.getByRole('group', { name: /knowledge health/i })
     expect(
       within(metrics).getByRole('button', { name: /unresolved conflicts/i }),
@@ -159,7 +160,7 @@ describe('MemoryOverview', () => {
 
   it('queues a re-read without claiming the walk happened here', async () => {
     useIntelligenceStore.setState({ understanding: understanding() })
-    render(<MemoryOverview />)
+    render(<BrainHome />)
     await userEvent.click(screen.getByRole('button', { name: /re-read project/i }))
     expect(analyzeApi).toHaveBeenCalledWith('p1')
   })
@@ -183,7 +184,7 @@ describe('MemoryOverview', () => {
         ],
       }),
     })
-    render(<MemoryOverview />)
+    render(<BrainHome />)
     expect(screen.getByRole('region', { name: 'something new' })).toBeInTheDocument()
     expect(
       within(screen.getByRole('region', { name: 'something new' })).getByText('A future finding'),

@@ -58,8 +58,14 @@ export function MemoryEditor() {
   if (!detail && !draft) {
     return (
       <div className="memory-editor is-empty">
-        <FileText size={22} aria-hidden />
-        <p>Select a memory, or create one.</p>
+        <div className="memory-empty-state">
+          <FileText size={15} aria-hidden />
+          <h3>Select a piece of knowledge</h3>
+          <p>
+            Its statement, the evidence behind it, what it connects to and what it replaced open
+            beside it.
+          </p>
+        </div>
       </div>
     )
   }
@@ -126,7 +132,10 @@ export function MemoryEditor() {
         {detail && (
           <label className="memory-field">
             <span>Quality</span>
+            {/* The control carries its own tone, the way the claim-status select does. A badge
+                beside it would print the same word twice. */}
             <select
+              className={`memory-status-select is-${qualityTone(detail.quality)}`}
               value={detail.quality}
               onChange={(event) => void setQuality(event.target.value as typeof detail.quality)}
               title={qualityHint(detail.quality)}
@@ -142,9 +151,6 @@ export function MemoryEditor() {
 
         {detail && (
           <>
-            <span className={`memory-quality-badge is-${qualityTone(detail.quality)}`}>
-              {qualityLabel(detail.quality)}
-            </span>
             <span className="memory-revision-note">
               rev {detail.revisionNumber}
               {detail.verifiedAt ? ' · verified' : ''}

@@ -2,7 +2,7 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { MemoryGraph } from './MemoryGraph'
-import { layoutGraph } from '../memoryGraphLayout'
+import { curateGraph, graphBounds, layoutGraph } from '../memoryGraphLayout'
 import { useMemoryStore } from '../memoryStore'
 import type { GraphEdge, GraphNode, KnowledgeGraph } from '../memoryTypes'
 
@@ -53,6 +53,72 @@ beforeEach(() => {
   getApi.mockReset()
   connectionsApi.mockReset()
   historyApi.mockReset()
+})
+
+describe('curateGraph', () => {
+  it('leaves a graph small enough to read alone', () => {
+    const small = graph({ nodes: [node({ id: 'memory:a' }), node({ id: 'memory:b' })] })
+    expect(curateGraph(small, 10)).toBe(small)
+  })
+
+  it('keeps the best-connected knowledge and drops edges to what it cut', () => {
+    const curated = curateGraph(
+      graph({
+        nodes: [
+          node({ id: 'memory:hub', degree: 9 }),
+          node({ id: 'memory:near', degree: 4 }),
+          node({ id: 'memory:far', degree: 0, importance: 0 }),
+        ],
+        edges: [
+          edge({ id: 'e1', source: 'memory:hub', target: 'memory:near' }),
+          edge({ id: 'e2', source: 'memory:hub', target: 'memory:far' }),
+        ],
+      }),
+      2,
+    )
+    expect(curated.nodes.map((item) => item.id)).toEqual(['memory:hub', 'memory:near'])
+    // An edge to a node that is not drawn would render as a line into empty space.
+    expect(curated.edges.map((item) => item.id)).toEqual(['e1'])
+    expect(curated.truncated).toBe(true)
+  })
+
+  it('never drops the node the view is focused on', () => {
+    const curated = curateGraph(
+      graph({
+        focusId: 'memory:quiet',
+        nodes: [
+          node({ id: 'memory:quiet', degree: 0, importance: 0, distance: 0 }),
+          node({ id: 'memory:loud', degree: 20, distance: 1 }),
+        ],
+      }),
+      1,
+    )
+    expect(curated.nodes.map((item) => item.id)).toContain('memory:quiet')
+  })
+
+  it('ranks superseded knowledge below current knowledge', () => {
+    const curated = curateGraph(
+      graph({
+        nodes: [
+          node({ id: 'memory:old', quality: 'superseded', degree: 3 }),
+          node({ id: 'memory:new', quality: 'canonical', degree: 3 }),
+        ],
+      }),
+      1,
+    )
+    expect(curated.nodes.map((item) => item.id)).toEqual(['memory:new'])
+  })
+})
+
+describe('graphBounds', () => {
+  it('frames the drawn nodes including their radius', () => {
+    expect(graphBounds([])).toBeNull()
+    const bounds = graphBounds([
+      { ...node({ id: 'a' }), x: 100, y: 100, r: 10 },
+      { ...node({ id: 'b' }), x: 200, y: 140, r: 10 },
+    ])
+    expect(bounds).toEqual({ x: 90, y: 90, width: 120, height: 60 })
+  })
 })
 
 describe('layoutGraph', () => {
@@ -198,7 +264,7 @@ describe('MemoryGraph', () => {
     historyApi.mockResolvedValue([])
     useMemoryStore.setState({
       projectId: 'p1',
-      view: 'graph',
+      view: 'explore', exploreMode: 'map',
       graph: graph({ nodes: [node({ id: 'memory:a', label: 'Auth', itemId: 'a' })] }),
     })
 
@@ -217,7 +283,7 @@ describe('MemoryGraph', () => {
     historyApi.mockResolvedValue([])
     useMemoryStore.setState({
       projectId: 'p1',
-      view: 'graph',
+      view: 'explore', exploreMode: 'map',
       graph: graph({ nodes: [node({ id: 'memory:a', label: 'Auth', itemId: 'a' })] }),
     })
 
@@ -259,7 +325,7 @@ describe('MemoryGraph', () => {
   it('disables the depth control until a memory is focused', async () => {
     graphApi.mockResolvedValue(graph())
     healthApi.mockResolvedValue(null)
-    useMemoryStore.setState({ projectId: 'p1', view: 'graph', graph: graph() })
+    useMemoryStore.setState({ projectId: 'p1', view: 'explore', exploreMode: 'map', graph: graph() })
     render(<MemoryGraph />)
     expect(screen.getByRole('combobox')).toBeDisabled()
 

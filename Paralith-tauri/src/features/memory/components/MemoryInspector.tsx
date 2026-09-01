@@ -1,24 +1,26 @@
 import { useState } from 'react'
-import { ChevronDown, ChevronRight, Link2, Plus, Trash2, Unlink } from 'lucide-react'
+import { ChevronDown, ChevronRight, Link2, PanelRightClose, Plus, Trash2, Unlink } from 'lucide-react'
 import { Button } from '../../../components/ui/Button'
 import { useMemoryStore } from '../memoryStore'
-import { claimLabel, claimTone, relativeAge, sourceLabel } from '../memoryPresentation'
+import { claimLabel, claimTone, qualityLabel, qualityTone, relativeAge, sourceLabel } from '../memoryPresentation'
 import { CLAIM_STATUSES, type ClaimStatus } from '../memoryTypes'
 
 type SectionId = 'properties' | 'connections' | 'claims' | 'evidence' | 'history'
 
 /**
- * Right pane: everything about a memory that is *not* its prose.
+ * The contextual inspector: everything about a memory that is *not* its prose.
  *
- * Sections use progressive disclosure — the ones that answer "what is this connected to" and "why
- * should I believe it" are open by default, the rest collapsed. Showing all five expanded turns
- * the panel into a wall and buries the two that matter.
+ * Order is the argument the panel makes. Evidence comes first because "why does Paralith believe
+ * this" is the question that makes the rest trustworthy, and the two sources behind a memory are
+ * summarised at the top so that question has an answer before anything is expanded. Claims,
+ * relationships, history and properties follow, each collapsed until asked for — five expanded
+ * sections is a wall, and a wall buries the two that matter.
  *
  * Nothing here is computed in the renderer. Backlinks, unlinked mentions, resolved links, claim
  * status and evidence all arrive already derived from Rust, so this panel is a faithful view of
  * what the database actually holds rather than a second opinion about it.
  */
-export function MemoryInspector() {
+export function MemoryInspector({ onClose }: { onClose?: () => void } = {}) {
   const detail = useMemoryStore((state) => state.detail)
   const connections = useMemoryStore((state) => state.connections)
   const history = useMemoryStore((state) => state.history)
@@ -33,11 +35,11 @@ export function MemoryInspector() {
   const previewRevision = useMemoryStore((state) => state.previewRevision)
 
   const [expanded, setExpanded] = useState<Record<SectionId, boolean>>({
-    properties: false,
-    connections: true,
-    claims: true,
     evidence: false,
+    claims: true,
+    connections: true,
     history: false,
+    properties: false,
   })
   const toggle = (id: SectionId) => setExpanded((current) => ({ ...current, [id]: !current[id] }))
 
@@ -54,133 +56,75 @@ export function MemoryInspector() {
 
   return (
     <aside className="memory-inspector" aria-label="Memory details">
-      <Section
-        id="properties"
-        title="Properties"
-        count={detail.properties.length + detail.tags.length}
-        expanded={expanded.properties}
-        onToggle={toggle}
-      >
-        {detail.tags.length > 0 && (
-          <div className="memory-chip-row">
-            {detail.tags.map((tag) => (
-              <span key={tag} className="memory-tag-chip">
-                #{tag}
-              </span>
-            ))}
-          </div>
+      <header className="memory-inspector-head">
+        <div>
+          <span className={`memory-quality-badge is-${qualityTone(detail.quality)}`}>
+            {qualityLabel(detail.quality)}
+          </span>
+          <span className="memory-inspector-type">{detail.memoryType}</span>
+        </div>
+        {onClose && (
+          <button
+            type="button"
+            className="memory-icon-button"
+            aria-label="Close inspector"
+            onClick={onClose}
+          >
+            <PanelRightClose size={13} />
+          </button>
         )}
-        {detail.properties.length === 0 ? (
+      </header>
+
+      {/* Provenance, summarised. The full list is one section below; this is here so "what is
+          this resting on" is answered before anything is expanded. */}
+      <div className="memory-why">
+        <h3 className="section-label">Why Paralith believes this</h3>
+        {detail.sources.length === 0 ? (
           <p className="memory-inspector-empty">
-            Add a <code>---</code> frontmatter block to the body to set properties.
+            Nothing is attached yet — this is a working note until it has evidence.
           </p>
         ) : (
-          <dl className="memory-properties">
-            {detail.properties.map((property, index) => (
-              <div key={`${property.key}-${index}`}>
-                <dt>{property.key}</dt>
-                <dd>{property.value}</dd>
-              </div>
-            ))}
-          </dl>
-        )}
-        <p className="memory-inspector-note">
-          Slug <code>{detail.slug}</code>
-        </p>
-      </Section>
-
-      <Section
-        id="connections"
-        title="Connections"
-        count={detail.outgoingLinks.length + backlinks.length + detail.relations.length}
-        expanded={expanded.connections}
-        onToggle={toggle}
-      >
-        <SubHeading>Outgoing links</SubHeading>
-        {detail.outgoingLinks.length === 0 ? (
-          <p className="memory-inspector-empty">None. Link with [[Another Memory]].</p>
-        ) : (
-          <ul className="memory-link-list">
-            {detail.outgoingLinks.map((link) => (
-              <li key={`${link.targetSlug}-${link.anchor ?? ''}`}>
-                {link.targetItemId ? (
-                  <button type="button" className="memory-link" onClick={() => void open(link.targetItemId!)}>
-                    <Link2 size={12} aria-hidden />
-                    {link.alias ?? link.targetText}
-                    {link.anchor && <span className="memory-link-anchor">#{link.anchor}</span>}
-                  </button>
-                ) : (
-                  // An unresolved link is shown, not hidden: it is a real thing the author
-                  // asserted, and the honest state is "this memory does not exist yet".
-                  <span className="memory-link is-unresolved" title="No memory with this name yet">
-                    <Unlink size={12} aria-hidden />
-                    {link.targetText}
-                  </span>
-                )}
+          <ul className="memory-why-list">
+            {detail.sources.slice(0, 2).map((source) => (
+              <li key={source.id}>
+                <span className="memory-source-type">{source.sourceType}</span>
+                <span className="path-text">{sourceLabel(source)}</span>
               </li>
             ))}
-          </ul>
-        )}
-
-        <SubHeading>Backlinks</SubHeading>
-        {backlinks.length === 0 ? (
-          <p className="memory-inspector-empty">
-            {connections?.orphan ? 'Orphan — nothing links here and it links nowhere.' : 'None yet.'}
-          </p>
-        ) : (
-          <ul className="memory-backlinks">
-            {backlinks.map((backlink) => (
-              <li key={backlink.sourceItemId}>
-                <button type="button" className="memory-backlink" onClick={() => void open(backlink.sourceItemId)}>
-                  <span className="memory-backlink-title">{backlink.sourceTitle}</span>
-                  <span className="memory-backlink-excerpt">{backlink.excerpt}</span>
+            {detail.sources.length > 2 && (
+              <li className="memory-why-more">
+                <button type="button" onClick={() => setExpanded((c) => ({ ...c, evidence: true }))}>
+                  {detail.sources.length - 2} more source
+                  {detail.sources.length - 2 === 1 ? '' : 's'}
                 </button>
               </li>
-            ))}
+            )}
           </ul>
         )}
+      </div>
 
-        {mentions.length > 0 && (
-          <>
-            <SubHeading>Unlinked mentions</SubHeading>
-            <ul className="memory-backlinks">
-              {mentions.map((mention) => (
-                <li key={mention.sourceItemId}>
-                  <button type="button" className="memory-backlink" onClick={() => void open(mention.sourceItemId)}>
-                    <span className="memory-backlink-title">{mention.sourceTitle}</span>
-                    <span className="memory-backlink-excerpt">{mention.excerpt}</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-            <p className="memory-inspector-note">
-              Suggestions only — nothing is linked until you edit the body.
-            </p>
-          </>
-        )}
-
-        <SubHeading>Typed relations</SubHeading>
-        <RelationEditor
-          relationTypes={relationTypes}
-          candidates={items.filter((item) => item.id !== detail.id)}
-          onCreate={(toItemId, relationType) => void saveRelation(toItemId, relationType)}
+      <Section
+        id="evidence"
+        title="Evidence"
+        count={detail.sources.length}
+        expanded={expanded.evidence}
+        onToggle={toggle}
+      >
+        <EvidenceComposer
+          claims={detail.claims.map((claim) => ({ id: claim.id, statement: claim.statement }))}
+          onAttach={(input) => void attachSource(input)}
         />
-        {detail.relations.length > 0 && (
-          <ul className="memory-relations">
-            {detail.relations.map((relation) => (
-              <li key={relation.id}>
-                <span className="memory-relation-type">{relation.relationType.replace(/_/g, ' ')}</span>
-                <button type="button" className="memory-link" onClick={() => void open(relation.toItemId)}>
-                  {relation.toTitle}
-                </button>
-                <button
-                  type="button"
-                  className="memory-icon-button"
-                  aria-label={`Remove ${relation.relationType} relation to ${relation.toTitle}`}
-                  onClick={() => void deleteRelation(relation.id)}
-                >
-                  <Trash2 size={12} />
-                </button>
+        {detail.sources.length === 0 ? (
+          <p className="memory-inspector-empty">
+            No provenance attached. A memory without evidence is a working note.
+          </p>
+        ) : (
+          <ul className="memory-source-list">
+            {detail.sources.map((source) => (
+              <li key={source.id}>
+                <span className="memory-source-type">{source.sourceType}</span>
+                <span className="path-text">{sourceLabel(source)}</span>
+                <time dateTime={source.capturedAt}>{relativeAge(source.capturedAt)}</time>
               </li>
             ))}
           </ul>
@@ -244,50 +188,162 @@ export function MemoryInspector() {
       </Section>
 
       <Section
-        id="evidence"
-        title="Evidence"
-        count={detail.sources.length}
-        expanded={expanded.evidence}
+        id="connections"
+        title="Connections"
+        count={detail.outgoingLinks.length + backlinks.length + detail.relations.length}
+        expanded={expanded.connections}
         onToggle={toggle}
       >
-        <EvidenceComposer
-          claims={detail.claims.map((claim) => ({ id: claim.id, statement: claim.statement }))}
-          onAttach={(input) => void attachSource(input)}
-        />
-        {detail.sources.length === 0 ? (
-          <p className="memory-inspector-empty">
-            No provenance attached. A memory without evidence is a working note.
-          </p>
+        {detail.relations.length > 0 && (
+          <>
+            <SubHeading>Related knowledge</SubHeading>
+            <ul className="memory-relations">
+              {detail.relations.map((relation) => (
+                <li key={relation.id}>
+                  <span className="memory-relation-type">{relation.relationType.replace(/_/g, ' ')}</span>
+                  <button type="button" className="memory-link" onClick={() => void open(relation.toItemId)}>
+                    {relation.toTitle}
+                  </button>
+                  <button
+                    type="button"
+                    className="memory-icon-button"
+                    aria-label={`Remove ${relation.relationType} relation to ${relation.toTitle}`}
+                    onClick={() => void deleteRelation(relation.id)}
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+
+        <SubHeading>Outgoing links</SubHeading>
+        {detail.outgoingLinks.length === 0 ? (
+          <p className="memory-inspector-empty">None. Link with [[Another Memory]].</p>
         ) : (
-          <ul className="memory-source-list">
-            {detail.sources.map((source) => (
-              <li key={source.id}>
-                <span className="memory-source-type">{source.sourceType}</span>
-                <span className="path-text">{sourceLabel(source)}</span>
-                <time dateTime={source.capturedAt}>{relativeAge(source.capturedAt)}</time>
+          <ul className="memory-link-list">
+            {detail.outgoingLinks.map((link) => (
+              <li key={`${link.targetSlug}-${link.anchor ?? ''}`}>
+                {link.targetItemId ? (
+                  <button type="button" className="memory-link" onClick={() => void open(link.targetItemId!)}>
+                    <Link2 size={12} aria-hidden />
+                    {link.alias ?? link.targetText}
+                    {link.anchor && <span className="memory-link-anchor">#{link.anchor}</span>}
+                  </button>
+                ) : (
+                  // An unresolved link is shown, not hidden: it is a real thing the author
+                  // asserted, and the honest state is "this memory does not exist yet".
+                  <span className="memory-link is-unresolved" title="No memory with this name yet">
+                    <Unlink size={12} aria-hidden />
+                    {link.targetText}
+                  </span>
+                )}
               </li>
             ))}
           </ul>
         )}
+
+        <SubHeading>Backlinks</SubHeading>
+        {backlinks.length === 0 ? (
+          <p className="memory-inspector-empty">
+            {connections?.orphan ? 'Orphan — nothing links here and it links nowhere.' : 'None yet.'}
+          </p>
+        ) : (
+          <ul className="memory-backlinks">
+            {backlinks.map((backlink) => (
+              <li key={backlink.sourceItemId}>
+                <button type="button" className="memory-backlink" onClick={() => void open(backlink.sourceItemId)}>
+                  <span className="memory-backlink-title">{backlink.sourceTitle}</span>
+                  <span className="memory-backlink-excerpt">{backlink.excerpt}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {mentions.length > 0 && (
+          <>
+            <SubHeading>Unlinked mentions</SubHeading>
+            <ul className="memory-backlinks">
+              {mentions.map((mention) => (
+                <li key={mention.sourceItemId}>
+                  <button type="button" className="memory-backlink" onClick={() => void open(mention.sourceItemId)}>
+                    <span className="memory-backlink-title">{mention.sourceTitle}</span>
+                    <span className="memory-backlink-excerpt">{mention.excerpt}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+            <p className="memory-inspector-note">
+              Suggestions only — nothing is linked until you edit the body.
+            </p>
+          </>
+        )}
+
+        <SubHeading>Add a relation</SubHeading>
+        <RelationEditor
+          relationTypes={relationTypes}
+          candidates={items.filter((item) => item.id !== detail.id)}
+          onCreate={(toItemId, relationType) => void saveRelation(toItemId, relationType)}
+        />
       </Section>
 
       <Section id="history" title="History" count={history.length} expanded={expanded.history} onToggle={toggle}>
         {history.length === 0 ? (
           <p className="memory-inspector-empty">No revisions recorded.</p>
         ) : (
-          <ul className="memory-history">
+          // A lineage, not a table: the newest statement at the top and each earlier one beneath
+          // it, so "what replaced what" reads down the column.
+          <ol className="memory-lineage">
             {history.map((revision, index) => (
-              <li key={revision.id}>
-                <button type="button" className="memory-history-row" onClick={() => void previewRevision(revision.id)}>
-                  <span className="memory-history-rev">rev {revision.revisionNumber}</span>
-                  <span className="memory-history-title">{revision.title}</span>
-                  <time dateTime={revision.createdAt}>{relativeAge(revision.createdAt)}</time>
-                  {index === 0 && <span className="memory-history-current">current</span>}
+              <li key={revision.id} className={index === 0 ? 'is-current' : ''}>
+                <button type="button" onClick={() => void previewRevision(revision.id)}>
+                  <span className="memory-lineage-state">{index === 0 ? 'Current' : 'Replaced'}</span>
+                  <span className="memory-lineage-title">{revision.title}</span>
+                  <span className="memory-lineage-meta">
+                    rev {revision.revisionNumber} · {relativeAge(revision.createdAt)}
+                  </span>
                 </button>
               </li>
             ))}
-          </ul>
+          </ol>
         )}
+      </Section>
+
+      <Section
+        id="properties"
+        title="Properties"
+        count={detail.properties.length + detail.tags.length}
+        expanded={expanded.properties}
+        onToggle={toggle}
+      >
+        {detail.tags.length > 0 && (
+          <div className="memory-chip-row">
+            {detail.tags.map((tag) => (
+              <span key={tag} className="memory-tag-chip">
+                #{tag}
+              </span>
+            ))}
+          </div>
+        )}
+        {detail.properties.length === 0 ? (
+          <p className="memory-inspector-empty">
+            Add a <code>---</code> frontmatter block to the body to set properties.
+          </p>
+        ) : (
+          <dl className="memory-properties">
+            {detail.properties.map((property, index) => (
+              <div key={`${property.key}-${index}`}>
+                <dt>{property.key}</dt>
+                <dd>{property.value}</dd>
+              </div>
+            ))}
+          </dl>
+        )}
+        <p className="memory-inspector-note">
+          Slug <code>{detail.slug}</code>
+        </p>
       </Section>
     </aside>
   )

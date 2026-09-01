@@ -1,4 +1,5 @@
 pub mod agent;
+pub mod brain;
 pub mod browser;
 pub mod code;
 pub mod context;

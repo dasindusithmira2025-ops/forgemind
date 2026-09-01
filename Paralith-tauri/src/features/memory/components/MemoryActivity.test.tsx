@@ -121,7 +121,8 @@ describe('MemoryActivity', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'Rotation Decision' }))
     expect(useMemoryStore.getState().activeId).toBe('m1')
-    expect(useMemoryStore.getState().view).toBe('knowledge')
+    expect(useMemoryStore.getState().view).toBe('explore')
+    expect(useMemoryStore.getState().exploreMode).toBe('all')
     expect(getApi).not.toHaveBeenCalled()
   })
 
@@ -308,7 +309,7 @@ describe('MemoryActivity', () => {
 
   it('loads the queue when the Activity view is opened', async () => {
     jobsApi.mockResolvedValue([job({ id: 'j1' })])
-    await useMemoryStore.getState().setView('activity')
+    await useMemoryStore.getState().setView('history')
     expect(jobsApi).toHaveBeenCalledWith('p1')
     expect(useMemoryStore.getState().jobs).toHaveLength(1)
   })

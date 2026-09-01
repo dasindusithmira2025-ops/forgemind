@@ -29,17 +29,45 @@ import type {
   MemorySummary,
 } from './memoryTypes'
 
-/** Which surface the centre pane is showing. The rail and inspector stay put across both. */
-export type MemoryView =
-  | 'overview'
-  | 'knowledge'
-  | 'graph'
-  | 'decisions'
-  | 'activity'
-  | 'review'
-  | 'context'
-  | 'timeline'
-  | 'search'
+/**
+ * Which surface Brain is showing.
+ *
+ * Three, not seven. The previous set — Overview, Knowledge, Graph, Decisions, Activity, Review,
+ * Context — asked the user to know the shape of the knowledge system before they could ask it
+ * anything. The questions a developer actually arrives with are "what does this project look
+ * like", "let me ask something", and "let me look around", so those are the three.
+ *
+ * The other four did not disappear; they stopped being top-level. Knowledge, Graph, Decisions and
+ * Activity became ways of looking around (see `ExploreMode`), Review became contextual — it exists
+ * only while Brain genuinely needs a person — and Context moved to the agent run that received it,
+ * which is the only place a compiled context is worth reading.
+ */
+export type BrainView = 'home' | 'ask' | 'explore'
+
+/**
+ * Ways of looking around. `history` is the old Timeline and Activity read as one question, and
+ * `map` is the graph, which is a way to answer "how is this connected" rather than a place to
+ * live.
+ */
+export type ExploreMode = 'all' | 'systems' | 'decisions' | 'history' | 'map'
+
+/**
+ * Anywhere Brain can be told to go.
+ *
+ * One destination union rather than two navigation actions: every call site that wants the map or
+ * the knowledge list means "take me there", and making it first select Explore and then select a
+ * mode would be two calls that must not be interleaved with anything.
+ */
+export type BrainDestination = BrainView | ExploreMode
+
+const EXPLORE_MODES: ExploreMode[] = ['all', 'systems', 'decisions', 'history', 'map']
+
+export function isExploreMode(destination: BrainDestination): destination is ExploreMode {
+  return (EXPLORE_MODES as BrainDestination[]).includes(destination)
+}
+
+/** Which half of the Activity surface is showing: knowledge change history, or the job queue. */
+export type ActivityTab = 'changes' | 'automation'
 
 /** User-adjustable graph scope. Held in the store rather than the component so switching to the
  * document and back does not silently reset the view the user set up. */
@@ -96,7 +124,17 @@ interface MemoryState {
   /** Body of the historical revision being previewed, keyed by revision id. */
   revisionPreview?: { revisionId: string; body: string }
 
-  view: MemoryView
+  view: BrainView
+  exploreMode: ExploreMode
+  /** Whether the focused review flow is open.
+   *
+   * Review is not a destination. It exists only while Brain has something it genuinely cannot
+   * decide alone, so it is a state the workspace can be *in* rather than a tab that sits there
+   * saying zero. Any navigation closes it. */
+  reviewOpen: boolean
+  /** Which History segment is open. Held in the store so leaving History and coming back does
+   * not silently drop the user on the other half. */
+  activityTab: ActivityTab
   /** What the Context surface last compiled, plus the inputs it used. Held in the store so
    * switching views does not discard a pack the user is reading. */
   contextTask: string
@@ -137,7 +175,10 @@ interface MemoryState {
   }) => Promise<void>
   saveRelation: (toItemId: string, relationType: string) => Promise<void>
   deleteRelation: (relationId: string) => Promise<void>
-  setView: (view: MemoryView) => Promise<void>
+  setView: (destination: BrainDestination) => Promise<void>
+  openReview: () => void
+  closeReview: () => void
+  setActivityTab: (tab: ActivityTab) => Promise<void>
   setContextTask: (task: string) => void
   setContextBudget: (budget: string) => void
   compileContext: () => Promise<void>
@@ -167,7 +208,10 @@ const EMPTY = {
   connections: undefined,
   history: [] as MemoryRevisionSummary[],
   revisionPreview: undefined,
-  view: 'overview' as MemoryView,
+  view: 'home' as BrainView,
+  exploreMode: 'all' as ExploreMode,
+  reviewOpen: false,
+  activityTab: 'changes' as ActivityTab,
   contextTask: '',
   contextBudget: 'balanced',
   contextPack: undefined,
@@ -538,11 +582,33 @@ export const useMemoryStore = create<MemoryState>((set, get) => ({
     }
   },
 
-  async setView(view) {
-    if (get().view === view) return
-    set({ view })
-    if (view === 'graph') await get().refreshGraph()
-    if (view === 'activity') await get().refreshJobs()
+  /**
+   * Navigate. Accepts a primary view or an Explore mode directly, so "show me the map" is one
+   * call rather than a select-then-select the caller has to sequence correctly.
+   */
+  async setView(destination) {
+    const explore = isExploreMode(destination)
+    const view: BrainView = explore ? 'explore' : destination
+    const exploreMode = explore ? destination : get().exploreMode
+    const current = get()
+    if (current.view === view && current.exploreMode === exploreMode && !current.reviewOpen) return
+    // Any deliberate navigation leaves the review flow. Review is something Brain asks *of* the
+    // user; carrying it under a different surface would make it a mode after all.
+    set({ view, exploreMode, reviewOpen: false })
+    // Home draws its architecture snapshot from the same graph payload, but it fetches that itself
+    // and only when it has none — returning Home must not cost a graph query every time.
+    if (view === 'explore' && exploreMode === 'map') await get().refreshGraph()
+    if (view === 'explore' && exploreMode === 'history') await get().refreshJobs()
+  },
+
+  openReview: () => set({ reviewOpen: true }),
+
+  closeReview: () => set({ reviewOpen: false }),
+
+  async setActivityTab(tab) {
+    if (get().activityTab === tab) return
+    set({ activityTab: tab })
+    if (tab === 'automation') await get().refreshJobs()
   },
 
   /** Reload the job queue. Cheap and bounded; called on open and after a lifecycle event. */
@@ -590,9 +656,9 @@ export const useMemoryStore = create<MemoryState>((set, get) => ({
    * event carries ids, not state: the backend stays the only thing that decides what a memory says.
    */
   applyKnowledgeUpdate(event) {
-    const { projectId, activeId, view, loadToken: token } = get()
+    const { projectId, activeId, view, exploreMode, loadToken: token } = get()
     if (!projectId || event.projectId !== projectId) return
-    if (view === 'activity') void get().refreshJobs()
+    if (view === 'explore' && exploreMode === 'history') void get().refreshJobs()
     if (event.changedItemIds.length === 0) return
     void (async () => {
       try {
@@ -658,11 +724,14 @@ export const useMemoryStore = create<MemoryState>((set, get) => ({
    *
    * Guarded by `loadToken` like every other read: a slow graph for one Project must not paint
    * over a newer one. The focus defaults to the open memory, so selecting a memory in the rail
-   * and switching to the graph lands on its neighbourhood rather than the whole project.
+   * and opening the Map lands on its neighbourhood rather than the whole project.
+   *
+   * Only Home and Explore → Map draw from this payload, so nothing else pays for the query.
    */
   async refreshGraph() {
-    const { projectId, graphControls, activeId, view } = get()
-    if (!projectId || view !== 'graph') return
+    const { projectId, graphControls, activeId, view, exploreMode } = get()
+    const drawsGraph = view === 'home' || (view === 'explore' && exploreMode === 'map')
+    if (!projectId || !drawsGraph) return
     const token = get().loadToken
     set({ graphLoading: true })
     try {

@@ -43,6 +43,10 @@ pub struct AppState {
     /// Retrieval and token packing over the Context Fabric. Shares `database`; holds no state of
     /// its own, so a pack is always compiled from current knowledge.
     context: services::ContextCompiler,
+    /// Paralith Brain: the universal, identity- and permission-carrying boundary every agent
+    /// reaches project knowledge through. Composes the services above; owns no store of its own,
+    /// which is what keeps one Brain rather than one Memory per agent integration.
+    brain: services::BrainGateway,
     /// Closes the change → impact → staleness loop. Owns a single worker thread that drains the
     /// durable knowledge job queue; every other subsystem only enqueues.
     knowledge: KnowledgeLifecycle,
@@ -464,6 +468,12 @@ pub fn run() {
             let semantic = services::SemanticService::new(database.clone());
             let context = services::ContextCompiler::new(database.clone(), filesystem.clone())
                 .with_database_studio(database_studio.clone());
+            let brain = services::BrainGateway::new(
+                database.clone(),
+                memory.clone(),
+                knowledge.intelligence().clone(),
+                context.clone(),
+            );
             // The Swarm engine owns its own background scheduler thread; it starts here so
             // active Swarms keep progressing regardless of which window/view is focused.
             let swarms = services::SwarmService::new(
@@ -535,6 +545,7 @@ pub fn run() {
                 code,
                 semantic,
                 context,
+                brain,
                 knowledge,
                 file_watch,
                 browser,
@@ -831,6 +842,7 @@ pub fn run() {
             commands::orchestrator_pause_session,
             commands::orchestrator_resume_session,
             commands::orchestrator_cancel_session,
+            commands::fabric_brain,
             commands::fabric_memory,
             commands::fabric_intelligence,
             commands::fabric_code,
