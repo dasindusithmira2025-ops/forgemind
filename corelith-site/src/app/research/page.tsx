@@ -34,10 +34,14 @@ export default function ResearchPage() {
               className="reveal grid grid-cols-1 gap-x-16 gap-y-6 border-t py-[clamp(36px,4vw,64px)] first:border-t-0 first:pt-0 lg:grid-cols-12"
               style={{ borderColor: "var(--hair-strong)" }}
             >
+              {/* The grounding column, cut as a readout bay: the plate a
+                  measured value sits on, not a card around the content. */}
               <div className="lg:col-span-4">
                 <span className="index">{item.index}</span>
                 <h2 className="mt-4 text-[length:var(--step-sub)] leading-[1.15]">{item.title}</h2>
-                <p className="mono-plain mt-5 text-[var(--ink-3)]">{item.grounding}</p>
+                <div className="bay mt-6 max-w-[38ch] p-4">
+                  <p className="mono-plain text-[var(--ink-2)]">{item.grounding}</p>
+                </div>
               </div>
 
               <div className="lg:col-span-8">

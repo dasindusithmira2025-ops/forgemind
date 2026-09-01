@@ -32,13 +32,14 @@ export default function CareersPage() {
             heading="Four things that are true of every week."
             className="mb-12"
           />
-          <div className="grid grid-cols-1 gap-x-12 gap-y-9 md:grid-cols-2">
+          <div className="grid grid-cols-1 gap-4 gap-y-9 md:grid-cols-2">
             {careers.operating.map((item, i) => (
               <div
                 key={item.title}
-                className="reveal border-t pt-6"
-                style={{ borderColor: "var(--hair-strong)", "--d": `${i * 60}ms` } as React.CSSProperties}
+                className="panel reveal p-7"
+                style={{ "--d": `${i * 60}ms` } as React.CSSProperties}
               >
+                <span className="panel-rim" aria-hidden="true" />
                 <span className="index">{String(i + 1).padStart(2, "0")}</span>
                 <h3 className="mt-3 text-[length:var(--step-sub)] leading-[1.15]">{item.title}</h3>
                 <p className="mt-4 max-w-[46ch] text-[15px] leading-[1.6] text-[var(--ink-2)]">
@@ -66,10 +67,9 @@ export default function CareersPage() {
                   {careers.openApplication.body}
                 </p>
 
-                <div
-                  className="mt-10 border-t pt-6"
-                  style={{ borderColor: "var(--hair-strong)" }}
-                >
+                {/* The intake spec, cut as a readout bay — the slot the
+                    application is measured against. */}
+                <div className="bay mt-10 p-6">
                   <p className="mono text-[var(--ink-3)]">What to send</p>
                   <ul className="mt-4 flex flex-col gap-2.5">
                     {[
@@ -110,7 +110,7 @@ export default function CareersPage() {
                     </span>
                     <span className="mono text-[var(--ink-3)] md:col-span-3">{role.discipline}</span>
                     <span className="mono text-[var(--ink-3)] md:col-span-3">{role.location}</span>
-                    <span className="text-[var(--ink-3)] transition-transform duration-[260ms] group-hover:translate-x-1.5 md:col-span-1 md:justify-self-end">
+                    <span className="text-[var(--ink-3)] transition-transform duration-[260ms] group-hover:translate-x-1.5 group-hover:text-[var(--accent)] md:col-span-1 md:justify-self-end">
                       <Arrow />
                     </span>
                   </Link>

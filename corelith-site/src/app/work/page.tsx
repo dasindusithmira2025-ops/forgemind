@@ -25,10 +25,18 @@ export default function WorkPage() {
       />
 
       <Band tone="ground">
-        <div className="shell">
+        <div className="shell grid gap-10">
           {caseStudies.map((study) => (
             <article key={study.slug} className="reveal">
-              <Link href={`/work/${study.slug}`} className="group block">
+              {/* A case study reads as one machined plate. The whole entry is
+                  the control — the reader presses the chassis, and everything
+                  on it is mounted rather than listed. */}
+              <Link
+                href={`/work/${study.slug}`}
+                className="panel panel-hover group block p-[clamp(22px,3.5vw,44px)]"
+              >
+                <span className="panel-rim" aria-hidden="true" />
+
                 <div
                   className="flex flex-wrap items-baseline gap-x-5 gap-y-3 border-b pb-6"
                   style={{ borderColor: "var(--hair-strong)" }}
@@ -62,11 +70,9 @@ export default function WorkPage() {
 
                   {/* The project itself. A work index that introduces a piece
                       of software with an abstract graphic is hiding the one
-                      thing the reader came for. */}
-                  <div
-                    className="overflow-hidden border lg:col-span-7"
-                    style={{ borderColor: "var(--hair)", borderRadius: "var(--r-md)" }}
-                  >
+                      thing the reader came for. The poster sits in a recessed
+                      bay — a screen mounted in the plate, not printed on it. */}
+                  <div className="bay overflow-hidden lg:col-span-7">
                     <Image
                       src={paralithPoster}
                       alt={`${study.name}: ${study.descriptor}`}

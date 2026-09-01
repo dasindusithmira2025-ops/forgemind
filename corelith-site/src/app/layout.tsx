@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Archivo, Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { site } from "@/content/site";
 import { SiteHeader } from "@/components/SiteHeader";
@@ -7,37 +7,41 @@ import { SiteFooter } from "@/components/SiteFooter";
 import { RevealRoot } from "@/components/Reveal";
 
 /**
- * One family.
+ * Three faces, three jobs.
  *
- * The previous system ran four: a display grotesque, an italic serif for
- * emphasis, a humanist sans for reading, and a mono. The serif was the problem
- * — an italic display face reads as fashion and editorial, not as engineering,
- * and it made the company look like a studio rather than a technology company.
- * Removing it removed the reason for the other three to be different from each
- * other, so the whole stack collapses to Geist.
+ * ARCHIVO is the signage. A grotesque drawn for signage, expanded to 125%
+ * for display: it reads as a plate on a machine, not as a magazine headline.
+ * Its width is the voice — industrial, wide, certain — and it is never used
+ * below section-heading size.
  *
- * Geist is a modern grotesque drawn for interfaces: it stays structural at 128px
- * where a humanist face softens, and stays legible at 15px where a display face
- * falls apart. Hierarchy is therefore carried by weight, scale, colour and line
- * break — never by changing font genre.
+ * INTER is the control room. The running text, the labels, the navigation:
+ * a face drawn for interfaces, quiet on purpose so the machinery can be loud.
  *
- * Both are variable, so the whole site is two font files covering 100–900 rather
- * than nine static cuts. next/font self-hosts and preloads them and emits a
- * size-adjusted fallback, so there is no third-party request and no layout shift.
+ * JETBRAINS MONO is the readout. Machine values only — versions, identifiers,
+ * measurements — and nothing else. It is not a brand element and never sets a
+ * label, a heading or navigation.
+ *
+ * All three are variable, so the whole site is three font files rather than
+ * a dozen static cuts. next/font self-hosts and preloads them and emits a
+ * size-adjusted fallback, so there is no third-party request and no layout
+ * shift.
  */
-const geist = Geist({
+const archivo = Archivo({
   subsets: ["latin"],
-  variable: "--font-geist",
+  variable: "--font-archivo",
+  display: "swap",
+  axes: ["wdth"],
+});
+
+const inter = Inter({
+  subsets: ["latin"],
+  variable: "--font-inter",
   display: "swap",
 });
 
-/**
- * Machine values only: versions, identifiers, schema numbers. It is not a brand
- * element and it never sets a label, a heading or navigation.
- */
-const geistMono = Geist_Mono({
+const jetbrains = JetBrains_Mono({
   subsets: ["latin"],
-  variable: "--font-geist-mono",
+  variable: "--font-jetbrains",
   display: "swap",
 });
 
@@ -83,7 +87,7 @@ export const metadata: Metadata = {
 // controls, scrollbars and the mobile address bar match the page.
 export const viewport: Viewport = {
   colorScheme: "dark",
-  themeColor: "#0e1015",
+  themeColor: "#101318",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
@@ -105,7 +109,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     <html
       lang="en"
       data-theme="dark"
-      className={`${geist.variable} ${geistMono.variable}`}
+      className={`${archivo.variable} ${inter.variable} ${jetbrains.variable}`}
     >
       <head>
         <script

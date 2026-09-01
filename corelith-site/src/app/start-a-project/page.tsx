@@ -46,8 +46,11 @@ export default function StartAProjectPage() {
         </Rail>
       </Band>
 
+      {/* What happens to the intake once it is sent. Three claims about the
+          reply, each on its own machined plate — the promises sit together on
+          the instrument the form belongs to. */}
       <Band tone="recessed" tight>
-        <div className="shell grid grid-cols-1 gap-x-12 gap-y-8 md:grid-cols-3">
+        <div className="shell grid grid-cols-1 gap-4 gap-y-8 md:grid-cols-3">
           {[
             {
               heading: "A person reads it",
@@ -64,9 +67,10 @@ export default function StartAProjectPage() {
           ].map((item, i) => (
             <div
               key={item.heading}
-              className="reveal border-t pt-6"
-              style={{ borderColor: "var(--hair-strong)", "--d": `${i * 60}ms` } as React.CSSProperties}
+              className="panel panel-hover reveal p-7"
+              style={{ "--d": `${i * 60}ms` } as React.CSSProperties}
             >
+              <span className="panel-rim" aria-hidden="true" />
               <span className="index">{String(i + 1).padStart(2, "0")}</span>
               <h2 className="mt-3 text-[length:var(--step-sub)] leading-[1.15]">{item.heading}</h2>
               <p className="mt-4 text-[15px] leading-[1.6] text-[var(--ink-2)]">{item.body}</p>

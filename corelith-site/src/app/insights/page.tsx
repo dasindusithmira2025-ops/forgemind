@@ -32,17 +32,28 @@ export default function InsightsPage() {
             // section is for and where the equivalent material already lives.
             <div className="grid grid-cols-1 gap-x-16 gap-y-10 lg:grid-cols-12">
               <div className="lg:col-span-6">
-                <h2 className="text-[length:var(--step-head)]">Nothing published yet.</h2>
-                <p className="mt-6 max-w-[46ch] text-[length:var(--step-lead)] leading-[1.5] text-[var(--ink-2)]">
+                <h2 className="reveal-wipe text-[length:var(--step-head)]">
+                  Nothing published yet.
+                </h2>
+                <p
+                  className="reveal mt-6 max-w-[46ch] text-[length:var(--step-lead)] leading-[1.5] text-[var(--ink-2)]"
+                  style={{ "--d": "60ms" } as React.CSSProperties}
+                >
                   We would rather publish nothing than publish something generic. The first pieces
                   will come out of work that is already running: what the agent runtime taught us
                   about bounded loops, and why project memory had to stop being a transcript.
                 </p>
-                <p className="mt-6 max-w-[46ch] text-[var(--ink-2)]">
+                <p
+                  className="reveal mt-6 max-w-[46ch] text-[var(--ink-2)]"
+                  style={{ "--d": "120ms" } as React.CSSProperties}
+                >
                   Until then, the research page carries the same thinking in shorter form, and the
                   Paralith case study carries the decisions in full.
                 </p>
-                <div className="mt-9 flex flex-wrap gap-3">
+                <div
+                  className="reveal mt-9 flex flex-wrap gap-3"
+                  style={{ "--d": "180ms" } as React.CSSProperties}
+                >
                   <Link href="/research" className="btn btn-primary">
                     Read the research
                     <Arrow />
@@ -54,25 +65,55 @@ export default function InsightsPage() {
               </div>
 
               <div className="lg:col-span-6">
-                <p className="mono text-[var(--ink-3)]">Planned categories</p>
-                <ul className="mt-5">
-                  {categories.map((category) => (
-                    <li
-                      key={category}
-                      className="flex items-baseline justify-between gap-4 border-t py-4"
-                      style={{ borderColor: "var(--hair)" }}
-                    >
-                      <span className="text-[16px] text-[var(--ink-2)]">{category}</span>
-                      <span className="mono text-[var(--ink-3)]">0</span>
-                    </li>
-                  ))}
-                  <li className="border-t" style={{ borderColor: "var(--hair)" }} />
-                </ul>
+                {/* The plan, cut as a readout bay — the plate a measured value
+                    sits on, not a set of stub cards. The counts are real:
+                    nothing in any category exists yet. */}
+                <div
+                  className="bay reveal p-6 sm:p-7"
+                  style={{ "--d": "120ms" } as React.CSSProperties}
+                >
+                  <div className="flex items-center justify-between gap-6">
+                    <p className="mono text-[var(--ink-3)]">Planned categories</p>
+                    <span className="mono-plain text-[var(--step-mono)] text-[var(--ink-3)]">
+                      {String(categories.length).padStart(2, "0")}
+                    </span>
+                  </div>
+                  <dl className="mt-5">
+                    {categories.map((category) => (
+                      <div
+                        key={category}
+                        className="flex items-baseline justify-between gap-4 border-t py-3.5"
+                        style={{ borderColor: "var(--hair)" }}
+                      >
+                        <dt className="text-[15px] leading-[1.5] text-[var(--ink-2)]">
+                          {category}
+                        </dt>
+                        <dd className="mono-plain text-[15px] text-[var(--ink-3)]">0</dd>
+                      </div>
+                    ))}
+                  </dl>
+                </div>
 
-                <p className="mono text-[var(--ink-3)] mt-10">In progress</p>
+                {/* Wayfinding rather than readout: these are routes out to
+                  live material, so they stay seam rows on the open ground. */}
+                <p
+                  className="mono reveal mt-10 text-[var(--ink-3)]"
+                  style={{ "--d": "180ms" } as React.CSSProperties}
+                >
+                  In progress
+                </p>
                 <ul className="mt-5">
-                  {research.slice(0, 2).map((item) => (
-                    <li key={item.slug} className="border-t py-4" style={{ borderColor: "var(--hair)" }}>
+                  {research.slice(0, 2).map((item, i) => (
+                    <li
+                      key={item.slug}
+                      className="reveal border-t py-4"
+                      style={
+                        {
+                          borderColor: "var(--hair)",
+                          "--d": `${240 + i * 60}ms`,
+                        } as React.CSSProperties
+                      }
+                    >
                       <GoLink href={`/research#${item.slug}`}>{item.title}</GoLink>
                     </li>
                   ))}

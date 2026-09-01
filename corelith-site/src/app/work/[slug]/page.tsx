@@ -71,6 +71,15 @@ export default async function CaseStudyPage({ params }: { params: Promise<{ slug
               </div>
             </dl>
           </div>
+
+          {/* The measured sequence this document runs through — six positions
+              on a ruler, the opening one lit. The ruler says the page is
+              measured; the lit tick says where the reader is standing. */}
+          <ul className="ticks reveal mt-12" aria-hidden="true">
+            {["01", "02", "03", "04", "05", "06"].map((step, i) => (
+              <li key={step} data-on={i === 0 ? true : undefined} />
+            ))}
+          </ul>
         </div>
       </section>
 
@@ -89,8 +98,8 @@ export default async function CaseStudyPage({ params }: { params: Promise<{ slug
             {study.problem.map((item, i) => (
               <div
                 key={item.heading}
-                className="reveal border-t pt-6"
-                style={{ borderColor: "var(--hair-strong)", "--d": `${i * 60}ms` } as React.CSSProperties}
+                className="reveal bay p-7"
+                style={{ "--d": `${i * 60}ms` } as React.CSSProperties}
               >
                 <span className="index">{String(i + 1).padStart(2, "0")}</span>
                 <h3 className="mt-3 text-[length:var(--step-sub)] leading-[1.15]">{item.heading}</h3>
@@ -137,8 +146,8 @@ export default async function CaseStudyPage({ params }: { params: Promise<{ slug
             {study.architecture.map((layer, i) => (
               <div
                 key={layer.layer}
-                className="reveal border-t py-7"
-                style={{ borderColor: "var(--hair-strong)", "--d": `${i * 55}ms` } as React.CSSProperties}
+                className="reveal bay p-7"
+                style={{ "--d": `${i * 55}ms` } as React.CSSProperties}
               >
                 <dt className="flex items-baseline gap-4">
                   <span className="index">{String(i + 1).padStart(2, "0")}</span>
@@ -175,21 +184,27 @@ export default async function CaseStudyPage({ params }: { params: Promise<{ slug
             lead="Facts about the shipped system rather than a summary of how it went."
             className="mb-12"
           />
-          <dl className="grid grid-cols-1 gap-x-12 gap-y-8 md:grid-cols-3">
-            {study.outcome.map((item, i) => (
-              <div
-                key={item.label}
-                className="reveal border-t pt-6"
-                style={{ borderColor: "var(--hair-strong)", "--d": `${i * 70}ms` } as React.CSSProperties}
-              >
-                <dt className="mono text-[var(--ink-3)]">{item.label}</dt>
-                <dd className="font-display mt-4 text-[length:var(--step-head)] leading-none font-semibold tracking-[-0.028em] text-[var(--ink)]">
-                  {item.value}
-                </dd>
-                <dd className="mt-4 text-[15px] leading-[1.6] text-[var(--ink-2)]">{item.note}</dd>
-              </div>
-            ))}
-          </dl>
+          {/* The readout strip: one plate carrying every checkable value at
+              once. A reader compares 0.4.14 against v36 against the signing
+              state — separated bays would hide that they read together. */}
+          <div className="panel reveal">
+            <span className="panel-rim" aria-hidden="true" />
+            <dl className="grid grid-cols-1 md:grid-cols-3">
+              {study.outcome.map((item, i) => (
+                <div
+                  key={item.label}
+                  className="flex flex-col gap-4 p-8 md:border-l md:first:border-l-0"
+                  style={{ borderColor: "var(--hair)", "--d": `${i * 70}ms` } as React.CSSProperties}
+                >
+                  <dt className="mono text-[var(--ink-3)]">{item.label}</dt>
+                  <dd className="font-display text-[length:var(--step-head)] leading-none font-semibold tracking-[-0.028em] text-[var(--ink)]">
+                    {item.value}
+                  </dd>
+                  <dd className="text-[15px] leading-[1.6] text-[var(--ink-2)]">{item.note}</dd>
+                </div>
+              ))}
+            </dl>
+          </div>
         </Rail>
       </Band>
 

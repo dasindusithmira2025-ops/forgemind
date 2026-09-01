@@ -65,7 +65,7 @@ export function ProductFilm({
           />
           <span
             className="absolute inset-0 flex items-center justify-center transition-colors duration-[260ms]"
-            style={{ backgroundColor: "rgba(12,14,16,0.28)" }}
+            style={{ backgroundColor: "rgba(16,19,24,0.45)" }}
           >
             <span
               className="btn btn-primary pointer-events-none"

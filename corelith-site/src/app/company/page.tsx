@@ -44,25 +44,27 @@ export default function CompanyPage() {
             className="mb-14"
           />
 
-          <dl>
+          {/* Each principle on its own machined plate: the claim and the
+              reasoning sit together on one instrument surface. */}
+          <dl className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             {principles.map((principle, i) => (
               <div
                 key={principle.index}
-                className="reveal grid grid-cols-1 gap-x-12 gap-y-3 border-t py-7 md:grid-cols-12"
-                style={{ borderColor: "var(--hair)", "--d": `${i * 50}ms` } as React.CSSProperties}
+                className="panel reveal p-7"
+                style={{ "--d": `${i * 60}ms` } as React.CSSProperties}
               >
-                <dt className="flex items-baseline gap-4 md:col-span-5">
+                <span className="panel-rim" aria-hidden="true" />
+                <dt className="flex items-baseline gap-4">
                   <span className="index">{principle.index}</span>
                   <span className="font-display text-[length:var(--step-sub)] leading-[1.15] font-semibold tracking-[-0.028em] text-[var(--ink)]">
                     {principle.claim}
                   </span>
                 </dt>
-                <dd className="text-[15px] leading-[1.6] text-[var(--ink-2)] md:col-span-7">
+                <dd className="mt-4 border-t pt-4 text-[15px] leading-[1.6] text-[var(--ink-2)]" style={{ borderColor: "var(--hair)" }}>
                   {principle.body}
                 </dd>
               </div>
             ))}
-            <div className="border-t" style={{ borderColor: "var(--hair)" }} />
           </dl>
         </Rail>
       </Band>
@@ -111,13 +113,14 @@ export default function CompanyPage() {
             className="mb-14"
           />
 
-          <div className="grid grid-cols-1 gap-x-12 gap-y-10 sm:grid-cols-2 lg:grid-cols-4">
-            {technology.map((group) => (
-              <div key={group.heading} className="reveal">
-                <h3
-                  className="mono border-b pb-3 text-[var(--ink-3)]"
-                  style={{ borderColor: "var(--hair-strong)" }}
-                >
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {technology.map((group, i) => (
+              <div
+                key={group.heading}
+                className="bay reveal p-6"
+                style={{ "--d": `${i * 60}ms` } as React.CSSProperties}
+              >
+                <h3 className="mono pb-3 text-[var(--ink-3)]">
                   {group.heading}
                 </h3>
                 <ul className="mt-4 flex flex-col gap-2">
@@ -134,8 +137,9 @@ export default function CompanyPage() {
       </Band>
 
       <Band tone="ground" tight>
-        <div className="shell grid grid-cols-1 gap-x-12 gap-y-10 md:grid-cols-3">
-          <div>
+        <div className="shell grid grid-cols-1 gap-4 gap-y-10 md:grid-cols-3">
+          <div className="panel panel-hover reveal p-7">
+            <span className="panel-rim" aria-hidden="true" />
             <p className="mono text-[var(--ink-3)]">Products</p>
             <h2 className="mt-4 text-[length:var(--step-sub)]">{paralith.wordmark}</h2>
             <p className="mt-3 text-[15px] leading-[1.6] text-[var(--ink-2)]">
@@ -145,7 +149,8 @@ export default function CompanyPage() {
               Explore Paralith
             </GoLink>
           </div>
-          <div>
+          <div className="panel panel-hover reveal p-7" style={{ "--d": "80ms" } as React.CSSProperties}>
+            <span className="panel-rim" aria-hidden="true" />
             <p className="mono text-[var(--ink-3)]">Research</p>
             <h2 className="mt-4 text-[length:var(--step-sub)]">Open questions</h2>
             <p className="mt-3 text-[15px] leading-[1.6] text-[var(--ink-2)]">
@@ -155,7 +160,8 @@ export default function CompanyPage() {
               Read the research
             </GoLink>
           </div>
-          <div>
+          <div className="panel panel-hover reveal p-7" style={{ "--d": "160ms" } as React.CSSProperties}>
+            <span className="panel-rim" aria-hidden="true" />
             <p className="mono text-[var(--ink-3)]">Careers</p>
             <h2 className="mt-4 text-[length:var(--step-sub)]">Working here</h2>
             <p className="mt-3 text-[15px] leading-[1.6] text-[var(--ink-2)]">
