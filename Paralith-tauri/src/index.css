@@ -1937,6 +1937,26 @@ html[data-theme-swapping] *, html[data-theme-swapping] *::before, html[data-them
 .repo-history-row-meta code { color: var(--muted); font: var(--font-xs) / 1 var(--font-mono); }
 .repo-history-more { padding: 10px; display: flex; justify-content: center; border-top: 1px solid var(--border-subtle); }
 
+/* Graph: history's data-dense inspector with topology as the leading signal, not a card dashboard. */
+.repo-graph-list { background: var(--surface); }
+.repo-graph-toolbar { position: sticky; top: 0; z-index: 2; background: var(--surface); }
+.repo-graph-wip { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--border); background: var(--surface-2); color: var(--muted); font-size: var(--font-xs); font-variant-numeric: tabular-nums; }
+.repo-graph-wip > div { display: flex; align-items: baseline; gap: 7px; min-width: 0; flex: 1; }
+.repo-graph-wip strong { color: var(--accent-strong); font-size: var(--font-xs); }
+.repo-graph-wip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.repo-graph-danger { color: var(--danger); }
+.repo-graph-rows { list-style: none; margin: 0; padding: 0; }
+.repo-graph-rows li > button { width: 100%; min-height: 48px; display: flex; align-items: stretch; padding: 0 8px 0 0; border: 0; border-top: 1px solid var(--border-subtle); background: transparent; color: inherit; text-align: left; cursor: pointer; }
+.repo-graph-rows li > button:hover { background: var(--surface-hover); }
+.repo-graph-rows li > button.active { background: var(--row-selected); box-shadow: inset 2px 0 0 var(--accent-edge); }
+.repo-graph-rows li > button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.repo-graph-lanes { flex: none; overflow: visible; }
+.repo-graph-lanes path { fill: none; stroke-width: 1.5; stroke-linecap: round; }
+.repo-graph-lanes circle { stroke-width: 2; }
+.repo-graph-row-content { min-width: 0; flex: 1; align-self: center; display: flex; flex-direction: column; gap: 3px; }
+.repo-graph-row-content .repo-history-row-meta { flex-wrap: nowrap; overflow: hidden; }
+.repo-graph-row-content .repo-tag { flex: none; }
+
 .repo-history-detail { overflow-y: auto; padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .repo-history-detail-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
 .repo-history-detail-head h3 { margin: 0; font-size: var(--font-lg); }
@@ -2507,6 +2527,8 @@ html[data-theme-swapping] *, html[data-theme-swapping] *::before, html[data-them
   .repo-changes { grid-template-columns: 1fr; overflow-y: auto; }
   .repo-changes-list { max-height: 300px; border-right: 0; border-bottom: 1px solid var(--border); }
   .repo-changes-detail { min-height: 500px; }
+  .repo-history { grid-template-columns: 1fr; overflow-y: auto; }
+  .repo-history-list { max-height: 360px; border-right: 0; border-bottom: 1px solid var(--border); }
   .repo-commit-actions { align-items: flex-start; flex-direction: column; }
   .repo-run-toggle { flex-wrap: wrap; }
   .repo-run-commit { flex-basis: 100%; padding-left: 35px; }
