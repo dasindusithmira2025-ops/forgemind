@@ -112,6 +112,10 @@ impl TerminalLog {
 struct TerminalHandle {
     metadata: RwLock<TerminalSession>,
     agent_adapter: Option<ProviderAdapter>,
+    /// Activity's feed for this session's agent transitions. Held per handle rather than threaded
+    /// through every `transition_agent_state` call site, several of which run on worker threads
+    /// that only ever captured the handle.
+    activity: Option<crate::services::ActivityService>,
     agent_state: Mutex<Option<AgentStateEvent>>,
     last_agent_output: Mutex<Option<Instant>>,
     agent_signal_buffer: Mutex<String>,
@@ -158,6 +162,9 @@ pub struct TerminalManager {
     database: Option<Arc<DatabaseService>>,
     app_handle: Option<AppHandle>,
     counters: Arc<TerminalRuntimeCounters>,
+    /// Set once during application setup, after Activity exists. Sessions created afterwards
+    /// carry it; there are none before, because nothing can open a terminal during setup.
+    activity: Arc<RwLock<Option<crate::services::ActivityService>>>,
 }
 
 /// Releases a pane's creation reservation on every exit path, including panics.
@@ -181,7 +188,14 @@ impl TerminalManager {
             database: Some(database),
             app_handle: Some(app_handle),
             counters: Arc::new(TerminalRuntimeCounters::default()),
+            activity: Arc::new(RwLock::new(None)),
         }
+    }
+
+    /// Attach the Activity surface. Separate from `new` because Activity itself needs the
+    /// repository provider, which is constructed after the terminal manager.
+    pub fn set_activity(&self, activity: crate::services::ActivityService) {
+        *self.activity.write() = Some(activity);
     }
 
     #[cfg(test)]
@@ -193,6 +207,7 @@ impl TerminalManager {
             database: None,
             app_handle: None,
             counters: Arc::new(TerminalRuntimeCounters::default()),
+            activity: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -330,6 +345,7 @@ impl TerminalManager {
         let handle = Arc::new(TerminalHandle {
             metadata: RwLock::new(session.clone()),
             agent_adapter: is_coding_agent(&session.provider).then_some(adapter.clone()),
+            activity: self.activity.read().clone(),
             agent_state: Mutex::new(None),
             last_agent_output: Mutex::new(
                 is_coding_agent(&session.provider).then_some(Instant::now()),
@@ -1521,8 +1537,13 @@ fn transition_agent_state(
         let _ = app.emit_to(
             crate::services::detached_label(&workspace_id),
             "agent-state",
-            event,
+            event.clone(),
         );
+    }
+    // Activity normalizes this into its own vocabulary. It is fed the same authoritative
+    // transition the windows receive, so the dock can never disagree with the terminal.
+    if let Some(activity) = &handle.activity {
+        activity.record_agent_state(&event);
     }
 }
 

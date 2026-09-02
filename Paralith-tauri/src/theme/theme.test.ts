@@ -3,6 +3,7 @@ import indexCss from '../index.css?raw'
 import codeSurfaceCss from '../features/code-surface/codeSurface.css?raw'
 import toolPanelCss from '../features/code-surface/workspaceToolPanel.css?raw'
 import browserCss from '../features/code-surface/browser/browser.css?raw'
+import activityCss from '../features/activity/activity.css?raw'
 import indexHtml from '../../index.html?raw'
 import {
   REQUIRED_CSS_VARS, monacoThemeName, toCssVars, toMonacoColors, toTerminalTheme,
@@ -200,6 +201,7 @@ describe('design genome', () => {
     'codeSurface.css': codeSurfaceCss,
     'workspaceToolPanel.css': toolPanelCss,
     'browser.css': browserCss,
+    'activity.css': activityCss,
   }
 
   it('never invents a fifth surface by mixing a component background toward black', () => {

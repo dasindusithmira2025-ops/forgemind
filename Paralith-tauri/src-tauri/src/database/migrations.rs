@@ -1,7 +1,7 @@
 use crate::errors::{AppError, AppResult};
 use rusqlite::{params, Connection};
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 40;
+pub const CURRENT_SCHEMA_VERSION: i64 = 41;
 
 const MIGRATION_1: &str = r#"
 CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
@@ -1151,6 +1151,9 @@ pub fn apply(connection: &Connection) -> AppResult<()> {
     if current < 40 || index_exists(connection, "idx_code_refs_target")? {
         migrate_v40(connection)?;
     }
+    if current < 41 || !table_exists(connection, "activity_threads")? {
+        migrate_v41(connection)?;
+    }
     Ok(())
 }
 
@@ -1208,6 +1211,7 @@ pub fn requires_migration(connection: &Connection) -> AppResult<bool> {
         || !column_exists(connection, "agent_sessions", "recovery_status")?
         || !column_exists(connection, "agent_sessions", "worktree_path")?
         || !column_exists(connection, "database_sources", "relevance")?
+        || !table_exists(connection, "activity_threads")?
         || !table_exists(connection, "memory_links")?
         || !table_exists(connection, "memory_claims")?
         || !table_exists(connection, "memory_relations")?
@@ -2624,6 +2628,40 @@ fn migrate_v40(connection: &Connection) -> AppResult<()> {
         record_migration(connection, 40)
     })();
     finish_migration_transaction(connection, result, 40)
+}
+
+/// Activity Threads: the durable half of the Activity surface.
+///
+/// Only what is needed to recover unresolved work across a restart and answer "what just
+/// happened" is persisted. The full thread lives in `payload_json`; the columns beside it exist
+/// solely so the recovery read and the retention prune are indexed rather than deserializing
+/// every row.
+fn migrate_v41(connection: &Connection) -> AppResult<()> {
+    connection
+        .execute_batch("BEGIN IMMEDIATE;")
+        .map_err(AppError::database)?;
+    let result = (|| {
+        connection
+            .execute_batch(
+                "CREATE TABLE IF NOT EXISTS activity_threads(
+                   id TEXT PRIMARY KEY,
+                   project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                   source TEXT NOT NULL,
+                   state TEXT NOT NULL,
+                   updated_at TEXT NOT NULL,
+                   observed_at TEXT NOT NULL,
+                   resolved_at TEXT,
+                   payload_json TEXT NOT NULL
+                 );
+                 CREATE INDEX IF NOT EXISTS idx_activity_threads_open
+                   ON activity_threads(resolved_at, updated_at DESC);
+                 CREATE INDEX IF NOT EXISTS idx_activity_threads_project
+                   ON activity_threads(project_id, resolved_at DESC);",
+            )
+            .map_err(AppError::database)?;
+        record_migration(connection, 41)
+    })();
+    finish_migration_transaction(connection, result, 41)
 }
 
 fn index_exists(connection: &Connection, index: &str) -> AppResult<bool> {

@@ -12,6 +12,8 @@ import { initThemeRuntime } from './theme/themeStore'
 import { UpdateNotification } from './features/updates/UpdateNotification'
 import { startUpdateController, stopUpdateController } from './features/updates/updateController'
 import { AgentResumeCenter } from './features/agent-resume/AgentResumeCenter'
+import { ActivityAlerts } from './features/activity/ActivityAlerts'
+import { startActivity } from './features/activity/activityStore'
 
 // Periodic background update poll while the app is running (in addition to the one-shot check after
 // safe startup and the manual Settings → Updates check). The Rust coordinator owns actual check
@@ -82,6 +84,15 @@ export default function App() {
     void startUpdateController()
     return () => stopUpdateController()
   }, [])
+
+  // Activity is a primary-window subscription for the same reason: one broadcast listener, one
+  // notification de-duplication table. A detached Workspace window shows its own terminals, not
+  // the project-wide Activity model. Recovery mode is excluded on both sides — the backend does
+  // not start the watcher there, so subscribing would only produce a failing hydrate.
+  useEffect(() => {
+    if (detachedWorkspaceId || startup === undefined || startup?.recoveryMode) return
+    return startActivity()
+  }, [startup])
 
   useEffect(() => {
     let active = true
@@ -165,6 +176,7 @@ export default function App() {
       <AgentResumeCenter />
       {whatsNew && <aside className="whats-new" aria-label="What's new"><span>UPDATED · {whatsNew.build.edition.toUpperCase()}</span><h2>PARALITH {whatsNew.build.version} is healthy.</h2><p>{Array.isArray(whatsNew.build.bundledRelease.highlights) ? (whatsNew.build.bundledRelease.highlights as string[]).join(' · ') : 'The signed update passed migration and startup health checks.'}</p><button onClick={() => setWhatsNew(undefined)}>Dismiss</button></aside>}
       <UpdateNotification />
+      <ActivityAlerts />
     </HashRouter>
   )
 }

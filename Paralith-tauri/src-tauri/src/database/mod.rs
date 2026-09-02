@@ -1,3 +1,4 @@
+mod activity;
 pub mod backup;
 pub(crate) mod code;
 pub(crate) mod database_studio;
