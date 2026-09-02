@@ -1,3 +1,4 @@
+pub mod activity;
 pub mod agent;
 pub mod brain;
 pub mod browser;
@@ -25,6 +26,7 @@ pub mod usage_telemetry;
 pub mod vnext;
 pub mod workspace;
 
+pub use activity::*;
 pub use agent::*;
 pub use database_studio::*;
 pub use diagnostics::*;

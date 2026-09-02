@@ -1,3 +1,4 @@
+pub mod activity_service;
 pub mod agent_detector;
 pub mod agent_handoff;
 pub mod agent_resume;
@@ -31,6 +32,7 @@ pub mod usage_telemetry_service;
 pub mod window_chrome;
 pub mod window_registry;
 
+pub use activity_service::ActivityService;
 pub use agent_detector::AgentDetector;
 pub use agent_resume::AgentResumeService;
 pub use brain_gateway::BrainGateway;

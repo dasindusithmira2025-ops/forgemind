@@ -1,3 +1,4 @@
+pub mod activity_commands;
 pub mod agent_commands;
 pub mod brain_commands;
 pub mod browser_commands;
@@ -23,6 +24,7 @@ pub mod usage_telemetry_commands;
 pub mod window_commands;
 pub mod workspace_commands;
 
+pub use activity_commands::*;
 pub use agent_commands::*;
 pub use browser_commands::*;
 pub use database_commands::*;

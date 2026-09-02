@@ -9,9 +9,9 @@ mod services;
 
 use database::DatabaseService;
 use services::{
-    AgentDetector, AgentResumeService, DatabaseStudioRuntime, FileSystemService, FileWatchService,
-    KnowledgeLifecycle, RepositoryService, RestorationScheduler, SelfWriteLedger, TerminalManager,
-    UpdateService, UsageService, UsageTelemetryService, WindowRegistry,
+    ActivityService, AgentDetector, AgentResumeService, DatabaseStudioRuntime, FileSystemService,
+    FileWatchService, KnowledgeLifecycle, RepositoryService, RestorationScheduler, SelfWriteLedger,
+    TerminalManager, UpdateService, UsageService, UsageTelemetryService, WindowRegistry,
 };
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -71,6 +71,10 @@ pub struct AppState {
     updates: UpdateService,
     usage: UsageService,
     usage_telemetry: UsageTelemetryService,
+    /// The Activity surface: one normalized model of what is running, what finished, and what
+    /// needs a human, fed by the agent runtime and by a GitHub watcher. Shares `database` and the
+    /// authenticated `repository` provider path; it owns no credentials of its own.
+    activity: ActivityService,
 }
 
 pub(crate) fn require_main_window(window: &tauri::Window) -> errors::AppResult<()> {
@@ -271,6 +275,10 @@ pub fn run() {
     let app = builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        // Native notifications for the few Activity outcomes worth interrupting someone over:
+        // an agent finishing or stopping, a deployment awaiting review, CI failing, a release
+        // completing. Routine progress never reaches the operating system.
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             startup_diagnostic("setup", "application setup started");
             let data_dir = match app.path().app_data_dir() {
@@ -532,6 +540,15 @@ pub fn run() {
             );
             let usage = UsageService::new(database.clone());
             let usage_telemetry = UsageTelemetryService::new();
+            // Activity watches from application start, not from the first time the dock is
+            // opened: a workflow that begins while the user is in the editor must already be
+            // known by the time they look.
+            let activity =
+                ActivityService::new(database.clone(), repository.clone(), app.handle().clone());
+            terminals.set_activity(activity.clone());
+            if !recovery_mode {
+                activity.start();
+            }
             app.manage(AppState {
                 database,
                 detector,
@@ -558,6 +575,7 @@ pub fn run() {
                 app_local_data_directory: local_data_dir,
                 backup_directory: backup_base.join(edition.channel()),
                 legacy_migration,
+                activity,
                 updates: updates.clone(),
                 usage,
                 usage_telemetry,
@@ -749,6 +767,10 @@ pub fn run() {
             commands::refresh_repository_intelligence,
             commands::get_repository_intelligence,
             commands::evaluate_merge_readiness,
+            commands::list_activity_threads,
+            commands::resync_activity,
+            commands::review_activity_deployment,
+            commands::dismiss_activity_thread,
             commands::get_settings,
             commands::get_ai_usage_snapshots,
             commands::get_ai_usage_history,

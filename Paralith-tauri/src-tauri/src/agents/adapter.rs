@@ -160,6 +160,21 @@ fn parse_agent_output(provider: &AgentProvider, output: &[u8]) -> Option<AgentSi
             reason: "shell prompt boundary observed".into(),
         });
     }
+    // A provider quota stop is not an interactive prompt and not a crash: the agent stopped for
+    // a reason the user can neither answer nor fix in the terminal. It is classified here, in the
+    // one parser every provider routes through, so Activity can say "usage limit reached" instead
+    // of inferring a generic failure from a process that has not even exited.
+    if text.contains("usage limit reached")
+        || text.contains("rate limit exceeded")
+        || text.contains("quota exceeded")
+        || text.contains("out of credits")
+    {
+        return Some(AgentSignal {
+            state: AgentActivityState::Failed,
+            source: AgentStateSource::Heuristic,
+            reason: "provider usage limit reached".into(),
+        });
+    }
     if text.contains("permission")
         && (text.contains("allow") || text.contains("approve") || text.contains("deny"))
     {

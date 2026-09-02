@@ -893,6 +893,36 @@ impl RepositoryService {
         Ok(risks)
     }
 
+    /// Run an authenticated `gh` query inside a Project's canonical repository and return its
+    /// JSON.
+    ///
+    /// Exposed for the Activity watcher so every GitHub read keeps flowing through this one
+    /// path — the same project-scoped path guard, the same `gh` keyring identity, the same
+    /// timeout, the same error classification and stderr redaction. Activity deliberately owns no
+    /// GitHub credentials and no second HTTP client of its own.
+    pub fn project_gh_json(&self, project_id: &str, args: &[&str]) -> AppResult<Value> {
+        let project = self.database.get_project(project_id)?;
+        let repository = self.validate_repository_path(&project, None)?;
+        self.gh_json(&repository, args, None)
+    }
+
+    /// `owner/name` for a Project's repository, as GitHub itself reports it. Needed to address the
+    /// REST endpoints (`pending_deployments`) that the `gh run` porcelain does not cover.
+    pub fn project_repository_slug(&self, project_id: &str) -> AppResult<String> {
+        self.project_gh_json(project_id, &["repo", "view", "--json", "nameWithOwner"])?
+            .get("nameWithOwner")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+            .ok_or_else(|| {
+                AppError::new(
+                    "github_repository_identity_missing",
+                    "GitHub did not return a repository owner and name.",
+                    true,
+                )
+                .layer("github_provider")
+            })
+    }
+
     pub fn provider_status(
         &self,
         project_id: &str,

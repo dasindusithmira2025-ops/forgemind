@@ -343,6 +343,82 @@ export interface AgentStateEvent {
   updatedAt: string
 }
 
+/** The normalized Activity vocabulary. Mirrors `models::activity` on the Rust side. */
+export type ActivitySource = 'agent' | 'github' | 'system'
+
+export type ActivityState =
+  | 'queued'
+  | 'running'
+  | 'waiting_for_user'
+  | 'paused'
+  | 'blocked'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+
+export type ActivityInterruption =
+  | 'provider_limit'
+  | 'authentication_required'
+  | 'permission_required'
+  | 'network_failure'
+  | 'process_exit'
+  | 'dependency_failure'
+  | 'user_cancelled'
+  | 'unknown'
+
+export interface ActivityStep {
+  key: string
+  label: string
+  state: ActivityState
+}
+
+export interface ActivityApproval {
+  runId: number
+  environment: string
+  environmentIds: number[]
+  canApprove: boolean
+  restriction?: string
+}
+
+export interface ActivityDetail {
+  workflowPath?: string
+  branch?: string
+  commitSha?: string
+  runNumber?: number
+  attempt?: number
+  url?: string
+  environment?: string
+  event?: string
+  provider?: string
+  workspaceId?: string
+  paneId?: string
+  terminalSessionId?: string
+}
+
+export interface ActivityThread {
+  id: string
+  projectId: string
+  source: ActivitySource
+  title: string
+  summary: string
+  state: ActivityState
+  interruption?: ActivityInterruption
+  reason?: string
+  steps: ActivityStep[]
+  approval?: ActivityApproval
+  detail: ActivityDetail
+  startedAt: string
+  updatedAt: string
+  observedAt: string
+  resolvedAt?: string
+  revision: number
+}
+
+export interface ActivityChangedEvent {
+  thread: ActivityThread
+  created: boolean
+}
+
 export interface GitChangedFile {
   path: string
   indexStatus: string

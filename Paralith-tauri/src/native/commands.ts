@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core'
 import type {
+  ActivityThread,
   AgentDetectionResult,
   AppSettings,
   BrowserBounds,
@@ -333,6 +334,14 @@ export const native = {
   browserSetInspect: (workspaceId: string, enable: boolean) =>
     invoke<void>('browser_set_inspect', { workspaceId, enable }),
   closeBrowserView: (workspaceId: string) => invoke<void>('close_browser_view', { workspaceId }),
+
+  // Activity. The initial read only; every subsequent change arrives on `activity-changed`.
+  listActivityThreads: () => invoke<ActivityThread[]>('list_activity_threads'),
+  /** Reconcile against GitHub now — used on focus, wake, and network recovery, not on a timer. */
+  resyncActivity: () => invoke<void>('resync_activity'),
+  reviewActivityDeployment: (threadId: string, approved: boolean, comment?: string) =>
+    invoke<ActivityThread>('review_activity_deployment', { threadId, approved, comment }),
+  dismissActivityThread: (threadId: string) => invoke<void>('dismiss_activity_thread', { threadId }),
 }
 
 export function asNativeError(error: unknown): { code: string; message: string; affectedEntity?: string; recommendedAction?: string } {
