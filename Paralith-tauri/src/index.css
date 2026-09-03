@@ -592,6 +592,11 @@ html[data-theme-swapping] *, html[data-theme-swapping] *::before, html[data-them
 /* Agent Mode keeps genuinely global status — Project, branch, usage, attention — and drops the
    Code-surface pane readouts, which describe a surface the user is not looking at. */
 .workspace-shell.mode-agent .status-code-only { display: none; }
+/* Where this Code session came from, when it was opened from Agent work. Deliberately quiet: a
+   breadcrumb, not a second product surface inside Code Mode. */
+.code-origin { display: flex; align-items: baseline; gap: 6px; min-width: 0; color: var(--muted); font-size: var(--font-2xs); }
+.code-origin strong { color: var(--text); font-weight: 600; white-space: nowrap; }
+.code-origin em { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-style: normal; color: var(--faint); }
 .return-to-agent { height: var(--control-h-xs); padding: 0 7px; color: var(--muted); background: transparent; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); font-size: var(--font-2xs); cursor: pointer; }
 .return-to-agent:hover { color: var(--text); background: var(--surface-2); border-color: var(--border); }
 .titlebar-spacer { flex: 1; }

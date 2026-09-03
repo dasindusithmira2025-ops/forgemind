@@ -1,8 +1,9 @@
 use crate::errors::AppResult;
 use crate::models::{
     AgentConversation, AgentConversationEntry, AgentDelegation, AgentOrganizationSnapshot,
-    AgentRuntimeOption, CreateAgentDelegationInput, CreateOrganizationalAgentInput,
-    OrganizationalAgent, SendAgentMessageInput,
+    AgentRuntimeOption, AgentWork, AgentWorkEvent, CreateAgentDelegationInput,
+    CreateOrganizationalAgentInput, OrganizationalAgent, SendAgentMessageInput,
+    StartAgentWorkInput,
 };
 use crate::AppState;
 use tauri::{State, Window};
@@ -55,6 +56,12 @@ pub fn search_agent_history(
     state.database.search_agent_history(&agent_id, &query)
 }
 
+/// Record a bounded delegation, and — when it asks for execution — start the real work.
+///
+/// The two halves stay separate on purpose. A delegation is the organizational handoff and is
+/// durable whether or not anything runs; `execute` is what wakes the recipient up. If the work
+/// cannot start (no grant, chain too deep, Project closed) the delegation is still recorded with
+/// the reason, because losing the handoff would also lose the user's intent.
 #[tauri::command(async)]
 pub fn create_agent_delegation(
     input: CreateAgentDelegationInput,
@@ -62,7 +69,89 @@ pub fn create_agent_delegation(
     state: State<'_, AppState>,
 ) -> AppResult<AgentDelegation> {
     crate::require_main_window(&window)?;
-    state.database.create_agent_delegation(input)
+    let execute = input.execute;
+    let runtime_id = input.runtime_id.clone();
+    let origin_conversation_id = input.origin_conversation_id.clone();
+    let delegation = state.database.create_agent_delegation(input)?;
+    if !execute {
+        return Ok(delegation);
+    }
+    let Some(project_id) = delegation.project_id.clone() else {
+        return Err(crate::errors::AppError::new(
+            "agent_work_project_required",
+            "Attach this delegation to a Project before asking for it to be executed.",
+            true,
+        )
+        .entity(&delegation.id));
+    };
+    match state.agent_work.start(StartAgentWorkInput {
+        agent_id: delegation.recipient_agent_id.clone(),
+        delegation_id: Some(delegation.id.clone()),
+        parent_work_id: None,
+        objective: delegation.objective.clone(),
+        constraints: delegation.constraints.clone(),
+        expected_result: delegation.expected_result.clone(),
+        project_id,
+        workspace_id: delegation.workspace_id.clone(),
+        origin_conversation_id,
+        runtime_id,
+    }) {
+        Ok(_) => state
+            .database
+            .get_agent_delegation(&delegation.id)
+            .map(|updated| updated.unwrap_or(delegation)),
+        Err(error) => {
+            let _ = state
+                .database
+                .mark_agent_delegation_blocked(&delegation.id, &error.message);
+            Err(error)
+        }
+    }
+}
+
+// ---- Agent Work ---------------------------------------------------------------------------
+
+/// Start work directly, without a delegation. Same execution, no handoff.
+#[tauri::command(async)]
+pub fn start_agent_work(
+    input: StartAgentWorkInput,
+    window: Window,
+    state: State<'_, AppState>,
+) -> AppResult<AgentWork> {
+    crate::require_main_window(&window)?;
+    state.agent_work.start(input)
+}
+
+#[tauri::command(async)]
+pub fn cancel_agent_work(
+    work_id: String,
+    window: Window,
+    state: State<'_, AppState>,
+) -> AppResult<()> {
+    crate::require_main_window(&window)?;
+    state.agent_work.cancel(&work_id)
+}
+
+/// Continue work that a provider limit paused, on a different connected runtime. The objective,
+/// constraints, authority and what was already done carry over; nothing is billed to an API.
+#[tauri::command(async)]
+pub fn continue_agent_work(
+    work_id: String,
+    runtime_id: Option<String>,
+    window: Window,
+    state: State<'_, AppState>,
+) -> AppResult<AgentWork> {
+    crate::require_main_window(&window)?;
+    state.agent_work.continue_on(&work_id, runtime_id)
+}
+
+/// The inspectable timeline behind one unit of work.
+#[tauri::command(async)]
+pub fn list_agent_work_events(
+    work_id: String,
+    state: State<'_, AppState>,
+) -> AppResult<Vec<AgentWorkEvent>> {
+    state.agent_work.events(&work_id)
 }
 
 #[tauri::command(async)]

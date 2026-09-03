@@ -1,7 +1,7 @@
 use crate::errors::{AppError, AppResult};
 use rusqlite::{params, Connection};
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 43;
+pub const CURRENT_SCHEMA_VERSION: i64 = 44;
 
 const MIGRATION_1: &str = r#"
 CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
@@ -1161,6 +1161,9 @@ pub fn apply(connection: &Connection) -> AppResult<()> {
     if current < 43 || !column_exists(connection, "agent_conversation_entries", "state")? {
         migrate_v43(connection)?;
     }
+    if current < 44 || !column_exists(connection, "runs", "agent_id")? {
+        migrate_v44(connection)?;
+    }
     Ok(())
 }
 
@@ -1263,7 +1266,8 @@ pub fn requires_migration(connection: &Connection) -> AppResult<bool> {
         || !table_exists(connection, "agent_conversation_entries")?
         || !table_exists(connection, "agent_delegations")?
         || !table_exists(connection, "agent_workspace_authorities")?
-        || !table_exists(connection, "agent_product_state")?)
+        || !table_exists(connection, "agent_product_state")?
+        || !column_exists(connection, "runs", "agent_id")?)
 }
 
 fn migrate_v24(connection: &Connection) -> AppResult<()> {
@@ -2826,6 +2830,41 @@ CREATE INDEX IF NOT EXISTS idx_agent_entries_active
         record_migration(connection, 43)
     })();
     finish_migration_transaction(connection, result, 43)
+}
+
+/// Owning Agent for a Run.
+///
+/// `runs` has been the durable shape of "a unit of provider work in a Project" since v38 —
+/// objective, workspace, worktree, resolved provider and model, terminal session, status,
+/// result, timestamps, parent linkage — but nothing has ever executed against it. Agent Mode
+/// engineering work is exactly that shape, so it becomes a Run rather than a second work table
+/// that would need its own events, its own approvals and its own recovery pass.
+///
+/// Only ownership was missing. A delegation already points at its Run through
+/// `agent_delegations.run_id`; this points the other way, and is what lets the Agent rail ask
+/// "what is this teammate doing right now" without a join through delegations — including for
+/// work that has no delegation because the user assigned it directly.
+fn migrate_v44(connection: &Connection) -> AppResult<()> {
+    connection
+        .execute_batch("BEGIN IMMEDIATE;")
+        .map_err(AppError::database)?;
+    let result = (|| {
+        add_column_if_missing(connection, "runs", "agent_id", "TEXT")?;
+        connection
+            .execute_batch(
+                r#"
+CREATE INDEX IF NOT EXISTS idx_runs_agent
+  ON runs(agent_id,created_at DESC) WHERE agent_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_runs_agent_active
+  ON runs(agent_id,status)
+  WHERE agent_id IS NOT NULL
+    AND status IN ('queued','preparing','working','waiting_user','needs_approval','verifying');
+"#,
+            )
+            .map_err(AppError::database)?;
+        record_migration(connection, 44)
+    })();
+    finish_migration_transaction(connection, result, 44)
 }
 
 fn index_exists(connection: &Connection, index: &str) -> AppResult<bool> {

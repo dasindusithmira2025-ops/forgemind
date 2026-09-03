@@ -1,4 +1,5 @@
 mod activity;
+pub mod agent_work;
 pub mod backup;
 pub(crate) mod code;
 pub(crate) mod database_studio;

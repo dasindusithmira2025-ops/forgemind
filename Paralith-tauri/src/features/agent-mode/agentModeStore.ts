@@ -1,10 +1,10 @@
 import { create } from 'zustand'
 import { asNativeError, native } from '../../native/commands'
-import { onAgentConversationTurn } from '../../native/events'
-import type { AgentConversationEntry, AgentOrganizationSnapshot, AgentRuntimeOption, CreateAgentDelegationInput, CreateOrganizationalAgentInput, ProductMode } from '../../native/types'
+import { onAgentConversationTurn, onAgentWorkChanged } from '../../native/events'
+import type { AgentConversationEntry, AgentOrganizationSnapshot, AgentRuntimeOption, AgentWork, AgentWorkEvent, CreateAgentDelegationInput, CreateOrganizationalAgentInput, ProductMode } from '../../native/types'
 
 const emptySnapshot: AgentOrganizationSnapshot = {
-  agents: [], conversations: [], entries: [], delegations: [], authorities: [],
+  agents: [], conversations: [], entries: [], delegations: [], work: [], authorities: [],
   productState: { selectedMode: 'code' },
 }
 
@@ -22,6 +22,10 @@ interface AgentModeStore {
   runtimesLoaded: boolean
   /** Per-conversation composer override, applied to the next message only. */
   messageRuntime: Record<string, string>
+  /** Timeline for one work item, loaded on demand. Evidence is never carried in the snapshot. */
+  workEvents: Record<string, AgentWorkEvent[]>
+  /** The work Code Mode was opened from, if any. Drives the origin breadcrumb and the way back. */
+  codeOrigin?: AgentWork
   hydrate: () => Promise<void>
   refresh: () => Promise<void>
   loadRuntimes: (force?: boolean) => Promise<void>
@@ -36,6 +40,11 @@ interface AgentModeStore {
   setConversationRuntime: (conversationId: string, runtimeId?: string) => Promise<void>
   setIntelligencePreference: (agentId: string, preference: string) => Promise<void>
   createDelegation: (input: CreateAgentDelegationInput) => Promise<void>
+  cancelWork: (workId: string) => Promise<void>
+  continueWork: (workId: string, runtimeId?: string) => Promise<void>
+  loadWorkEvents: (workId: string) => Promise<void>
+  openWorkInCode: (work: AgentWork) => void
+  returnToAgent: () => void
   setPinned: (agentId: string, pinned: boolean) => Promise<void>
   reorderAgents: (orderedIds: string[]) => Promise<void>
   reorderConversations: (agentId: string, orderedIds: string[]) => Promise<void>
@@ -65,8 +74,21 @@ function patchEntry(snapshot: AgentOrganizationSnapshot, entry: AgentConversatio
   return { ...snapshot, entries }
 }
 
+/**
+ * Apply one work update in place, for the same reason turns are patched rather than refetched: a
+ * long-running work item publishes many transitions and the rail must not rerender the whole
+ * organization for each one.
+ */
+function patchWork(snapshot: AgentOrganizationSnapshot, work: AgentWork): AgentOrganizationSnapshot {
+  const index = snapshot.work.findIndex((item) => item.id === work.id)
+  if (index === -1) return { ...snapshot, work: [work, ...snapshot.work] }
+  const next = snapshot.work.slice()
+  next[index] = work
+  return { ...snapshot, work: next }
+}
+
 export const useAgentModeStore = create<AgentModeStore>((set, get) => ({
-  mode: 'code', snapshot: emptySnapshot, hydrated: false, busy: false, runtimes: [], runtimesLoaded: false, messageRuntime: {},
+  mode: 'code', snapshot: emptySnapshot, hydrated: false, busy: false, runtimes: [], runtimesLoaded: false, messageRuntime: {}, workEvents: {},
   hydrate: async () => {
     if (get().hydrated) return
     try {
@@ -75,6 +97,12 @@ export const useAgentModeStore = create<AgentModeStore>((set, get) => ({
     } catch (caught) { set({ hydrated: true, error: asNativeError(caught).message }) }
     void onAgentConversationTurn((entry) => set((state) => ({ snapshot: patchEntry(state.snapshot, entry) })))
       .catch(() => undefined)
+    void onAgentWorkChanged((work) => {
+      set((state) => ({ snapshot: patchWork(state.snapshot, work) }))
+      // A finished item's timeline is what the user opens next; the agent's own work state and
+      // the delegation status changed on the backend at the same moment.
+      if (['completed', 'failed', 'cancelled', 'provider_limit', 'interrupted'].includes(work.status)) void get().refresh()
+    }).catch(() => undefined)
     void get().loadRuntimes()
   },
   refresh: async () => {
@@ -151,6 +179,33 @@ export const useAgentModeStore = create<AgentModeStore>((set, get) => ({
     try { await native.createAgentDelegation(input); await get().refresh() }
     catch (caught) { set({ error: asNativeError(caught).message }); throw caught }
     finally { set({ busy: false }) }
+  },
+  cancelWork: async (workId) => {
+    try { await native.cancelAgentWork(workId) }
+    catch (caught) { set({ error: asNativeError(caught).message }) }
+  },
+  continueWork: async (workId, runtimeId) => {
+    set({ busy: true, error: undefined })
+    try { await native.continueAgentWork(workId, runtimeId); await get().refresh() }
+    catch (caught) { set({ error: asNativeError(caught).message }) }
+    finally { set({ busy: false }) }
+  },
+  loadWorkEvents: async (workId) => {
+    try { const events = await native.listAgentWorkEvents(workId); set((state) => ({ workEvents: { ...state.workEvents, [workId]: events } })) }
+    catch (caught) { set({ error: asNativeError(caught).message }) }
+  },
+  /**
+   * Cross into Code Mode from a piece of work. Only the origin is recorded here; the navigation
+   * itself belongs to the screen that owns routing. Switching product view never touches the
+   * execution — the provider process is owned by the terminal runtime, not by either surface.
+   */
+  openWorkInCode: (work) => { set({ codeOrigin: work }); get().setMode('code') },
+  returnToAgent: () => {
+    const origin = get().codeOrigin
+    if (origin?.originConversationId) get().selectConversation(origin.originConversationId)
+    else if (origin) get().selectAgent(origin.agentId)
+    set({ codeOrigin: undefined })
+    get().setMode('agent')
   },
   setPinned: async (agentId, pinned) => {
     try { await native.setOrganizationalAgentPinned(agentId, pinned); await get().refresh() }

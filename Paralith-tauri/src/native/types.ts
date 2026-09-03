@@ -1451,11 +1451,46 @@ export interface AgentDelegation {
   projectId?: string; workspaceId?: string; runId?: string; status: string; statusReason?: string
   createdAt: string; updatedAt: string
 }
+/** Canonical lifecycle of one unit of Agent Work. Persisted as a Run status; the rail, the work
+ * list, notifications and restart recovery all read this same vocabulary. */
+export type AgentWorkStatus =
+  | 'queued' | 'preparing' | 'working' | 'waiting_user' | 'needs_approval'
+  | 'blocked' | 'provider_limit' | 'verifying' | 'completed' | 'failed' | 'cancelled' | 'interrupted'
+/** What a unit of work is permitted to do. Derived from the Agent's standing grant, narrowed by
+ * the delegation's constraints — never widened. */
+export interface AgentWorkAuthority { read: boolean; write: boolean; runCommands: boolean; commit: boolean; push: boolean }
+/** Real execution. A delegation is the handoff; this is the work being done. */
+export interface AgentWork {
+  id: string; agentId: string; delegationId?: string; parentWorkId?: string
+  objective: string; constraints: string; expectedResult: string
+  projectId: string; workspaceId?: string
+  status: AgentWorkStatus; statusReason?: string
+  /** Which runtime actually took the work, and how it was chosen. Provenance, never identity. */
+  providerId?: string; modelId?: string; runtimeSource?: string
+  terminalSessionId?: string; workingDirectory?: string
+  /** The workspace and pane the provider session runs in — what "Open in Code" focuses. */
+  executionWorkspaceId?: string; executionPaneId?: string
+  authority: AgentWorkAuthority
+  originConversationId?: string
+  resultSummary?: string; errorCode?: string; errorMessage?: string
+  createdAt: string; startedAt?: string; completedAt?: string; updatedAt: string
+}
+/** One inspectable step. The evidence behind a claim, not a transcript. */
+export interface AgentWorkEvent {
+  id: string; workId: string; sequence: number; kind: string; summary: string
+  level: string; metadata: Record<string, unknown>; createdAt: string
+}
+export interface StartAgentWorkInput {
+  agentId: string; delegationId?: string; parentWorkId?: string
+  objective: string; constraints?: string; expectedResult?: string
+  projectId: string; workspaceId?: string; originConversationId?: string; runtimeId?: string
+}
 export interface AgentWorkspaceAuthority { agentId: string; projectId: string; workspaceId?: string; access: 'read' | 'read_write'; grantedAt: string }
 export interface AgentProductState { selectedMode: ProductMode; selectedAgentId?: string; selectedConversationId?: string }
 export interface AgentOrganizationSnapshot {
   agents: OrganizationalAgent[]; conversations: AgentConversation[]; entries: AgentConversationEntry[]
-  delegations: AgentDelegation[]; authorities: AgentWorkspaceAuthority[]; productState: AgentProductState
+  delegations: AgentDelegation[]; work: AgentWork[]; authorities: AgentWorkspaceAuthority[]
+  productState: AgentProductState
 }
 export interface CreateOrganizationalAgentInput {
   name: string; role: string; brief: string; responsibilities: string[]; intelligencePreference: string
@@ -1465,6 +1500,13 @@ export interface CreateAgentDelegationInput {
   ownerAgentId: string; recipientAgentId: string; objective: string; relevantContext: string
   constraints: string; expectedResult: string; authorityBoundary: string; parentDelegationId?: string
   projectId?: string; workspaceId?: string
+  /** Start real work as soon as the delegation is recorded. Without it the delegation is only an
+   * organizational handoff. */
+  execute?: boolean
+  /** Runtime for the resulting work. Inherits the recipient's preference when absent. */
+  runtimeId?: string
+  /** Conversation to report the structured result back into. */
+  originConversationId?: string
 }
 
 /** Lifecycle + security events emitted by an embedded browser view. `payload` on `inspect-selected`

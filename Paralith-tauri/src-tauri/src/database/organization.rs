@@ -105,12 +105,16 @@ impl DatabaseService {
         let authorities = connection.prepare("SELECT agent_id,project_id,workspace_id,access,granted_at FROM agent_workspace_authorities ORDER BY agent_id,project_id")
             .map_err(AppError::database)?.query_map([], |row| Ok(AgentWorkspaceAuthority { agent_id: row.get(0)?, project_id: row.get(1)?, workspace_id: row.get(2)?, access: row.get(3)?, granted_at: row.get(4)? }))
             .map_err(AppError::database)?.collect::<Result<Vec<_>, _>>().map_err(AppError::database)?;
+        drop(connection);
+        let work = self.list_agent_work()?;
+        let connection = self.connection.lock();
         let product_state = connection.query_row("SELECT selected_mode,selected_agent_id,selected_conversation_id FROM agent_product_state WHERE singleton=1", [], |row| Ok(AgentProductState { selected_mode: row.get(0)?, selected_agent_id: row.get(1)?, selected_conversation_id: row.get(2)? })).map_err(AppError::database)?;
         Ok(AgentOrganizationSnapshot {
             agents,
             conversations,
             entries,
             delegations,
+            work,
             authorities,
             product_state,
         })
@@ -429,6 +433,22 @@ impl DatabaseService {
         Ok(())
     }
 
+    pub fn get_organizational_agent(&self, agent_id: &str) -> AppResult<OrganizationalAgent> {
+        self.connection
+            .lock()
+            .query_row("SELECT id,name,role,brief,responsibilities_json,avatar_seed,intelligence_preference,work_state,work_state_detail,pinned,position,created_at,updated_at FROM organizational_agents WHERE id=?1", [agent_id], agent_row)
+            .optional()
+            .map_err(AppError::database)?
+            .ok_or_else(|| {
+                AppError::new(
+                    "agent_not_found",
+                    "That teammate no longer exists.",
+                    true,
+                )
+                .entity(agent_id)
+            })
+    }
+
     pub fn set_organizational_agent_work_state(
         &self,
         agent_id: &str,
@@ -626,6 +646,31 @@ impl DatabaseService {
         })
     }
 
+    pub fn get_agent_delegation(&self, delegation_id: &str) -> AppResult<Option<AgentDelegation>> {
+        self.connection
+            .lock()
+            .query_row("SELECT id,owner_agent_id,recipient_agent_id,objective,relevant_context,constraints,expected_result,authority_boundary,parent_delegation_id,project_id,workspace_id,run_id,status,status_reason,created_at,updated_at FROM agent_delegations WHERE id=?1", [delegation_id], |row| Ok(AgentDelegation { id: row.get(0)?, owner_agent_id: row.get(1)?, recipient_agent_id: row.get(2)?, objective: row.get(3)?, relevant_context: row.get(4)?, constraints: row.get(5)?, expected_result: row.get(6)?, authority_boundary: row.get(7)?, parent_delegation_id: row.get(8)?, project_id: row.get(9)?, workspace_id: row.get(10)?, run_id: row.get(11)?, status: row.get(12)?, status_reason: row.get(13)?, created_at: row.get(14)?, updated_at: row.get(15)? }))
+            .optional()
+            .map_err(AppError::database)
+    }
+
+    /// A delegation whose execution was refused keeps the handoff and records why. Losing the
+    /// delegation because the work could not start would also lose what the user asked for.
+    pub fn mark_agent_delegation_blocked(
+        &self,
+        delegation_id: &str,
+        reason: &str,
+    ) -> AppResult<()> {
+        self.connection
+            .lock()
+            .execute(
+                "UPDATE agent_delegations SET status='blocked',status_reason=?2,updated_at=?3 WHERE id=?1",
+                params![delegation_id, reason, Utc::now().to_rfc3339()],
+            )
+            .map_err(AppError::database)?;
+        Ok(())
+    }
+
     pub fn save_agent_product_state(
         &self,
         mode: &str,
@@ -792,6 +837,9 @@ mod tests {
                 parent_delegation_id: None,
                 project_id: None,
                 workspace_id: None,
+                execute: false,
+                runtime_id: None,
+                origin_conversation_id: None,
             })
             .unwrap();
         database
@@ -953,6 +1001,9 @@ mod tests {
                 parent_delegation_id: None,
                 project_id: Some("project-without-grant".into()),
                 workspace_id: None,
+                execute: false,
+                runtime_id: None,
+                origin_conversation_id: None,
             })
             .unwrap_err();
         assert_eq!(error.code, "agent_workspace_access_denied");
@@ -976,6 +1027,9 @@ mod tests {
                 parent_delegation_id: None,
                 project_id: None,
                 workspace_id: None,
+                execute: false,
+                runtime_id: None,
+                origin_conversation_id: None,
             })
             .unwrap_err();
         assert_eq!(error.code, "agent_delegation_self");
