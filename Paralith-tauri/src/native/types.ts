@@ -1406,6 +1406,67 @@ export interface BrowserBounds {
   height: number
 }
 
+export type ProductMode = 'code' | 'agent'
+export type AgentWorkState = 'idle' | 'working' | 'waiting' | 'needs_approval' | 'blocked' | 'failed' | 'complete'
+
+export interface OrganizationalAgent {
+  id: string; name: string; role: string; brief: string; responsibilities: string[]
+  avatarSeed: string; intelligencePreference: string; workState: AgentWorkState
+  workStateDetail?: string; pinned: boolean; position: number; createdAt: string; updatedAt: string
+}
+export interface AgentConversation {
+  id: string; agentId: string; title: string; position: number
+  /** Conversation-level runtime. Undefined inherits the Agent's preference. */
+  runtimePreference?: string
+  createdAt: string; updatedAt: string
+}
+/** Lifecycle of one turn. Only agent turns leave `complete`. */
+export type AgentTurnState = 'preparing' | 'streaming' | 'complete' | 'failed' | 'cancelled' | 'blocked'
+export interface AgentConversationEntry {
+  id: string; conversationId: string
+  kind: 'user' | 'agent' | 'event' | 'delegation' | 'approval' | 'evidence'
+  authorAgentId?: string; body: string; metadata: Record<string, unknown>
+  state: AgentTurnState
+  /** Which runtime produced this turn. Provenance, never identity. */
+  runtimeProvider?: string; runtimeModel?: string; runtimeAccount?: string
+  parentEntryId?: string; errorCode?: string
+  createdAt: string; updatedAt: string
+}
+/** One selectable intelligence, derived from what is installed and signed in on this machine. */
+export interface AgentRuntimeOption {
+  id: string; providerId: string; providerName: string; modelId: string
+  displayName: string; description: string
+  installed: boolean; authenticated: boolean; available: boolean
+  unavailableReason?: string; version?: string
+}
+export interface SendAgentMessageInput {
+  conversationId: string; body: string
+  /** Applies to this turn only; never mutates the conversation or Agent default. */
+  runtimeId?: string
+  projectId?: string
+}
+export interface AgentDelegation {
+  id: string; ownerAgentId: string; recipientAgentId: string; objective: string; relevantContext: string
+  constraints: string; expectedResult: string; authorityBoundary: string; parentDelegationId?: string
+  projectId?: string; workspaceId?: string; runId?: string; status: string; statusReason?: string
+  createdAt: string; updatedAt: string
+}
+export interface AgentWorkspaceAuthority { agentId: string; projectId: string; workspaceId?: string; access: 'read' | 'read_write'; grantedAt: string }
+export interface AgentProductState { selectedMode: ProductMode; selectedAgentId?: string; selectedConversationId?: string }
+export interface AgentOrganizationSnapshot {
+  agents: OrganizationalAgent[]; conversations: AgentConversation[]; entries: AgentConversationEntry[]
+  delegations: AgentDelegation[]; authorities: AgentWorkspaceAuthority[]; productState: AgentProductState
+}
+export interface CreateOrganizationalAgentInput {
+  name: string; role: string; brief: string; responsibilities: string[]; intelligencePreference: string
+  projectId?: string; workspaceId?: string; projectAccess?: 'none' | 'read' | 'read_write'
+}
+export interface CreateAgentDelegationInput {
+  ownerAgentId: string; recipientAgentId: string; objective: string; relevantContext: string
+  constraints: string; expectedResult: string; authorityBoundary: string; parentDelegationId?: string
+  projectId?: string; workspaceId?: string
+}
+
 /** Lifecycle + security events emitted by an embedded browser view. `payload` on `inspect-selected`
  * is an opaque base64url string that the frontend decodes and re-sanitizes before use. */
 export type BrowserEvent =
