@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { asNativeError, native } from '../../native/commands'
 import { onAgentConversationTurn, onAgentWorkChanged } from '../../native/events'
-import type { AgentConversationEntry, AgentOrganizationSnapshot, AgentRuntimeOption, AgentWork, AgentWorkEvent, CreateAgentDelegationInput, CreateOrganizationalAgentInput, ProductMode } from '../../native/types'
+import type { AgentApproval, AgentCapability, AgentCapabilityDecision, AgentConversationEntry, AgentOrganizationSnapshot, AgentRoutine, AgentRuntimeOption, AgentSkill, AgentWork, AgentWorkEvent, CreateAgentDelegationInput, CreateOrganizationalAgentInput, ProductMode, SaveAgentRoutineInput, SaveAgentSkillInput } from '../../native/types'
 
 const emptySnapshot: AgentOrganizationSnapshot = {
   agents: [], conversations: [], entries: [], delegations: [], work: [], authorities: [],
@@ -26,6 +26,16 @@ interface AgentModeStore {
   workEvents: Record<string, AgentWorkEvent[]>
   /** The work Code Mode was opened from, if any. Drives the origin breadcrumb and the way back. */
   codeOrigin?: AgentWork
+  /** Consequential actions waiting on the user. Loaded from the backend, never inferred from work
+   * status: an approval is a durable row and survives a restart the UI does not. */
+  approvals: AgentApproval[]
+  /** Capability decisions, loaded per teammate when their Access panel opens. */
+  capabilities: Record<string, AgentCapability[]>
+  skills: AgentSkill[]
+  /** `agentId` → assigned skill ids. */
+  skillAssignments: Record<string, string[]>
+  routines: AgentRoutine[]
+  organizationLoaded: boolean
   hydrate: () => Promise<void>
   refresh: () => Promise<void>
   loadRuntimes: (force?: boolean) => Promise<void>
@@ -48,6 +58,17 @@ interface AgentModeStore {
   setPinned: (agentId: string, pinned: boolean) => Promise<void>
   reorderAgents: (orderedIds: string[]) => Promise<void>
   reorderConversations: (agentId: string, orderedIds: string[]) => Promise<void>
+  loadApprovals: () => Promise<void>
+  decideApproval: (approvalId: string, approved: boolean, note?: string) => Promise<void>
+  loadCapabilities: (agentId: string) => Promise<void>
+  setCapability: (agentId: string, capability: string, decision: AgentCapabilityDecision) => Promise<void>
+  loadOrganization: (force?: boolean) => Promise<void>
+  saveSkill: (input: SaveAgentSkillInput) => Promise<void>
+  deleteSkill: (skillId: string) => Promise<void>
+  setSkillAssigned: (agentId: string, skillId: string, assigned: boolean) => Promise<void>
+  saveRoutine: (input: SaveAgentRoutineInput) => Promise<void>
+  deleteRoutine: (routineId: string) => Promise<void>
+  runRoutineNow: (routineId: string) => Promise<void>
   clearError: () => void
 }
 
@@ -89,6 +110,7 @@ function patchWork(snapshot: AgentOrganizationSnapshot, work: AgentWork): AgentO
 
 export const useAgentModeStore = create<AgentModeStore>((set, get) => ({
   mode: 'code', snapshot: emptySnapshot, hydrated: false, busy: false, runtimes: [], runtimesLoaded: false, messageRuntime: {}, workEvents: {},
+  approvals: [], capabilities: {}, skills: [], skillAssignments: {}, routines: [], organizationLoaded: false,
   hydrate: async () => {
     if (get().hydrated) return
     try {
@@ -102,8 +124,13 @@ export const useAgentModeStore = create<AgentModeStore>((set, get) => ({
       // A finished item's timeline is what the user opens next; the agent's own work state and
       // the delegation status changed on the backend at the same moment.
       if (['completed', 'failed', 'cancelled', 'provider_limit', 'interrupted'].includes(work.status)) void get().refresh()
+      // A run that has stopped in front of the user raised a durable approval as it did so. The
+      // card is read from the backend rather than assembled from this event, so what the user
+      // answers is the same row a restart would have found.
+      if (work.status === 'needs_approval') void get().loadApprovals()
     }).catch(() => undefined)
     void get().loadRuntimes()
+    void get().loadApprovals()
   },
   refresh: async () => {
     const snapshot = await native.getAgentOrganization()
@@ -224,6 +251,72 @@ export const useAgentModeStore = create<AgentModeStore>((set, get) => ({
     set({ snapshot: { ...snapshot, conversations: snapshot.conversations.map((item) => item.agentId === agentId ? { ...item, position: order.get(item.id) ?? item.position } : item) } })
     try { await native.reorderAgentConversations(agentId, orderedIds); await get().refresh() }
     catch (caught) { set({ error: asNativeError(caught).message }); await get().refresh() }
+  },
+  loadApprovals: async () => {
+    try { set({ approvals: await native.listAgentApprovals() }) }
+    catch (caught) { set({ error: asNativeError(caught).message }) }
+  },
+  /**
+   * Answer one approval. The backend performs the approved action itself and refuses a second
+   * decision, so this never has to guard against a double click — it only has to tell the truth
+   * about what came back.
+   */
+  decideApproval: async (approvalId, approved, note) => {
+    set({ busy: true, error: undefined })
+    try { await native.decideAgentApproval(approvalId, approved, note); await get().loadApprovals(); await get().refresh() }
+    catch (caught) { set({ error: asNativeError(caught).message }); await get().loadApprovals() }
+    finally { set({ busy: false }) }
+  },
+  loadCapabilities: async (agentId) => {
+    try { const capabilities = await native.listAgentCapabilities(agentId); set((state) => ({ capabilities: { ...state.capabilities, [agentId]: capabilities } })) }
+    catch (caught) { set({ error: asNativeError(caught).message }) }
+  },
+  setCapability: async (agentId, capability, decision) => {
+    try { const capabilities = await native.setAgentCapability(agentId, capability, decision); set((state) => ({ capabilities: { ...state.capabilities, [agentId]: capabilities } })) }
+    catch (caught) { set({ error: asNativeError(caught).message }); await get().loadCapabilities(agentId) }
+  },
+  /** Skills and Routines, loaded together because both settings panels open from the same menu. */
+  loadOrganization: async (force = false) => {
+    if (get().organizationLoaded && !force) return
+    try {
+      const [skills, assignments, routines] = await Promise.all([
+        native.listAgentSkills(), native.listAgentSkillAssignments(), native.listAgentRoutines(),
+      ])
+      const skillAssignments: Record<string, string[]> = {}
+      for (const [agentId, skillId] of assignments) (skillAssignments[agentId] ??= []).push(skillId)
+      set({ skills, skillAssignments, routines, organizationLoaded: true })
+    } catch (caught) { set({ organizationLoaded: true, error: asNativeError(caught).message }) }
+  },
+  saveSkill: async (input) => {
+    set({ busy: true, error: undefined })
+    try { await native.saveAgentSkill(input); await get().loadOrganization(true) }
+    catch (caught) { set({ error: asNativeError(caught).message }); throw caught }
+    finally { set({ busy: false }) }
+  },
+  deleteSkill: async (skillId) => {
+    try { await native.deleteAgentSkill(skillId); await get().loadOrganization(true) }
+    catch (caught) { set({ error: asNativeError(caught).message }) }
+  },
+  setSkillAssigned: async (agentId, skillId, assigned) => {
+    try { await native.setAgentSkillAssigned(agentId, skillId, assigned); await get().loadOrganization(true) }
+    catch (caught) { set({ error: asNativeError(caught).message }) }
+  },
+  saveRoutine: async (input) => {
+    set({ busy: true, error: undefined })
+    try { await native.saveAgentRoutine(input); await get().loadOrganization(true) }
+    catch (caught) { set({ error: asNativeError(caught).message }); throw caught }
+    finally { set({ busy: false }) }
+  },
+  deleteRoutine: async (routineId) => {
+    try { await native.deleteAgentRoutine(routineId); await get().loadOrganization(true) }
+    catch (caught) { set({ error: asNativeError(caught).message }) }
+  },
+  /** The same execution the scheduler produces, so what the user sees here is what runs unattended. */
+  runRoutineNow: async (routineId) => {
+    set({ busy: true, error: undefined })
+    try { await native.runAgentRoutineNow(routineId); await get().loadOrganization(true); await get().refresh() }
+    catch (caught) { set({ error: asNativeError(caught).message }) }
+    finally { set({ busy: false }) }
   },
   clearError: () => set({ error: undefined }),
 }))

@@ -1,9 +1,10 @@
 use crate::errors::AppResult;
 use crate::models::{
-    AgentConversation, AgentConversationEntry, AgentDelegation, AgentOrganizationSnapshot,
-    AgentRuntimeOption, AgentWork, AgentWorkEvent, CreateAgentDelegationInput,
-    CreateOrganizationalAgentInput, OrganizationalAgent, SendAgentMessageInput,
-    StartAgentWorkInput,
+    AgentApproval, AgentCapability, AgentCapabilityDecision, AgentConversation,
+    AgentConversationEntry, AgentDelegation, AgentOrganizationSnapshot, AgentRoutine,
+    AgentRuntimeOption, AgentSkill, AgentWork, AgentWorkEvent, CreateAgentDelegationInput,
+    CreateOrganizationalAgentInput, OrganizationalAgent, SaveAgentRoutineInput,
+    SaveAgentSkillInput, SendAgentMessageInput, StartAgentWorkInput,
 };
 use crate::AppState;
 use tauri::{State, Window};
@@ -259,4 +260,147 @@ pub fn set_agent_intelligence_preference(
     state
         .database
         .set_agent_intelligence_preference(&agent_id, &preference)
+}
+
+// ---- Authority ------------------------------------------------------------------------------
+
+/// What one teammate is permitted to do, with defaults materialised.
+#[tauri::command(async)]
+pub fn list_agent_capabilities(
+    agent_id: String,
+    state: State<'_, AppState>,
+) -> AppResult<Vec<AgentCapability>> {
+    state.database.agent_capabilities(&agent_id)
+}
+
+/// Change one capability decision.
+///
+/// Takes effect on the next unit of work rather than on work already running: authority is
+/// resolved once, when a run starts, and is recorded on the run. Widening a policy mid-run would
+/// leave a run whose stored authority disagreed with what it was actually doing.
+#[tauri::command(async)]
+pub fn set_agent_capability(
+    agent_id: String,
+    capability: String,
+    decision: AgentCapabilityDecision,
+    window: Window,
+    state: State<'_, AppState>,
+) -> AppResult<Vec<AgentCapability>> {
+    crate::require_main_window(&window)?;
+    state
+        .database
+        .set_agent_capability(&agent_id, &capability, decision)?;
+    state.database.agent_capabilities(&agent_id)
+}
+
+// ---- Approvals ------------------------------------------------------------------------------
+
+/// Every consequential action currently waiting on a person.
+#[tauri::command(async)]
+pub fn list_agent_approvals(state: State<'_, AppState>) -> AppResult<Vec<AgentApproval>> {
+    state.database.open_agent_approvals()
+}
+
+/// Answer one approval. Approving carries the exact action out once; denying records the refusal
+/// and lets the run finish with its work left unpublished.
+#[tauri::command(async)]
+pub fn decide_agent_approval(
+    approval_id: String,
+    approved: bool,
+    note: Option<String>,
+    window: Window,
+    state: State<'_, AppState>,
+) -> AppResult<AgentApproval> {
+    crate::require_main_window(&window)?;
+    state
+        .agent_work
+        .decide_approval(&approval_id, approved, note)
+}
+
+// ---- Skills ---------------------------------------------------------------------------------
+
+#[tauri::command(async)]
+pub fn list_agent_skills(state: State<'_, AppState>) -> AppResult<Vec<AgentSkill>> {
+    state.database.list_agent_skills()
+}
+
+/// Which Skills each teammate has, as `[agentId, skillId]` pairs.
+#[tauri::command(async)]
+pub fn list_agent_skill_assignments(
+    state: State<'_, AppState>,
+) -> AppResult<Vec<(String, String)>> {
+    state.database.agent_skill_assignments()
+}
+
+#[tauri::command(async)]
+pub fn save_agent_skill(
+    input: SaveAgentSkillInput,
+    window: Window,
+    state: State<'_, AppState>,
+) -> AppResult<AgentSkill> {
+    crate::require_main_window(&window)?;
+    state.database.save_agent_skill(input)
+}
+
+#[tauri::command(async)]
+pub fn delete_agent_skill(
+    skill_id: String,
+    window: Window,
+    state: State<'_, AppState>,
+) -> AppResult<()> {
+    crate::require_main_window(&window)?;
+    state.database.delete_agent_skill(&skill_id)
+}
+
+#[tauri::command(async)]
+pub fn set_agent_skill_assigned(
+    agent_id: String,
+    skill_id: String,
+    assigned: bool,
+    window: Window,
+    state: State<'_, AppState>,
+) -> AppResult<()> {
+    crate::require_main_window(&window)?;
+    state
+        .database
+        .set_agent_skill_assigned(&agent_id, &skill_id, assigned)
+}
+
+// ---- Routines -------------------------------------------------------------------------------
+
+#[tauri::command(async)]
+pub fn list_agent_routines(state: State<'_, AppState>) -> AppResult<Vec<AgentRoutine>> {
+    state.database.list_agent_routines()
+}
+
+#[tauri::command(async)]
+pub fn save_agent_routine(
+    input: SaveAgentRoutineInput,
+    window: Window,
+    state: State<'_, AppState>,
+) -> AppResult<AgentRoutine> {
+    crate::require_main_window(&window)?;
+    state.database.save_agent_routine(input)
+}
+
+#[tauri::command(async)]
+pub fn delete_agent_routine(
+    routine_id: String,
+    window: Window,
+    state: State<'_, AppState>,
+) -> AppResult<()> {
+    crate::require_main_window(&window)?;
+    state.database.delete_agent_routine(&routine_id)
+}
+
+/// Run a Routine now. The same execution the scheduler produces, so what a user sees when they
+/// press this is what will happen unattended.
+#[tauri::command(async)]
+pub fn run_agent_routine_now(
+    routine_id: String,
+    window: Window,
+    state: State<'_, AppState>,
+) -> AppResult<AgentWork> {
+    crate::require_main_window(&window)?;
+    state.agent_work.run_routine_now(&routine_id)
 }

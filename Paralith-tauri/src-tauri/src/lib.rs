@@ -582,6 +582,10 @@ pub fn run() {
                 agent_conversations.clone(),
                 app.handle().clone(),
             );
+            // Close the loop the other way: a conversation can now start and stop work, which is
+            // what lets Atlas delegate from an ordinary message instead of the user reopening a
+            // form. Bound after construction because work already depends on conversations.
+            agent_conversations.bind_executor(std::sync::Arc::new(agent_work.clone()));
             // Engineering work does not survive the application either. Anything still marked
             // live belongs to a previous run and is recorded as interrupted; nothing restarts on
             // its own, because re-running a half-finished repository change unasked is its own
@@ -593,6 +597,10 @@ pub fn run() {
             }
             if !recovery_mode {
                 activity.start();
+                // Recurring Agent work only schedules itself in a normal launch. A recovery boot
+                // is for repairing state, not for firing everything that fell due while the
+                // application was unable to start.
+                agent_work.start_routines();
             }
             app.manage(AppState {
                 database,
@@ -828,6 +836,19 @@ pub fn run() {
             commands::cancel_agent_work,
             commands::continue_agent_work,
             commands::list_agent_work_events,
+            commands::list_agent_capabilities,
+            commands::set_agent_capability,
+            commands::list_agent_approvals,
+            commands::decide_agent_approval,
+            commands::list_agent_skills,
+            commands::list_agent_skill_assignments,
+            commands::save_agent_skill,
+            commands::delete_agent_skill,
+            commands::set_agent_skill_assigned,
+            commands::list_agent_routines,
+            commands::save_agent_routine,
+            commands::delete_agent_routine,
+            commands::run_agent_routine_now,
             commands::save_agent_product_state,
             commands::set_organizational_agent_pinned,
             commands::reorder_organizational_agents,

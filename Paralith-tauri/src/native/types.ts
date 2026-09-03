@@ -1458,7 +1458,12 @@ export type AgentWorkStatus =
   | 'blocked' | 'provider_limit' | 'verifying' | 'completed' | 'failed' | 'cancelled' | 'interrupted'
 /** What a unit of work is permitted to do. Derived from the Agent's standing grant, narrowed by
  * the delegation's constraints — never widened. */
-export interface AgentWorkAuthority { read: boolean; write: boolean; runCommands: boolean; commit: boolean; push: boolean }
+export interface AgentWorkAuthority {
+  read: boolean; write: boolean; runCommands: boolean; commit: boolean; push: boolean
+  /** A refused consequential action is not always a refusal. When the Agent's policy says `ask`,
+   * the run executes without the authority and may request it at the end, where a person decides. */
+  commitRequiresApproval: boolean; pushRequiresApproval: boolean
+}
 /** Real execution. A delegation is the handoff; this is the work being done. */
 export interface AgentWork {
   id: string; agentId: string; delegationId?: string; parentWorkId?: string
@@ -1491,6 +1496,48 @@ export interface AgentOrganizationSnapshot {
   agents: OrganizationalAgent[]; conversations: AgentConversation[]; entries: AgentConversationEntry[]
   delegations: AgentDelegation[]; work: AgentWork[]; authorities: AgentWorkspaceAuthority[]
   productState: AgentProductState
+}
+/** What Paralith does when a teammate reaches for one capability. Three values, because "may
+ * never publish" and "may publish once you have looked" are different teammates. */
+export type AgentCapabilityDecision = 'allow' | 'ask' | 'deny'
+export interface AgentCapability { agentId: string; capability: string; decision: AgentCapabilityDecision }
+/** One consequential action a run has stopped in front of, waiting for a person. Durable: a
+ * restart finds the same pending decision. */
+export interface AgentApproval {
+  id: string; workId: string; agentId?: string; agentName?: string; projectId: string
+  /** `commit` or `push`. */
+  kind: string
+  summary: string
+  /** Repository facts Paralith observed, plus what the runtime reported — labelled separately so
+   * the card can show which parts are measured and which are claimed. */
+  detail: Record<string, unknown>
+  status: string; decisionNote?: string; createdAt: string; decidedAt?: string
+}
+/** A repeatable procedure a teammate can apply. Content, not authority: a Skill reaches a runtime
+ * through the work prompt, so having one can never widen what an Agent may do. */
+export interface AgentSkill {
+  id: string; name: string; summary: string; appliesWhen: string
+  procedure: string; validation: string; expectedResult: string
+  createdAt: string; updatedAt: string
+}
+export interface SaveAgentSkillInput {
+  /** Absent creates; present edits in place, keeping every assignment. */
+  id?: string
+  name: string; summary?: string; appliesWhen?: string
+  procedure: string; validation?: string; expectedResult?: string
+}
+/** Recurring work an Agent owns. Every execution is an ordinary run, with the same timeline,
+ * evidence and authority as work a human delegated by hand. */
+export interface AgentRoutine {
+  id: string; agentId: string; name: string; objective: string; constraints: string
+  projectId: string; cadence: AgentRoutineCadence; enabled: boolean
+  nextRunAt?: string; lastRunAt?: string; lastRunId?: string; lastStatus?: string
+  createdAt: string; updatedAt: string
+}
+export type AgentRoutineCadence = 'hourly' | 'daily' | 'weekly'
+export interface SaveAgentRoutineInput {
+  id?: string; agentId: string; name: string; objective: string; constraints?: string
+  projectId: string; cadence: AgentRoutineCadence; enabled?: boolean
 }
 export interface CreateOrganizationalAgentInput {
   name: string; role: string; brief: string; responsibilities: string[]; intelligencePreference: string

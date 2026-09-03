@@ -154,6 +154,14 @@ pub struct AgentWorkAuthority {
     pub run_commands: bool,
     pub commit: bool,
     pub push: bool,
+    /// A denied consequential action is not always a refusal. When the Agent's policy says `ask`,
+    /// the run still executes without the authority — structurally, so nothing depends on the
+    /// runtime's cooperation — and may request the action at the end, where a person decides.
+    /// Defaulted so work recorded before capabilities existed reads as a plain refusal.
+    #[serde(default)]
+    pub commit_requires_approval: bool,
+    #[serde(default)]
+    pub push_requires_approval: bool,
 }
 
 /// One inspectable thing that happened during a unit of work. The timeline the user reads, and
@@ -276,4 +284,152 @@ pub struct SendAgentMessageInput {
     /// conversation or Agent default.
     pub runtime_id: Option<String>,
     pub project_id: Option<String>,
+}
+
+// ---- Authority ----------------------------------------------------------------------------
+
+/// What Paralith does when an Agent reaches for one capability.
+///
+/// Three values because two is not enough: a teammate that may never publish and a teammate that
+/// may publish once you have looked at it are different teammates, and collapsing them would
+/// force every user who wants review into either blanket trust or a useless Agent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AgentCapabilityDecision {
+    Allow,
+    Ask,
+    Deny,
+}
+
+impl AgentCapabilityDecision {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Allow => "allow",
+            Self::Ask => "ask",
+            Self::Deny => "deny",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "allow" => Some(Self::Allow),
+            "ask" => Some(Self::Ask),
+            "deny" => Some(Self::Deny),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentCapability {
+    pub agent_id: String,
+    pub capability: String,
+    pub decision: AgentCapabilityDecision,
+}
+
+/// A repeatable procedure a teammate can apply.
+///
+/// Content, deliberately: a Skill reaches a runtime through the work prompt exactly like Project
+/// knowledge does, so having a Skill can never widen what an Agent is permitted to do. Authority
+/// stays in [`AgentCapability`], where it can be inspected.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentSkill {
+    pub id: String,
+    pub name: String,
+    pub summary: String,
+    /// When the procedure applies. Written for the runtime to match against its task, which is
+    /// what stops five assigned Skills from all being pasted into every unrelated run.
+    pub applies_when: String,
+    pub procedure: String,
+    pub validation: String,
+    pub expected_result: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveAgentSkillInput {
+    /// Absent creates; present edits in place, keeping every assignment.
+    pub id: Option<String>,
+    pub name: String,
+    #[serde(default)]
+    pub summary: String,
+    #[serde(default)]
+    pub applies_when: String,
+    pub procedure: String,
+    #[serde(default)]
+    pub validation: String,
+    #[serde(default)]
+    pub expected_result: String,
+}
+
+/// Recurring work an Agent owns.
+///
+/// Only the standing instruction lives here. Every execution is an ordinary run, which is what
+/// makes a Routine inspectable with the same timeline, evidence and authority as work a human
+/// delegated by hand — and what keeps "it ran on Tuesday" a fact rather than a UI claim.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRoutine {
+    pub id: String,
+    pub agent_id: String,
+    pub name: String,
+    pub objective: String,
+    pub constraints: String,
+    pub project_id: String,
+    pub cadence: String,
+    pub enabled: bool,
+    pub next_run_at: Option<String>,
+    pub last_run_at: Option<String>,
+    pub last_run_id: Option<String>,
+    pub last_status: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveAgentRoutineInput {
+    pub id: Option<String>,
+    pub agent_id: String,
+    pub name: String,
+    pub objective: String,
+    #[serde(default)]
+    pub constraints: String,
+    pub project_id: String,
+    pub cadence: String,
+    #[serde(default = "enabled_by_default")]
+    pub enabled: bool,
+}
+
+fn enabled_by_default() -> bool {
+    true
+}
+
+/// One consequential action a run has stopped in front of, waiting for a person.
+///
+/// Projected from `run_approvals`, which is durable and uniquely indexed to one open approval per
+/// run and kind — so a restart finds the same pending decision and a second request cannot queue
+/// behind the first as a duplicate.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentApproval {
+    pub id: String,
+    pub work_id: String,
+    pub agent_id: Option<String>,
+    pub agent_name: Option<String>,
+    pub project_id: String,
+    /// The capability being asked for: `commit` or `push`.
+    pub kind: String,
+    pub summary: String,
+    /// Everything the decision needs: repository, branch, remote, what changed, what was
+    /// validated. Observed by Paralith where possible, never only claimed by the runtime.
+    pub detail: serde_json::Value,
+    pub status: String,
+    pub decision_note: Option<String>,
+    pub created_at: String,
+    pub decided_at: Option<String>,
 }

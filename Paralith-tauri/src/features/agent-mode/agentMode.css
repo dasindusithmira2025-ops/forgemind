@@ -276,3 +276,92 @@
 @media (max-width: 860px) { .agent-mode-overlay { grid-template-columns: 200px minmax(0, 1fr); } .agent-review-grid { grid-template-columns: 1fr; } .agent-review-grid .is-wide { grid-column: 1; } .agent-history-search { width: 130px; } }
 @media (max-width: 680px) { .agent-mode-overlay { grid-template-columns: 168px minmax(0, 1fr); } .agent-work-state { display: none; } .agent-composer-scope { display: none; } }
 @media (prefers-reduced-motion: reduce) { .agent-mode-overlay { transition: none; } .agent-busy-line, .agent-loading span, .agent-turn-placeholder span { animation: none; } .agent-provenance { transition: none; } }
+
+/* ---- Approvals ---------------------------------------------------------------------------
+ * A decision, not an alert. It sits in the thread beside the work it belongs to, carries the
+ * facts Paralith measured separately from what the runtime claimed, and offers exactly two
+ * answers. No modal: interrupting the screen to ask a question the user can answer in place is
+ * how a permission prompt becomes something people click through without reading.
+ */
+.agent-approval { margin: 4px 0 8px; padding: 13px 15px 11px; display: flex; flex-direction: column; gap: 10px; background: var(--surface); border: 1px solid var(--warn, var(--border-strong)); border-radius: 6px; }
+.agent-approval > header { display: flex; align-items: center; gap: 10px; }
+.agent-approval > header strong { color: var(--text-strong); font-size: var(--agent-label); font-weight: 620; }
+.agent-approval-kind { margin-left: auto; padding: 2px 7px; color: var(--warn, var(--muted)); background: color-mix(in srgb, var(--warn, var(--muted)) 12%, transparent); border-radius: 3px; font-size: var(--agent-micro); font-weight: 620; letter-spacing: .04em; }
+.agent-approval-facts { margin: 0; display: flex; flex-wrap: wrap; gap: 4px 22px; }
+.agent-approval-facts div { display: flex; flex-direction: column; gap: 2px; }
+.agent-approval-facts dt { color: var(--faint); font-size: var(--agent-micro); letter-spacing: .05em; text-transform: uppercase; }
+.agent-approval-facts dd { margin: 0; color: var(--text); font-size: var(--agent-meta); }
+.agent-approval-files { margin: 0; padding: 8px 10px; max-height: 128px; overflow: auto; list-style: none; display: flex; flex-direction: column; gap: 3px; background: var(--surface-2); border-radius: 4px; color: var(--muted); font: var(--agent-meta) var(--font-mono); scrollbar-width: thin; }
+.agent-approval-files .is-more { color: var(--faint); font-style: italic; }
+/* Reported, not observed. The label is the whole point: Paralith did not run these commands. */
+.agent-approval-reported { margin: 0; display: flex; flex-direction: column; gap: 3px; color: var(--muted); font-size: var(--agent-meta); line-height: 1.5; }
+.agent-approval-reported span { color: var(--faint); font-size: var(--agent-micro); letter-spacing: .05em; text-transform: uppercase; }
+.agent-approval-reported.is-warn { color: var(--warn, var(--muted)); }
+.agent-approval > footer { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+
+/* ---- Agent settings: Access, Skills, Routines ----------------------------------------------
+ * One panel, three sections, reached from the teammate header rather than from the rail — the
+ * rail is the team and gains nothing by holding configuration.
+ */
+.agent-header-icon { width: 28px; height: 28px; display: grid; place-items: center; color: var(--muted); background: transparent; border: 1px solid var(--border); border-radius: 4px; cursor: pointer; }
+.agent-header-icon:hover { color: var(--text); background: var(--surface-2); }
+.agent-header-icon:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+
+.agent-settings-panel { width: min(480px, calc(100% - 40px)); height: 100%; display: grid; grid-template-rows: 60px 34px minmax(0, 1fr); background: var(--surface); border-left: 1px solid var(--border-strong); box-shadow: -12px 0 36px color-mix(in srgb, var(--bg) 70%, transparent); }
+.agent-settings-panel > header { padding: 0 13px 0 16px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border); }
+.agent-settings-panel header span { color: var(--faint); font-size: var(--agent-micro); letter-spacing: .09em; }
+.agent-settings-panel header h2 { margin: 3px 0 0; color: var(--text-strong); font-size: var(--agent-name); }
+.agent-settings-panel header button { width: 26px; height: 26px; display: grid; place-items: center; color: var(--muted); background: transparent; border: 0; border-radius: 4px; cursor: pointer; }
+.agent-settings-panel header button:hover { color: var(--text); background: var(--surface-hover); }
+.agent-settings-tabs { padding: 0 16px; display: flex; align-items: stretch; gap: 2px; border-bottom: 1px solid var(--border); }
+.agent-settings-tabs button { padding: 0 11px; color: var(--muted); background: transparent; border: 0; border-bottom: 2px solid transparent; font-size: var(--agent-label); cursor: pointer; }
+.agent-settings-tabs button:hover { color: var(--text); }
+.agent-settings-tabs button.is-selected { color: var(--text-strong); border-bottom-color: var(--accent); }
+.agent-settings-tabs button:focus-visible { outline: 1px solid var(--accent); outline-offset: -2px; }
+.agent-settings-body { padding: 16px; overflow: auto; display: flex; flex-direction: column; gap: 14px; scrollbar-width: thin; }
+.agent-settings-lead { margin: 0; color: var(--muted); font-size: var(--agent-meta); line-height: 1.55; }
+.agent-settings-note { margin: 0; color: var(--faint); font-size: var(--agent-micro); line-height: 1.5; }
+.agent-settings-empty, .agent-settings-loading { margin: 0; padding: 18px 0; color: var(--faint); font-size: var(--agent-label); text-align: center; }
+
+.agent-access-grants { margin: 0; display: flex; flex-direction: column; gap: 6px; }
+.agent-access-grants div { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 8px 11px; background: var(--surface-2); border-radius: 4px; }
+.agent-access-grants dt { color: var(--text); font-size: var(--agent-label); }
+.agent-access-grants dd { margin: 0; color: var(--muted); font-size: var(--agent-meta); }
+
+.agent-capability-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; }
+.agent-capability-list li { padding: 10px 0; display: flex; align-items: center; justify-content: space-between; gap: 14px; border-bottom: 1px solid var(--border-subtle); }
+.agent-capability-list li:last-child { border-bottom: 0; }
+/* Publishing is a different class of decision from editing, and the list should say so before
+   the user reads a word of it. */
+.agent-capability-list li.is-consequential { border-left: 2px solid var(--warn, var(--border-strong)); padding-left: 10px; }
+.agent-capability-list strong { display: block; color: var(--text); font-size: var(--agent-label); font-weight: 550; }
+.agent-capability-list small { display: block; margin-top: 2px; color: var(--faint); font-size: var(--agent-micro); line-height: 1.45; }
+.agent-decision-group { flex: none; display: inline-flex; padding: 2px; gap: 1px; background: var(--surface-3); border: 1px solid var(--border); border-radius: 5px; }
+.agent-decision-group button { min-width: 46px; height: 22px; color: var(--faint); background: transparent; border: 0; border-radius: 3px; font-size: var(--agent-micro); font-weight: 620; cursor: pointer; transition: color 100ms ease, background 100ms ease; }
+.agent-decision-group button:hover { color: var(--text); }
+.agent-decision-group button.is-selected { color: var(--text-strong); background: var(--surface); box-shadow: inset 0 0 0 1px var(--border-strong); }
+.agent-decision-group button:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+
+.agent-skill-list, .agent-routine-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; }
+.agent-skill-list li, .agent-routine-list li { padding: 9px 0; display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--border-subtle); }
+.agent-skill-list li:last-child, .agent-routine-list li:last-child { border-bottom: 0; }
+.agent-skill-list .agent-check { flex: 1; min-width: 0; display: flex; align-items: flex-start; gap: 9px; color: var(--text); font-size: var(--agent-label); cursor: pointer; }
+.agent-skill-actions { flex: none; display: flex; align-items: center; gap: 10px; }
+.agent-routine-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.agent-routine-copy strong { color: var(--text); font-size: var(--agent-label); font-weight: 550; }
+.agent-routine-copy small { color: var(--muted); font-size: var(--agent-meta); line-height: 1.45; }
+.agent-routine-schedule { display: inline-flex; align-items: center; gap: 4px; color: var(--faint); font-size: var(--agent-micro); }
+
+.agent-settings-form { display: flex; flex-direction: column; gap: 13px; }
+.agent-settings-form label { display: flex; flex-direction: column; gap: 6px; color: var(--faint); font-size: var(--agent-micro); }
+.agent-settings-form label.agent-check { flex-direction: row; align-items: flex-start; gap: 9px; color: var(--text); font-size: var(--agent-label); }
+.agent-settings-form input, .agent-settings-form textarea, .agent-settings-form select { width: 100%; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 4px; outline: none; font: inherit; font-size: var(--agent-label); }
+.agent-settings-form input, .agent-settings-form select { height: 33px; padding: 0 9px; }
+.agent-settings-form textarea { padding: 10px 11px; resize: vertical; line-height: 1.5; }
+.agent-settings-form input:focus, .agent-settings-form textarea:focus, .agent-settings-form select:focus { border-color: var(--accent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 28%, transparent); }
+.agent-settings-form small { color: var(--faint); font-size: var(--agent-micro); line-height: 1.45; }
+.agent-settings-form footer { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding-top: 4px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-decision-group button, .agent-settings-tabs button { transition: none; }
+}
