@@ -1,16 +1,19 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { AgentConversationEntry, AgentRuntimeOption, OrganizationalAgent, Project, Workspace } from '../../native/types'
+import type { AgentConversationEntry, AgentRuntimeOption, AgentWork, AgentWorkStatus, OrganizationalAgent, Project, Workspace } from '../../native/types'
 import { useAgentModeStore } from './agentModeStore'
 import { AgentModeSurface } from './AgentModeSurface'
 
-const { sendAgentMessage, listAgentRuntimes, getAgentOrganization } = vi.hoisted(() => ({
+const { sendAgentMessage, listAgentRuntimes, getAgentOrganization, cancelAgentWork, continueAgentWork, listAgentWorkEvents } = vi.hoisted(() => ({
   sendAgentMessage: vi.fn().mockResolvedValue(undefined),
   listAgentRuntimes: vi.fn().mockResolvedValue([]),
   getAgentOrganization: vi.fn(),
+  cancelAgentWork: vi.fn().mockResolvedValue(undefined),
+  continueAgentWork: vi.fn().mockResolvedValue(undefined),
+  listAgentWorkEvents: vi.fn().mockResolvedValue([]),
 }))
 vi.mock('../../native/commands', () => ({
-  native: { sendAgentMessage, listAgentRuntimes, getAgentOrganization },
+  native: { sendAgentMessage, listAgentRuntimes, getAgentOrganization, cancelAgentWork, continueAgentWork, listAgentWorkEvents },
   asNativeError: (error: unknown) => ({ message: String(error) }),
 }))
 
@@ -28,11 +31,35 @@ const runtimes: AgentRuntimeOption[] = [
   { id: 'codex/gpt-5.5', providerId: 'codex', providerName: 'Codex', modelId: 'gpt-5.5', displayName: 'GPT-5.5', description: 'Strong repository work.', installed: false, authenticated: false, available: false, unavailableReason: 'The executable was not found on PATH.' },
 ]
 
+const forge = { ...atlas, id: 'forge', name: 'Forge', role: 'Engineering Lead', pinned: false, position: 1 } satisfies OrganizationalAgent
+const work = (over: Partial<AgentWork> = {}): AgentWork => ({
+  id: 'work-1', agentId: 'forge', delegationId: 'delegation-1',
+  objective: 'Repair the Agent composer.', constraints: 'Do not commit or push.', expectedResult: 'Implementation and validation.',
+  projectId: 'project', status: 'working' as AgentWorkStatus,
+  providerId: 'codex', modelId: 'gpt-5.5', runtimeSource: 'agent',
+  terminalSessionId: 'session-1', executionWorkspaceId: 'agent-mode-work-project', executionPaneId: 'agent-work-work-1',
+  authority: { read: true, write: true, runCommands: true, commit: false, push: false },
+  originConversationId: 'chat',
+  createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z', ...over,
+})
+const delegation = { id: 'delegation-1', ownerAgentId: 'atlas', recipientAgentId: 'forge', objective: 'Repair the Agent composer.', relevantContext: '', constraints: 'Do not commit or push.', expectedResult: '', authorityBoundary: '', projectId: 'project', status: 'executing', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z' }
+
+function seedWork(status: AgentWorkStatus, over: Partial<AgentWork> = {}) {
+  useAgentModeStore.setState((state) => ({
+    snapshot: {
+      ...state.snapshot,
+      agents: [{ ...atlas }, { ...forge }],
+      delegations: [delegation],
+      work: [work({ status, ...over })],
+    },
+  }))
+}
+
 function seed(entries: AgentConversationEntry[], extra: Partial<Parameters<typeof useAgentModeStore.setState>[0]> = {}) {
   useAgentModeStore.setState({
     snapshot: {
       agents: [{ ...atlas }], conversations: [{ ...chat }], entries,
-      delegations: [], authorities: [], productState: { selectedMode: 'agent', selectedAgentId: 'atlas', selectedConversationId: 'chat' },
+      delegations: [], work: [], authorities: [], productState: { selectedMode: 'agent', selectedAgentId: 'atlas', selectedConversationId: 'chat' },
     },
     ...extra,
   })
@@ -49,7 +76,7 @@ describe('AgentModeSurface', () => {
   })
 
   it('uses team-first onboarding instead of an empty dashboard', () => {
-    useAgentModeStore.setState({ snapshot: { agents: [], conversations: [], entries: [], delegations: [], authorities: [], productState: { selectedMode: 'agent' } } })
+    useAgentModeStore.setState({ snapshot: { agents: [], conversations: [], entries: [], delegations: [], work: [], authorities: [], productState: { selectedMode: 'agent' } } })
     render(<AgentModeSurface visible project={project} workspace={workspace} onOpenCode={vi.fn()} />)
     expect(screen.getByRole('heading', { name: 'Build your team.' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Create Chief of Staff' })).toBeInTheDocument()
@@ -59,7 +86,7 @@ describe('AgentModeSurface', () => {
   })
 
   it('turns a natural-language responsibility into an editable teammate suggestion', () => {
-    useAgentModeStore.setState({ snapshot: { agents: [], conversations: [], entries: [], delegations: [], authorities: [], productState: { selectedMode: 'agent' } } })
+    useAgentModeStore.setState({ snapshot: { agents: [], conversations: [], entries: [], delegations: [], work: [], authorities: [], productState: { selectedMode: 'agent' } } })
     render(<AgentModeSurface visible project={project} workspace={workspace} onOpenCode={vi.fn()} />)
     fireEvent.click(screen.getByRole('button', { name: 'Create another role' }))
     fireEvent.change(screen.getByPlaceholderText('Manage our products and turn ideas into clear implementation plans.'), { target: { value: 'Implement repository changes and run tests.' } })
@@ -131,5 +158,58 @@ describe('AgentModeSurface', () => {
     expect(screen.getByRole('heading', { name: 'Atlas is your chief of staff.' })).toBeInTheDocument()
     expect(screen.getByText('Coordinate work.')).toBeInTheDocument()
     expect(screen.getByText('Paralith')).toBeInTheDocument()
+  })
+
+  it('renders delegated work as real execution, not as an organizational record', async () => {
+    seed([entry()], { runtimes })
+    seedWork('working')
+    render(<AgentModeSurface visible project={project} workspace={workspace} onOpenCode={vi.fn()} />)
+    // Canonical work state, read from the Run rather than guessed in the UI.
+    expect(await screen.findByText('Working')).toBeInTheDocument()
+    expect(screen.getByText('Atlas \u2192 Forge')).toBeInTheDocument()
+    // Runtime provenance is visible; the teammate is still the teammate.
+    expect(screen.getByText('Codex GPT-5.5')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Stop/ }))
+    expect(cancelAgentWork).toHaveBeenCalledWith('work-1')
+  })
+
+  it('opens the exact execution in Code, not the project root', async () => {
+    const onOpenCode = vi.fn()
+    seed([entry()], { runtimes })
+    seedWork('working')
+    render(<AgentModeSurface visible project={project} workspace={workspace} onOpenCode={onOpenCode} />)
+    fireEvent.click(await screen.findByRole('button', { name: /Open in Code/ }))
+    expect(onOpenCode).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'work-1', executionWorkspaceId: 'agent-mode-work-project', executionPaneId: 'agent-work-work-1',
+    }))
+  })
+
+  it('treats a provider limit as a pause with a connected way forward, never a silent switch', async () => {
+    seed([entry()], { runtimes })
+    seedWork('provider_limit', { statusReason: 'This runtime reached its usage limit.' })
+    render(<AgentModeSurface visible project={project} workspace={workspace} onOpenCode={vi.fn()} />)
+    expect(await screen.findByText('Paused \u00b7 provider limit')).toBeInTheDocument()
+    // Only a genuinely connected alternative may be offered. Codex ran out, and the unavailable
+    // entry in `runtimes` must never be proposed as a way to continue.
+    fireEvent.click(screen.getByRole('button', { name: 'Continue on Claude' }))
+    expect(continueAgentWork).toHaveBeenCalledWith('work-1', 'claude/sonnet')
+    expect(screen.queryByRole('button', { name: /Continue on Codex/ })).not.toBeInTheDocument()
+  })
+
+  it('keeps evidence one click away instead of in the transcript', async () => {
+    listAgentWorkEvents.mockResolvedValueOnce([
+      { id: 'e1', workId: 'work-1', sequence: 1, kind: 'started', summary: 'Started engineering work', level: 'info', metadata: {}, createdAt: '2026-01-01T00:01:00Z' },
+      { id: 'e2', workId: 'work-1', sequence: 2, kind: 'validation', summary: 'Running validation', level: 'info', metadata: {}, createdAt: '2026-01-01T00:02:00Z' },
+    ])
+    seed([entry()], { runtimes })
+    seedWork('completed', { resultSummary: 'Fixed the runtime override leak.' })
+    render(<AgentModeSurface visible project={project} workspace={workspace} onOpenCode={vi.fn()} />)
+    expect(await screen.findByText('Fixed the runtime override leak.')).toBeInTheDocument()
+    // The work ran without commit authority and says so, rather than leaving it implied.
+    expect(screen.getByText('No commit or push was performed.')).toBeInTheDocument()
+    expect(screen.queryByText('Running validation')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Evidence' }))
+    expect(await screen.findByText('Running validation')).toBeInTheDocument()
+    expect(listAgentWorkEvents).toHaveBeenCalledWith('work-1')
   })
 })

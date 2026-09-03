@@ -31,13 +31,14 @@ use crate::models::{
     AgentConversationEntry, AgentProvider, AgentRuntimeOption, OrganizationalAgent,
     SendAgentMessageInput,
 };
+use crate::services::provider_session::{self, ProviderOutcome};
 use crate::services::{AgentDetector, ContextCompiler, TerminalManager};
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 
 /// Selector meaning "let Paralith choose". Persisted as a *preference*, never as a resolved
@@ -47,10 +48,6 @@ pub const AUTOMATIC_RUNTIME: &str = "automatic";
 /// Frontend event carrying one turn's current state. Emitted on every observed change so the
 /// renderer never polls for a streaming answer.
 const TURN_EVENT: &str = "agent-conversation-turn";
-
-/// How often a live turn's output is drained. This is the same observation model the Swarm
-/// engine uses; it exists only while a turn is in flight, so it is not presence polling.
-const DRAIN_INTERVAL: Duration = Duration::from_millis(180);
 
 /// Ceiling on one turn. A provider that has produced nothing and exited nothing by here is a
 /// failure the user can act on, not an answer worth waiting longer for.
@@ -82,7 +79,7 @@ pub struct ResolvedRuntime {
 }
 
 impl ResolvedRuntime {
-    fn runtime_kind(&self) -> SwarmRuntimeKind {
+    pub fn runtime_kind(&self) -> SwarmRuntimeKind {
         match self.provider {
             AgentProvider::Codex => SwarmRuntimeKind::Codex,
             _ => SwarmRuntimeKind::Claude,
@@ -481,6 +478,9 @@ impl AgentConversationService {
     }
 
     /// Follow one live session to its end, publishing the answer as it arrives.
+    ///
+    /// The observation loop is shared with engineering work; only the mapping into the turn
+    /// vocabulary lives here. A quota stop becomes `blocked`, never `failed`.
     fn drain(
         &self,
         entry_id: &str,
@@ -488,106 +488,30 @@ impl AgentConversationService {
         runtime: &ResolvedRuntime,
         cancel: &AtomicBool,
     ) -> TurnOutcome {
-        let started = Instant::now();
-        let mut published = String::new();
-        loop {
-            if cancel.load(Ordering::SeqCst) {
-                let _ = self.terminals.terminate_session(session_id);
-                return TurnOutcome::cancelled(published);
-            }
-            if started.elapsed() > TURN_TIMEOUT {
-                let _ = self.terminals.terminate_session(session_id);
-                return TurnOutcome {
-                    body: published,
-                    state: "failed",
-                    error_code: Some("runtime_timeout".into()),
-                    message: Some("The runtime did not finish this turn in time.".into()),
-                };
-            }
-            let live = self.terminals.session_status(session_id).ok();
-            let output = match &live {
-                Some(session) => session.output_tail.clone(),
-                None => match self.database.get_terminal_session(session_id) {
-                    Ok(Some(session)) => session.output_tail,
-                    _ => {
-                        return TurnOutcome {
-                            body: published,
-                            state: "failed",
-                            error_code: Some("runtime_lost".into()),
-                            message: Some("The runtime process was lost.".into()),
-                        }
-                    }
-                },
-            };
-            let mut reading = read_turn(runtime.runtime_kind(), &output);
-            if reading.answer != published {
-                published = std::mem::take(&mut reading.answer);
-                self.publish(entry_id, &published, "streaming", None);
-            }
-            if live.is_none() {
-                let exit_code = self
-                    .database
-                    .get_terminal_session(session_id)
-                    .ok()
-                    .flatten()
-                    .and_then(|session| session.exit_code);
-                return self.classify(published, &reading, exit_code);
-            }
-            if reading.completed || reading.failed {
-                // Codex `exec` keeps reading from an attached PTY after its terminal event.
-                // Closing stdin lets it exit with its real status while the terminal manager
-                // continues to own draining and reaping.
-                let _ = self.terminals.close_input(session_id);
-            }
-            std::thread::sleep(DRAIN_INTERVAL);
-        }
-    }
-
-    fn classify(&self, body: String, reading: &TurnReading, exit_code: Option<i32>) -> TurnOutcome {
-        if reading.provider_limit {
-            return TurnOutcome {
-                body,
-                state: "blocked",
-                error_code: Some("provider_limit".into()),
-                message: Some(
-                    "This runtime reached its usage limit. Choose another connected runtime to continue."
-                        .into(),
-                ),
-            };
-        }
-        if crate::agents::provider_session_succeeded(exit_code, reading.completed, reading.failed) {
-            if body.trim().is_empty() {
-                return TurnOutcome {
-                    body,
-                    state: "failed",
-                    error_code: Some("empty_response".into()),
-                    message: Some("The runtime finished without producing an answer.".into()),
-                };
-            }
-            return TurnOutcome {
-                body,
-                state: "complete",
-                error_code: None,
-                message: None,
-            };
-        }
-        let failure = crate::agents::provider_session_failure_code(
-            exit_code,
-            reading.completed,
-            reading.failed,
-        )
-        .unwrap_or("provider_exit");
+        let followed = provider_session::follow(
+            &self.terminals,
+            &self.database,
+            session_id,
+            runtime.runtime_kind(),
+            cancel,
+            TURN_TIMEOUT,
+            |text| self.publish(entry_id, text, "streaming", None),
+        );
+        let message = provider_session::outcome_message(&followed.outcome);
+        let (state, error_code) = match &followed.outcome {
+            ProviderOutcome::Completed => ("complete", None),
+            ProviderOutcome::Empty => ("failed", Some("empty_response".to_string())),
+            ProviderOutcome::ProviderLimit => ("blocked", Some("provider_limit".to_string())),
+            ProviderOutcome::Cancelled => ("cancelled", None),
+            ProviderOutcome::Timeout => ("failed", Some("runtime_timeout".to_string())),
+            ProviderOutcome::Lost => ("failed", Some("runtime_lost".to_string())),
+            ProviderOutcome::Failed(code) => ("failed", Some(code.clone())),
+        };
         TurnOutcome {
-            body,
-            state: "failed",
-            error_code: Some(failure.into()),
-            message: Some(match failure {
-                "provider_reported_failure" => "The runtime reported a failure.".into(),
-                "completion_not_observed" => {
-                    "The runtime exited before completing this turn.".into()
-                }
-                _ => "The runtime exited with an error.".into(),
-            }),
+            body: followed.text,
+            state,
+            error_code,
+            message,
         }
     }
 
@@ -742,15 +666,6 @@ impl TurnOutcome {
             state: "failed",
             error_code: Some(code.to_string()),
             message: Some(message),
-        }
-    }
-
-    fn cancelled(body: String) -> Self {
-        Self {
-            body,
-            state: "cancelled",
-            error_code: None,
-            message: Some("This turn was cancelled.".into()),
         }
     }
 }

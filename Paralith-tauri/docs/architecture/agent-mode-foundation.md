@@ -41,11 +41,70 @@ work remains honest (`idle`, `ready`, `blocked`, and so on) until an existing ex
 owns a real transition. Provider limits must block or pause the linked Run without deleting the
 Agent, delegation, conversation, context references, or evidence.
 
-## Current execution seam
+## Execution
 
-This foundation persists and validates organizational work but does not fabricate an Agent reply
-or start a provider process when a message or delegation is recorded. The next execution slice
-must create a canonical Run, compile context through Brain/ContextCompiler, enforce the stored
-Workspace authority through the Orchestration Kernel, and then associate the real Run and terminal
-session with the delegation. “Open in Code” already uses the persisted Workspace identity and the
-existing workspace route.
+Delegation and execution are separate objects. A delegation is the organizational handoff and is
+durable whether or not anything runs; **Agent Work** is the execution.
+
+Agent Work is a row in `runs`, not a new table. `runs` has held the shape of “one unit of provider
+work in a Project” since v38 — objective, workspace, worktree, resolved provider and model,
+terminal session, status, result, parent linkage, timestamps — with `run_events` and
+`run_approvals` beside it, and nothing had ever executed against it. Migration v44 adds only
+`runs.agent_id` so the rail can ask what a teammate is doing without joining through delegations.
+`agent_delegations.run_id` already pointed the other way.
+
+    delegation (handoff)  ──run_id──►  run (agent_work)  ──►  run_events (evidence)
+                                       │
+                                       └──►  terminal_sessions (the exact execution)
+
+### Lifecycle
+
+`queued → preparing → working → verifying → completed`, with `waiting_user`, `needs_approval`,
+`blocked`, `provider_limit`, `failed`, `cancelled` and `interrupted` as the other terminal or
+paused states. One vocabulary is shared by persistence, the Agent rail, the work row, restart
+recovery and the result reported to the parent.
+
+### Authority
+
+Role does not imply access. `agent_workspace_authorities` is the ceiling; a delegation's
+constraints can only lower it (`narrow_by_constraints`). `commit` and `push` are false for every
+Agent today because no capability grant exists for them, so “do not commit or push” is belt and
+braces rather than the only barrier. The effective authority is persisted with the work and drives
+`AgentInvocation::may_write`, which is what makes read-only structural: Claude loses its edit tools
+and Codex runs in a read-only sandbox. Conversation turns remain `may_write: false` unconditionally.
+
+### What crosses the handoff
+
+Not the delegating Agent's chat history. The package is the recipient's identity, the objective,
+the expected result, the constraints, the authority, and whatever `ContextCompiler` ranks as
+relevant Project knowledge for that objective. The runtime is asked to end with a labelled result
+(`SUMMARY`/`FILES`/`COMMANDS`/`VALIDATION`/`UNRESOLVED`); an unlabelled answer becomes the summary
+and every other field stays empty, because an unreported validation is not a passing one.
+
+### Evidence
+
+`run_events` is the timeline. Alongside the runtime's own account, Paralith records what it
+measured itself: the files the working tree shows as changed, whether HEAD moved, and the terminal
+session holding the full transcript. HEAD moving without commit authority is recorded as a
+`boundary_violation` event rather than dropped.
+
+### Return path
+
+The structured result — never the transcript — is written back into the originating conversation
+as one entry attributed to the teammate who did the work, with the evidence pointer in its
+metadata.
+
+### Open in Code
+
+Work records `executionWorkspaceId` and `executionPaneId` when its session starts. Opening it in
+Code focuses that workspace and pane: the exact provider session, not the Project root. The
+workspace keeps the `agent-mode-` prefix so `TerminalManager` gives it a wide, never-resized PTY;
+attaching a viewer is safe because `resize_session` is a no-op for machine-protocol sessions.
+Switching modes never touches process lifetime — the terminal runtime owns it, not either surface.
+
+### Not in this slice
+
+Nothing enters `needs_approval` yet. The status, `run_approvals` and the persisted work context
+exist, but no consequential operation currently reaches a model that could request one: commit,
+push and merge are denied structurally rather than offered for approval. Wiring an approval queue
+is the next slice, not a claim this one makes.

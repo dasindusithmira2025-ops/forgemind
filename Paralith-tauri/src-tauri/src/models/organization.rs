@@ -96,6 +96,81 @@ pub struct AgentDelegation {
     pub updated_at: String,
 }
 
+/// One unit of real work an Agent is performing, projected from a `runs` row.
+///
+/// A delegation is the organizational handoff — who asked whom for what. This is the execution:
+/// where it runs, under what authority, on which runtime, how far it has got and what it
+/// produced. The two are separate on purpose; a delegation can exist without ever executing, and
+/// work can exist without a delegation when the user assigns it directly.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentWork {
+    pub id: String,
+    pub agent_id: String,
+    pub delegation_id: Option<String>,
+    pub parent_work_id: Option<String>,
+    pub objective: String,
+    pub constraints: String,
+    pub expected_result: String,
+    pub project_id: String,
+    pub workspace_id: Option<String>,
+    /// Canonical lifecycle. See `AgentWorkState` on the frontend for the same vocabulary.
+    pub status: String,
+    pub status_reason: Option<String>,
+    /// Resolved runtime provenance. Written when execution starts, never derived from the Agent.
+    pub provider_id: Option<String>,
+    pub model_id: Option<String>,
+    /// How the runtime was chosen: `work`, `agent` or `automatic`.
+    pub runtime_source: Option<String>,
+    pub terminal_session_id: Option<String>,
+    /// The workspace and pane the provider session actually runs in. This is what "Open in Code"
+    /// focuses: the exact execution, not the Project root.
+    pub execution_workspace_id: Option<String>,
+    pub execution_pane_id: Option<String>,
+    pub working_directory: Option<String>,
+    /// What the Agent may actually do here, after the delegation has narrowed its standing grant.
+    pub authority: AgentWorkAuthority,
+    /// The conversation this work was delegated from, so Code Mode can return to it exactly.
+    pub origin_conversation_id: Option<String>,
+    pub result_summary: Option<String>,
+    pub error_code: Option<String>,
+    pub error_message: Option<String>,
+    pub created_at: String,
+    pub started_at: Option<String>,
+    pub completed_at: Option<String>,
+    pub updated_at: String,
+}
+
+/// What one unit of work is permitted to do.
+///
+/// Derived, never stored as intent: an Agent's standing workspace grant is the ceiling, and a
+/// delegation's constraints can only lower it. Git actions are their own capabilities because
+/// being allowed to edit and test a repository is not being allowed to publish to it.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentWorkAuthority {
+    pub read: bool,
+    pub write: bool,
+    pub run_commands: bool,
+    pub commit: bool,
+    pub push: bool,
+}
+
+/// One inspectable thing that happened during a unit of work. The timeline the user reads, and
+/// the evidence behind a claim like "validation passed".
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentWorkEvent {
+    pub id: String,
+    pub work_id: String,
+    pub sequence: i64,
+    pub kind: String,
+    pub summary: String,
+    pub level: String,
+    pub metadata: serde_json::Value,
+    pub created_at: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentWorkspaceAuthority {
@@ -121,6 +196,7 @@ pub struct AgentOrganizationSnapshot {
     pub conversations: Vec<AgentConversation>,
     pub entries: Vec<AgentConversationEntry>,
     pub delegations: Vec<AgentDelegation>,
+    pub work: Vec<AgentWork>,
     pub authorities: Vec<AgentWorkspaceAuthority>,
     pub product_state: AgentProductState,
 }
@@ -161,6 +237,34 @@ pub struct CreateAgentDelegationInput {
     pub parent_delegation_id: Option<String>,
     pub project_id: Option<String>,
     pub workspace_id: Option<String>,
+    /// Start real execution as soon as the delegation is recorded. A delegation without this is
+    /// still only an organizational handoff.
+    #[serde(default)]
+    pub execute: bool,
+    /// Runtime override for the resulting work. Inherits the recipient's preference when absent.
+    pub runtime_id: Option<String>,
+    /// Conversation the delegation was created from, so its result can be reported back there.
+    pub origin_conversation_id: Option<String>,
+}
+
+/// Start one unit of real work. Usually created by a delegation, but the shape does not require
+/// one: the user assigning work to an Agent directly is the same execution with no handoff.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StartAgentWorkInput {
+    pub agent_id: String,
+    pub delegation_id: Option<String>,
+    pub parent_work_id: Option<String>,
+    pub objective: String,
+    #[serde(default)]
+    pub constraints: String,
+    #[serde(default)]
+    pub expected_result: String,
+    pub project_id: String,
+    pub workspace_id: Option<String>,
+    pub origin_conversation_id: Option<String>,
+    /// Runtime override for this work only. Inherits the Agent's preference when absent.
+    pub runtime_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

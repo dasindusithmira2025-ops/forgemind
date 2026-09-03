@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { ArrowUpRight, ChevronLeft, GripVertical, Paperclip, Pin, Plus, Search, Send, Square, UserRoundPlus, X } from 'lucide-react'
-import type { AgentConversationEntry, CreateOrganizationalAgentInput, OrganizationalAgent, Project, Workspace } from '../../native/types'
+import type { AgentConversationEntry, AgentWork, AgentWorkStatus, CreateOrganizationalAgentInput, OrganizationalAgent, Project, Workspace } from '../../native/types'
 import { native } from '../../native/commands'
 import { AgentAvatar } from './AgentIdentity'
 import { IntelligencePicker, IntelligenceTrigger } from './IntelligencePicker'
@@ -22,11 +22,20 @@ function stateLabel(state: OrganizationalAgent['workState']) {
   return ({ idle: 'Available', working: 'Working', waiting: 'Waiting', needs_approval: 'Needs approval', blocked: 'Blocked', failed: 'Failed', complete: 'Complete' } as const)[state]
 }
 
+/** One vocabulary for work status, shared by the rail, the work row and the timeline. */
+const workStatusLabel: Record<AgentWorkStatus, string> = {
+  queued: 'Queued', preparing: 'Preparing', working: 'Working', waiting_user: 'Waiting for you',
+  needs_approval: 'Needs approval', blocked: 'Blocked', provider_limit: 'Paused · provider limit',
+  verifying: 'Verifying', completed: 'Completed', failed: 'Failed', cancelled: 'Cancelled',
+  interrupted: 'Interrupted',
+}
+const liveWorkStatuses: AgentWorkStatus[] = ['queued', 'preparing', 'working', 'waiting_user', 'needs_approval', 'verifying']
+
 function timeOf(value: string) {
   return new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 }
 
-export function AgentModeSurface({ visible, project, workspace, onOpenCode }: { visible: boolean; project: Project; workspace: Workspace; onOpenCode: (workspaceId?: string) => void }) {
+export function AgentModeSurface({ visible, project, workspace, onOpenCode }: { visible: boolean; project: Project; workspace: Workspace; onOpenCode: (target: AgentWork | { workspaceId?: string }) => void }) {
   const snapshot = useAgentModeStore((state) => state.snapshot)
   const hydrated = useAgentModeStore((state) => state.hydrated)
   const busy = useAgentModeStore((state) => state.busy)
@@ -115,7 +124,7 @@ function suggestion(templateId: Template, ownership: string, project: Project, w
   return { name: selected.name || 'New teammate', role, brief: ownership.trim(), responsibilities: ownership.trim() ? [ownership.trim()] : [], intelligencePreference: 'automatic', projectId: project.id, workspaceId: workspace.id, projectAccess: inferred === 'engineering' ? 'read_write' : 'none' }
 }
 
-function AgentPage({ agent, project, workspace, visible, onOpenCode }: { agent: OrganizationalAgent; project: Project; workspace: Workspace; visible: boolean; onOpenCode: (workspaceId?: string) => void }) {
+function AgentPage({ agent, project, workspace, visible, onOpenCode }: { agent: OrganizationalAgent; project: Project; workspace: Workspace; visible: boolean; onOpenCode: (target: AgentWork | { workspaceId?: string }) => void }) {
   const snapshot = useAgentModeStore((state) => state.snapshot)
   const selectConversation = useAgentModeStore((state) => state.selectConversation)
   const createConversation = useAgentModeStore((state) => state.createConversation)
@@ -184,20 +193,28 @@ function AgentPage({ agent, project, workspace, visible, onOpenCode }: { agent: 
             : <>
               {entries.length === 0 && <ConversationStarter agent={agent} project={project} delegations={assigned.length} />}
               {entries.map((entry) => <Message key={entry.id} entry={entry} agent={agent} />)}
-              {assigned.map((delegation) => <article key={delegation.id} className="agent-event-row is-delegation">
-                <span className="agent-event-mark" aria-hidden />
-                <div>
-                  <p><strong>{snapshot.agents.find((item) => item.id === delegation.ownerAgentId)?.name} → {snapshot.agents.find((item) => item.id === delegation.recipientAgentId)?.name}</strong> · {delegation.status.replace('_', ' ')}</p>
-                  <p className="agent-event-detail">{delegation.objective}</p>
-                </div>
-                {delegation.workspaceId && <button type="button" className="agent-event-action" onClick={() => onOpenCode(delegation.workspaceId)}>Open in Code <ArrowUpRight size={12} /></button>}
-              </article>)}
+              {assigned.map((delegation) => {
+                const work = snapshot.work.find((item) => item.delegationId === delegation.id)
+                return work
+                  ? <WorkRow key={delegation.id} work={work} owner={snapshot.agents.find((item) => item.id === delegation.ownerAgentId)?.name} recipient={snapshot.agents.find((item) => item.id === delegation.recipientAgentId)?.name} onOpenCode={onOpenCode} />
+                  : <article key={delegation.id} className="agent-event-row is-delegation">
+                    <span className="agent-event-mark" aria-hidden />
+                    <div>
+                      <p><strong>{snapshot.agents.find((item) => item.id === delegation.ownerAgentId)?.name} → {snapshot.agents.find((item) => item.id === delegation.recipientAgentId)?.name}</strong> · {delegation.status.replace('_', ' ')} · not executed</p>
+                      <p className="agent-event-detail">{delegation.objective}</p>
+                    </div>
+                    {delegation.statusReason && <span className="agent-work-reason">{delegation.statusReason}</span>}
+                  </article>
+              })}
+              {/* Work with no delegation: assigned to this teammate directly. */}
+              {snapshot.work.filter((item) => item.agentId === agent.id && !item.delegationId).map((work) =>
+                <WorkRow key={work.id} work={work} recipient={agent.name} onOpenCode={onOpenCode} />)}
             </>}
         </div>
       </div>
       {activeConversation && <Composer agent={agent} conversationId={activeConversation.id} conversationRuntime={activeConversation.runtimePreference} projectId={project.id} entries={entries} visible={visible} />}
     </div>
-    {delegating && <DelegationPanel owner={agent} project={project} workspace={workspace} onClose={() => setDelegating(false)} />}
+    {delegating && <DelegationPanel owner={agent} project={project} workspace={workspace} conversationId={activeConversation?.id} onClose={() => setDelegating(false)} />}
   </section>
 }
 
@@ -221,12 +238,69 @@ function ConversationStarter({ agent, project, delegations }: { agent: Organizat
 }
 
 /**
+ * One unit of real work in the thread.
+ *
+ * Everything shown here comes from canonical work state — the status, the runtime that took it,
+ * the result and the timeline are all read from the Run, never guessed from what the UI last did.
+ * The detail stays closed by default: a conversation should read as a conversation, and the
+ * evidence is one click away rather than in the way.
+ */
+function WorkRow({ work, owner, recipient, onOpenCode }: { work: AgentWork; owner?: string; recipient?: string; onOpenCode: (target: AgentWork) => void }) {
+  const runtimes = useAgentModeStore((state) => state.runtimes)
+  const events = useAgentModeStore((state) => state.workEvents[work.id])
+  const cancelWork = useAgentModeStore((state) => state.cancelWork)
+  const continueWork = useAgentModeStore((state) => state.continueWork)
+  const loadWorkEvents = useAgentModeStore((state) => state.loadWorkEvents)
+  const [open, setOpen] = useState(false)
+  const live = liveWorkStatuses.includes(work.status)
+  const runtime = work.providerId ? runtimes.find((item) => item.providerId === work.providerId && item.modelId === work.modelId) : undefined
+  // Only a genuinely connected alternative is offered. A quota stop must never become a silent
+  // switch to something the user has not signed in to, or to a billable API.
+  const alternative = work.status === 'provider_limit'
+    ? runtimes.find((item) => item.available && item.providerId !== work.providerId)
+    : undefined
+
+  const toggle = () => { setOpen((value) => { if (!value && !events) void loadWorkEvents(work.id); return !value }) }
+
+  return <article className={`agent-work-row is-${work.status}`}>
+    <span className={`agent-work-mark ${live ? 'is-live' : ''}`} aria-hidden />
+    <div className="agent-work-body">
+      <p className="agent-work-heading">
+        <strong>{owner ? `${owner} → ${recipient}` : recipient}</strong>
+        <span className="agent-work-status">{workStatusLabel[work.status]}</span>
+        {runtime && <span className="agent-provenance" title={`Running on ${runtime.providerName} ${runtime.displayName}`}>{runtime.providerName} {runtime.displayName}</span>}
+      </p>
+      <p className="agent-event-detail">{work.objective}</p>
+      {work.resultSummary && <p className="agent-work-result">{work.resultSummary}</p>}
+      {work.statusReason && work.status !== 'working' && <p className="agent-work-reason">{work.statusReason}</p>}
+      {!work.authority.commit && work.status === 'completed' && <p className="agent-work-boundary">No commit or push was performed.</p>}
+      {open && <ol className="agent-work-timeline">
+        {events === undefined ? <li>Loading evidence…</li>
+          : events.length === 0 ? <li>No steps were recorded.</li>
+            : events.map((event) => <li key={event.id} className={`is-${event.level}`}><time>{timeOf(event.createdAt)}</time><span>{event.summary}</span></li>)}
+      </ol>}
+    </div>
+    <div className="agent-work-actions">
+      {live && <button type="button" className="agent-event-action" onClick={() => void cancelWork(work.id)}><Square size={10} /> Stop</button>}
+      {alternative && <button type="button" className="agent-event-action is-primary" onClick={() => void continueWork(work.id, alternative.id)}>Continue on {alternative.providerName}</button>}
+      <button type="button" className="agent-event-action" aria-expanded={open} onClick={toggle}>{open ? 'Hide evidence' : 'Evidence'}</button>
+      {work.executionWorkspaceId && <button type="button" className="agent-event-action" onClick={() => onOpenCode(work)}>Open in Code <ArrowUpRight size={12} /></button>}
+    </div>
+  </article>
+}
+
+/**
  * One row in the thread. Human and Agent turns read as conversation; everything else — a join, a
  * delegation, a runtime transition — is a compact timeline event, visually secondary, so the
  * transcript does not become a wall of bordered cards.
  */
 function Message({ entry, agent, showDate }: { entry: AgentConversationEntry; agent: OrganizationalAgent; showDate?: boolean }) {
   const cancelTurn = useAgentModeStore((state) => state.cancelTurn)
+  // A delegated result is written into the *delegating* Agent's conversation by the teammate who
+  // did the work, so the row is attributed to its author rather than to whoever owns the page.
+  const author = useAgentModeStore((state) => entry.authorAgentId && entry.authorAgentId !== agent.id
+    ? state.snapshot.agents.find((item) => item.id === entry.authorAgentId)?.name
+    : undefined)
   if (entry.kind === 'event') {
     return <article className="agent-event-row"><span className="agent-event-mark" aria-hidden /><div><p>{entry.body}</p></div><time>{timeOf(entry.createdAt)}</time></article>
   }
@@ -234,7 +308,7 @@ function Message({ entry, agent, showDate }: { entry: AgentConversationEntry; ag
   const provenance = entry.runtimeProvider ? [entry.runtimeProvider, entry.runtimeModel].filter(Boolean).join(' ') : undefined
   return <article className={`agent-message is-${entry.kind} state-${entry.state}`}>
     <header>
-      <strong>{entry.kind === 'user' ? 'You' : agent.name}</strong>
+      <strong>{entry.kind === 'user' ? 'You' : author ?? agent.name}</strong>
       <time>{showDate ? new Date(entry.createdAt).toLocaleDateString() : timeOf(entry.createdAt)}</time>
       {provenance && !pending && <span className="agent-provenance" title={`Answered on ${provenance}`}>{provenance}</span>}
       {pending && <span className="agent-turn-status">{entry.state === 'preparing' ? 'Preparing…' : 'Responding…'}</span>}
@@ -317,15 +391,56 @@ function Composer({ agent, conversationId, conversationRuntime, projectId, entri
   </form>
 }
 
-function DelegationPanel({ owner, project, workspace, onClose }: { owner: OrganizationalAgent; project: Project; workspace: Workspace; onClose: () => void }) {
+function DelegationPanel({ owner, project, workspace, conversationId, onClose }: { owner: OrganizationalAgent; project: Project; workspace: Workspace; conversationId?: string; onClose: () => void }) {
   const snapshot = useAgentModeStore((state) => state.snapshot)
+  const runtimes = useAgentModeStore((state) => state.runtimes)
   const createDelegation = useAgentModeStore((state) => state.createDelegation)
   const recipients = snapshot.agents.filter((item) => item.id !== owner.id)
   const [recipientId, setRecipientId] = useState(recipients[0]?.id ?? '')
   const [objective, setObjective] = useState('')
   const [expected, setExpected] = useState('')
-  const [constraints, setConstraints] = useState('')
+  const [constraints, setConstraints] = useState('Do not commit or push.')
   const [linkWorkspace, setLinkWorkspace] = useState(true)
-  const submit = async (event: FormEvent) => { event.preventDefault(); try { await createDelegation({ ownerAgentId: owner.id, recipientAgentId: recipientId, objective, relevantContext: `Originated in ${owner.name}'s Agent workspace.`, constraints, expectedResult: expected, authorityBoundary: linkWorkspace ? `Only approved access to ${project.name}.` : 'No Project access requested.', projectId: linkWorkspace ? project.id : undefined, workspaceId: linkWorkspace ? workspace.id : undefined }); onClose() } catch { /* inline store error */ } }
-  return <div className="agent-panel-scrim" onMouseDown={onClose}><form className="agent-delegation-panel" onSubmit={submit} onMouseDown={(event) => event.stopPropagation()}><header><div><span>BOUNDED DELEGATION</span><h2>Assign work</h2></div><button type="button" onClick={onClose} aria-label="Close"><X size={14} /></button></header>{recipients.length === 0 ? <div className="agent-panel-empty"><UserRoundPlus size={18} /><p>Create another teammate before delegating work.</p></div> : <div className="agent-panel-fields"><label><span>Recipient</span><select value={recipientId} onChange={(e) => setRecipientId(e.target.value)}>{recipients.map((agent) => <option key={agent.id} value={agent.id}>{agent.name} — {agent.role}</option>)}</select></label><label><span>Objective</span><textarea autoFocus rows={4} value={objective} onChange={(e) => setObjective(e.target.value)} required /></label><label><span>Expected result</span><input value={expected} onChange={(e) => setExpected(e.target.value)} placeholder="A reviewable implementation and evidence" /></label><label><span>Constraints</span><textarea rows={3} value={constraints} onChange={(e) => setConstraints(e.target.value)} placeholder="Scope, exclusions, approval requirements" /></label><label className="agent-check"><input type="checkbox" checked={linkWorkspace} onChange={(e) => setLinkWorkspace(e.target.checked)} /><span>Associate with {workspace.name}<small>The recipient must already have explicit access.</small></span></label><footer><button type="button" className="agent-text-button" onClick={onClose}>Cancel</button><button type="submit" className="agent-primary" disabled={!recipientId || !objective.trim()}>Create delegation</button></footer></div>}</form></div>
+  const [execute, setExecute] = useState(true)
+  const [runtimeId, setRuntimeId] = useState('')
+  const recipient = recipients.find((item) => item.id === recipientId)
+  // Execution needs a Project to run in and a recipient who already has access to it. Saying so
+  // before the user commits is better than a delegation that is recorded and then refused.
+  const grant = snapshot.authorities.find((item) => item.agentId === recipientId && item.projectId === project.id)
+  const executable = linkWorkspace && Boolean(grant)
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault()
+    try {
+      await createDelegation({
+        ownerAgentId: owner.id,
+        recipientAgentId: recipientId,
+        objective,
+        relevantContext: `Originated in ${owner.name}'s Agent workspace.`,
+        constraints,
+        expectedResult: expected,
+        authorityBoundary: linkWorkspace ? `Only approved access to ${project.name}.` : 'No Project access requested.',
+        projectId: linkWorkspace ? project.id : undefined,
+        workspaceId: linkWorkspace ? workspace.id : undefined,
+        execute: execute && executable,
+        runtimeId: runtimeId || undefined,
+        originConversationId: conversationId,
+      })
+      onClose()
+    } catch { /* inline store error */ }
+  }
+
+  return <div className="agent-panel-scrim" onMouseDown={onClose}><form className="agent-delegation-panel" onSubmit={submit} onMouseDown={(event) => event.stopPropagation()}>
+    <header><div><span>BOUNDED DELEGATION</span><h2>Assign work</h2></div><button type="button" onClick={onClose} aria-label="Close"><X size={14} /></button></header>
+    {recipients.length === 0 ? <div className="agent-panel-empty"><UserRoundPlus size={18} /><p>Create another teammate before delegating work.</p></div> : <div className="agent-panel-fields">
+      <label><span>Recipient</span><select value={recipientId} onChange={(e) => setRecipientId(e.target.value)}>{recipients.map((agent) => <option key={agent.id} value={agent.id}>{agent.name} — {agent.role}</option>)}</select></label>
+      <label><span>Objective</span><textarea autoFocus rows={4} value={objective} onChange={(e) => setObjective(e.target.value)} required /></label>
+      <label><span>Expected result</span><input value={expected} onChange={(e) => setExpected(e.target.value)} placeholder="A reviewable implementation and evidence" /></label>
+      <label><span>Constraints</span><textarea rows={3} value={constraints} onChange={(e) => setConstraints(e.target.value)} placeholder="Scope, exclusions, approval requirements" /><small>Constraints can only narrow what {recipient?.name ?? 'the recipient'} may do. They never grant access.</small></label>
+      <label className="agent-check"><input type="checkbox" checked={linkWorkspace} onChange={(e) => setLinkWorkspace(e.target.checked)} /><span>Associate with {workspace.name}<small>The recipient must already have explicit access.</small></span></label>
+      <label className="agent-check"><input type="checkbox" checked={execute && executable} disabled={!executable} onChange={(e) => setExecute(e.target.checked)} /><span>Execute now<small>{executable ? `${recipient?.name ?? 'The recipient'} starts the work immediately and reports the result back here.` : `${recipient?.name ?? 'This teammate'} has no access to ${project.name}. The delegation will be recorded but nothing will run.`}</small></span></label>
+      {execute && executable && <label><span>Intelligence</span><select value={runtimeId} onChange={(e) => setRuntimeId(e.target.value)}><option value="">{recipient?.name ?? 'Recipient'} default</option>{runtimes.filter((item) => item.available).map((item) => <option key={item.id} value={item.id}>{item.providerName} {item.displayName}</option>)}</select><small>The runtime answers this work only. It never becomes the teammate&apos;s identity.</small></label>}
+      <footer><button type="button" className="agent-text-button" onClick={onClose}>Cancel</button><button type="submit" className="agent-primary" disabled={!recipientId || !objective.trim()}>{execute && executable ? 'Delegate and start' : 'Create delegation'}</button></footer>
+    </div>}
+  </form></div>
 }

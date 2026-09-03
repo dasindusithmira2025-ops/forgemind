@@ -170,6 +170,29 @@
 .agent-event-action { padding: 0; display: inline-flex; align-items: center; gap: 4px; color: var(--accent); background: transparent; border: 0; font-size: var(--agent-meta); cursor: pointer; }
 .agent-event-action:hover { text-decoration: underline; }
 
+/* Real work in the thread. Same left-rule language as a timeline event, one step denser, because
+   a work item carries a status, a runtime, a result and controls without becoming a card. */
+.agent-work-row { margin: 0 0 16px; padding: 0 0 0 14px; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; column-gap: 12px; border-left: 1px solid var(--border); }
+.agent-work-row.is-working, .agent-work-row.is-preparing, .agent-work-row.is-verifying, .agent-work-row.is-queued { border-left-color: var(--accent); }
+.agent-work-row.is-failed, .agent-work-row.is-interrupted { border-left-color: var(--danger, #c0553f); }
+.agent-work-row.is-provider_limit, .agent-work-row.is-blocked, .agent-work-row.is-needs_approval { border-left-color: var(--warning, #b8873a); }
+.agent-work-row p { margin: 0; color: var(--muted); font-size: var(--agent-meta); line-height: 1.5; }
+.agent-work-heading { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; }
+.agent-work-heading strong { color: var(--text); font-weight: 600; }
+.agent-work-status { color: var(--faint); font-size: var(--agent-micro); text-transform: uppercase; letter-spacing: 0.04em; }
+.agent-work-row .agent-provenance { opacity: 1; }
+.agent-work-row .agent-event-detail { margin-top: 3px; color: var(--faint); }
+.agent-work-result { margin-top: 6px !important; color: var(--text) !important; }
+.agent-work-reason, .agent-work-boundary { margin-top: 4px !important; color: var(--faint) !important; font-size: var(--agent-micro) !important; }
+.agent-work-actions { display: flex; align-items: center; gap: 12px; }
+.agent-event-action.is-primary { font-weight: 600; }
+/* Evidence stays closed by default: a conversation should read as a conversation. */
+.agent-work-timeline { margin: 8px 0 0; padding: 8px 0 0; list-style: none; border-top: 1px solid var(--border-subtle); display: grid; gap: 4px; }
+.agent-work-timeline li { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px; color: var(--muted); font-size: var(--agent-micro); }
+.agent-work-timeline li.is-warn span { color: var(--warning, #b8873a); }
+.agent-work-timeline li.is-error span { color: var(--danger, #c0553f); }
+.agent-work-timeline time { color: var(--faint); font-variant-numeric: tabular-nums; }
+
 /* A new teammate's conversation states what is true right now and nothing more. It scrolls away
    the moment there is real conversation; it is not a dashboard and it never gains metrics. */
 .agent-starter { margin-bottom: 26px; padding-bottom: 20px; border-bottom: 1px solid var(--border-subtle); }
