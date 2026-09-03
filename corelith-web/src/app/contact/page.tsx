@@ -67,7 +67,7 @@ export default function ContactPage() {
 
               <a
                 href={`mailto:${route.email}`}
-                className="text-ink hover:text-ember-ink font-mono text-sm break-all underline decoration-1 underline-offset-4 transition-colors"
+                className="text-ink hover:text-core-ink font-mono text-sm break-all underline decoration-1 underline-offset-4 transition-colors"
               >
                 {route.email}
               </a>

@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 
-type Tone = 'paper' | 'paper-2' | 'ember';
+type Tone = 'paper' | 'paper-2' | 'core';
 
 interface BandProps {
   tone?: Tone;
@@ -15,7 +15,7 @@ interface BandProps {
 
 /**
  * A full-bleed horizontal band. The page is a stack of these, alternating
- * between the two weights of stock and — sparingly — the ember block. Bands
+ * between the two weights of stock and — sparingly — the core block. Bands
  * separate by stock weight and by the halftone screen they all carry, not by a
  * rule, which is what gives the page its printed, sectioned rhythm.
  */
@@ -151,7 +151,7 @@ export function MetaStrip({
           <dt className="stamp text-ink-faint">{row.key}</dt>
           <dd
             className={`mt-2.5 font-mono text-sm ${
-              row.accent ? 'text-ember-ink' : 'text-[var(--fg)]'
+              row.accent ? 'text-core-ink' : 'text-[var(--fg)]'
             }`}
           >
             {row.value}
@@ -184,7 +184,7 @@ export function Colophon({ rows, className = '' }: { rows: MetaRow[]; className?
           <dt className="stamp text-ink-faint">{row.key}</dt>
           <dd
             className={`text-right font-mono text-sm ${
-              row.accent ? 'text-ember-ink' : 'text-[var(--fg)]'
+              row.accent ? 'text-core-ink' : 'text-[var(--fg)]'
             }`}
           >
             {row.value}
@@ -209,7 +209,7 @@ export function Ticker({ items }: { items: string[] }) {
               {items.map((item) => (
                 <span key={item} className="stamp text-ink-soft flex items-center py-3.5">
                   <span className="px-7">{item}</span>
-                  <span aria-hidden="true" className="text-ember/70">
+                  <span aria-hidden="true" className="text-core/70">
                     ◆
                   </span>
                 </span>
@@ -232,7 +232,7 @@ export function Tag({
 }) {
   const variants = {
     default: 'border-[var(--hair-strong)] text-ink-soft',
-    accent: 'border-ember/50 bg-ember/10 text-ember-ink',
+    accent: 'border-core/50 bg-core/10 text-core-ink',
     success: 'border-success/45 bg-success/10 text-success',
   };
 
@@ -253,7 +253,7 @@ export function ClosingBand({
   children: ReactNode;
 }) {
   return (
-    <Band tone="ember" compact divider>
+    <Band tone="core" compact divider>
       <div className="grid grid-cols-12 items-end gap-x-8 gap-y-10">
         <div className="col-span-12 lg:col-span-7">
           <h2 className="text-2xl sm:text-3xl">{title}</h2>

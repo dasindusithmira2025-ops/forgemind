@@ -17,8 +17,8 @@ export function ProductStatusBadge({ status }: ProductStatusBadgeProps) {
       marker: 'bg-success',
     },
     'Early Access': {
-      tone: 'border-ember/45 bg-ember/10 text-ember-ink',
-      marker: 'bg-ember',
+      tone: 'border-core/45 bg-core/10 text-core-ink',
+      marker: 'bg-core',
     },
     'Private Beta': {
       tone: 'border-warning/40 bg-warning/10 text-warning',

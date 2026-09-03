@@ -74,7 +74,7 @@ export const metadata: Metadata = {
 // band rather than banding against it.
 export const viewport: Viewport = {
   colorScheme: 'dark',
-  themeColor: '#171310',
+  themeColor: '#070707',
 };
 
 export default function RootLayout({
@@ -87,7 +87,7 @@ export default function RootLayout({
     '@type': 'Organization',
     name: siteConfig.name,
     url: siteConfig.domain,
-    logo: `${siteConfig.domain}/logo.png`,
+    logo: `${siteConfig.domain}/brand/corelith-lockup.png`,
     description: siteConfig.description,
     sameAs: [siteConfig.social.github, siteConfig.social.twitter, siteConfig.social.linkedin],
   };
