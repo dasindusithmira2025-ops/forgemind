@@ -587,7 +587,18 @@ html[data-theme-swapping] *, html[data-theme-swapping] *::before, html[data-them
 
 /* ---- Application shell -------------------------------------------------------- */
 .app-shell { height: 100dvh; display: grid; grid-template-rows: var(--header-height) minmax(0, 1fr) var(--status-height); background: var(--bg); }
-.app-titlebar { padding: 0 var(--space-2); display: flex; align-items: center; gap: 6px; border-bottom: 1px solid var(--border); background: var(--surface); }
+.app-titlebar { position: relative; padding: 0 var(--space-2); display: flex; align-items: center; gap: 6px; border-bottom: 1px solid var(--border); background: var(--surface); }
+.workspace-shell.mode-agent .app-titlebar > :not(.product-mode-switch) { visibility: hidden; }
+/* Agent Mode keeps genuinely global status — Project, branch, usage, attention — and drops the
+   Code-surface pane readouts, which describe a surface the user is not looking at. */
+.workspace-shell.mode-agent .status-code-only { display: none; }
+/* Where this Code session came from, when it was opened from Agent work. Deliberately quiet: a
+   breadcrumb, not a second product surface inside Code Mode. */
+.code-origin { display: flex; align-items: baseline; gap: 6px; min-width: 0; color: var(--muted); font-size: var(--font-2xs); }
+.code-origin strong { color: var(--text); font-weight: 600; white-space: nowrap; }
+.code-origin em { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-style: normal; color: var(--faint); }
+.return-to-agent { height: var(--control-h-xs); padding: 0 7px; color: var(--muted); background: transparent; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); font-size: var(--font-2xs); cursor: pointer; }
+.return-to-agent:hover { color: var(--text); background: var(--surface-2); border-color: var(--border); }
 .titlebar-spacer { flex: 1; }
 .compact-count { color: var(--muted); font-size: var(--font-xs); white-space: nowrap; }
 .app-workarea { min-height: 0; display: flex; }

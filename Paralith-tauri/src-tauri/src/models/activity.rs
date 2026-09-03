@@ -127,6 +127,9 @@ pub struct ActivityDetail {
     pub workspace_id: Option<String>,
     pub pane_id: Option<String>,
     pub terminal_session_id: Option<String>,
+    /// Canonical Agent Work run behind a provider terminal, when this thread belongs to Agent
+    /// Mode rather than an ordinary Code Mode session.
+    pub agent_work_id: Option<String>,
 }
 
 /// One evolving unit of work. A release that runs an agent, commits, pushes, validates on GitHub,
@@ -188,7 +191,9 @@ impl ActivityThread {
         }
         // A settled run stays settled. A late "running" for a completed run is stale by
         // definition, never a regression to display.
-        if self.state.is_terminal() && !incoming.state.is_terminal() {
+        let agent_work_waiting = incoming.state == ActivityState::WaitingForUser
+            && incoming.detail.agent_work_id.is_some();
+        if self.state.is_terminal() && !incoming.state.is_terminal() && !agent_work_waiting {
             return None;
         }
         if self.visible() == incoming.visible() {

@@ -393,6 +393,7 @@ export interface ActivityDetail {
   workspaceId?: string
   paneId?: string
   terminalSessionId?: string
+  agentWorkId?: string
 }
 
 export interface ActivityThread {
@@ -1404,6 +1405,163 @@ export interface BrowserBounds {
   y: number
   width: number
   height: number
+}
+
+export type ProductMode = 'code' | 'agent'
+export type AgentWorkState = 'idle' | 'working' | 'waiting' | 'needs_approval' | 'blocked' | 'failed' | 'complete'
+
+export interface OrganizationalAgent {
+  id: string; name: string; role: string; brief: string; responsibilities: string[]
+  avatarSeed: string; intelligencePreference: string; workState: AgentWorkState
+  workStateDetail?: string; pinned: boolean; position: number; createdAt: string; updatedAt: string
+}
+export interface AgentConversation {
+  id: string; agentId: string; projectId?: string; title: string; position: number
+  /** Conversation-level runtime. Undefined inherits the Agent's preference. */
+  runtimePreference?: string
+  createdAt: string; updatedAt: string
+}
+/** Lifecycle of one turn. Only agent turns leave `complete`. */
+export type AgentTurnState = 'preparing' | 'streaming' | 'complete' | 'failed' | 'cancelled' | 'blocked'
+export interface AgentConversationEntry {
+  id: string; conversationId: string
+  kind: 'user' | 'agent' | 'event' | 'delegation' | 'approval' | 'evidence'
+  authorAgentId?: string; body: string; metadata: Record<string, unknown>
+  state: AgentTurnState
+  /** Which runtime produced this turn. Provenance, never identity. */
+  runtimeProvider?: string; runtimeModel?: string; runtimeAccount?: string
+  parentEntryId?: string; errorCode?: string
+  createdAt: string; updatedAt: string
+}
+/** One selectable intelligence, derived from what is installed and signed in on this machine. */
+export interface AgentRuntimeOption {
+  id: string; providerId: string; providerName: string; modelId: string
+  displayName: string; description: string
+  installed: boolean; authenticated: boolean; available: boolean
+  unavailableReason?: string; version?: string
+}
+export interface SendAgentMessageInput {
+  conversationId: string; body: string
+  /** Applies to this turn only; never mutates the conversation or Agent default. */
+  runtimeId?: string
+  projectId?: string
+  attachments?: AgentMessageAttachment[]
+}
+export interface AgentMessageAttachment {
+  name: string; mediaType: string; content: string; size: number
+}
+export interface AgentDelegation {
+  id: string; ownerAgentId: string; recipientAgentId: string; objective: string; relevantContext: string
+  constraints: string; expectedResult: string; authorityBoundary: string; parentDelegationId?: string
+  projectId?: string; workspaceId?: string; runId?: string; status: string; statusReason?: string
+  createdAt: string; updatedAt: string
+}
+/** Canonical lifecycle of one unit of Agent Work. Persisted as a Run status; the rail, the work
+ * list, notifications and restart recovery all read this same vocabulary. */
+export type AgentWorkStatus =
+  | 'queued' | 'preparing' | 'working' | 'waiting_user' | 'needs_approval'
+  | 'blocked' | 'provider_limit' | 'verifying' | 'completed' | 'failed' | 'cancelled' | 'interrupted'
+/** What a unit of work is permitted to do. Derived from the Agent's standing grant, narrowed by
+ * the delegation's constraints — never widened. */
+export interface AgentWorkAuthority {
+  read: boolean; write: boolean; runCommands: boolean; commit: boolean; push: boolean
+  /** A refused consequential action is not always a refusal. When the Agent's policy says `ask`,
+   * the run executes without the authority and may request it at the end, where a person decides. */
+  commitRequiresApproval: boolean; pushRequiresApproval: boolean
+}
+/** Real execution. A delegation is the handoff; this is the work being done. */
+export interface AgentWork {
+  id: string; agentId: string; delegationId?: string; parentWorkId?: string
+  objective: string; constraints: string; expectedResult: string
+  projectId: string; workspaceId?: string
+  status: AgentWorkStatus; statusReason?: string
+  /** Which runtime actually took the work, and how it was chosen. Provenance, never identity. */
+  providerId?: string; modelId?: string; runtimeSource?: string
+  terminalSessionId?: string; workingDirectory?: string
+  /** The workspace and pane the provider session runs in — what "Open in Code" focuses. */
+  executionWorkspaceId?: string; executionPaneId?: string
+  authority: AgentWorkAuthority
+  originConversationId?: string
+  resultSummary?: string; errorCode?: string; errorMessage?: string
+  createdAt: string; startedAt?: string; completedAt?: string; updatedAt: string
+}
+/** One inspectable step. The evidence behind a claim, not a transcript. */
+export interface AgentWorkEvent {
+  id: string; workId: string; sequence: number; kind: string; summary: string
+  level: string; metadata: Record<string, unknown>; createdAt: string
+}
+export interface StartAgentWorkInput {
+  agentId: string; delegationId?: string; parentWorkId?: string
+  objective: string; constraints?: string; expectedResult?: string
+  projectId: string; workspaceId?: string; originConversationId?: string; runtimeId?: string
+}
+export interface AgentWorkspaceAuthority { agentId: string; projectId: string; workspaceId?: string; access: 'read' | 'read_write'; grantedAt: string }
+export interface AgentProductState { selectedMode: ProductMode; selectedAgentId?: string; selectedConversationId?: string }
+export interface AgentOrganizationSnapshot {
+  agents: OrganizationalAgent[]; conversations: AgentConversation[]; entries: AgentConversationEntry[]
+  delegations: AgentDelegation[]; work: AgentWork[]; authorities: AgentWorkspaceAuthority[]
+  productState: AgentProductState
+}
+/** What Paralith does when a teammate reaches for one capability. Three values, because "may
+ * never publish" and "may publish once you have looked" are different teammates. */
+export type AgentCapabilityDecision = 'allow' | 'ask' | 'deny'
+/** A teammate's standing grant over one Project. The ceiling every capability is resolved inside;
+ * `none` is stored as the absence of a grant, never as a refusal row. */
+export type AgentProjectAccess = 'none' | 'read' | 'read_write'
+export interface AgentCapability { agentId: string; capability: string; decision: AgentCapabilityDecision }
+/** One consequential action a run has stopped in front of, waiting for a person. Durable: a
+ * restart finds the same pending decision. */
+export interface AgentApproval {
+  id: string; workId: string; agentId?: string; agentName?: string; projectId: string
+  /** `commit` or `push`. */
+  kind: string
+  summary: string
+  /** Repository facts Paralith observed, plus what the runtime reported — labelled separately so
+   * the card can show which parts are measured and which are claimed. */
+  detail: Record<string, unknown>
+  status: string; decisionNote?: string; createdAt: string; decidedAt?: string
+}
+/** A repeatable procedure a teammate can apply. Content, not authority: a Skill reaches a runtime
+ * through the work prompt, so having one can never widen what an Agent may do. */
+export interface AgentSkill {
+  id: string; name: string; summary: string; appliesWhen: string
+  procedure: string; validation: string; expectedResult: string
+  createdAt: string; updatedAt: string
+}
+export interface SaveAgentSkillInput {
+  /** Absent creates; present edits in place, keeping every assignment. */
+  id?: string
+  name: string; summary?: string; appliesWhen?: string
+  procedure: string; validation?: string; expectedResult?: string
+}
+/** Recurring work an Agent owns. Every execution is an ordinary run, with the same timeline,
+ * evidence and authority as work a human delegated by hand. */
+export interface AgentRoutine {
+  id: string; agentId: string; name: string; objective: string; constraints: string
+  projectId: string; cadence: AgentRoutineCadence; enabled: boolean
+  nextRunAt?: string; lastRunAt?: string; lastRunId?: string; lastStatus?: string
+  createdAt: string; updatedAt: string
+}
+export type AgentRoutineCadence = 'hourly' | 'daily' | 'weekly'
+export interface SaveAgentRoutineInput {
+  id?: string; agentId: string; name: string; objective: string; constraints?: string
+  projectId: string; cadence: AgentRoutineCadence; enabled?: boolean
+}
+export interface CreateOrganizationalAgentInput {
+  name: string; role: string; brief: string; responsibilities: string[]; intelligencePreference: string
+  projectId?: string; workspaceId?: string; projectAccess?: 'none' | 'read' | 'read_write'
+}
+export interface CreateAgentDelegationInput {
+  ownerAgentId: string; recipientAgentId: string; objective: string; relevantContext: string
+  constraints: string; expectedResult: string; authorityBoundary: string; parentDelegationId?: string
+  projectId?: string; workspaceId?: string
+  /** Start real work as soon as the delegation is recorded. Without it the delegation is only an
+   * organizational handoff. */
+  execute?: boolean
+  /** Runtime for the resulting work. Inherits the recipient's preference when absent. */
+  runtimeId?: string
+  /** Conversation to report the structured result back into. */
+  originConversationId?: string
 }
 
 /** Lifecycle + security events emitted by an embedded browser view. `payload` on `inspect-selected`

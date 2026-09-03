@@ -75,6 +75,14 @@ pub struct AppState {
     /// needs a human, fed by the agent runtime and by a GitHub watcher. Shares `database` and the
     /// authenticated `repository` provider path; it owns no credentials of its own.
     activity: ActivityService,
+    /// Execution for Agent Mode conversations: runtime discovery, runtime resolution, and the
+    /// streamed turn itself. Composes the detector, the shared provider invocation grammar, the
+    /// terminal service and the Context Fabric; it owns no second execution stack.
+    agent_conversations: services::AgentConversationService,
+    /// Execution for Agent Work: authority resolution, the bounded handoff package, and the
+    /// provider session that actually changes a repository. Shares the conversation service's
+    /// runtime resolution and the same terminal, context and Run persistence as everything else.
+    agent_work: services::AgentWorkService,
 }
 
 pub(crate) fn require_main_window(window: &tauri::Window) -> errors::AppResult<()> {
@@ -546,8 +554,54 @@ pub fn run() {
             let activity =
                 ActivityService::new(database.clone(), repository.clone(), app.handle().clone());
             terminals.set_activity(activity.clone());
+            // Agent Mode conversation execution. Composed from services that already exist so a
+            // turn runs through the same detector, provider grammar, PTY and Context Fabric the
+            // rest of Paralith uses.
+            let agent_conversations = services::AgentConversationService::new(
+                database.clone(),
+                detector.clone(),
+                terminals.clone(),
+                context.clone(),
+                app.handle().clone(),
+            );
+            // A turn's provider process does not survive the application. Any turn still marked
+            // live belongs to a previous run and is recorded as interrupted rather than rendered
+            // as though it were still streaming.
+            match agent_conversations.recover_after_restart() {
+                Ok(0) => {}
+                Ok(count) => log::info!("marked {count} interrupted Agent turn(s) after restart"),
+                Err(error) => log::warn!("Agent turn recovery skipped: {}", error.message),
+            }
+            // Agent Work execution, layered on the conversation service so both resolve a
+            // runtime the same way.
+            let agent_work = services::AgentWorkService::new(
+                database.clone(),
+                repository.clone(),
+                terminals.clone(),
+                context.clone(),
+                agent_conversations.clone(),
+                activity.clone(),
+                app.handle().clone(),
+            );
+            // Close the loop the other way: a conversation can now start and stop work, which is
+            // what lets Atlas delegate from an ordinary message instead of the user reopening a
+            // form. Bound after construction because work already depends on conversations.
+            agent_conversations.bind_executor(std::sync::Arc::new(agent_work.clone()));
+            // Engineering work does not survive the application either. Anything still marked
+            // live belongs to a previous run and is recorded as interrupted; nothing restarts on
+            // its own, because re-running a half-finished repository change unasked is its own
+            // hazard.
+            match agent_work.recover_after_restart() {
+                Ok(0) => {}
+                Ok(count) => log::info!("recovered {count} interrupted agent work items"),
+                Err(error) => log::warn!("agent work recovery failed: {}", error.code),
+            }
             if !recovery_mode {
                 activity.start();
+                // Recurring Agent work only schedules itself in a normal launch. A recovery boot
+                // is for repairing state, not for firing everything that fell due while the
+                // application was unable to start.
+                agent_work.start_routines();
             }
             app.manage(AppState {
                 database,
@@ -579,6 +633,8 @@ pub fn run() {
                 updates: updates.clone(),
                 usage,
                 usage_telemetry,
+                agent_conversations,
+                agent_work,
             });
             if let Some(state) = app.try_state::<AppState>() {
                 spawn_runtime_health_logger(state.inner().clone());
@@ -771,6 +827,39 @@ pub fn run() {
             commands::resync_activity,
             commands::review_activity_deployment,
             commands::dismiss_activity_thread,
+            commands::get_agent_organization,
+            commands::create_organizational_agent,
+            commands::create_agent_conversation,
+            commands::add_agent_conversation_entry,
+            commands::search_agent_history,
+            commands::create_agent_delegation,
+            commands::start_agent_work,
+            commands::cancel_agent_work,
+            commands::continue_agent_work,
+            commands::list_agent_work_events,
+            commands::set_agent_workspace_access,
+            commands::list_agent_capabilities,
+            commands::set_agent_capability,
+            commands::list_agent_approvals,
+            commands::decide_agent_approval,
+            commands::list_agent_skills,
+            commands::list_agent_skill_assignments,
+            commands::save_agent_skill,
+            commands::delete_agent_skill,
+            commands::set_agent_skill_assigned,
+            commands::list_agent_routines,
+            commands::save_agent_routine,
+            commands::delete_agent_routine,
+            commands::run_agent_routine_now,
+            commands::save_agent_product_state,
+            commands::set_organizational_agent_pinned,
+            commands::reorder_organizational_agents,
+            commands::reorder_agent_conversations,
+            commands::list_agent_runtimes,
+            commands::send_agent_message,
+            commands::cancel_agent_message,
+            commands::set_agent_conversation_runtime,
+            commands::set_agent_intelligence_preference,
             commands::get_settings,
             commands::get_ai_usage_snapshots,
             commands::get_ai_usage_history,

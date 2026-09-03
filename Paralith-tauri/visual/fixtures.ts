@@ -8,6 +8,7 @@
  */
 
 const NOW = '2026-08-12T09:41:00Z'
+const PRODUCT_MODE = new URLSearchParams(globalThis.location?.search ?? '').get('mode') === 'agent' ? 'agent' : 'code'
 
 export const project = {
   id: 'proj-paralith',
@@ -597,6 +598,52 @@ const projectFile = {
 }
 
 export const FIXTURES: Record<string, unknown> = {
+  get_agent_organization: {
+    agents: [
+      { id: 'atlas', name: 'Atlas', role: 'Chief of Staff', brief: 'Coordinate priorities and bounded delegation.', responsibilities: ['Coordinate priorities'], avatarSeed: 'atlas', intelligencePreference: 'automatic', workState: 'idle', pinned: true, position: 0, createdAt: NOW, updatedAt: NOW },
+      { id: 'forge', name: 'Forge', role: 'Engineering Lead', brief: 'Own implementation and verification.', responsibilities: ['Engineering delivery'], avatarSeed: 'forge', intelligencePreference: 'automatic', workState: 'working', workStateDetail: 'Running tests', pinned: false, position: 1, createdAt: NOW, updatedAt: NOW },
+      { id: 'scout', name: 'Scout', role: 'Researcher', brief: 'Return sourced findings.', responsibilities: ['Research'], avatarSeed: 'scout', intelligencePreference: 'subscription_first', workState: 'complete', workStateDetail: 'Research complete', pinned: false, position: 2, createdAt: NOW, updatedAt: NOW },
+    ],
+    conversations: [
+      { id: 'atlas-general', agentId: 'atlas', title: 'General', position: 0, createdAt: NOW, updatedAt: NOW },
+      { id: 'atlas-product', agentId: 'atlas', title: 'Product direction', position: 1, runtimePreference: 'codex/gpt-5.5', createdAt: NOW, updatedAt: NOW },
+      { id: 'forge-general', agentId: 'forge', title: 'General', position: 0, createdAt: NOW, updatedAt: NOW },
+      { id: 'scout-general', agentId: 'scout', title: 'General', position: 0, createdAt: NOW, updatedAt: NOW },
+    ],
+    entries: [
+      { id: 'entry-1', conversationId: 'atlas-general', kind: 'event', authorAgentId: 'atlas', body: 'Atlas joined the team as Chief of Staff.', metadata: {}, state: 'complete', createdAt: NOW, updatedAt: NOW },
+      { id: 'entry-2', conversationId: 'atlas-general', kind: 'user', body: 'Turn the approved notification direction into a bounded engineering task.', metadata: {}, state: 'complete', createdAt: NOW, updatedAt: NOW },
+      { id: 'entry-3', conversationId: 'atlas-general', kind: 'agent', authorAgentId: 'atlas', body: 'Forge should own it. The Activity system already normalizes agent state, so the work is a delivery path into it rather than a second notification engine.\n\nI would bound the task to the existing surface and require a passing test run before review.', metadata: {}, state: 'complete', runtimeProvider: 'claude', runtimeModel: 'sonnet', parentEntryId: 'entry-2', createdAt: NOW, updatedAt: NOW },
+      { id: 'entry-4', conversationId: 'atlas-general', kind: 'user', body: 'Draft the delegation.', metadata: {}, state: 'complete', createdAt: NOW, updatedAt: NOW },
+      { id: 'entry-5', conversationId: 'atlas-general', kind: 'agent', authorAgentId: 'atlas', body: 'Drafting the bounded delegation for Forge', metadata: {}, state: 'streaming', runtimeProvider: 'claude', runtimeModel: 'sonnet', parentEntryId: 'entry-4', createdAt: NOW, updatedAt: NOW },
+    ],
+    delegations: [{ id: 'delegation-1', ownerAgentId: 'atlas', recipientAgentId: 'forge', objective: 'Implement the approved notification system using the existing Activity architecture.', relevantContext: 'Approved in product direction.', constraints: 'Preserve existing terminals and do not publish.', expectedResult: 'Verified implementation.', authorityBoundary: 'Approved workspace only.', projectId: project.id, workspaceId: workspace.id, status: 'ready', createdAt: NOW, updatedAt: NOW }],
+    work: [
+      { id: 'work-1', agentId: 'forge', delegationId: 'delegation-1', objective: 'Implement the approved notification system using the existing Activity architecture.', constraints: 'Do not commit or push.', expectedResult: 'Verified implementation.', projectId: project.id, workspaceId: workspace.id, status: 'working', statusReason: 'Implement the approved notification system', providerId: 'codex', modelId: 'gpt-5.5', runtimeSource: 'agent', terminalSessionId: 'session-work-1', executionWorkspaceId: `agent-mode-work-${project.id}`, executionPaneId: 'agent-work-work-1', authority: { read: true, write: true, runCommands: true, commit: false, push: false }, originConversationId: 'atlas-general', createdAt: NOW, startedAt: NOW, updatedAt: NOW },
+      { id: 'work-2', agentId: 'scout', objective: 'Establish whether the updater manifest separates channels correctly.', constraints: 'Read only.', expectedResult: 'Sourced findings.', projectId: project.id, status: 'provider_limit', statusReason: 'This runtime reached its usage limit.', providerId: 'claude', modelId: 'opus', runtimeSource: 'automatic', terminalSessionId: 'session-work-2', executionWorkspaceId: `agent-mode-work-${project.id}`, executionPaneId: 'agent-work-work-2', authority: { read: true, write: false, runCommands: true, commit: false, push: false }, originConversationId: 'scout-general', createdAt: NOW, startedAt: NOW, updatedAt: NOW },
+    ],
+    authorities: [{ agentId: 'forge', projectId: project.id, workspaceId: workspace.id, access: 'read_write', grantedAt: NOW }],
+    productState: { selectedMode: PRODUCT_MODE, selectedAgentId: 'atlas', selectedConversationId: 'atlas-general' },
+  },
+  // One connected runtime family and one that is installed but not signed in, so the picker's
+  // honest-unavailability path is visible in the harness rather than only in theory.
+  list_agent_runtimes: [
+    { id: 'claude/opus', providerId: 'claude', providerName: 'Claude', modelId: 'opus', displayName: 'Opus', description: 'Deep planning and architecture work.', installed: true, authenticated: true, available: true, version: '2.4.0' },
+    { id: 'claude/sonnet', providerId: 'claude', providerName: 'Claude', modelId: 'sonnet', displayName: 'Sonnet', description: 'Balanced coding, review, and implementation.', installed: true, authenticated: true, available: true, version: '2.4.0' },
+    { id: 'codex/gpt-5.5', providerId: 'codex', providerName: 'Codex', modelId: 'gpt-5.5', displayName: 'GPT-5.5', description: 'Strong general coding and repository work.', installed: true, authenticated: false, available: false, unavailableReason: "Sign in to this runtime's CLI to use it here." },
+  ],
+  start_agent_work: null,
+  cancel_agent_work: null,
+  continue_agent_work: null,
+  list_agent_work_events: [
+    { id: 'event-1', workId: 'work-1', sequence: 1, kind: 'started', summary: 'Started engineering work \u00b7 Codex GPT-5.5', level: 'info', metadata: {}, createdAt: NOW },
+    { id: 'event-2', workId: 'work-1', sequence: 2, kind: 'validation', summary: 'Running validation', level: 'info', metadata: {}, createdAt: NOW },
+  ],
+  send_agent_message: null,
+  cancel_agent_message: null,
+  set_agent_conversation_runtime: null,
+  set_agent_intelligence_preference: null,
+  save_agent_product_state: null,
   get_startup_status: { recoveryMode: false },
   get_settings: settings,
   save_settings: settings,

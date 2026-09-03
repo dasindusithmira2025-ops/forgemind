@@ -1,4 +1,8 @@
 mod activity;
+pub mod agent_authority;
+#[cfg(test)]
+mod agent_authority_tests;
+pub mod agent_work;
 pub mod backup;
 pub(crate) mod code;
 pub(crate) mod database_studio;
@@ -10,6 +14,7 @@ pub mod legacy_migration;
 pub(crate) mod memory;
 pub mod migrations;
 pub(crate) mod orchestration;
+pub mod organization;
 mod placement;
 mod repair;
 mod repository;
@@ -1532,7 +1537,8 @@ impl DatabaseService {
         if matches!(
             session.provider,
             AgentProvider::Claude | AgentProvider::Codex | AgentProvider::Opencode
-        ) {
+        ) && !is_engine_supervised_workspace(&session.workspace_id)
+        {
             let pane: (Option<String>, String, String) = transaction
                 .query_row(
                     "SELECT profile_id,args_json,executable_path FROM workspace_panes WHERE id=?1 AND workspace_id=?2",
@@ -1764,6 +1770,17 @@ fn row_to_workspace(row: &Row<'_>) -> rusqlite::Result<Workspace> {
         last_opened_at: row.get(9)?,
         panes: Vec::new(),
     })
+}
+
+/// A provider session an engine owns end to end is not a user's interactive agent session.
+///
+/// An Agent Mode conversation turn is launched, observed and finished by the conversation
+/// runtime. It has no pane to reattach to and nothing to resume once it ends, so recording one in
+/// the resume ledger would put a dead chat turn in the Agent Resume Center for every message the
+/// user ever sent. The terminal row is still written; only the resumable-session ledger is
+/// skipped.
+fn is_engine_supervised_workspace(workspace_id: &str) -> bool {
+    workspace_id.starts_with("agent-mode-")
 }
 
 fn load_project_workspaces(connection: &Connection, project_id: &str) -> AppResult<Vec<Workspace>> {
@@ -2061,6 +2078,92 @@ mod tests {
         database
             .mark_session_ended(&session.id, "exited", Some(0), b"bye")
             .unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn an_agent_mode_turn_is_recorded_as_a_terminal_but_never_as_a_resumable_session() {
+        let database = DatabaseService::in_memory().unwrap();
+        let root = std::env::temp_dir().join(format!("paralith-turn-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let saved = database.upsert_project(&project(&root)).unwrap();
+        let request = database
+            .prepare_agent_turn_terminal(
+                &saved.id,
+                "chat",
+                "Atlas · Sonnet",
+                "claude",
+                &std::env::current_exe().unwrap().to_string_lossy(),
+                &["--print".to_string()],
+                &root.to_string_lossy(),
+            )
+            .unwrap();
+        // The hidden runtime workspace is never a user workspace, so it must not appear in any
+        // workspace list the user sees.
+        assert!(database
+            .list_workspaces_for_project(&saved.id)
+            .unwrap()
+            .iter()
+            .all(|workspace| workspace.id != request.workspace_id));
+
+        let session = crate::models::TerminalSession {
+            id: Uuid::new_v4().to_string(),
+            project_id: request.project_id.clone(),
+            workspace_id: request.workspace_id.clone(),
+            pane_id: request.pane_id.clone(),
+            provider: crate::models::AgentProvider::Claude,
+            executable: request.executable_path.clone(),
+            arguments: request.args.clone(),
+            title: request.title.clone(),
+            working_directory: request.working_directory.clone(),
+            status: "running".into(),
+            process_id: Some(321),
+            started_at: Utc::now().to_rfc3339(),
+            ended_at: None,
+            exit_code: None,
+            output_tail: Vec::new(),
+            next_sequence: 0,
+            log_path: None,
+            restoration_state: "not_requested".into(),
+            dropped_output_bytes: 0,
+        };
+        database.record_session(&session).unwrap();
+
+        // The terminal row exists, because the turn's answer is read out of its output.
+        assert!(database
+            .get_terminal_session(&session.id)
+            .unwrap()
+            .is_some());
+        // The resume ledger does not: there is no pane to reattach to and nothing to resume, and
+        // otherwise every message ever sent would become a card in the Agent Resume Center.
+        assert!(database
+            .list_agent_resume_records(true)
+            .unwrap()
+            .iter()
+            .all(|record| record.terminal_session_id != session.id));
+
+        // A second turn in the same conversation reuses the pane instead of accumulating rows.
+        database
+            .prepare_agent_turn_terminal(
+                &saved.id,
+                "chat",
+                "Atlas · Sonnet",
+                "claude",
+                &std::env::current_exe().unwrap().to_string_lossy(),
+                &["--print".to_string()],
+                &root.to_string_lossy(),
+            )
+            .unwrap();
+        let panes: i64 = database
+            .connection
+            .lock()
+            .query_row(
+                "SELECT count(*) FROM workspace_panes WHERE workspace_id=?1",
+                [&request.workspace_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(panes, 1);
         fs::remove_dir_all(root).unwrap();
     }
 
