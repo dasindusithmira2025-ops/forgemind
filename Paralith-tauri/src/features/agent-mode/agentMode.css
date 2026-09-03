@@ -144,6 +144,11 @@
 .agent-message header strong { color: var(--text-strong); font-size: var(--agent-label); font-weight: 650; }
 .agent-message header time { color: var(--faint); font-size: var(--agent-micro); font-variant-numeric: tabular-nums; }
 .agent-message p { margin: 8px 0 0; color: var(--text); font-size: var(--agent-body); line-height: 1.62; white-space: pre-wrap; overflow-wrap: anywhere; }
+.agent-message-body > p:first-child { margin-top: 8px; }
+.agent-message-body code { padding: 1px 4px; color: var(--text-strong); background: var(--surface-2); border-radius: 3px; font: .92em var(--font-mono); }
+.agent-message-body pre { position: relative; margin: 10px 0 0; padding: 11px 13px; overflow: auto; color: var(--text); background: var(--surface-2); border: 1px solid var(--border); border-radius: 5px; font: var(--agent-meta) / 1.55 var(--font-mono); white-space: pre; scrollbar-width: thin; }
+.agent-message-body pre[data-language]::before { content: attr(data-language); position: absolute; top: 3px; right: 6px; color: var(--faint); font: var(--agent-micro) var(--font-sans); text-transform: lowercase; }
+.agent-message-body pre code { padding: 0; color: inherit; background: transparent; border-radius: 0; font: inherit; }
 .agent-message.is-user p { color: var(--text); }
 /* Provenance is available, not advertised: it stays quiet until the row is hovered or focused. */
 .agent-provenance { color: var(--faint); background: var(--surface-2); border-radius: 3px; padding: 1px 5px; font-size: var(--agent-micro); opacity: 0; transition: opacity 90ms ease; }
@@ -206,6 +211,10 @@
 .agent-history-heading { margin-bottom: 20px; padding-bottom: 10px; display: flex; align-items: baseline; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--border-subtle); }
 .agent-history-heading strong { color: var(--text); font-size: var(--agent-label); }
 .agent-history-heading span { color: var(--faint); font-size: var(--agent-meta); }
+.agent-history-error { margin: 0 0 18px; padding: 9px 11px; color: var(--danger-text); background: var(--danger-soft); border-radius: 4px; font-size: var(--agent-label); }
+.agent-history-result { position: relative; padding-right: 120px; }
+.agent-history-result > button { position: absolute; top: 2px; right: 0; color: var(--muted); background: transparent; border: 0; font-size: var(--agent-micro); cursor: pointer; }
+.agent-history-result > button:hover { color: var(--text); text-decoration: underline; }
 
 /* ---- Composer: the command surface -------------------------------------------------------- */
 .agent-composer { position: relative; width: var(--agent-column); margin: 0 auto 18px; padding: 2px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: 8px; box-shadow: 0 1px 3px color-mix(in srgb, var(--bg) 55%, transparent); }
@@ -218,6 +227,14 @@
 .agent-composer-icon:hover:not(:disabled) { color: var(--text); background: var(--surface-2); }
 .agent-composer-icon:disabled { opacity: .4; cursor: default; }
 .agent-composer-scope { overflow: hidden; color: var(--faint); font-size: var(--agent-micro); text-overflow: ellipsis; white-space: nowrap; }
+.agent-attachment-input { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; pointer-events: none; }
+.agent-attachments { margin: 8px 9px 0; padding: 0; display: flex; flex-wrap: wrap; gap: 5px; list-style: none; }
+.agent-attachments li { max-width: 240px; height: 25px; padding: 0 4px 0 7px; display: flex; align-items: center; gap: 5px; color: var(--muted); background: var(--surface-2); border: 1px solid var(--border); border-radius: 4px; font-size: var(--agent-micro); }
+.agent-attachments li span { overflow: hidden; color: var(--text); text-overflow: ellipsis; white-space: nowrap; }
+.agent-attachments li small { flex: none; color: var(--faint); }
+.agent-attachments li button { width: 19px; height: 19px; display: grid; place-items: center; color: var(--faint); background: transparent; border: 0; border-radius: 3px; cursor: pointer; }
+.agent-attachments li button:hover { color: var(--text); background: var(--surface-hover); }
+.agent-attachment-error { margin: 6px 13px 0; color: var(--danger-text); font-size: var(--agent-micro); }
 .agent-composer-actions { display: flex; align-items: center; gap: 7px; }
 .agent-intelligence-trigger { height: 26px; padding: 0 8px; display: inline-flex; align-items: center; gap: 5px; color: var(--muted); background: transparent; border: 1px solid var(--border); border-radius: 5px; font-size: var(--agent-meta); white-space: nowrap; cursor: pointer; }
 .agent-intelligence-trigger:hover { color: var(--text); background: var(--surface-2); border-color: var(--border-strong); }
@@ -327,6 +344,12 @@
 .agent-access-grants div { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 8px 11px; background: var(--surface-2); border-radius: 4px; }
 .agent-access-grants dt { color: var(--text); font-size: var(--agent-label); }
 .agent-access-grants dd { margin: 0; color: var(--muted); font-size: var(--agent-meta); }
+/* The grant is a control, not a readout: a teammate created without access has to be able to be
+   given some, or every delegation to them is refused with no way to fix it. */
+.agent-access-select select { height: 26px; padding: 0 6px; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 4px; outline: none; font: inherit; font-size: var(--agent-meta); cursor: pointer; }
+.agent-access-select select:hover:not(:disabled) { border-color: var(--border-strong); }
+.agent-access-select select:focus-visible { border-color: var(--accent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 28%, transparent); }
+.agent-access-select select:disabled { opacity: .55; cursor: default; }
 
 .agent-capability-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; }
 .agent-capability-list li { padding: 10px 0; display: flex; align-items: center; justify-content: space-between; gap: 14px; border-bottom: 1px solid var(--border-subtle); }

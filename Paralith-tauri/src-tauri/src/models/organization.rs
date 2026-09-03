@@ -23,6 +23,9 @@ pub struct OrganizationalAgent {
 pub struct AgentConversation {
     pub id: String,
     pub agent_id: String,
+    /// Project whose Context Fabric and repository may be used by this conversation. Legacy
+    /// conversations remain unbound until the first project-aware turn.
+    pub project_id: Option<String>,
     pub title: String,
     pub position: i64,
     /// Conversation-level runtime choice. `None` inherits the Agent's preference, which in turn
@@ -275,6 +278,15 @@ pub struct StartAgentWorkInput {
     pub runtime_id: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentMessageAttachment {
+    pub name: String,
+    pub media_type: String,
+    pub content: String,
+    pub size: usize,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SendAgentMessageInput {
@@ -284,6 +296,8 @@ pub struct SendAgentMessageInput {
     /// conversation or Agent default.
     pub runtime_id: Option<String>,
     pub project_id: Option<String>,
+    #[serde(default)]
+    pub attachments: Vec<AgentMessageAttachment>,
 }
 
 // ---- Authority ----------------------------------------------------------------------------

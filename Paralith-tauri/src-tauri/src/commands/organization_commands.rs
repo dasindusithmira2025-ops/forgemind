@@ -27,12 +27,15 @@ pub fn create_organizational_agent(
 #[tauri::command(async)]
 pub fn create_agent_conversation(
     agent_id: String,
+    project_id: Option<String>,
     title: String,
     window: Window,
     state: State<'_, AppState>,
 ) -> AppResult<AgentConversation> {
     crate::require_main_window(&window)?;
-    state.database.create_agent_conversation(&agent_id, &title)
+    state
+        .database
+        .create_agent_conversation(&agent_id, project_id.as_deref(), &title)
 }
 
 #[tauri::command(async)]
@@ -51,10 +54,13 @@ pub fn add_agent_conversation_entry(
 #[tauri::command(async)]
 pub fn search_agent_history(
     agent_id: String,
+    project_id: String,
     query: String,
     state: State<'_, AppState>,
 ) -> AppResult<Vec<AgentConversationEntry>> {
-    state.database.search_agent_history(&agent_id, &query)
+    state
+        .database
+        .search_agent_history(&agent_id, Some(&project_id), &query)
 }
 
 /// Record a bounded delegation, and — when it asks for execution — start the real work.
@@ -291,6 +297,30 @@ pub fn set_agent_capability(
         .database
         .set_agent_capability(&agent_id, &capability, decision)?;
     state.database.agent_capabilities(&agent_id)
+}
+
+/// Grant, change or revoke a teammate's access to this Project.
+///
+/// Returns the refreshed organization so the rail, the delegation panel and the Access panel all
+/// read the same grant immediately — a stale grant is the difference between a delegation that
+/// runs and one that is refused.
+#[tauri::command(async)]
+pub fn set_agent_workspace_access(
+    agent_id: String,
+    project_id: String,
+    workspace_id: Option<String>,
+    access: String,
+    window: Window,
+    state: State<'_, AppState>,
+) -> AppResult<AgentOrganizationSnapshot> {
+    crate::require_main_window(&window)?;
+    state.database.set_agent_workspace_access(
+        &agent_id,
+        &project_id,
+        workspace_id.as_deref(),
+        &access,
+    )?;
+    state.database.agent_organization_snapshot()
 }
 
 // ---- Approvals ------------------------------------------------------------------------------

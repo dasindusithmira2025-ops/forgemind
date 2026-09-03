@@ -32,14 +32,18 @@ use crate::database::DatabaseService;
 use crate::errors::{AppError, AppResult};
 use crate::models::context::ContextRequest;
 use crate::models::{
-    AgentApproval, AgentWork, AgentWorkAuthority, OrganizationalAgent, StartAgentWorkInput,
+    AgentApproval, AgentProvider, AgentWork, AgentWorkAuthority, OrganizationalAgent,
+    RepositoryActor, RepositoryActorKind, RepositoryOperation, RepositoryOperationContext,
+    RepositoryOperationRequest, RepositoryWorktreeLease, StartAgentWorkInput,
 };
 use crate::services::agent_conversation::AgentConversationService;
 use crate::services::provider_session::{self, ProviderOutcome};
-use crate::services::{ContextCompiler, RepositoryService, TerminalManager};
+use crate::services::repository_service::snapshot_fingerprint;
+use crate::services::{ActivityService, ContextCompiler, RepositoryService, TerminalManager};
 use parking_lot::Mutex;
 use serde_json::json;
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -69,6 +73,7 @@ pub struct AgentWorkService {
     terminals: TerminalManager,
     context: ContextCompiler,
     conversations: AgentConversationService,
+    activity: ActivityService,
     app: AppHandle,
     /// Cancellation flags for in-flight work, keyed by work id. Absence means "not running here",
     /// which is also how a restart is handled: the map starts empty and the database repair pass
@@ -86,6 +91,7 @@ impl AgentWorkService {
         terminals: TerminalManager,
         context: ContextCompiler,
         conversations: AgentConversationService,
+        activity: ActivityService,
         app: AppHandle,
     ) -> Self {
         Self {
@@ -94,6 +100,7 @@ impl AgentWorkService {
             terminals,
             context,
             conversations,
+            activity,
             app,
             active: Arc::new(Mutex::new(HashMap::new())),
             routines_running: Arc::new(AtomicBool::new(false)),
@@ -181,23 +188,58 @@ impl AgentWorkService {
             )
             .entity(work_id));
         }
+        if !matches!(previous.status.as_str(), "provider_limit" | "interrupted") {
+            return Err(AppError::new(
+                "agent_work_not_continuable",
+                "Only provider-limited or interrupted work can continue.",
+                true,
+            )
+            .entity(work_id));
+        }
+        let runtime_id = runtime_id
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| {
+                AppError::new(
+                    "agent_continuation_runtime_required",
+                    "Choose an available runtime for the continuation.",
+                    true,
+                )
+                .entity(work_id)
+            })?;
         let agent = self.database.get_organizational_agent(&previous.agent_id)?;
+        let runtime = self
+            .conversations
+            .resolve_runtime(&agent, None, Some(&runtime_id))?;
+        if previous.status == "provider_limit"
+            && previous.provider_id.as_deref() == Some(runtime.provider_id.as_str())
+            && previous.model_id.as_deref() == Some(runtime.model_id.as_str())
+        {
+            return Err(AppError::new(
+                "agent_continuation_runtime_unchanged",
+                "Choose a different runtime after a provider limit.",
+                true,
+            )
+            .entity(work_id));
+        }
+        let authority = self.database.agent_work_authority(
+            &agent.id,
+            &previous.project_id,
+            previous.workspace_id.as_deref(),
+            &previous.constraints,
+        )?;
+        if !authority.read {
+            return Err(AppError::new(
+                "agent_work_access_denied",
+                "This Agent no longer has access to the Project.",
+                true,
+            )
+            .entity(&agent.id)
+            .layer("authority"));
+        }
         let continuation = self.continuation_package(&previous);
-        let work = self.database.create_agent_work(NewAgentWork {
-            agent_id: &previous.agent_id,
-            delegation_id: previous.delegation_id.as_deref(),
-            parent_work_id: Some(&previous.id),
-            objective: &previous.objective,
-            constraints: &previous.constraints,
-            expected_result: &previous.expected_result,
-            project_id: &previous.project_id,
-            workspace_id: previous.workspace_id.as_deref(),
-            origin_conversation_id: previous.origin_conversation_id.as_deref(),
-            runtime_preference: runtime_id.as_deref(),
-            // The continuation inherits the authority the paused work already had. Changing
-            // runtime is not a reason to widen or narrow what the Agent may do.
-            authority: previous.authority,
-        })?;
+        let work =
+            self.database
+                .prepare_agent_work_continuation(&previous.id, &runtime_id, authority)?;
         self.database.append_agent_work_event(
             &work.id,
             "runtime_transition",
@@ -211,7 +253,7 @@ impl AgentWorkService {
             "info",
             json!({ "previousWorkId": previous.id, "previousProvider": previous.provider_id }),
         )?;
-        self.spawn_with_continuation(work.clone(), agent, runtime_id, Some(continuation))?;
+        self.spawn_with_continuation(work.clone(), agent, Some(runtime_id), Some(continuation))?;
         Ok(work)
     }
 
@@ -417,8 +459,27 @@ impl AgentWorkService {
             Ok(runtime) => runtime,
             Err(error) => return WorkOutcome::failed(&error.code, error.message),
         };
-        let before = self.repository_state(&work.project_id);
-        let prompt = self.compile_package(work, agent, &project, continuation.as_deref());
+        let lease = match self.ensure_worktree(work, agent) {
+            Ok(lease) => lease,
+            Err(error) => return WorkOutcome::failed(&error.code, error.message),
+        };
+        let working_directory = lease.worktree_path.clone();
+        let before = self.repository_state(&work.project_id, Some(&working_directory));
+        let prompt = self.compile_package(
+            work,
+            agent,
+            &project,
+            &working_directory,
+            &lease.branch_name,
+            continuation.as_deref(),
+        );
+        if runtime.provider == AgentProvider::Codex && !work.authority.run_commands {
+            return WorkOutcome::failed(
+                "runtime_cannot_enforce_command_authority",
+                "Codex cannot structurally disable shell tools. Choose Claude or grant command authority."
+                    .into(),
+            );
+        }
         let invocation = AgentInvocation {
             provider: runtime.provider.clone(),
             model_id: runtime.model_id.clone(),
@@ -426,7 +487,8 @@ impl AgentWorkService {
             // The one place in Agent Mode where this can be true, and only when a persisted grant
             // survived the delegation's constraints.
             may_write: work.authority.write,
-            working_directory: project.root_path.clone(),
+            may_run_commands: work.authority.run_commands,
+            working_directory: working_directory.clone(),
             prompt,
             resume_session_id: None,
         };
@@ -444,7 +506,7 @@ impl AgentWorkService {
             runtime.provider.as_str(),
             &runtime.executable,
             &arguments,
-            &project.root_path,
+            &working_directory,
         ) {
             Ok(request) => request,
             Err(error) => return WorkOutcome::failed(&error.code, error.message),
@@ -459,7 +521,7 @@ impl AgentWorkService {
             &runtime.model_id,
             runtime.source,
             &session,
-            &project.root_path,
+            &working_directory,
         );
         let _ = self.database.append_agent_work_event(
             &work.id,
@@ -482,6 +544,9 @@ impl AgentWorkService {
             Some(&short(&work.objective, 48)),
             agent,
         );
+        if let Ok(Some(started)) = self.database.get_agent_work(&work.id) {
+            self.activity.record_agent_work(&started, &agent.name);
+        }
 
         // Only meaningful milestones reach the timeline. A provider emits thousands of tokens and
         // dozens of tool calls per run; republishing that would be noise pretending to be
@@ -496,7 +561,7 @@ impl AgentWorkService {
             WORK_TIMEOUT,
             |text| milestones.observe(self, &work.id, text),
         );
-        let after = self.repository_state(&work.project_id);
+        let after = self.repository_state(&work.project_id, Some(&working_directory));
         let evidence = self.evidence(work, before.as_ref(), after.as_ref(), &session.id);
         let message = provider_session::outcome_message(&followed.outcome);
         let (status, error_code) = match &followed.outcome {
@@ -519,7 +584,7 @@ impl AgentWorkService {
         }
     }
 
-    fn finish(&self, work: &AgentWork, agent: &OrganizationalAgent, outcome: WorkOutcome) {
+    fn finish(&self, work: &AgentWork, agent: &OrganizationalAgent, mut outcome: WorkOutcome) {
         self.active.lock().remove(&work.id);
         // Re-read: the row now carries the runtime provenance bound during execution, which the
         // report back to the parent names.
@@ -542,9 +607,42 @@ impl AgentWorkService {
         //
         // The result and the evidence are written either way. What the person is deciding about
         // includes what the run produced, so parking it must not lose that.
-        let awaiting = (outcome.status == "completed")
-            .then(|| requested_approval(&work.authority, outcome.result.requests.as_deref()))
+        let boundary_violation = outcome
+            .evidence
+            .get("boundaryViolation")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+        let requested = (outcome.status == "completed" && !boundary_violation)
+            .then(|| {
+                requested_repository_action(&work.authority, outcome.result.requests.as_deref())
+            })
             .flatten();
+        let awaiting = requested.filter(|action| action.needs_approval);
+
+        if let Some(action) = requested.filter(|action| !action.needs_approval) {
+            match self.perform_allowed_action(work, agent, action.kind) {
+                Ok(detail) => {
+                    outcome.evidence["repositoryAction"] = detail.clone();
+                    let _ = self.database.append_agent_work_event(
+                        &work.id,
+                        "repository_action_executed",
+                        &format!(
+                            "{} completed under {}'s standing authority.",
+                            action.kind, agent.name
+                        ),
+                        "info",
+                        detail,
+                    );
+                }
+                Err(error) => {
+                    outcome.status = "failed";
+                    outcome.error_code = Some(error.code.clone());
+                    outcome.message = Some(error.message.clone());
+                    outcome.evidence["repositoryActionError"] =
+                        json!({ "code": error.code, "message": error.message });
+                }
+            }
+        }
         let _ = self.database.finish_agent_work(
             &work.id,
             if awaiting.is_some() {
@@ -557,8 +655,8 @@ impl AgentWorkService {
             outcome.message.as_deref(),
             &outcome.evidence,
         );
-        if let Some(kind) = awaiting {
-            if self.request_approval(work, agent, kind, &outcome) {
+        if let Some(action) = awaiting {
+            if self.request_approval(work, agent, action.kind, &outcome) {
                 return;
             }
             // The approval could not be recorded, so the run is not actually waiting for anybody.
@@ -603,6 +701,9 @@ impl AgentWorkService {
             work_state,
             detail.as_deref(),
         );
+        if let Ok(Some(finished)) = self.database.get_agent_work(&work.id) {
+            self.activity.record_agent_work(&finished, &agent.name);
+        }
         self.report_to_parent(work, agent, &outcome);
         self.publish(&work.id);
     }
@@ -624,16 +725,23 @@ impl AgentWorkService {
         kind: &'static str,
         outcome: &WorkOutcome,
     ) -> bool {
-        let repository = self.repository_state(&work.project_id);
+        let Some(repository) =
+            self.repository_state(&work.project_id, work.working_directory.as_deref())
+        else {
+            return false;
+        };
+        let Ok(state_fingerprint) = snapshot_fingerprint(&repository) else {
+            return false;
+        };
         let detail = json!({
             "objective": work.objective,
             "agentName": agent.name,
-            "branch": repository.as_ref().and_then(|state| state.branch.clone()),
-            "headSha": repository.as_ref().map(|state| state.head_sha.clone()),
-            "changedFiles": repository
-                .as_ref()
-                .map(|state| state.files.iter().map(|file| file.path.clone()).collect::<Vec<_>>())
-                .unwrap_or_default(),
+            "branch": repository.branch.clone(),
+            "headSha": repository.head_sha.clone(),
+            "repositoryPath": repository.repository_path.clone(),
+            "worktreePath": repository.worktree_path.clone(),
+            "stateFingerprint": state_fingerprint,
+            "changedFiles": repository.files.iter().map(|file| file.path.clone()).collect::<Vec<_>>(),
             // Reported, not observed. Labelled as such so the card can present it that way.
             "reportedSummary": outcome.result.summary,
             "reportedValidation": outcome.result.validation,
@@ -661,6 +769,9 @@ impl AgentWorkService {
                     json!({ "approvalId": approval.id, "kind": kind }),
                 );
                 self.transition(&work.id, "needs_approval", Some(&summary), agent);
+                if let Ok(Some(waiting)) = self.database.get_agent_work(&work.id) {
+                    self.activity.record_agent_work(&waiting, &agent.name);
+                }
                 true
             }
             Err(error) => {
@@ -672,6 +783,45 @@ impl AgentWorkService {
                 false
             }
         }
+    }
+
+    /// Execute a commit or push covered by the Agent's persisted `allow` capability. The runtime
+    /// never receives raw Git authority: Paralith snapshots the isolated worktree and performs an
+    /// exact-path operation through the same lease, policy and stale-state checks used by a human
+    /// approval.
+    fn perform_allowed_action(
+        &self,
+        work: &AgentWork,
+        agent: &OrganizationalAgent,
+        kind: &'static str,
+    ) -> AppResult<serde_json::Value> {
+        let snapshot = self
+            .repository_state(&work.project_id, work.working_directory.as_deref())
+            .ok_or_else(|| {
+                AppError::new(
+                    "agent_repository_unavailable",
+                    "The Agent worktree could not be inspected before its repository action.",
+                    true,
+                )
+                .entity(&work.id)
+            })?;
+        let actor = RepositoryActor {
+            kind: RepositoryActorKind::Agent,
+            id: agent.id.clone(),
+            display_name: agent.name.clone(),
+            agent_run_id: Some(work.id.clone()),
+            model: work.model_id.clone(),
+            task_id: Some(work.id.clone()),
+        };
+        let authorization_id = format!("agent-capability:{}:{}:{}", agent.id, work.id, kind);
+        self.perform_repository_action(
+            work,
+            kind,
+            &actor,
+            &snapshot,
+            &authorization_id,
+            "Allowed by the Agent's persisted capability policy.",
+        )
     }
 
     /// Resolve one approval and, when it is granted, carry the action out.
@@ -687,6 +837,10 @@ impl AgentWorkService {
         note: Option<String>,
     ) -> AppResult<AgentApproval> {
         let approval = self.database.get_agent_approval(approval_id)?;
+        if approved {
+            let work = self.require_work(&approval.work_id)?;
+            self.approved_snapshot(&work, &approval)?;
+        }
         // The conditional update is the replay guard: a second window, or a decision replayed
         // after a restart, does not move the row and therefore never reaches the execution below.
         if !self
@@ -751,42 +905,121 @@ impl AgentWorkService {
         work: &AgentWork,
         approval: &AgentApproval,
     ) -> AppResult<serde_json::Value> {
-        let directory = work.working_directory.clone();
+        let original = self.approved_snapshot(work, approval)?;
+        let actor = RepositoryActor {
+            kind: RepositoryActorKind::Agent,
+            id: work.agent_id.clone(),
+            display_name: approval
+                .agent_name
+                .clone()
+                .unwrap_or_else(|| "Agent".into()),
+            agent_run_id: Some(work.id.clone()),
+            model: work.model_id.clone(),
+            task_id: Some(work.id.clone()),
+        };
+        self.perform_repository_action(
+            work,
+            &approval.kind,
+            &actor,
+            &original,
+            &approval.id,
+            "Authorised by a Paralith user.",
+        )
+    }
+
+    fn perform_repository_action(
+        &self,
+        work: &AgentWork,
+        kind: &str,
+        actor: &RepositoryActor,
+        original: &crate::models::RepositorySnapshot,
+        authorization_id: &str,
+        authorization_note: &str,
+    ) -> AppResult<serde_json::Value> {
         let message = format!(
-            "{}\n\nAuthorised by a Paralith user. Agent run {}.",
+            "{}\n\n{} Agent run {}.",
             short(&work.objective, 72),
+            authorization_note,
             work.id
         );
-        let directory = directory.as_deref();
-        match approval.kind.as_str() {
+        let changed_files = original
+            .files
+            .iter()
+            .map(|file| file.path.clone())
+            .collect::<Vec<_>>();
+        match kind {
             "commit" => {
-                let output =
-                    self.repository
-                        .commit_authorized(&work.project_id, directory, &message)?;
-                Ok(json!({ "action": "commit", "output": short(&output, 400) }))
+                if changed_files.is_empty() {
+                    return Err(AppError::new(
+                        "agent_approval_no_changes",
+                        "The approved worktree no longer contains changes to commit.",
+                        true,
+                    )
+                    .entity(authorization_id));
+                }
+                let record = self.execute_agent_repository_operation(
+                    work,
+                    authorization_id,
+                    actor,
+                    original,
+                    RepositoryOperation::CommitChangeSet {
+                        message,
+                        paths: changed_files,
+                    },
+                    "commit",
+                )?;
+                Ok(json!({ "action": "commit", "operationId": record.id, "result": record.result }))
             }
             "push" => {
-                // The runtime may have committed nothing, expecting the approval to cover both
-                // steps. Committing first is what makes "approve the push" mean the change the
-                // person just looked at, rather than whatever happened to be committed already.
-                let committed = self
-                    .repository
-                    .has_uncommitted_changes(&work.project_id, directory)
-                    .unwrap_or(false)
-                    .then(|| {
-                        self.repository
-                            .commit_authorized(&work.project_id, directory, &message)
-                    })
-                    .transpose()?
-                    .is_some();
-                let (branch, output) = self
-                    .repository
-                    .push_authorized(&work.project_id, directory)?;
+                let committed = if changed_files.is_empty() {
+                    false
+                } else {
+                    self.execute_agent_repository_operation(
+                        work,
+                        authorization_id,
+                        actor,
+                        original,
+                        RepositoryOperation::CommitChangeSet {
+                            message,
+                            paths: changed_files,
+                        },
+                        "commit-before-push",
+                    )?;
+                    true
+                };
+                let current = self
+                    .repository_state(&work.project_id, work.working_directory.as_deref())
+                    .ok_or_else(|| {
+                        AppError::new(
+                            "agent_repository_unavailable",
+                            "The approved worktree could not be inspected before publishing.",
+                            true,
+                        )
+                    })?;
+                let branch = current.branch.clone().ok_or_else(|| {
+                    AppError::new(
+                        "agent_work_detached_head",
+                        "PARALITH will not publish a detached worktree.",
+                        true,
+                    )
+                })?;
+                let record = self.execute_agent_repository_operation(
+                    work,
+                    authorization_id,
+                    actor,
+                    &current,
+                    RepositoryOperation::PublishBranch {
+                        remote: "origin".into(),
+                        branch: branch.clone(),
+                    },
+                    "publish",
+                )?;
                 Ok(json!({
                     "action": "push",
                     "branch": branch,
                     "committed": committed,
-                    "output": short(&output, 400),
+                    "operationId": record.id,
+                    "result": record.result,
                 }))
             }
             other => Err(AppError::new(
@@ -795,6 +1028,101 @@ impl AgentWorkService {
                 false,
             )),
         }
+    }
+
+    fn execute_agent_repository_operation(
+        &self,
+        work: &AgentWork,
+        authorization_id: &str,
+        actor: &RepositoryActor,
+        snapshot: &crate::models::RepositorySnapshot,
+        operation: RepositoryOperation,
+        phase: &str,
+    ) -> AppResult<crate::models::RepositoryOperationRecord> {
+        let fingerprint = snapshot_fingerprint(snapshot)?;
+        self.repository.execute_authorized(
+            RepositoryOperationRequest {
+                context: RepositoryOperationContext {
+                    project_id: work.project_id.clone(),
+                    repository_path: Some(snapshot.repository_path.clone()),
+                    worktree_path: Some(snapshot.worktree_path.clone()),
+                    actor: actor.clone(),
+                    base_commit: Some(snapshot.head_sha.clone()),
+                    expected_branch: snapshot.branch.clone(),
+                    approval_id: Some(authorization_id.to_string()),
+                    idempotency_key: format!(
+                        "agent-authorization:{}:{}:{}",
+                        authorization_id, phase, snapshot.head_sha
+                    ),
+                    timeout_seconds: Some(120),
+                },
+                operation,
+            },
+            authorization_id,
+            &fingerprint,
+            |_| {},
+        )
+    }
+
+    fn approved_snapshot(
+        &self,
+        work: &AgentWork,
+        approval: &AgentApproval,
+    ) -> AppResult<crate::models::RepositorySnapshot> {
+        let expected_fingerprint = approval
+            .detail
+            .get("stateFingerprint")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| {
+                AppError::new(
+                    "agent_approval_incomplete",
+                    "This approval predates repository-state binding and cannot be executed safely.",
+                    true,
+                )
+                .entity(&approval.id)
+                .layer("repository_policy")
+            })?;
+        let expected_worktree = approval
+            .detail
+            .get("worktreePath")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| {
+                AppError::new(
+                    "agent_approval_incomplete",
+                    "The approval does not identify its isolated worktree.",
+                    true,
+                )
+                .entity(&approval.id)
+                .layer("repository_policy")
+            })?;
+        if work.working_directory.as_deref() != Some(expected_worktree) {
+            return Err(AppError::new(
+                "agent_approval_worktree_mismatch",
+                "The run no longer points to the worktree shown for approval.",
+                true,
+            )
+            .entity(&approval.id)
+            .layer("repository_policy"));
+        }
+        let current = self
+            .repository_state(&work.project_id, Some(expected_worktree))
+            .ok_or_else(|| {
+                AppError::new(
+                    "agent_repository_unavailable",
+                    "The approved worktree could not be inspected.",
+                    true,
+                )
+            })?;
+        if snapshot_fingerprint(&current)? != expected_fingerprint {
+            return Err(AppError::new(
+                "repository_approval_stale",
+                "Repository state changed after approval; review the current change and approve again.",
+                true,
+            )
+            .entity(&approval.id)
+            .layer("repository_policy"));
+        }
+        Ok(current)
     }
 
     /// Move a run out of `needs_approval` once a person has answered, and tell the parent.
@@ -827,6 +1155,7 @@ impl AgentWorkService {
             .ok()
             .flatten()
             .unwrap_or_else(|| work.clone());
+        self.activity.record_agent_work(&work, &agent.name);
         self.report_to_parent(
             &work,
             agent,
@@ -950,6 +1279,105 @@ impl AgentWorkService {
         }
     }
 
+    /// Give every engineering run an exclusive managed worktree before a provider starts.
+    ///
+    /// This is deliberately performed through `RepositoryService`: its persisted lease is the
+    /// authority checked again for every later commit or publish operation. A writable Agent is
+    /// never launched in the user's checkout, even when the checkout currently appears clean.
+    fn ensure_worktree(
+        &self,
+        work: &AgentWork,
+        agent: &OrganizationalAgent,
+    ) -> AppResult<RepositoryWorktreeLease> {
+        if let Some(working_directory) = work.working_directory.as_deref() {
+            if Path::new(working_directory).is_dir() {
+                if let Some(lease) = self
+                    .database
+                    .list_repository_worktree_leases(&work.project_id)?
+                    .into_iter()
+                    .find(|lease| {
+                        lease.status == "active"
+                            && lease.agent_id == agent.id
+                            && lease.task_id == work.id
+                            && lease.worktree_path == working_directory
+                    })
+                {
+                    let snapshot = self.repository.inspect(
+                        &work.project_id,
+                        Some(&lease.repository_path),
+                        Some(&lease.worktree_path),
+                    )?;
+                    if snapshot.branch.as_deref() == Some(lease.branch_name.as_str()) {
+                        return Ok(lease);
+                    }
+                }
+            }
+            return Err(AppError::new(
+                "agent_worktree_lease_lost",
+                "The isolated worktree lease for this run is no longer valid.",
+                true,
+            )
+            .entity(&work.id)
+            .layer("repository_lease"));
+        }
+        let base = self.repository.inspect(&work.project_id, None, None)?;
+        let expected_branch = base.branch.clone().ok_or_else(|| {
+            AppError::new(
+                "agent_work_detached_head",
+                "Agent Work needs a named base branch before it can create an isolated worktree.",
+                true,
+            )
+            .entity(&work.project_id)
+            .layer("repository_lease")
+        })?;
+        let branch = agent_work_branch(&agent.name, &work.id);
+        let actor = RepositoryActor {
+            kind: RepositoryActorKind::Agent,
+            id: agent.id.clone(),
+            display_name: agent.name.clone(),
+            agent_run_id: Some(work.id.clone()),
+            model: work.model_id.clone(),
+            task_id: Some(work.id.clone()),
+        };
+        let record = self.repository.execute(
+            RepositoryOperationRequest {
+                context: RepositoryOperationContext {
+                    project_id: work.project_id.clone(),
+                    repository_path: Some(base.repository_path.clone()),
+                    worktree_path: Some(base.worktree_path.clone()),
+                    actor,
+                    base_commit: Some(base.head_sha.clone()),
+                    expected_branch: Some(expected_branch),
+                    approval_id: None,
+                    idempotency_key: format!("agent-worktree:{}", work.id),
+                    timeout_seconds: Some(90),
+                },
+                operation: RepositoryOperation::CreateAgentWorktree {
+                    branch,
+                    base_commit: base.head_sha,
+                    agent_id: agent.id.clone(),
+                    task_id: work.id.clone(),
+                    file_scope: Vec::new(),
+                    expires_at: None,
+                },
+            },
+            |_| {},
+        )?;
+        let lease = record
+            .result
+            .and_then(|result| result.get("lease").cloned())
+            .ok_or_else(|| {
+                AppError::new(
+                    "agent_worktree_not_created",
+                    "PARALITH could not obtain the worktree lease for this Agent run.",
+                    false,
+                )
+                .entity(&work.id)
+                .layer("repository_lease")
+            })?;
+        serde_json::from_value(lease).map_err(AppError::database)
+    }
+
     /// Compile the bounded execution package.
     ///
     /// Not the delegating Agent's chat history. What crosses the handoff is the recipient's own
@@ -961,6 +1389,8 @@ impl AgentWorkService {
         work: &AgentWork,
         agent: &OrganizationalAgent,
         project: &crate::models::Project,
+        working_directory: &str,
+        branch: &str,
         continuation: Option<&str>,
     ) -> String {
         let mut prompt = format!(
@@ -982,12 +1412,10 @@ impl AgentWorkService {
             prompt.push_str(&format!("Constraints: {}\n", work.constraints.trim()));
         }
         prompt.push_str(&format!(
-            "\n## Where you are working\nProject: {} at {}\n",
-            project.name, project.root_path
+            "\n## Where you are working\nProject: {}\nIsolated worktree: {}\n",
+            project.name, working_directory
         ));
-        if let Some(branch) = project.git_branch.as_deref() {
-            prompt.push_str(&format!("Branch: {branch}\n"));
-        }
+        prompt.push_str(&format!("Branch: {branch}\n"));
         prompt.push_str(&authority_clause(&work.authority));
         if let Some(knowledge) = self.project_knowledge(work, agent) {
             prompt.push_str("\n## What this Project already knows\n");
@@ -1080,8 +1508,14 @@ impl AgentWorkService {
 
     /// The repository as it actually is, for before/after comparison. A Project that is not a Git
     /// repository simply has no Git evidence; that is reported as absence, never as a clean tree.
-    fn repository_state(&self, project_id: &str) -> Option<crate::models::RepositorySnapshot> {
-        self.repository.inspect(project_id, None, None).ok()
+    fn repository_state(
+        &self,
+        project_id: &str,
+        worktree_path: Option<&str>,
+    ) -> Option<crate::models::RepositorySnapshot> {
+        self.repository
+            .inspect(project_id, None, worktree_path)
+            .ok()
     }
 
     /// Observed evidence for the claims the Agent makes about its own work.
@@ -1274,8 +1708,8 @@ FILES: the files you changed, comma separated, or `none`.\n\
 COMMANDS: the commands you ran, comma separated, or `none`.\n\
 VALIDATION: what the validation actually reported, or `not run`. Never claim a result you did not observe.\n\
 UNRESOLVED: what remains blocked or uncertain, or `none`.\n\
-REQUESTS: `commit`, `push`, or `none` — the consequential action you want a person to authorise. \
-Only ask when the work above is finished and verified, and only for something you were told needs approval. \
+REQUESTS: `commit`, `push`, or `none` — the repository action you want Paralith to perform. \
+Only request an action when the work above is finished and verified, and only when your authority explicitly allows it or offers an approval route. \
 Never attempt it yourself.\n";
 
 /// Read the labelled result out of the runtime's final message.
@@ -1332,6 +1766,8 @@ fn authority_clause(authority: &AgentWorkAuthority) -> String {
     });
     if !authority.commit {
         clause.push_str("- You must not run `git commit`, `git push`, `git merge`, or create tags or releases. Leave your work in the working tree for review.\n");
+    } else {
+        clause.push_str("- Do not run `git commit` or `git push` yourself. When the work is finished, request the allowed action and Paralith will apply it to the exact observed change set.\n");
     }
     // Naming the approval route matters: a runtime told only "you may not commit" will either
     // finish silently or try anyway. Told that asking is the supported path, it finishes the work
@@ -1340,25 +1776,42 @@ fn authority_clause(authority: &AgentWorkAuthority) -> String {
         clause.push_str("- Publishing needs a person's approval. When the work is finished and verified, write `REQUESTS: push` and stop; Paralith will ask them and push for you if they agree.\n");
     } else if authority.commit_requires_approval {
         clause.push_str("- Committing needs a person's approval. When the work is finished and verified, write `REQUESTS: commit` and stop; Paralith will ask them and commit for you if they agree.\n");
+    } else if authority.push {
+        clause.push_str("- Publishing is allowed. When the work is finished and verified, write `REQUESTS: push`; Paralith will commit the observed files and publish the isolated branch.\n");
+    } else if authority.commit {
+        clause.push_str("- Committing is allowed. When the work is finished and verified, write `REQUESTS: commit`; Paralith will commit the exact observed files.\n");
     }
     clause
 }
 
-/// The action a run asked for, once it has been checked against what that run was allowed to ask.
+#[derive(Clone, Copy)]
+struct RequestedRepositoryAction {
+    kind: &'static str,
+    needs_approval: bool,
+}
+
+/// The action a run asked for, once it has been checked against what that run was allowed to do
+/// or ask a person to approve.
 ///
 /// A runtime writing `REQUESTS: push` on work whose policy never offered approval is asking for
 /// something nobody granted, and the answer is nothing at all — not an approval card a user might
 /// reasonably click.
-fn requested_approval(
+fn requested_repository_action(
     authority: &AgentWorkAuthority,
     requests: Option<&str>,
-) -> Option<&'static str> {
+) -> Option<RequestedRepositoryAction> {
     let requested = requests?.trim().to_ascii_lowercase();
-    if requested.contains("push") && authority.push_requires_approval {
-        return Some("push");
+    if requested.contains("push") && (authority.push || authority.push_requires_approval) {
+        return Some(RequestedRepositoryAction {
+            kind: "push",
+            needs_approval: authority.push_requires_approval,
+        });
     }
-    if requested.contains("commit") && authority.commit_requires_approval {
-        return Some("commit");
+    if requested.contains("commit") && (authority.commit || authority.commit_requires_approval) {
+        return Some(RequestedRepositoryAction {
+            kind: "commit",
+            needs_approval: authority.commit_requires_approval,
+        });
     }
     None
 }
@@ -1370,6 +1823,30 @@ fn short(value: &str, limit: usize) -> String {
     }
     let cut: String = trimmed.chars().take(limit.saturating_sub(1)).collect();
     format!("{}…", cut.trim_end())
+}
+
+fn agent_work_branch(agent_name: &str, work_id: &str) -> String {
+    let slug = agent_name
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() {
+                character.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>()
+        .split('-')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("-");
+    let slug = if slug.is_empty() { "agent" } else { &slug };
+    let run = work_id
+        .chars()
+        .filter(|value| value.is_ascii_alphanumeric())
+        .take(12)
+        .collect::<String>();
+    format!("paralith/{slug}-{run}")
 }
 
 #[cfg(test)]
@@ -1426,10 +1903,47 @@ mod tests {
     }
 
     #[test]
+    fn repository_requests_follow_allow_ask_and_deny_decisions() {
+        let allowed = requested_repository_action(
+            &AgentWorkAuthority {
+                commit: true,
+                ..AgentWorkAuthority::default()
+            },
+            Some("commit"),
+        )
+        .expect("an allowed commit is a repository action");
+        assert_eq!(allowed.kind, "commit");
+        assert!(!allowed.needs_approval);
+
+        let gated = requested_repository_action(
+            &AgentWorkAuthority {
+                commit_requires_approval: true,
+                ..AgentWorkAuthority::default()
+            },
+            Some("commit"),
+        )
+        .expect("an ask decision creates a gated action");
+        assert_eq!(gated.kind, "commit");
+        assert!(gated.needs_approval);
+
+        assert!(
+            requested_repository_action(&AgentWorkAuthority::default(), Some("push")).is_none()
+        );
+    }
+
+    #[test]
     fn a_long_objective_is_shortened_for_the_rail_without_losing_the_start() {
         assert_eq!(short("Fix the composer", 48), "Fix the composer");
         let long = short(&"x".repeat(80), 20);
         assert_eq!(long.chars().count(), 20);
         assert!(long.ends_with('…'));
+    }
+
+    #[test]
+    fn an_agent_work_branch_is_deterministic_and_git_safe() {
+        assert_eq!(
+            agent_work_branch("Forge / Builder", "12345678-abcd-ef00"),
+            "paralith/forge-builder-12345678abcd"
+        );
     }
 }

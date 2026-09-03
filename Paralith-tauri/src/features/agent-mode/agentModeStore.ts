@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { asNativeError, native } from '../../native/commands'
 import { onAgentConversationTurn, onAgentWorkChanged } from '../../native/events'
-import type { AgentApproval, AgentCapability, AgentCapabilityDecision, AgentConversationEntry, AgentOrganizationSnapshot, AgentRoutine, AgentRuntimeOption, AgentSkill, AgentWork, AgentWorkEvent, CreateAgentDelegationInput, CreateOrganizationalAgentInput, ProductMode, SaveAgentRoutineInput, SaveAgentSkillInput } from '../../native/types'
+import type { AgentApproval, AgentCapability, AgentCapabilityDecision, AgentProjectAccess, AgentConversationEntry, AgentMessageAttachment, AgentOrganizationSnapshot, AgentRoutine, AgentRuntimeOption, AgentSkill, AgentWork, AgentWorkEvent, CreateAgentDelegationInput, CreateOrganizationalAgentInput, ProductMode, SaveAgentRoutineInput, SaveAgentSkillInput } from '../../native/types'
 
 const emptySnapshot: AgentOrganizationSnapshot = {
   agents: [], conversations: [], entries: [], delegations: [], work: [], authorities: [],
@@ -43,8 +43,8 @@ interface AgentModeStore {
   selectAgent: (agentId: string) => void
   selectConversation: (conversationId: string) => void
   createAgent: (input: CreateOrganizationalAgentInput) => Promise<void>
-  createConversation: (agentId: string, title: string) => Promise<void>
-  sendMessage: (conversationId: string, body: string, projectId?: string) => Promise<void>
+  createConversation: (agentId: string, projectId: string, title: string) => Promise<void>
+  sendMessage: (conversationId: string, body: string, projectId?: string, attachments?: AgentMessageAttachment[]) => Promise<void>
   cancelTurn: (entryId: string) => Promise<void>
   setMessageRuntime: (conversationId: string, runtimeId?: string) => void
   setConversationRuntime: (conversationId: string, runtimeId?: string) => Promise<void>
@@ -60,6 +60,7 @@ interface AgentModeStore {
   reorderConversations: (agentId: string, orderedIds: string[]) => Promise<void>
   loadApprovals: () => Promise<void>
   decideApproval: (approvalId: string, approved: boolean, note?: string) => Promise<void>
+  setProjectAccess: (agentId: string, projectId: string, access: AgentProjectAccess, workspaceId?: string) => Promise<void>
   loadCapabilities: (agentId: string) => Promise<void>
   setCapability: (agentId: string, capability: string, decision: AgentCapabilityDecision) => Promise<void>
   loadOrganization: (force?: boolean) => Promise<void>
@@ -164,17 +165,17 @@ export const useAgentModeStore = create<AgentModeStore>((set, get) => ({
     catch (caught) { set({ error: asNativeError(caught).message }); throw caught }
     finally { set({ busy: false }) }
   },
-  createConversation: async (agentId, title) => {
+  createConversation: async (agentId, projectId, title) => {
     set({ busy: true, error: undefined })
-    try { const conversation = await native.createAgentConversation(agentId, title); await get().refresh(); get().selectConversation(conversation.id) }
+    try { const conversation = await native.createAgentConversation(agentId, projectId, title); await get().refresh(); get().selectConversation(conversation.id) }
     catch (caught) { set({ error: asNativeError(caught).message }) }
     finally { set({ busy: false }) }
   },
-  sendMessage: async (conversationId, body, projectId) => {
+  sendMessage: async (conversationId, body, projectId, attachments = []) => {
     set({ busy: true, error: undefined })
     const runtimeId = get().messageRuntime[conversationId]
     try {
-      await native.sendAgentMessage({ conversationId, body, runtimeId, projectId })
+      await native.sendAgentMessage({ conversationId, body, runtimeId, projectId, attachments })
       // A message-level choice applies to one turn. Clearing it here is what keeps an override
       // from silently becoming the conversation default.
       set((state) => { const { [conversationId]: _cleared, ...rest } = state.messageRuntime; return { messageRuntime: rest } })
@@ -265,6 +266,17 @@ export const useAgentModeStore = create<AgentModeStore>((set, get) => ({
     set({ busy: true, error: undefined })
     try { await native.decideAgentApproval(approvalId, approved, note); await get().loadApprovals(); await get().refresh() }
     catch (caught) { set({ error: asNativeError(caught).message }); await get().loadApprovals() }
+    finally { set({ busy: false }) }
+  },
+  /**
+   * Change a teammate's standing grant over a Project. The backend returns the refreshed
+   * organization, so the delegation panel stops saying a teammate has no access the moment they
+   * do — a stale grant here is the difference between work that runs and work that is refused.
+   */
+  setProjectAccess: async (agentId, projectId, access, workspaceId) => {
+    set({ busy: true, error: undefined })
+    try { set({ snapshot: await native.setAgentWorkspaceAccess(agentId, projectId, access, workspaceId) }) }
+    catch (caught) { set({ error: asNativeError(caught).message }); await get().refresh() }
     finally { set({ busy: false }) }
   },
   loadCapabilities: async (agentId) => {

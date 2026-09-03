@@ -8,7 +8,7 @@ second agent executor.
 - `organizational_agents` owns durable teammate identity, role, responsibility, runtime routing
   preference, ordering and current organizational work state. Provider names are configuration,
   never teammate identity.
-- `agent_conversations` and `agent_conversation_entries` own bounded conversation continuity.
+- `agent_conversations` and `agent_conversation_entries` own bounded, Project-bound conversation continuity.
   Historical retrieval must project these records through Brain/Context Fabric rather than append
   every transcript to every request.
 - `agent_delegations` owns explicit owner/recipient/objective/constraints/result/authority and may
@@ -17,16 +17,16 @@ second agent executor.
   connection or another teammate's grant does not satisfy this boundary.
 - `agent_product_state` remembers the selected operating mode, teammate and conversation. It owns
   UI continuity only; it does not own Code workspace, pane, process or placement state.
-- `skills` remains the one reusable-procedure store. `skill_activations.target_kind =
-  'organizational_agent'` is the assignment seam; Agent Mode must not create another skills table.
+- `agent_skills` owns Agent Mode procedures and `agent_skill_assignments` binds them to teammates.
 - `runs` and `run_approvals` remain the canonical execution and approval records.
 - `TerminalManager` remains the only interactive process owner. `RepositoryService` remains the
   audited Git/worktree boundary. `SwarmService` and the Orchestration Kernel remain the provider
   scheduling and capability-policy boundaries.
 - `MemoryService`, `ContextCompiler`, and Brain remain the Context Fabric. Agent-specific context
   is a scoped projection with provenance, not another memory database.
-- Activity Threads remain the notification model. Future delegation/run transitions should be
-  projected into Activity and deep-link by organizational Agent, delegation, Run and Workspace id.
+- Activity Threads remain the notification model. Agent Work projects its canonical state over
+  the provider-terminal observation so approvals, limits, interruptions and completion generate
+  the correct in-app and native attention signal.
 
 ## Renderer lifecycle
 
@@ -61,17 +61,33 @@ terminal session, status, result, parent linkage, timestamps — with `run_event
 
 `queued → preparing → working → verifying → completed`, with `waiting_user`, `needs_approval`,
 `blocked`, `provider_limit`, `failed`, `cancelled` and `interrupted` as the other terminal or
-paused states. One vocabulary is shared by persistence, the Agent rail, the work row, restart
-recovery and the result reported to the parent.
+paused states. Interrupted and provider-limited work may continue in the same leased worktree;
+authority is recomputed and the next runtime must be selected explicitly. One vocabulary is
+shared by persistence, the Agent rail, Activity, restart recovery and the result reported to the parent.
 
 ### Authority
 
 Role does not imply access. `agent_workspace_authorities` is the ceiling; a delegation's
-constraints can only lower it (`narrow_by_constraints`). `commit` and `push` are false for every
-Agent today because no capability grant exists for them, so “do not commit or push” is belt and
-braces rather than the only barrier. The effective authority is persisted with the work and drives
-`AgentInvocation::may_write`, which is what makes read-only structural: Claude loses its edit tools
-and Codex runs in a read-only sandbox. Conversation turns remain `may_write: false` unconditionally.
+constraints can only lower it (`narrow_by_constraints`). The effective authority drives both
+`AgentInvocation::may_write` and `AgentInvocation::may_run_commands`. Claude loses denied tools;
+Codex runs read-only and is refused for engineering work when command denial cannot be enforced.
+Commit and push use separate allow/ask/deny capabilities and are performed only by
+`RepositoryService`, never by provider cooperation. Conversation turns remain `may_write: false`.
+
+### Isolation and repository approvals
+
+Every Agent Work run creates an exclusive managed worktree lease before provider launch. The
+provider's working directory, terminal record, evidence inspection and Open in Code target all use
+that worktree; the user's checkout is never the execution directory. One teammate may have only
+one live turn or work item, enforced transactionally.
+
+An approval records the isolated worktree, branch, HEAD, changed paths and a repository snapshot
+fingerprint. Approval execution rechecks that fingerprint under the repository mutation lock,
+validates the Agent/run/task lease, commits only the reviewed paths, and publishes the pinned
+branch. A changed tree makes the approval stale instead of sweeping new changes into `git add -A`.
+An `allow` capability is also executed by Paralith against an immediately captured fingerprint;
+the provider requests the action but never receives open-ended Git authority. If committing is
+`ask`, an allowed push inherits that approval requirement because publishing may need a commit.
 
 ### What crosses the handoff
 
@@ -102,9 +118,10 @@ workspace keeps the `agent-mode-` prefix so `TerminalManager` gives it a wide, n
 attaching a viewer is safe because `resize_session` is a no-op for machine-protocol sessions.
 Switching modes never touches process lifetime — the terminal runtime owns it, not either surface.
 
-### Not in this slice
+### Conversations
 
-Nothing enters `needs_approval` yet. The status, `run_approvals` and the persisted work context
-exist, but no consequential operation currently reaches a model that could request one: commit,
-push and merge are denied structurally rather than offered for approval. Wiring an approval queue
-is the next slice, not a claim this one makes.
+A conversation is bound to one Project. Legacy unbound conversations bind on their first
+project-aware turn; a later cross-Project send is rejected, and history search is scoped to the
+same Project. Messages may include a bounded set of explicit text/code attachments. Attachment
+content is stored with the user entry and passed as delimited untrusted context—never interpreted
+as a filesystem path or as authority.

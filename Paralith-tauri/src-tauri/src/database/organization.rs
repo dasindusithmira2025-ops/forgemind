@@ -22,6 +22,16 @@ pub struct NewAgentEntry<'a> {
     pub parent_entry_id: Option<&'a str>,
 }
 
+pub struct NewAgentTurn<'a> {
+    pub conversation_id: &'a str,
+    pub agent_id: &'a str,
+    pub body: &'a str,
+    pub user_metadata: serde_json::Value,
+    pub runtime_metadata: serde_json::Value,
+    pub runtime_provider: &'a str,
+    pub runtime_model: &'a str,
+}
+
 use rusqlite::{params, OptionalExtension, Row};
 use serde_json::json;
 use uuid::Uuid;
@@ -91,8 +101,8 @@ impl DatabaseService {
         let agents = connection.prepare("SELECT id,name,role,brief,responsibilities_json,avatar_seed,intelligence_preference,work_state,work_state_detail,pinned,position,created_at,updated_at FROM organizational_agents ORDER BY pinned DESC,position,id")
             .map_err(AppError::database)?.query_map([], agent_row).map_err(AppError::database)?
             .collect::<Result<Vec<_>, _>>().map_err(AppError::database)?;
-        let conversations = connection.prepare("SELECT id,agent_id,title,position,runtime_preference,created_at,updated_at FROM agent_conversations ORDER BY agent_id,position,id")
-            .map_err(AppError::database)?.query_map([], |row| Ok(AgentConversation { id: row.get(0)?, agent_id: row.get(1)?, title: row.get(2)?, position: row.get(3)?, runtime_preference: row.get(4)?, created_at: row.get(5)?, updated_at: row.get(6)? }))
+        let conversations = connection.prepare("SELECT id,agent_id,project_id,title,position,runtime_preference,created_at,updated_at FROM agent_conversations ORDER BY agent_id,position,id")
+            .map_err(AppError::database)?.query_map([], |row| Ok(AgentConversation { id: row.get(0)?, agent_id: row.get(1)?, project_id: row.get(2)?, title: row.get(3)?, position: row.get(4)?, runtime_preference: row.get(5)?, created_at: row.get(6)?, updated_at: row.get(7)? }))
             .map_err(AppError::database)?.collect::<Result<Vec<_>, _>>().map_err(AppError::database)?;
         // Only hydrate the selected conversation. Agent history is durable and searchable at the
         // database boundary; it is not dumped wholesale into every renderer or future prompt.
@@ -185,7 +195,7 @@ impl DatabaseService {
                 .detail(error.to_string())
             })?;
         tx.execute("INSERT INTO organizational_agents(id,name,role,brief,responsibilities_json,avatar_seed,intelligence_preference,work_state,pinned,position,created_at,updated_at) VALUES(?1,?2,?3,?4,?5,?6,?7,'idle',0,?8,?9,?9)", params![id,name,role,brief,responsibilities_json,id,input.intelligence_preference,position,now]).map_err(AppError::database)?;
-        tx.execute("INSERT INTO agent_conversations(id,agent_id,title,position,created_at,updated_at) VALUES(?1,?2,'General',0,?3,?3)", params![chat_id,id,now]).map_err(AppError::database)?;
+        tx.execute("INSERT INTO agent_conversations(id,agent_id,project_id,title,position,created_at,updated_at) VALUES(?1,?2,?3,'General',0,?4,?4)", params![chat_id,id,input.project_id,now]).map_err(AppError::database)?;
         tx.execute("INSERT INTO agent_conversation_entries(id,conversation_id,kind,author_agent_id,body,metadata_json,created_at) VALUES(?1,?2,'event',?3,?4,'{}',?5)", params![Uuid::new_v4().to_string(),chat_id,id,format!("{} joined the team as {}.", name, role),now]).map_err(AppError::database)?;
         if access != "none" {
             tx.execute("INSERT INTO agent_workspace_authorities(agent_id,project_id,workspace_id,access,granted_at) VALUES(?1,?2,?3,?4,?5)", params![id,input.project_id,input.workspace_id,access,now]).map_err(AppError::database)?;
@@ -212,6 +222,7 @@ impl DatabaseService {
     pub fn create_agent_conversation(
         &self,
         agent_id: &str,
+        project_id: Option<&str>,
         title: &str,
     ) -> AppResult<AgentConversation> {
         let title = required(title, "Conversation title")?;
@@ -225,10 +236,11 @@ impl DatabaseService {
                 |row| row.get(0),
             )
             .map_err(AppError::database)?;
-        connection.execute("INSERT INTO agent_conversations(id,agent_id,title,position,created_at,updated_at) VALUES(?1,?2,?3,?4,?5,?5)", params![id,agent_id,title,position,now]).map_err(AppError::database)?;
+        connection.execute("INSERT INTO agent_conversations(id,agent_id,project_id,title,position,created_at,updated_at) VALUES(?1,?2,?3,?4,?5,?6,?6)", params![id,agent_id,project_id,title,position,now]).map_err(AppError::database)?;
         Ok(AgentConversation {
             id,
             agent_id: agent_id.into(),
+            project_id: project_id.map(str::to_owned),
             title,
             position,
             runtime_preference: None,
@@ -259,6 +271,81 @@ impl DatabaseService {
         })
     }
 
+    /// Persist a question and reserve its answer atomically.
+    ///
+    /// The per-Agent availability check shares the same database mutex and transaction as both
+    /// inserts. A competing delegation can therefore win before this turn or after it, never in
+    /// between and leave an unanswered user row behind.
+    pub fn begin_agent_conversation_turn(
+        &self,
+        turn: NewAgentTurn<'_>,
+    ) -> AppResult<(AgentConversationEntry, AgentConversationEntry)> {
+        let body = required(turn.body, "Message")?;
+        let user_id = Uuid::new_v4().to_string();
+        let agent_entry_id = Uuid::new_v4().to_string();
+        let now = Utc::now().to_rfc3339();
+        let user_metadata = turn.user_metadata.to_string();
+        let runtime_metadata = turn.runtime_metadata.to_string();
+        let connection = self.connection.lock();
+        let transaction = connection
+            .unchecked_transaction()
+            .map_err(AppError::database)?;
+        let conversation_agent_id: String = transaction
+            .query_row(
+                "SELECT agent_id FROM agent_conversations WHERE id=?1",
+                [turn.conversation_id],
+                |row| row.get(0),
+            )
+            .map_err(AppError::database)?;
+        if conversation_agent_id != turn.agent_id {
+            return Err(AppError::new(
+                "agent_conversation_owner_mismatch",
+                "The selected conversation no longer belongs to this Agent.",
+                false,
+            )
+            .entity(turn.conversation_id));
+        }
+        let busy: bool = transaction
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM runs WHERE agent_id=?1 AND run_type='agent_work' AND status IN ('queued','preparing','working','waiting_user','needs_approval','verifying') UNION ALL SELECT 1 FROM agent_conversation_entries e JOIN agent_conversations c ON c.id=e.conversation_id WHERE c.agent_id=?1 AND e.state IN ('preparing','streaming'))",
+                [turn.agent_id],
+                |row| row.get(0),
+            )
+            .map_err(AppError::database)?;
+        if busy {
+            return Err(AppError::new(
+                "agent_already_active",
+                "This Agent is already handling another turn or unit of work.",
+                true,
+            )
+            .entity(turn.agent_id)
+            .layer("agent_lifecycle"));
+        }
+        transaction.execute(
+            "INSERT INTO agent_conversation_entries(id,conversation_id,kind,body,metadata_json,state,created_at,updated_at) VALUES(?1,?2,'user',?3,?4,'complete',?5,?5)",
+            params![user_id, turn.conversation_id, body, user_metadata, now],
+        ).map_err(AppError::database)?;
+        transaction.execute(
+            "INSERT INTO agent_conversation_entries(id,conversation_id,kind,author_agent_id,body,metadata_json,state,runtime_provider,runtime_model,parent_entry_id,created_at,updated_at) VALUES(?1,?2,'agent',?3,'',?4,'preparing',?5,?6,?7,?8,?8)",
+            params![agent_entry_id, turn.conversation_id, turn.agent_id, runtime_metadata, turn.runtime_provider, turn.runtime_model, user_id, now],
+        ).map_err(AppError::database)?;
+        transaction
+            .execute(
+                "UPDATE agent_conversations SET updated_at=?2 WHERE id=?1",
+                params![turn.conversation_id, now],
+            )
+            .map_err(AppError::database)?;
+        transaction.commit().map_err(AppError::database)?;
+        drop(connection);
+        let user = self
+            .get_agent_entry(&user_id)?
+            .ok_or_else(|| AppError::database("question row missing after insert"))?;
+        let pending = self
+            .get_agent_entry(&agent_entry_id)?
+            .ok_or_else(|| AppError::database("answer row missing after insert"))?;
+        Ok((user, pending))
+    }
+
     /// The single insert every conversation row goes through, human or runtime authored.
     pub fn insert_agent_entry(
         &self,
@@ -268,6 +355,31 @@ impl DatabaseService {
         let now = Utc::now().to_rfc3339();
         let metadata = entry.metadata.to_string();
         let connection = self.connection.lock();
+        if entry.state == "preparing" {
+            let agent_id: String = connection
+                .query_row(
+                    "SELECT agent_id FROM agent_conversations WHERE id=?1",
+                    [entry.conversation_id],
+                    |row| row.get(0),
+                )
+                .map_err(AppError::database)?;
+            let busy: bool = connection
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM runs WHERE agent_id=?1 AND run_type='agent_work' AND status IN ('queued','preparing','working','waiting_user','needs_approval','verifying') UNION ALL SELECT 1 FROM agent_conversation_entries e JOIN agent_conversations c ON c.id=e.conversation_id WHERE c.agent_id=?1 AND e.state IN ('preparing','streaming'))",
+                    [&agent_id],
+                    |row| row.get(0),
+                )
+                .map_err(AppError::database)?;
+            if busy {
+                return Err(AppError::new(
+                    "agent_already_active",
+                    "This Agent is already handling another turn or unit of work.",
+                    true,
+                )
+                .entity(agent_id)
+                .layer("agent_lifecycle"));
+            }
+        }
         connection.execute(
             "INSERT INTO agent_conversation_entries(id,conversation_id,kind,author_agent_id,body,metadata_json,state,runtime_provider,runtime_model,runtime_account,parent_entry_id,created_at,updated_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?12)",
             params![id, entry.conversation_id, entry.kind, entry.author_agent_id, entry.body, metadata, entry.state, entry.runtime_provider, entry.runtime_model, entry.runtime_account, entry.parent_entry_id, now],
@@ -381,13 +493,13 @@ impl DatabaseService {
     pub fn agent_for_conversation(
         &self,
         conversation_id: &str,
-    ) -> AppResult<(OrganizationalAgent, Option<String>)> {
+    ) -> AppResult<(OrganizationalAgent, Option<String>, Option<String>)> {
         let connection = self.connection.lock();
         connection
             .query_row(
-                "SELECT agent.id,agent.name,agent.role,agent.brief,agent.responsibilities_json,agent.avatar_seed,agent.intelligence_preference,agent.work_state,agent.work_state_detail,agent.pinned,agent.position,agent.created_at,agent.updated_at,chat.runtime_preference FROM agent_conversations chat JOIN organizational_agents agent ON agent.id=chat.agent_id WHERE chat.id=?1",
+                "SELECT agent.id,agent.name,agent.role,agent.brief,agent.responsibilities_json,agent.avatar_seed,agent.intelligence_preference,agent.work_state,agent.work_state_detail,agent.pinned,agent.position,agent.created_at,agent.updated_at,chat.runtime_preference,chat.project_id FROM agent_conversations chat JOIN organizational_agents agent ON agent.id=chat.agent_id WHERE chat.id=?1",
                 params![conversation_id],
-                |row| Ok((agent_row(row)?, row.get::<_, Option<String>>(13)?)),
+                |row| Ok((agent_row(row)?, row.get::<_, Option<String>>(13)?, row.get::<_, Option<String>>(14)?)),
             )
             .optional()
             .map_err(AppError::database)?
@@ -399,6 +511,31 @@ impl DatabaseService {
                 )
                 .entity(conversation_id)
             })
+    }
+
+    pub fn bind_agent_conversation_project(
+        &self,
+        conversation_id: &str,
+        project_id: &str,
+    ) -> AppResult<()> {
+        let changed = self
+            .connection
+            .lock()
+            .execute(
+                "UPDATE agent_conversations SET project_id=?2,updated_at=?3 WHERE id=?1 AND (project_id IS NULL OR project_id=?2)",
+                params![conversation_id, project_id, Utc::now().to_rfc3339()],
+            )
+            .map_err(AppError::database)?;
+        if changed != 1 {
+            return Err(AppError::new(
+                "agent_conversation_project_mismatch",
+                "This conversation belongs to another Project. Start a new conversation here.",
+                true,
+            )
+            .entity(conversation_id)
+            .layer("project_scope"));
+        }
+        Ok(())
     }
 
     /// Persist a conversation-level runtime choice. `None` restores inheritance from the Agent.
@@ -573,6 +710,7 @@ impl DatabaseService {
     pub fn search_agent_history(
         &self,
         agent_id: &str,
+        project_id: Option<&str>,
         query: &str,
     ) -> AppResult<Vec<AgentConversationEntry>> {
         let query = required(query, "Search")?;
@@ -589,9 +727,9 @@ impl DatabaseService {
             .map(|column| format!("entry.{column}"))
             .collect::<Vec<_>>()
             .join(",");
-        let results = connection.prepare(&format!("SELECT {columns} FROM agent_conversation_entries entry JOIN agent_conversations conversation ON conversation.id=entry.conversation_id WHERE conversation.agent_id=?1 AND entry.body LIKE ?2 ESCAPE '\\' ORDER BY entry.created_at DESC,entry.id DESC LIMIT 50"))
+        let results = connection.prepare(&format!("SELECT {columns} FROM agent_conversation_entries entry JOIN agent_conversations conversation ON conversation.id=entry.conversation_id WHERE conversation.agent_id=?1 AND ((?2 IS NULL AND conversation.project_id IS NULL) OR conversation.project_id=?2) AND entry.body LIKE ?3 ESCAPE '\\' ORDER BY entry.created_at DESC,entry.id DESC LIMIT 50"))
             .map_err(AppError::database)?
-            .query_map(params![agent_id, pattern], entry_row)
+            .query_map(params![agent_id, project_id, pattern], entry_row)
             .map_err(AppError::database)?
             .collect::<Result<Vec<_>, _>>()
             .map_err(AppError::database)?;
@@ -837,7 +975,7 @@ mod tests {
             .add_agent_conversation_entry(&atlas_chat.id, "Prepare the implementation decision.")
             .unwrap();
         let history = database
-            .search_agent_history(&atlas.id, "implementation")
+            .search_agent_history(&atlas.id, None, "implementation")
             .unwrap();
         assert_eq!(history.len(), 1);
         assert_eq!(history[0].conversation_id, atlas_chat.id);
@@ -933,7 +1071,7 @@ mod tests {
         database
             .set_agent_conversation_runtime(&chat.id, Some("codex/gpt-5.5"))
             .unwrap();
-        let (owner, preference) = database.agent_for_conversation(&chat.id).unwrap();
+        let (owner, preference, _) = database.agent_for_conversation(&chat.id).unwrap();
         assert_eq!(owner.id, atlas.id);
         assert_eq!(preference.as_deref(), Some("codex/gpt-5.5"));
         // Choosing a runtime for one conversation must not rewrite the teammate's own default.

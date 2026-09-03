@@ -393,6 +393,7 @@ export interface ActivityDetail {
   workspaceId?: string
   paneId?: string
   terminalSessionId?: string
+  agentWorkId?: string
 }
 
 export interface ActivityThread {
@@ -1415,7 +1416,7 @@ export interface OrganizationalAgent {
   workStateDetail?: string; pinned: boolean; position: number; createdAt: string; updatedAt: string
 }
 export interface AgentConversation {
-  id: string; agentId: string; title: string; position: number
+  id: string; agentId: string; projectId?: string; title: string; position: number
   /** Conversation-level runtime. Undefined inherits the Agent's preference. */
   runtimePreference?: string
   createdAt: string; updatedAt: string
@@ -1444,6 +1445,10 @@ export interface SendAgentMessageInput {
   /** Applies to this turn only; never mutates the conversation or Agent default. */
   runtimeId?: string
   projectId?: string
+  attachments?: AgentMessageAttachment[]
+}
+export interface AgentMessageAttachment {
+  name: string; mediaType: string; content: string; size: number
 }
 export interface AgentDelegation {
   id: string; ownerAgentId: string; recipientAgentId: string; objective: string; relevantContext: string
@@ -1500,6 +1505,9 @@ export interface AgentOrganizationSnapshot {
 /** What Paralith does when a teammate reaches for one capability. Three values, because "may
  * never publish" and "may publish once you have looked" are different teammates. */
 export type AgentCapabilityDecision = 'allow' | 'ask' | 'deny'
+/** A teammate's standing grant over one Project. The ceiling every capability is resolved inside;
+ * `none` is stored as the absence of a grant, never as a refusal row. */
+export type AgentProjectAccess = 'none' | 'read' | 'read_write'
 export interface AgentCapability { agentId: string; capability: string; decision: AgentCapabilityDecision }
 /** One consequential action a run has stopped in front of, waiting for a person. Durable: a
  * restart finds the same pending decision. */

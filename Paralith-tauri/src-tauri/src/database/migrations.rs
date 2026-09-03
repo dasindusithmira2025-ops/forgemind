@@ -1,7 +1,7 @@
 use crate::errors::{AppError, AppResult};
 use rusqlite::{params, Connection};
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 45;
+pub const CURRENT_SCHEMA_VERSION: i64 = 46;
 
 const MIGRATION_1: &str = r#"
 CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
@@ -1167,6 +1167,9 @@ pub fn apply(connection: &Connection) -> AppResult<()> {
     if current < 45 || !table_exists(connection, "agent_capabilities")? {
         migrate_v45(connection)?;
     }
+    if current < 46 || !column_exists(connection, "agent_conversations", "project_id")? {
+        migrate_v46(connection)?;
+    }
     Ok(())
 }
 
@@ -1274,7 +1277,8 @@ pub fn requires_migration(connection: &Connection) -> AppResult<bool> {
         || !table_exists(connection, "agent_capabilities")?
         || !table_exists(connection, "agent_skills")?
         || !table_exists(connection, "agent_skill_assignments")?
-        || !table_exists(connection, "agent_routines")?)
+        || !table_exists(connection, "agent_routines")?
+        || !column_exists(connection, "agent_conversations", "project_id")?)
 }
 
 fn migrate_v24(connection: &Connection) -> AppResult<()> {
@@ -2957,6 +2961,50 @@ CREATE INDEX IF NOT EXISTS idx_agent_routines_agent
         record_migration(connection, 45)
     })();
     finish_migration_transaction(connection, result, 45)
+}
+
+/// Bind chat history to the Project whose Context Fabric and repository it may reference.
+///
+/// Existing conversations remain unbound until their next project-aware turn, preserving old
+/// history without guessing provenance. SQLite cannot add a foreign key with `ALTER TABLE`, so
+/// triggers enforce the same insert/update/delete behavior without rebuilding a table referenced
+/// by entries and the persisted product selection.
+fn migrate_v46(connection: &Connection) -> AppResult<()> {
+    connection
+        .execute_batch("BEGIN IMMEDIATE;")
+        .map_err(AppError::database)?;
+    let result = (|| {
+        add_column_if_missing(connection, "agent_conversations", "project_id", "TEXT")?;
+        connection
+            .execute_batch(
+                r#"
+CREATE INDEX IF NOT EXISTS idx_agent_conversations_project
+  ON agent_conversations(agent_id,project_id,position,id);
+CREATE TRIGGER IF NOT EXISTS agent_conversation_project_insert
+BEFORE INSERT ON agent_conversations
+WHEN NEW.project_id IS NOT NULL
+  AND NOT EXISTS(SELECT 1 FROM projects WHERE id=NEW.project_id)
+BEGIN
+  SELECT RAISE(ABORT,'agent conversation project does not exist');
+END;
+CREATE TRIGGER IF NOT EXISTS agent_conversation_project_update
+BEFORE UPDATE OF project_id ON agent_conversations
+WHEN NEW.project_id IS NOT NULL
+  AND NOT EXISTS(SELECT 1 FROM projects WHERE id=NEW.project_id)
+BEGIN
+  SELECT RAISE(ABORT,'agent conversation project does not exist');
+END;
+CREATE TRIGGER IF NOT EXISTS agent_conversation_project_delete
+AFTER DELETE ON projects
+BEGIN
+  UPDATE agent_conversations SET project_id=NULL WHERE project_id=OLD.id;
+END;
+"#,
+            )
+            .map_err(AppError::database)?;
+        record_migration(connection, 46)
+    })();
+    finish_migration_transaction(connection, result, 46)
 }
 
 fn index_exists(connection: &Connection, index: &str) -> AppResult<bool> {
@@ -6459,6 +6507,60 @@ PRAGMA user_version=26;
         );
         // Repeating a partially applied upgrade must not fail.
         migrate_v43(&connection).unwrap();
+    }
+
+    #[test]
+    fn v46_preserves_legacy_chats_and_enforces_project_binding() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
+                 CREATE TABLE projects(id TEXT PRIMARY KEY);
+                 CREATE TABLE organizational_agents(id TEXT PRIMARY KEY);
+                 CREATE TABLE agent_conversations(id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, title TEXT NOT NULL, position INTEGER NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, runtime_preference TEXT NOT NULL DEFAULT 'automatic');
+                 INSERT INTO projects VALUES('project');
+                 INSERT INTO organizational_agents VALUES('atlas');
+                 INSERT INTO agent_conversations(id,agent_id,title,position,created_at,updated_at) VALUES('chat','atlas','Legacy',0,'t','t');
+                 PRAGMA user_version=45;",
+            )
+            .unwrap();
+
+        migrate_v46(&connection).unwrap();
+
+        let legacy_project: Option<String> = connection
+            .query_row(
+                "SELECT project_id FROM agent_conversations WHERE id='chat'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(
+            legacy_project.is_none(),
+            "legacy provenance must not be guessed"
+        );
+        connection
+            .execute(
+                "UPDATE agent_conversations SET project_id='project' WHERE id='chat'",
+                [],
+            )
+            .unwrap();
+        assert!(connection
+            .execute(
+                "UPDATE agent_conversations SET project_id='missing' WHERE id='chat'",
+                [],
+            )
+            .is_err());
+        connection
+            .execute("DELETE FROM projects WHERE id='project'", [])
+            .unwrap();
+        let deleted_project: Option<String> = connection
+            .query_row(
+                "SELECT project_id FROM agent_conversations WHERE id='chat'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(deleted_project.is_none());
     }
 
     #[test]

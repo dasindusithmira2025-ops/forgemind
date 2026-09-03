@@ -232,6 +232,7 @@ fn swarm_invocation(
         model_id: agent.model_config.model_id.clone(),
         reasoning_effort: agent.model_config.reasoning_effort.clone(),
         may_write: agent.role.may_write_code(),
+        may_run_commands: true,
         working_directory: scope.project_root.clone(),
         prompt: runtime_instruction(scope, task, agent, mission, instructions, context),
         resume_session_id: resume_session_id.map(str::to_owned),

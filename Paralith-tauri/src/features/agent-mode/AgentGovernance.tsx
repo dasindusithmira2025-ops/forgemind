@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Check, Play, Plus, Trash2, X } from 'lucide-react'
-import type { AgentApproval, AgentCapabilityDecision, AgentRoutine, AgentRoutineCadence, AgentSkill, OrganizationalAgent, Project } from '../../native/types'
+import type { AgentApproval, AgentCapabilityDecision, AgentProjectAccess, AgentRoutine, AgentRoutineCadence, AgentSkill, OrganizationalAgent, Project } from '../../native/types'
 import { useAgentModeStore } from './agentModeStore'
 
 /** Capabilities in the order a person reasons about them: what the teammate organises, what it
@@ -99,20 +99,44 @@ export function AgentSettingsPanel({ agent, project, onClose }: { agent: Organiz
   </div>
 }
 
+const accessOptions: Array<{ value: AgentProjectAccess; label: string }> = [
+  { value: 'none', label: 'No access' },
+  { value: 'read', label: 'Read' },
+  { value: 'read_write', label: 'Read / write' },
+]
+
 function AccessSection({ agent, project }: { agent: OrganizationalAgent; project: Project }) {
   const capabilities = useAgentModeStore((state) => state.capabilities[agent.id])
   const authorities = useAgentModeStore((state) => state.snapshot.authorities)
   const setCapability = useAgentModeStore((state) => state.setCapability)
+  const setProjectAccess = useAgentModeStore((state) => state.setProjectAccess)
+  const busy = useAgentModeStore((state) => state.busy)
   const grant = authorities.find((item) => item.agentId === agent.id && item.projectId === project.id)
+  const access: AgentProjectAccess = grant?.access ?? 'none'
 
   return <>
     <p className="agent-settings-lead">
-      A Project grant is the ceiling; these decide what {agent.name} may do within it. Both have to
-      agree, so denying a capability here removes it from every Project at once.
+      A Project grant is the ceiling; the capabilities below decide what {agent.name} may do within
+      it. Both have to agree, so denying a capability removes it from every Project at once.
     </p>
+    {/* The grant is editable here, not only at creation. A teammate created without access must
+        be able to be given some, or delegating to them is a permanent dead end. */}
     <dl className="agent-access-grants">
-      <div><dt>{project.name}</dt><dd>{grant?.access === 'read_write' ? 'Read and write' : grant?.access === 'read' ? 'Read only' : 'No access'}</dd></div>
+      <div>
+        <dt>{project.name}</dt>
+        <dd>
+          <label className="agent-access-select">
+            <span className="sr-only">{agent.name} access to {project.name}</span>
+            <select value={access} disabled={busy} onChange={(event) => void setProjectAccess(agent.id, project.id, event.target.value as AgentProjectAccess)}>
+              {accessOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select>
+          </label>
+        </dd>
+      </div>
     </dl>
+    {access === 'none' && <p className="agent-settings-note">
+      {agent.name} cannot be delegated work in {project.name} until they have at least read access.
+    </p>}
     {capabilities === undefined
       ? <p className="agent-settings-loading">Loading access…</p>
       : <ul className="agent-capability-list">

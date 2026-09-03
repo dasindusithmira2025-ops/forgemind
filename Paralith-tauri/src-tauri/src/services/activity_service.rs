@@ -3,7 +3,7 @@ use crate::errors::{AppError, AppResult};
 use crate::models::{
     agent_interruption, github_state, ActivityApproval, ActivityChangedEvent, ActivityDetail,
     ActivityInterruption, ActivitySource, ActivityState, ActivityStep, ActivityThread,
-    AgentActivityState, AgentStateEvent,
+    AgentActivityState, AgentStateEvent, AgentWork,
 };
 use crate::services::repository_service::RepositoryService;
 use chrono::Utc;
@@ -214,6 +214,97 @@ impl ActivityService {
             },
             started_at: now.clone(),
             updated_at: event.updated_at.clone(),
+            observed_at: now,
+            resolved_at: None,
+            revision: 1,
+        });
+    }
+
+    /// Publish Agent Mode's canonical run state over the terminal-level observation.
+    ///
+    /// A provider terminal can tell Activity that a process stopped, but it cannot know the run
+    /// is waiting for an Agent Mode commit/push decision. This projection uses the same thread id
+    /// and adds that missing product state, so the dock and native notifications never announce
+    /// completion while the run is actually blocked on the user.
+    pub fn record_agent_work(&self, work: &AgentWork, agent_name: &str) {
+        let (Some(workspace_id), Some(pane_id), Some(terminal_session_id)) = (
+            work.execution_workspace_id.as_deref(),
+            work.execution_pane_id.as_deref(),
+            work.terminal_session_id.as_deref(),
+        ) else {
+            return;
+        };
+        let state = match work.status.as_str() {
+            "queued" => ActivityState::Queued,
+            "preparing" | "working" | "verifying" => ActivityState::Running,
+            "needs_approval" | "waiting_user" => ActivityState::WaitingForUser,
+            "provider_limit" | "interrupted" => ActivityState::Paused,
+            "completed" => ActivityState::Completed,
+            "cancelled" => ActivityState::Cancelled,
+            "blocked" => ActivityState::Blocked,
+            "failed" => ActivityState::Failed,
+            _ => ActivityState::Running,
+        };
+        let interruption = match work.status.as_str() {
+            "provider_limit" => Some(ActivityInterruption::ProviderLimit),
+            "cancelled" => Some(ActivityInterruption::UserCancelled),
+            "failed" | "blocked" | "interrupted" => Some(ActivityInterruption::Unknown),
+            _ => None,
+        };
+        let summary = match work.status.as_str() {
+            "needs_approval" => "Finished work is waiting for your approval".into(),
+            "provider_limit" => "Paused at the provider limit; choose another runtime".into(),
+            "interrupted" => "Interrupted when PARALITH closed; continuation is available".into(),
+            "completed" => work
+                .result_summary
+                .clone()
+                .unwrap_or_else(|| "Work completed".into()),
+            "failed" | "blocked" => work
+                .error_message
+                .clone()
+                .or_else(|| work.status_reason.clone())
+                .unwrap_or_else(|| "Work stopped".into()),
+            "cancelled" => "Work cancelled".into(),
+            _ => work
+                .status_reason
+                .clone()
+                .unwrap_or_else(|| "Engineering work is running".into()),
+        };
+        let now = Utc::now().to_rfc3339();
+        self.record(ActivityThread {
+            id: format!("agent:{workspace_id}:{pane_id}:{terminal_session_id}"),
+            project_id: work.project_id.clone(),
+            source: ActivitySource::Agent,
+            title: agent_name.into(),
+            summary,
+            state,
+            interruption,
+            reason: (!state.is_live() && state != ActivityState::Completed)
+                .then(|| {
+                    work.status_reason
+                        .clone()
+                        .or_else(|| work.error_message.clone())
+                })
+                .flatten(),
+            steps: vec![ActivityStep {
+                key: work.id.clone(),
+                label: work.objective.clone(),
+                state,
+            }],
+            approval: None,
+            detail: ActivityDetail {
+                provider: work.provider_id.clone(),
+                workspace_id: Some(workspace_id.into()),
+                pane_id: Some(pane_id.into()),
+                terminal_session_id: Some(terminal_session_id.into()),
+                agent_work_id: Some(work.id.clone()),
+                ..ActivityDetail::default()
+            },
+            started_at: work
+                .started_at
+                .clone()
+                .unwrap_or_else(|| work.created_at.clone()),
+            updated_at: work.updated_at.clone(),
             observed_at: now,
             resolved_at: None,
             revision: 1,
