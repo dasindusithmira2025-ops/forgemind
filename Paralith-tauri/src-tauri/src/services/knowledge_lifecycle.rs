@@ -2128,6 +2128,7 @@ mod loop_tests {
             model_id: "claude-test".into(),
             reasoning_effort: "medium".into(),
             may_write: false,
+            may_run_commands: true,
             working_directory: fixture.root.to_string_lossy().to_string(),
             prompt,
             resume_session_id: None,

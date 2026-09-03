@@ -17,6 +17,9 @@ pub struct AgentInvocation {
     /// Whether this execution may modify repository files. Read-only roles get a deny-by-default
     /// permission mode and lose every direct write/delegation tool.
     pub may_write: bool,
+    /// Whether this execution may invoke shell commands. This is separate from writes: an Agent
+    /// may be allowed to inspect files but denied process execution by its capability policy.
+    pub may_run_commands: bool,
     /// Case-preserving working directory the provider is launched in. For Codex this is also
     /// passed as `--cd` because its sandbox root is an explicit option.
     pub working_directory: String,
@@ -70,12 +73,25 @@ fn claude_arguments(invocation: &AgentInvocation) -> Vec<String> {
     if let Some(session_id) = invocation.resume_session_id.as_deref() {
         arguments.extend(["--resume".into(), session_id.to_string()]);
     }
-    arguments.extend(["--allowedTools".into(), ALLOWED_VERIFICATION_TOOLS.into()]);
-    if !invocation.may_write {
-        arguments.extend([
-            "--disallowedTools".into(),
-            "Edit,Write,NotebookEdit,Task,EnterWorktree,ExitWorktree".into(),
-        ]);
+    if invocation.may_run_commands {
+        arguments.extend(["--allowedTools".into(), ALLOWED_VERIFICATION_TOOLS.into()]);
+    }
+    if !invocation.may_write || !invocation.may_run_commands {
+        let mut denied = Vec::new();
+        if !invocation.may_write {
+            denied.extend([
+                "Edit",
+                "Write",
+                "NotebookEdit",
+                "Task",
+                "EnterWorktree",
+                "ExitWorktree",
+            ]);
+        }
+        if !invocation.may_run_commands {
+            denied.extend(["Bash", "PowerShell"]);
+        }
+        arguments.extend(["--disallowedTools".into(), denied.join(",")]);
     }
     arguments
 }
@@ -174,6 +190,7 @@ mod tests {
             model_id: "model-x".into(),
             reasoning_effort: "high".into(),
             may_write,
+            may_run_commands: true,
             working_directory: "C:/repo".into(),
             prompt: "do the work".into(),
             resume_session_id: None,
@@ -221,6 +238,17 @@ mod tests {
             .position(|value| value == "--allowedTools")
             .expect("verification allowlist is always passed");
         assert!(prompt < allowed);
+    }
+
+    #[test]
+    fn claude_structurally_denies_shell_tools_without_command_authority() {
+        let mut request = invocation(AgentProvider::Claude, true);
+        request.may_run_commands = false;
+        let arguments = provider_arguments(&request);
+        assert!(!arguments.iter().any(|value| value == "--allowedTools"));
+        let denied = option_value(&arguments, "--disallowedTools").unwrap();
+        assert!(denied.contains("Bash"));
+        assert!(denied.contains("PowerShell"));
     }
 
     #[test]

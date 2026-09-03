@@ -22,14 +22,15 @@
 //!   message 2 on Codex without the second runtime losing the conversation.
 
 use crate::agents::{provider_arguments, AgentInvocation};
-use crate::database::organization::NewAgentEntry;
+use crate::database::organization::{NewAgentEntry, NewAgentTurn};
 use crate::database::DatabaseService;
 use crate::errors::{AppError, AppResult};
 use crate::models::context::ContextRequest;
 use crate::models::swarm::SwarmRuntimeKind;
 use crate::models::{
-    AgentCapabilityDecision, AgentConversationEntry, AgentProvider, AgentRuntimeOption,
-    CreateAgentDelegationInput, OrganizationalAgent, SendAgentMessageInput, StartAgentWorkInput,
+    AgentCapabilityDecision, AgentConversationEntry, AgentMessageAttachment, AgentProvider,
+    AgentRuntimeOption, CreateAgentDelegationInput, OrganizationalAgent, SendAgentMessageInput,
+    StartAgentWorkInput,
 };
 use crate::services::agent_actions::{self, AgentActionExecutor, RejectedAction, RequestedAction};
 use crate::services::provider_session::{self, ProviderOutcome};
@@ -360,28 +361,30 @@ impl AgentConversationService {
     /// Returns as soon as both rows exist so the renderer can show the question and the pending
     /// answer immediately; the answer itself streams in over [`TURN_EVENT`].
     pub fn send(&self, input: SendAgentMessageInput) -> AppResult<AgentConversationEntry> {
-        let (agent, conversation_preference) = self
+        validate_attachments(&input.attachments)?;
+        let (agent, conversation_preference, conversation_project_id) = self
             .database
             .agent_for_conversation(&input.conversation_id)?;
+        let project_id = resolve_conversation_project(
+            &self.database,
+            &input.conversation_id,
+            conversation_project_id,
+            input.project_id,
+        )?;
         let runtime = self.resolve_runtime(
             &agent,
             conversation_preference.as_deref(),
             input.runtime_id.as_deref(),
         )?;
-        let user_entry = self
-            .database
-            .add_agent_conversation_entry(&input.conversation_id, &input.body)?;
-        let pending = self.database.insert_agent_entry(NewAgentEntry {
+        let question = message_with_attachments(&input.body, &input.attachments);
+        let (user_entry, pending) = self.database.begin_agent_conversation_turn(NewAgentTurn {
             conversation_id: &input.conversation_id,
-            kind: "agent",
-            author_agent_id: Some(&agent.id),
-            body: "",
-            metadata: serde_json::json!({ "runtimeSource": runtime.source }),
-            state: "preparing",
-            runtime_provider: Some(&runtime.provider_id),
-            runtime_model: Some(&runtime.model_id),
-            runtime_account: None,
-            parent_entry_id: Some(&user_entry.id),
+            agent_id: &agent.id,
+            body: &input.body,
+            user_metadata: serde_json::json!({ "attachments": input.attachments }),
+            runtime_metadata: serde_json::json!({ "runtimeSource": runtime.source }),
+            runtime_provider: &runtime.provider_id,
+            runtime_model: &runtime.model_id,
         })?;
         self.database.set_organizational_agent_work_state(
             &agent.id,
@@ -394,8 +397,8 @@ impl AgentConversationService {
             agent,
             runtime,
             input.conversation_id,
-            input.project_id,
-            input.body,
+            project_id,
+            question,
             Speaker::Teammate,
         )?;
         Ok(user_entry)
@@ -409,8 +412,14 @@ impl AgentConversationService {
     /// would be a summary of an unfinished thing, which is exactly the kind of confident-sounding
     /// wrongness this product must not produce.
     pub fn synthesize(&self, conversation_id: &str, project_id: Option<String>) -> AppResult<()> {
-        let (agent, conversation_preference) =
+        let (agent, conversation_preference, conversation_project_id) =
             self.database.agent_for_conversation(conversation_id)?;
+        let project_id = resolve_conversation_project(
+            &self.database,
+            conversation_id,
+            conversation_project_id,
+            project_id,
+        )?;
         let runtime = self.resolve_runtime(&agent, conversation_preference.as_deref(), None)?;
         let pending = self.database.insert_agent_entry(NewAgentEntry {
             conversation_id,
@@ -539,6 +548,7 @@ impl AgentConversationService {
             // work goes through a delegation with its own authority check, and a chat reply is
             // not a place to grant write access implicitly.
             may_write: false,
+            may_run_commands: true,
             working_directory: working_directory.clone(),
             prompt,
             resume_session_id: None,
@@ -1163,6 +1173,74 @@ pub(crate) fn read_turn(runtime: SwarmRuntimeKind, output: &[u8]) -> TurnReading
     reading
 }
 
+fn resolve_conversation_project(
+    database: &DatabaseService,
+    conversation_id: &str,
+    bound_project_id: Option<String>,
+    requested_project_id: Option<String>,
+) -> AppResult<Option<String>> {
+    match (bound_project_id, requested_project_id) {
+        (Some(bound), Some(requested)) if bound != requested => Err(AppError::new(
+            "agent_conversation_project_mismatch",
+            "This conversation belongs to another Project. Start a new conversation here.",
+            true,
+        )
+        .entity(conversation_id)
+        .layer("project_scope")),
+        (Some(bound), _) => Ok(Some(bound)),
+        (None, Some(requested)) => {
+            database.bind_agent_conversation_project(conversation_id, &requested)?;
+            Ok(Some(requested))
+        }
+        (None, None) => Ok(None),
+    }
+}
+
+fn validate_attachments(attachments: &[AgentMessageAttachment]) -> AppResult<()> {
+    const MAX_ATTACHMENTS: usize = 5;
+    const MAX_ATTACHMENT_BYTES: usize = 64 * 1024;
+    const MAX_TOTAL_BYTES: usize = 128 * 1024;
+    if attachments.len() > MAX_ATTACHMENTS {
+        return Err(AppError::new(
+            "agent_attachment_limit",
+            "Attach at most five text files to one message.",
+            true,
+        ));
+    }
+    let mut total = 0usize;
+    for attachment in attachments {
+        let size = attachment.content.len();
+        if attachment.name.trim().is_empty() || size == 0 || size > MAX_ATTACHMENT_BYTES {
+            return Err(AppError::new(
+                "agent_attachment_invalid",
+                "Each attachment must be a non-empty text file no larger than 64 KiB.",
+                true,
+            )
+            .entity(&attachment.name));
+        }
+        total = total.saturating_add(size);
+    }
+    if total > MAX_TOTAL_BYTES {
+        return Err(AppError::new(
+            "agent_attachment_total_limit",
+            "Attachments may contain at most 128 KiB of text in total.",
+            true,
+        ));
+    }
+    Ok(())
+}
+
+fn message_with_attachments(body: &str, attachments: &[AgentMessageAttachment]) -> String {
+    let mut message = body.trim().to_string();
+    for attachment in attachments {
+        message.push_str(&format!(
+            "\n\n<attachment name={:?} media_type={:?}>\n{}\n</attachment>",
+            attachment.name, attachment.media_type, attachment.content
+        ));
+    }
+    message
+}
+
 fn is_provider_limit(metadata: &serde_json::Value) -> bool {
     is_provider_limit_text(&metadata.to_string())
 }
@@ -1374,5 +1452,33 @@ mod tests {
         let kept = tail_chars(transcript, 20);
         assert!(kept.starts_with("Teammate: third") || kept.starts_with("Atlas: second"));
         assert!(!kept.contains("first"));
+    }
+
+    #[test]
+    fn attachment_limits_use_received_content_not_client_reported_size() {
+        let attachment = AgentMessageAttachment {
+            name: "notes.txt".into(),
+            media_type: "text/plain".into(),
+            content: "x".repeat(64 * 1024 + 1),
+            size: 1,
+        };
+        let error = validate_attachments(&[attachment]).unwrap_err();
+        assert_eq!(error.code, "agent_attachment_invalid");
+    }
+
+    #[test]
+    fn attached_text_is_delimited_and_keeps_the_user_message() {
+        let rendered = message_with_attachments(
+            "Review this",
+            &[AgentMessageAttachment {
+                name: "config.json".into(),
+                media_type: "application/json".into(),
+                content: "{\"enabled\":true}".into(),
+                size: 16,
+            }],
+        );
+        assert!(rendered.starts_with("Review this\n\n<attachment"));
+        assert!(rendered.contains("{\"enabled\":true}"));
+        assert!(rendered.ends_with("</attachment>"));
     }
 }

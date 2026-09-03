@@ -169,7 +169,7 @@ describe('AgentModeSurface', () => {
     fireEvent.change(screen.getByLabelText('Message Atlas'), { target: { value: 'What should we prioritize today?' } })
     fireEvent.submit(screen.getByLabelText('Message Atlas').closest('form')!)
     await vi.waitFor(() => expect(sendAgentMessage).toHaveBeenCalledWith({
-      conversationId: 'chat', body: 'What should we prioritize today?', runtimeId: 'claude/sonnet', projectId: 'project',
+      conversationId: 'chat', body: 'What should we prioritize today?', runtimeId: 'claude/sonnet', projectId: 'project', attachments: [],
     }))
     // A message-level choice must not become the standing default.
     expect(useAgentModeStore.getState().messageRuntime).toEqual({})

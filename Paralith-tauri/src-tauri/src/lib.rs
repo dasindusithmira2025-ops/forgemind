@@ -580,6 +580,7 @@ pub fn run() {
                 terminals.clone(),
                 context.clone(),
                 agent_conversations.clone(),
+                activity.clone(),
                 app.handle().clone(),
             );
             // Close the loop the other way: a conversation can now start and stop work, which is
@@ -836,6 +837,7 @@ pub fn run() {
             commands::cancel_agent_work,
             commands::continue_agent_work,
             commands::list_agent_work_events,
+            commands::set_agent_workspace_access,
             commands::list_agent_capabilities,
             commands::set_agent_capability,
             commands::list_agent_approvals,

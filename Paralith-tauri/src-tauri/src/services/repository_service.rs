@@ -522,6 +522,104 @@ impl RepositoryService {
             &lock_key,
             &mut progress,
             None,
+            None,
+            false,
+        )
+    }
+
+    /// Execute an operation covered by an approval owned by another product domain.
+    ///
+    /// Agent Mode keeps its user-facing approval in `run_approvals`, but the Git operation still
+    /// belongs here. The caller supplies the repository fingerprint shown to the person; this
+    /// service rechecks it after acquiring the mutation lock and applies every normal state pin,
+    /// lease, policy-block and exact-path validation. The authorization can satisfy an
+    /// approval-required repository policy, but can never override a blocked policy.
+    pub fn execute_authorized<F>(
+        &self,
+        request: RepositoryOperationRequest,
+        authorization_id: &str,
+        expected_fingerprint: &str,
+        mut progress: F,
+    ) -> AppResult<RepositoryOperationRecord>
+    where
+        F: FnMut(RepositoryOperationEvent),
+    {
+        if authorization_id.trim().is_empty() || expected_fingerprint.trim().is_empty() {
+            return Err(invalid(
+                "repository_authorization_invalid",
+                "An authorization identity and repository fingerprint are required.",
+            ));
+        }
+        self.validate_request(&request)?;
+        let request_json = serde_json::to_string(&request).map_err(AppError::database)?;
+        let operation_hash = hash_text(&request_json);
+        if let Some(existing) = self.database.repository_operation_retry(
+            &request.context.project_id,
+            &request.context.idempotency_key,
+            &operation_hash,
+        )? {
+            return Ok(existing);
+        }
+        let project = self.database.get_project(&request.context.project_id)?;
+        let repository =
+            self.validate_repository_path(&project, request.context.repository_path.as_deref())?;
+        let worktree = self.validate_worktree_path(
+            &project.id,
+            &repository,
+            request.context.worktree_path.as_deref(),
+        )?;
+        let before = self.inspect_validated(&project.id, &repository, &worktree)?;
+        self.validate_expected_state(&request.context, &before)?;
+        self.validate_agent_lease(&request, &worktree, &before)?;
+        if snapshot_fingerprint(&before)? != expected_fingerprint {
+            return Err(AppError::new(
+                "repository_approval_stale",
+                "Repository state changed after approval; request a new approval.",
+                true,
+            )
+            .entity(authorization_id)
+            .layer("repository_policy"));
+        }
+        let policy = self.evaluate_policy(&request.operation, &before)?;
+        if policy.decision == RepositoryPolicyDecisionKind::Blocked {
+            return Err(
+                AppError::new("repository_operation_blocked", policy.reason, false)
+                    .entity(request.operation.kind())
+                    .layer("repository_policy"),
+            );
+        }
+        let operation_id = Uuid::new_v4().to_string();
+        let lock_key = self.lock_key(&project.id, &worktree, &before, &request.operation);
+        let inserted = self
+            .database
+            .insert_repository_operation(&NewRepositoryOperation {
+                id: &operation_id,
+                project_id: &project.id,
+                repository_path: &repository.to_string_lossy(),
+                worktree_path: &worktree.to_string_lossy(),
+                branch_name: before.branch.as_deref(),
+                kind: request.operation.kind(),
+                actor: &request.context.actor,
+                idempotency_key: &request.context.idempotency_key,
+                request_json: &request_json,
+                operation_hash: &operation_hash,
+                lock_key: &lock_key,
+                policy: &policy,
+                before_state: &before,
+            })?;
+        if let Some(existing) = inserted {
+            return Ok(existing);
+        }
+        self.run_recorded_operation(
+            &operation_id,
+            &request,
+            &repository,
+            &worktree,
+            &lock_key,
+            &mut progress,
+            Some(authorization_id),
+            Some(expected_fingerprint),
+            false,
         )
     }
 
@@ -604,6 +702,8 @@ impl RepositoryService {
             &lock_key,
             &mut progress,
             Some(approval_id),
+            Some(&approval.state_fingerprint),
+            true,
         )
     }
 
@@ -616,7 +716,9 @@ impl RepositoryService {
         worktree: &Path,
         lock_key: &str,
         progress: &mut F,
-        approval_id: Option<&str>,
+        authorization_id: Option<&str>,
+        approved_fingerprint: Option<&str>,
+        consume_repository_approval: bool,
     ) -> AppResult<RepositoryOperationRecord>
     where
         F: FnMut(RepositoryOperationEvent),
@@ -673,7 +775,7 @@ impl RepositoryService {
                 "operationId": operation_id,
                 "projectId": request.context.project_id,
                 "actor": request.context.actor,
-                "approvalId": approval_id,
+                "approvalId": authorization_id,
                 "repository": repository.to_string_lossy(),
                 "worktree": worktree.to_string_lossy(),
             }),
@@ -693,7 +795,7 @@ impl RepositoryService {
             let current_policy = self.evaluate_policy(&request.operation, &current)?;
             if current_policy.decision == RepositoryPolicyDecisionKind::Blocked
                 || (current_policy.decision == RepositoryPolicyDecisionKind::ApprovalRequired
-                    && approval_id.is_none())
+                    && authorization_id.is_none())
             {
                 return Err(AppError::new(
                     "repository_policy_changed",
@@ -703,15 +805,14 @@ impl RepositoryService {
                 .detail(current_policy.reason)
                 .layer("repository_policy"));
             }
-            if let Some(approval_id) = approval_id {
-                let (approval, _) = self.database.repository_approval(approval_id)?;
-                if snapshot_fingerprint(&current)? != approval.state_fingerprint {
+            if let Some(expected_fingerprint) = approved_fingerprint {
+                if snapshot_fingerprint(&current)? != expected_fingerprint {
                     return Err(AppError::new(
                         "repository_approval_stale",
                         "Repository state changed while the approved operation was queued.",
                         true,
                     )
-                    .entity(approval_id)
+                    .entity(authorization_id.unwrap_or("repository-authorization"))
                     .layer("repository_policy"));
                 }
             }
@@ -737,7 +838,14 @@ impl RepositoryService {
                     Some(&after),
                     None,
                 )?;
-                if let Some(approval_id) = approval_id {
+                if consume_repository_approval {
+                    let approval_id = authorization_id.ok_or_else(|| {
+                        AppError::new(
+                            "repository_approval_missing",
+                            "The repository approval identity was lost before completion.",
+                            false,
+                        )
+                    })?;
                     self.database
                         .consume_repository_approval(approval_id, &result)?;
                 }
@@ -797,88 +905,6 @@ impl RepositoryService {
                 Err(error)
             }
         }
-    }
-
-    /// Publish an Agent's work after a person has explicitly authorised it.
-    ///
-    /// Two named actions rather than a general "run git for me", because the whole value of the
-    /// approval gate is that the approved thing is *specific*. Handing the work service an
-    /// arbitrary Git escape hatch would give back everything the gate took away.
-    ///
-    /// The directory is re-validated against the Project root on every call. The caller has
-    /// already checked authority, but a path that was inside the Project when the run started is
-    /// not proof it still is, and this is the boundary that must not be assumed.
-    pub fn commit_authorized(
-        &self,
-        project_id: &str,
-        directory: Option<&str>,
-        message: &str,
-    ) -> AppResult<String> {
-        let (project, repository) = self.authorized_target(project_id, directory)?;
-        let _ = project;
-        self.git_text(&repository, &["add", "-A"], None, None)?;
-        self.git_text(&repository, &["commit", "-m", message], None, None)
-    }
-
-    /// Push the checked-out branch to `origin`, after explicit authorisation.
-    ///
-    /// A detached HEAD is refused rather than resolved to something plausible: guessing which
-    /// branch a person meant to publish is exactly the class of decision that must stay theirs.
-    pub fn push_authorized(
-        &self,
-        project_id: &str,
-        directory: Option<&str>,
-    ) -> AppResult<(String, String)> {
-        let (project, repository) = self.authorized_target(project_id, directory)?;
-        let _ = project;
-        let branch = self
-            .git_text(
-                &repository,
-                &["rev-parse", "--abbrev-ref", "HEAD"],
-                None,
-                None,
-            )?
-            .trim()
-            .to_string();
-        if branch.is_empty() || branch == "HEAD" {
-            return Err(AppError::new(
-                "repository_detached_head",
-                "This work is not on a branch, so there is nothing to push.",
-                true,
-            )
-            .layer("repository_security"));
-        }
-        let output = self.git_text(
-            &repository,
-            &["push", "--set-upstream", "origin", &branch],
-            None,
-            None,
-        )?;
-        Ok((branch, output))
-    }
-
-    /// Whether the working tree has anything to commit. Used to tell "already committed" from
-    /// "nothing was done", which are different things to report back to a person.
-    pub fn has_uncommitted_changes(
-        &self,
-        project_id: &str,
-        directory: Option<&str>,
-    ) -> AppResult<bool> {
-        let (_, repository) = self.authorized_target(project_id, directory)?;
-        Ok(!self
-            .git_text(&repository, &["status", "--porcelain"], None, None)?
-            .trim()
-            .is_empty())
-    }
-
-    fn authorized_target(
-        &self,
-        project_id: &str,
-        directory: Option<&str>,
-    ) -> AppResult<(Project, PathBuf)> {
-        let project = self.database.get_project(project_id)?;
-        let repository = self.validate_repository_path(&project, directory)?;
-        Ok((project, repository))
     }
 
     pub fn cancel(&self, project_id: &str, operation_id: &str) -> AppResult<bool> {

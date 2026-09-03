@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { ArrowUpRight, ChevronLeft, GripVertical, MoreHorizontal, Paperclip, Pin, Plus, Search, Send, Square, UserRoundPlus, X } from 'lucide-react'
-import type { AgentConversationEntry, AgentWork, AgentWorkStatus, CreateOrganizationalAgentInput, OrganizationalAgent, Project, Workspace } from '../../native/types'
-import { native } from '../../native/commands'
+import type { AgentConversationEntry, AgentMessageAttachment, AgentWork, AgentWorkStatus, CreateOrganizationalAgentInput, OrganizationalAgent, Project, Workspace } from '../../native/types'
+import { asNativeError, native } from '../../native/commands'
 import { AgentAvatar } from './AgentIdentity'
 import { AgentSettingsPanel, ApprovalCard } from './AgentGovernance'
 import { IntelligencePicker, IntelligenceTrigger } from './IntelligencePicker'
@@ -135,13 +135,21 @@ function AgentPage({ agent, project, workspace, visible, onOpenCode }: { agent: 
   const [draggingConversation, setDraggingConversation] = useState<string>()
   const [historyQuery, setHistoryQuery] = useState('')
   const [historyResults, setHistoryResults] = useState<AgentConversationEntry[]>()
-  const conversations = useMemo(() => snapshot.conversations.filter((item) => item.agentId === agent.id).sort((a, b) => a.position - b.position), [agent.id, snapshot.conversations])
+  const [historyError, setHistoryError] = useState<string>()
+  const conversations = useMemo(() => snapshot.conversations.filter((item) => item.agentId === agent.id && (!item.projectId || item.projectId === project.id)).sort((a, b) => a.position - b.position), [agent.id, project.id, snapshot.conversations])
   const activeConversation = conversations.find((item) => item.id === snapshot.productState.selectedConversationId) ?? conversations[0]
   const entries = snapshot.entries.filter((item) => item.conversationId === activeConversation?.id)
   const assigned = snapshot.delegations.filter((item) => item.ownerAgentId === agent.id || item.recipientAgentId === agent.id)
   const approvals = useAgentModeStore((state) => state.approvals).filter((item) => item.agentId === agent.id)
   const moveConversationBefore = (targetId: string) => { if (!draggingConversation || draggingConversation === targetId) return; const ordered = conversations.map((item) => item.id).filter((id) => id !== draggingConversation); ordered.splice(ordered.indexOf(targetId), 0, draggingConversation); setDraggingConversation(undefined); void reorderConversations(agent.id, ordered) }
-  const searchHistory = async (event: FormEvent) => { event.preventDefault(); const query = historyQuery.trim(); if (!query) { setHistoryResults(undefined); return } setHistoryResults(await native.searchAgentHistory(agent.id, query).catch(() => [])) }
+  const searchHistory = async (event: FormEvent) => {
+    event.preventDefault()
+    const query = historyQuery.trim()
+    if (!query) { setHistoryResults(undefined); setHistoryError(undefined); return }
+    setHistoryError(undefined)
+    try { setHistoryResults(await native.searchAgentHistory(agent.id, project.id, query)) }
+    catch (caught) { setHistoryResults(undefined); setHistoryError(asNativeError(caught).message) }
+  }
 
   // Follow a streaming answer, but only while the reader is already at the end. Scrolling back to
   // re-read something must not be yanked forward by the next token.
@@ -153,6 +161,12 @@ function AgentPage({ agent, project, workspace, visible, onOpenCode }: { agent: 
     if (!element || !pinned.current) return
     element.scrollTop = element.scrollHeight
   }, [entries.length, lastEntry?.body, lastEntry?.state, activeConversation?.id])
+
+  useEffect(() => {
+    if (activeConversation && activeConversation.id !== snapshot.productState.selectedConversationId) {
+      selectConversation(activeConversation.id)
+    }
+  }, [activeConversation, selectConversation, snapshot.productState.selectedConversationId])
 
   // Alt+Up / Alt+Down move between this teammate's conversations. Alt keeps it clear of both the
   // Code surface's Ctrl shortcuts and a terminal's own key handling.
@@ -181,7 +195,7 @@ function AgentPage({ agent, project, workspace, visible, onOpenCode }: { agent: 
       <button type="button" className="agent-header-action" onClick={() => setDelegating(true)}>Delegate work</button>
       <button type="button" className="agent-header-icon" aria-label={`${agent.name} settings`} title="Access, Skills and Routines" onClick={() => setSettingsOpen(true)}><MoreHorizontal size={15} /></button>
     </header>
-    <nav className="agent-chat-tabs" aria-label={`${agent.name} conversations`}>{conversations.map((conversation) => <button type="button" draggable key={conversation.id} className={activeConversation?.id === conversation.id ? 'is-selected' : ''} onDragStart={() => setDraggingConversation(conversation.id)} onDragOver={(event) => event.preventDefault()} onDrop={() => moveConversationBefore(conversation.id)} onClick={() => selectConversation(conversation.id)}>{conversation.title}</button>)}<button type="button" className="agent-chat-new" aria-label="New conversation" title="New conversation" onClick={() => void createConversation(agent.id, `Conversation ${conversations.length + 1}`)}><Plus size={13} /></button></nav>
+    <nav className="agent-chat-tabs" aria-label={`${agent.name} conversations`}>{conversations.map((conversation) => <button type="button" draggable key={conversation.id} className={activeConversation?.id === conversation.id ? 'is-selected' : ''} onDragStart={() => setDraggingConversation(conversation.id)} onDragOver={(event) => event.preventDefault()} onDrop={() => moveConversationBefore(conversation.id)} onClick={() => selectConversation(conversation.id)}>{conversation.title}</button>)}<button type="button" className="agent-chat-new" aria-label="New conversation" title="New conversation" onClick={() => void createConversation(agent.id, project.id, `Conversation ${conversations.length + 1}`)}><Plus size={13} /></button></nav>
     <div className="agent-conversation">
       <div
         className="agent-transcript"
@@ -192,8 +206,9 @@ function AgentPage({ agent, project, workspace, visible, onOpenCode }: { agent: 
         }}
       >
         <div className="agent-thread">
+          {historyError && <p className="agent-history-error" role="alert">History search failed: {historyError}</p>}
           {historyResults
-            ? <><div className="agent-history-heading"><strong>History results</strong><span>{historyResults.length} match{historyResults.length === 1 ? '' : 'es'} across {agent.name}'s conversations</span></div>{historyResults.map((entry) => <Message key={entry.id} entry={entry} agent={agent} showDate />)}</>
+            ? <><div className="agent-history-heading"><strong>History results</strong><span>{historyResults.length} match{historyResults.length === 1 ? '' : 'es'} across {agent.name}'s conversations</span></div>{historyResults.map((entry) => <div className="agent-history-result" key={entry.id}><Message entry={entry} agent={agent} showDate /><button type="button" onClick={() => { setHistoryResults(undefined); setHistoryQuery(''); selectConversation(entry.conversationId) }}>Open conversation</button></div>)}</>
             : <>
               {entries.length === 0 && <ConversationStarter agent={agent} project={project} delegations={assigned.length} />}
               {entries.map((entry) => <Message key={entry.id} entry={entry} agent={agent} />)}
@@ -265,8 +280,10 @@ function WorkRow({ work, owner, recipient, onOpenCode }: { work: AgentWork; owne
   // Only a genuinely connected alternative is offered. A quota stop must never become a silent
   // switch to something the user has not signed in to, or to a billable API.
   const alternative = work.status === 'provider_limit'
-    ? runtimes.find((item) => item.available && item.providerId !== work.providerId)
-    : undefined
+    ? runtimes.find((item) => item.available && (item.providerId !== work.providerId || item.modelId !== work.modelId))
+    : work.status === 'interrupted'
+      ? runtimes.find((item) => item.available && (item.providerId !== work.providerId || item.modelId !== work.modelId)) ?? runtimes.find((item) => item.available)
+      : undefined
 
   const toggle = () => { setOpen((value) => { if (!value && !events) void loadWorkEvents(work.id); return !value }) }
 
@@ -323,10 +340,21 @@ function Message({ entry, agent, showDate }: { entry: AgentConversationEntry; ag
       {pending && <span className="agent-turn-status">{entry.state === 'preparing' ? 'Preparing…' : 'Responding…'}</span>}
       {pending && <button type="button" className="agent-turn-stop" onClick={() => void cancelTurn(entry.id)} aria-label="Stop this response"><Square size={10} /> Stop</button>}
     </header>
-    {entry.body ? <p>{entry.body}</p> : pending ? <p className="agent-turn-placeholder"><span /><span /><span /></p> : null}
+    {entry.body ? <MessageBody body={entry.body} /> : pending ? <p className="agent-turn-placeholder"><span /><span /><span /></p> : null}
     {entry.state === 'blocked' && <p className="agent-turn-blocked">Runtime limit reached — choose another connected runtime in the composer to continue.</p>}
     {entry.state === 'failed' && <p className="agent-turn-failed">{entry.errorCode === 'interrupted' ? 'Interrupted when Paralith closed.' : 'This turn did not complete.'}</p>}
   </article>
+}
+
+function MessageBody({ body }: { body: string }) {
+  return <div className="agent-message-body">{body.split('```').map((block, index) => {
+    if (index % 2 === 1) {
+      const [first, ...rest] = block.replace(/^\n/, '').split('\n')
+      const hasLanguage = /^[a-z0-9_+#.-]+$/i.test(first.trim()) && rest.length > 0
+      return <pre key={index} data-language={hasLanguage ? first.trim() : undefined}><code>{hasLanguage ? rest.join('\n').replace(/\n$/, '') : block.trim()}</code></pre>
+    }
+    return block.split(/\n{2,}/).filter((paragraph) => paragraph.trim()).map((paragraph, paragraphIndex) => <p key={`${index}-${paragraphIndex}`}>{paragraph.split('`').map((part, partIndex) => partIndex % 2 ? <code key={partIndex}>{part}</code> : part)}</p>)
+  })}</div>
 }
 
 function Composer({ agent, conversationId, conversationRuntime, projectId, entries, visible }: { agent: OrganizationalAgent; conversationId: string; conversationRuntime?: string; projectId: string; entries: AgentConversationEntry[]; visible: boolean }) {
@@ -337,8 +365,11 @@ function Composer({ agent, conversationId, conversationRuntime, projectId, entri
   const setConversationRuntime = useAgentModeStore((state) => state.setConversationRuntime)
   const loadRuntimes = useAgentModeStore((state) => state.loadRuntimes)
   const [message, setMessage] = useState('')
+  const [attachments, setAttachments] = useState<AgentMessageAttachment[]>([])
+  const [attachmentError, setAttachmentError] = useState<string>()
   const [picking, setPicking] = useState(false)
   const field = useRef<HTMLTextAreaElement>(null)
+  const attachmentField = useRef<HTMLInputElement>(null)
   const streaming = entries.some((entry) => entry.state === 'preparing' || entry.state === 'streaming')
   const runtime = composerRuntimeLabel(runtimes, messageRuntime, conversationRuntime, agent.intelligencePreference)
 
@@ -347,7 +378,31 @@ function Composer({ agent, conversationId, conversationRuntime, projectId, entri
     const body = message.trim()
     if (!body || streaming) return
     setMessage('')
-    void sendMessage(conversationId, body, projectId)
+    const selectedAttachments = attachments
+    setAttachments([])
+    void sendMessage(conversationId, body, projectId, selectedAttachments)
+  }
+
+  const attachFiles = async (files: FileList | null) => {
+    if (!files?.length) return
+    setAttachmentError(undefined)
+    const available = Math.max(0, 5 - attachments.length)
+    const selected = Array.from(files).slice(0, available)
+    try {
+      const next = await Promise.all(selected.map(async (file) => {
+        if (file.size > 64 * 1024) throw new Error(`${file.name} is larger than 64 KiB.`)
+        const content = await file.text()
+        if (!content.trim()) throw new Error(`${file.name} has no readable text.`)
+        return { name: file.name, mediaType: file.type || 'text/plain', content, size: file.size }
+      }))
+      const total = [...attachments, ...next].reduce((sum, item) => sum + item.size, 0)
+      if (total > 128 * 1024) throw new Error('Attachments may contain at most 128 KiB in total.')
+      setAttachments((current) => [...current, ...next])
+    } catch (caught) {
+      setAttachmentError(caught instanceof Error ? caught.message : 'The selected file could not be attached.')
+    } finally {
+      if (attachmentField.current) attachmentField.current.value = ''
+    }
   }
 
   // Ctrl+L focuses the composer and Ctrl+Shift+I opens the intelligence picker. Both are bound
@@ -366,6 +421,9 @@ function Composer({ agent, conversationId, conversationRuntime, projectId, entri
   }, [loadRuntimes, visible])
 
   return <form className="agent-composer" onSubmit={submit}>
+    <input ref={attachmentField} className="agent-attachment-input" type="file" multiple accept="text/*,.md,.json,.yaml,.yml,.toml,.csv,.xml,.html,.css,.js,.jsx,.ts,.tsx,.rs,.py,.go,.java,.kt,.swift,.sql,.sh,.ps1" onChange={(event) => void attachFiles(event.target.files)} />
+    {attachments.length > 0 && <ul className="agent-attachments" aria-label="Attached files">{attachments.map((attachment, index) => <li key={`${attachment.name}-${index}`}><Paperclip size={11} /><span>{attachment.name}</span><small>{Math.ceil(attachment.size / 1024)} KiB</small><button type="button" onClick={() => setAttachments((current) => current.filter((_, itemIndex) => itemIndex !== index))} aria-label={`Remove ${attachment.name}`}><X size={11} /></button></li>)}</ul>}
+    {attachmentError && <p className="agent-attachment-error" role="alert">{attachmentError}</p>}
     <textarea
       ref={field}
       rows={2}
@@ -377,7 +435,7 @@ function Composer({ agent, conversationId, conversationRuntime, projectId, entri
     />
     <footer>
       <div className="agent-composer-tools">
-        <button type="button" className="agent-composer-icon" disabled title="Attachments are not available yet" aria-label="Attach (unavailable)"><Paperclip size={14} /></button>
+        <button type="button" className="agent-composer-icon" title="Attach text files" aria-label="Attach text files" onClick={() => attachmentField.current?.click()}><Paperclip size={14} /></button>
         <span className="agent-composer-scope" title="Context compiled for this turn">{projectId ? 'Project context' : 'No project context'}</span>
       </div>
       <div className="agent-composer-actions">

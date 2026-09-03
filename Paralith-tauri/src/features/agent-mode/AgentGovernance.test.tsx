@@ -6,6 +6,7 @@ import { AgentSettingsPanel, ApprovalCard } from './AgentGovernance'
 
 const commands = vi.hoisted(() => ({
   listAgentCapabilities: vi.fn(),
+  setAgentWorkspaceAccess: vi.fn(),
   setAgentCapability: vi.fn(),
   listAgentApprovals: vi.fn().mockResolvedValue([]),
   decideAgentApproval: vi.fn().mockResolvedValue(undefined),
@@ -137,7 +138,30 @@ describe('AgentSettingsPanel', () => {
   it('states the Project grant it is operating inside rather than implying global access', async () => {
     render(<AgentSettingsPanel agent={forge} project={project} onClose={vi.fn()} />)
     expect(await screen.findByText('Paralith')).toBeInTheDocument()
-    expect(screen.getByText('Read and write')).toBeInTheDocument()
+    const grant = screen.getByLabelText('Forge access to Paralith') as HTMLSelectElement
+    expect(grant.value).toBe('read_write')
+  })
+
+  it('lets a teammate created without access be given some, rather than dead-ending', async () => {
+    // The grant used to be settable only while creating the teammate, so a teammate created with
+    // "None" could never be delegated to and there was nowhere in the product to fix it.
+    useAgentModeStore.setState({
+      snapshot: { ...useAgentModeStore.getState().snapshot, authorities: [] },
+    })
+    commands.setAgentWorkspaceAccess.mockImplementation(async () => ({
+      ...useAgentModeStore.getState().snapshot,
+      authorities: [{ agentId: 'forge', projectId: 'project', access: 'read_write', grantedAt: '2026-01-01T00:00:00Z' }],
+    }))
+    render(<AgentSettingsPanel agent={forge} project={project} onClose={vi.fn()} />)
+    const grant = await screen.findByLabelText('Forge access to Paralith') as HTMLSelectElement
+    expect(grant.value).toBe('none')
+    // And it says why that matters, rather than leaving the user to discover it from a refused
+    // delegation.
+    expect(screen.getByText(/cannot be delegated work in Paralith/)).toBeInTheDocument()
+
+    fireEvent.change(grant, { target: { value: 'read_write' } })
+    await waitFor(() => expect(commands.setAgentWorkspaceAccess).toHaveBeenCalledWith('forge', 'project', 'read_write', undefined))
+    await waitFor(() => expect(screen.queryByText(/cannot be delegated work in Paralith/)).not.toBeInTheDocument())
   })
 
   it('sends a capability change through the backend, never only to local state', async () => {

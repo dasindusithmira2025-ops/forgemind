@@ -142,6 +142,22 @@ impl DatabaseService {
         let transaction = connection
             .unchecked_transaction()
             .map_err(AppError::database)?;
+        let busy: bool = transaction
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM runs WHERE agent_id=?1 AND run_type='agent_work' AND status IN ('queued','preparing','working','waiting_user','needs_approval','verifying') UNION ALL SELECT 1 FROM agent_conversation_entries e JOIN agent_conversations c ON c.id=e.conversation_id WHERE c.agent_id=?1 AND e.state IN ('preparing','streaming'))",
+                [input.agent_id],
+                |row| row.get(0),
+            )
+            .map_err(AppError::database)?;
+        if busy {
+            return Err(AppError::new(
+                "agent_already_active",
+                "This Agent is already handling another turn or unit of work.",
+                true,
+            )
+            .entity(input.agent_id)
+            .layer("agent_lifecycle"));
+        }
         let root = match input.parent_work_id {
             Some(parent) => transaction
                 .query_row(
@@ -244,6 +260,69 @@ impl DatabaseService {
             )
             .map_err(AppError::database)?;
         Ok(())
+    }
+
+    /// Requeue a stopped run in its existing isolated worktree.
+    ///
+    /// Authority is derived again immediately before continuation, so revoking a grant while a
+    /// provider is limited or the app is closed takes effect. The run identity and worktree lease
+    /// remain stable; creating a child run here would either abandon the partial changes or let a
+    /// second task identity operate inside another task's lease.
+    pub fn prepare_agent_work_continuation(
+        &self,
+        work_id: &str,
+        runtime_preference: &str,
+        authority: AgentWorkAuthority,
+    ) -> AppResult<AgentWork> {
+        let now = Utc::now().to_rfc3339();
+        let authority = serde_json::to_string(&authority).map_err(AppError::database)?;
+        let connection = self.connection.lock();
+        let transaction = connection
+            .unchecked_transaction()
+            .map_err(AppError::database)?;
+        let agent_id: String = transaction
+            .query_row(
+                "SELECT agent_id FROM runs WHERE id=?1 AND run_type='agent_work'",
+                [work_id],
+                |row| row.get(0),
+            )
+            .map_err(AppError::database)?;
+        let busy: bool = transaction
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM runs WHERE id<>?1 AND agent_id=?2 AND run_type='agent_work' AND status IN ('queued','preparing','working','waiting_user','needs_approval','verifying') UNION ALL SELECT 1 FROM agent_conversation_entries e JOIN agent_conversations c ON c.id=e.conversation_id WHERE c.agent_id=?2 AND e.state IN ('preparing','streaming'))",
+                params![work_id, agent_id],
+                |row| row.get(0),
+            )
+            .map_err(AppError::database)?;
+        if busy {
+            return Err(AppError::new(
+                "agent_already_active",
+                "This Agent is already handling another turn or unit of work.",
+                true,
+            )
+            .entity(agent_id)
+            .layer("agent_lifecycle"));
+        }
+        let changed = transaction
+            .execute(
+                "UPDATE runs SET status='queued',status_reason=NULL,provider_id=NULL,model_id=NULL,terminal_session_id=NULL,result_summary=NULL,error_code=NULL,error_message=NULL,completed_at=NULL,updated_at=?2,metadata_json=json_set(metadata_json,'$.authority',json(?3),'$.runtimePreference',?4) WHERE id=?1 AND run_type='agent_work' AND status IN ('provider_limit','interrupted')",
+                params![work_id, now, authority, runtime_preference],
+            )
+            .map_err(AppError::database)?;
+        if changed != 1 {
+            return Err(AppError::new(
+                "agent_work_not_continuable",
+                "This work is no longer available to continue.",
+                true,
+            )
+            .entity(work_id));
+        }
+        transaction.commit().map_err(AppError::database)?;
+        drop(connection);
+        self.get_agent_work(work_id)?.ok_or_else(|| {
+            AppError::new("agent_work_not_found", "That work no longer exists.", false)
+                .entity(work_id)
+        })
     }
 
     /// Finish work with its structured result. `result_summary` is the Agent's own account;
@@ -421,9 +500,18 @@ impl DatabaseService {
         }
         // Pushing without committing is not a thing. A policy that allows one and refuses the
         // other resolves to the narrower of the two rather than to something incoherent.
-        if !authority.commit && !authority.commit_requires_approval {
-            authority.push = false;
-            authority.push_requires_approval = false;
+        if !authority.commit {
+            if authority.commit_requires_approval {
+                // A push may need to create a commit first. An `allow push` grant cannot bypass
+                // an `ask commit` gate, so the combined action inherits the stricter decision.
+                if authority.push {
+                    authority.push = false;
+                    authority.push_requires_approval = true;
+                }
+            } else {
+                authority.push = false;
+                authority.push_requires_approval = false;
+            }
         }
         narrow_by_constraints(&mut authority, constraints);
         Ok(authority)
@@ -679,6 +767,22 @@ mod tests {
         assert_eq!(work.status, "queued");
         assert_eq!(work.delegation_id.as_deref(), Some(delegation.id.as_str()));
         assert!(work.authority.write && !work.authority.commit);
+        let duplicate = database
+            .create_agent_work(NewAgentWork {
+                agent_id: &forge.id,
+                delegation_id: None,
+                parent_work_id: None,
+                objective: "Competing work",
+                constraints: "",
+                expected_result: "",
+                project_id: &saved.id,
+                workspace_id: None,
+                origin_conversation_id: None,
+                runtime_preference: None,
+                authority,
+            })
+            .unwrap_err();
+        assert_eq!(duplicate.code, "agent_already_active");
         assert_eq!(
             database.delegation_for_work(&work.id).unwrap().as_deref(),
             Some(delegation.id.as_str()),

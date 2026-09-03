@@ -151,6 +151,23 @@ fn push_without_commit_resolves_to_neither() {
 }
 
 #[test]
+fn an_allowed_push_cannot_bypass_a_commit_approval() {
+    let (database, project, forge) = fixture();
+    database
+        .set_agent_capability(&forge, "push", AgentCapabilityDecision::Allow)
+        .unwrap();
+    database
+        .set_agent_capability(&forge, "commit", AgentCapabilityDecision::Ask)
+        .unwrap();
+    let authority = database
+        .agent_work_authority(&forge, &project.id, None, "")
+        .unwrap();
+    assert!(!authority.push);
+    assert!(authority.commit_requires_approval);
+    assert!(authority.push_requires_approval);
+}
+
+#[test]
 fn an_unknown_capability_cannot_be_invented() {
     let (database, _, forge) = fixture();
     let error = database
@@ -481,4 +498,97 @@ fn an_unconfigured_teammate_has_a_complete_and_closed_posture() {
         };
         assert_eq!(capability.decision, expected, "{}", capability.capability);
     }
+}
+
+/// A teammate created without access must be able to be given some, and to have it taken back.
+/// Before this the grant existed only at creation, so delegating to such a teammate was refused
+/// with no way to fix it from anywhere in the product.
+#[test]
+fn a_project_grant_can_be_given_changed_and_revoked_after_creation() {
+    let database = DatabaseService::in_memory().unwrap();
+    let root = std::env::temp_dir().join(format!("paralith-grant-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&root).unwrap();
+    let project = database.upsert_project(&project(&root)).unwrap();
+    // Created with no access at all, which is what happens when the creation form's access
+    // dropdown is left at "None".
+    let forge = database
+        .create_organizational_agent(agent("Forge"))
+        .unwrap();
+    assert!(
+        !database
+            .agent_work_authority(&forge.id, &project.id, None, "")
+            .unwrap()
+            .read
+    );
+
+    database
+        .set_agent_workspace_access(&forge.id, &project.id, None, "read")
+        .unwrap();
+    let reading = database
+        .agent_work_authority(&forge.id, &project.id, None, "")
+        .unwrap();
+    assert!(reading.read && !reading.write);
+
+    database
+        .set_agent_workspace_access(&forge.id, &project.id, None, "read_write")
+        .unwrap();
+    assert!(
+        database
+            .agent_work_authority(&forge.id, &project.id, None, "")
+            .unwrap()
+            .write
+    );
+    // Changing the grant must replace it, not accumulate rows the resolver would still honour.
+    assert_eq!(
+        database
+            .agent_organization_snapshot()
+            .unwrap()
+            .authorities
+            .len(),
+        1
+    );
+
+    database
+        .set_agent_workspace_access(&forge.id, &project.id, None, "none")
+        .unwrap();
+    assert!(
+        !database
+            .agent_work_authority(&forge.id, &project.id, None, "")
+            .unwrap()
+            .read
+    );
+    // Revoking stores absence rather than a refusal row, so there is one representation of
+    // "no access" for the resolver to agree with.
+    assert!(database
+        .agent_organization_snapshot()
+        .unwrap()
+        .authorities
+        .is_empty());
+}
+
+#[test]
+fn a_grant_cannot_be_invented_for_a_teammate_or_project_that_is_gone() {
+    let (database, project, forge) = fixture();
+    assert_eq!(
+        database
+            .set_agent_workspace_access(&forge, &project.id, None, "everything")
+            .unwrap_err()
+            .code,
+        "agent_access_invalid"
+    );
+    assert_eq!(
+        database
+            .set_agent_workspace_access("nobody", &project.id, None, "read")
+            .unwrap_err()
+            .code,
+        "agent_grant_target_missing"
+    );
+    // A revoke is a delete, which would otherwise succeed silently against an id that never was.
+    assert_eq!(
+        database
+            .set_agent_workspace_access(&forge, "no-such-project", None, "none")
+            .unwrap_err()
+            .code,
+        "agent_grant_target_missing"
+    );
 }

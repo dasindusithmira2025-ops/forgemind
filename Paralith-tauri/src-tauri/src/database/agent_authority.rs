@@ -181,6 +181,92 @@ impl DatabaseService {
         Ok(())
     }
 
+    /// Grant, change or revoke one teammate's access to a Project.
+    ///
+    /// Until this existed a grant could only be set while creating the teammate, which left a
+    /// teammate created without access permanently unable to be given any — the Access panel
+    /// could show `No access` and offer no way out of it. A grant is a decision a user changes
+    /// as often as they change their mind about who does what, so it belongs here rather than in
+    /// a one-time creation form.
+    ///
+    /// `none` deletes the row rather than storing a refusal, because absence is already how the
+    /// authority resolver reads "no access". Two representations of the same state would be one
+    /// too many, and the resolver would have to agree with both.
+    ///
+    /// Like a capability, this takes effect on the next unit of work: authority is resolved once,
+    /// when a run starts, and recorded on that run.
+    pub fn set_agent_workspace_access(
+        &self,
+        agent_id: &str,
+        project_id: &str,
+        workspace_id: Option<&str>,
+        access: &str,
+    ) -> AppResult<()> {
+        if !matches!(access, "none" | "read" | "read_write") {
+            return Err(AppError::new(
+                "agent_access_invalid",
+                "Choose no access, read, or read/write.",
+                true,
+            )
+            .layer("authority"));
+        }
+        let connection = self.connection.lock();
+        // The teammate and the Project both have to exist. Foreign keys would catch it on insert,
+        // but a revoke is a delete and would silently succeed against an id that never existed.
+        let known: bool = connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM organizational_agents WHERE id=?1) AND EXISTS(SELECT 1 FROM projects WHERE id=?2)",
+                params![agent_id, project_id],
+                |row| row.get(0),
+            )
+            .map_err(AppError::database)?;
+        if !known {
+            return Err(AppError::new(
+                "agent_grant_target_missing",
+                "That teammate or Project no longer exists.",
+                true,
+            )
+            .entity(agent_id)
+            .layer("authority"));
+        }
+        if let Some(workspace_id) = workspace_id {
+            let matches_project: bool = connection
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM workspaces WHERE id=?1 AND project_id=?2)",
+                    params![workspace_id, project_id],
+                    |row| row.get(0),
+                )
+                .map_err(AppError::database)?;
+            if !matches_project {
+                return Err(AppError::new(
+                    "agent_workspace_scope_mismatch",
+                    "That Workspace does not belong to this Project.",
+                    false,
+                )
+                .layer("authority"));
+            }
+        }
+        // A Project-wide grant and a Workspace-scoped one are different rows for the same
+        // teammate, and the resolver prefers the wider. Replacing every scope for this Project
+        // keeps one answer to "what may this teammate do here" instead of a residue of old
+        // narrower grants quietly outliving the decision that replaced them.
+        connection
+            .execute(
+                "DELETE FROM agent_workspace_authorities WHERE agent_id=?1 AND project_id=?2",
+                params![agent_id, project_id],
+            )
+            .map_err(AppError::database)?;
+        if access != "none" {
+            connection
+                .execute(
+                    "INSERT INTO agent_workspace_authorities(agent_id,project_id,workspace_id,access,granted_at) VALUES(?1,?2,?3,?4,?5)",
+                    params![agent_id, project_id, workspace_id, access, Utc::now().to_rfc3339()],
+                )
+                .map_err(AppError::database)?;
+        }
+        Ok(())
+    }
+
     // ---- Skills ----------------------------------------------------------------------------
 
     pub fn list_agent_skills(&self) -> AppResult<Vec<AgentSkill>> {
