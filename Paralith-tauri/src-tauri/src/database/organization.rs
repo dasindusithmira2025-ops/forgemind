@@ -433,6 +433,22 @@ impl DatabaseService {
         Ok(())
     }
 
+    /// The whole team, ordered the way the rail shows it.
+    ///
+    /// Separate from the snapshot because a prompt needs *only* the roster: compiling the full
+    /// organization — every conversation, entry, delegation and run — to name five teammates
+    /// would put the snapshot's cost on every conversation turn.
+    pub fn list_organizational_agents(&self) -> AppResult<Vec<OrganizationalAgent>> {
+        self.connection
+            .lock()
+            .prepare("SELECT id,name,role,brief,responsibilities_json,avatar_seed,intelligence_preference,work_state,work_state_detail,pinned,position,created_at,updated_at FROM organizational_agents ORDER BY pinned DESC,position,id")
+            .map_err(AppError::database)?
+            .query_map([], agent_row)
+            .map_err(AppError::database)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(AppError::database)
+    }
+
     pub fn get_organizational_agent(&self, agent_id: &str) -> AppResult<OrganizationalAgent> {
         self.connection
             .lock()

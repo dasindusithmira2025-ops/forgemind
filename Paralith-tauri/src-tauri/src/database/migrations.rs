@@ -1,7 +1,7 @@
 use crate::errors::{AppError, AppResult};
 use rusqlite::{params, Connection};
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 44;
+pub const CURRENT_SCHEMA_VERSION: i64 = 45;
 
 const MIGRATION_1: &str = r#"
 CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
@@ -1164,6 +1164,9 @@ pub fn apply(connection: &Connection) -> AppResult<()> {
     if current < 44 || !column_exists(connection, "runs", "agent_id")? {
         migrate_v44(connection)?;
     }
+    if current < 45 || !table_exists(connection, "agent_capabilities")? {
+        migrate_v45(connection)?;
+    }
     Ok(())
 }
 
@@ -1267,7 +1270,11 @@ pub fn requires_migration(connection: &Connection) -> AppResult<bool> {
         || !table_exists(connection, "agent_delegations")?
         || !table_exists(connection, "agent_workspace_authorities")?
         || !table_exists(connection, "agent_product_state")?
-        || !column_exists(connection, "runs", "agent_id")?)
+        || !column_exists(connection, "runs", "agent_id")?
+        || !table_exists(connection, "agent_capabilities")?
+        || !table_exists(connection, "agent_skills")?
+        || !table_exists(connection, "agent_skill_assignments")?
+        || !table_exists(connection, "agent_routines")?)
 }
 
 fn migrate_v24(connection: &Connection) -> AppResult<()> {
@@ -2865,6 +2872,91 @@ CREATE INDEX IF NOT EXISTS idx_runs_agent_active
         record_migration(connection, 44)
     })();
     finish_migration_transaction(connection, result, 44)
+}
+
+/// Authority, repeatable procedure and recurring work for organizational Agents.
+///
+/// Three things an Agent needs before it is a teammate rather than a chat identity, and they
+/// share one migration because they share one lifetime: all three hang off an Agent and all three
+/// are meaningless without it.
+///
+/// * `agent_capabilities` is the authority engine's storage. A row is a *decision* — allow, ask
+///   or deny — for one named capability. Absence is not permission: the resolver's default for a
+///   consequential capability is `deny`, so an Agent created before this migration gains nothing
+///   by upgrading.
+/// * `agent_skills` is a repeatable procedure, and `agent_skill_assignments` says who has it. A
+///   Skill is content, not code: it reaches the runtime through the work prompt like any other
+///   context, so a Skill can never widen what an Agent may do.
+/// * `agent_routines` is recurring work. It carries only *what to run and when* — every execution
+///   is an ordinary run in `runs`, which is why there is no second work table here and no
+///   scheduler state to reconcile after a restart beyond `next_run_at`.
+///
+/// Additive throughout: no existing table is rewritten and no existing row changes meaning.
+fn migrate_v45(connection: &Connection) -> AppResult<()> {
+    connection
+        .execute_batch("BEGIN IMMEDIATE;")
+        .map_err(AppError::database)?;
+    let result = (|| {
+        connection
+            .execute_batch(
+                r#"
+CREATE TABLE IF NOT EXISTS agent_capabilities(
+  agent_id TEXT NOT NULL REFERENCES organizational_agents(id) ON DELETE CASCADE,
+  capability TEXT NOT NULL,
+  decision TEXT NOT NULL CHECK(decision IN ('allow','ask','deny')),
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY(agent_id,capability)
+);
+
+CREATE TABLE IF NOT EXISTS agent_skills(
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  summary TEXT NOT NULL DEFAULT '',
+  applies_when TEXT NOT NULL DEFAULT '',
+  procedure TEXT NOT NULL,
+  validation TEXT NOT NULL DEFAULT '',
+  expected_result TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_skills_name
+  ON agent_skills(lower(name));
+
+CREATE TABLE IF NOT EXISTS agent_skill_assignments(
+  agent_id TEXT NOT NULL REFERENCES organizational_agents(id) ON DELETE CASCADE,
+  skill_id TEXT NOT NULL REFERENCES agent_skills(id) ON DELETE CASCADE,
+  assigned_at TEXT NOT NULL,
+  PRIMARY KEY(agent_id,skill_id)
+);
+CREATE INDEX IF NOT EXISTS idx_agent_skill_assignments_skill
+  ON agent_skill_assignments(skill_id);
+
+CREATE TABLE IF NOT EXISTS agent_routines(
+  id TEXT PRIMARY KEY,
+  agent_id TEXT NOT NULL REFERENCES organizational_agents(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  objective TEXT NOT NULL,
+  constraints TEXT NOT NULL DEFAULT '',
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  cadence TEXT NOT NULL CHECK(cadence IN ('hourly','daily','weekly')),
+  enabled INTEGER NOT NULL DEFAULT 1,
+  next_run_at TEXT,
+  last_run_at TEXT,
+  last_run_id TEXT REFERENCES runs(id) ON DELETE SET NULL,
+  last_status TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_agent_routines_due
+  ON agent_routines(next_run_at) WHERE enabled=1;
+CREATE INDEX IF NOT EXISTS idx_agent_routines_agent
+  ON agent_routines(agent_id,created_at DESC);
+"#,
+            )
+            .map_err(AppError::database)?;
+        record_migration(connection, 45)
+    })();
+    finish_migration_transaction(connection, result, 45)
 }
 
 fn index_exists(connection: &Connection, index: &str) -> AppResult<bool> {

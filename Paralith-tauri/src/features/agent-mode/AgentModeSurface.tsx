@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
-import { ArrowUpRight, ChevronLeft, GripVertical, Paperclip, Pin, Plus, Search, Send, Square, UserRoundPlus, X } from 'lucide-react'
+import { ArrowUpRight, ChevronLeft, GripVertical, MoreHorizontal, Paperclip, Pin, Plus, Search, Send, Square, UserRoundPlus, X } from 'lucide-react'
 import type { AgentConversationEntry, AgentWork, AgentWorkStatus, CreateOrganizationalAgentInput, OrganizationalAgent, Project, Workspace } from '../../native/types'
 import { native } from '../../native/commands'
 import { AgentAvatar } from './AgentIdentity'
+import { AgentSettingsPanel, ApprovalCard } from './AgentGovernance'
 import { IntelligencePicker, IntelligenceTrigger } from './IntelligencePicker'
 import { composerRuntimeLabel, useAgentModeStore } from './agentModeStore'
 import './agentMode.css'
@@ -130,6 +131,7 @@ function AgentPage({ agent, project, workspace, visible, onOpenCode }: { agent: 
   const createConversation = useAgentModeStore((state) => state.createConversation)
   const reorderConversations = useAgentModeStore((state) => state.reorderConversations)
   const [delegating, setDelegating] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [draggingConversation, setDraggingConversation] = useState<string>()
   const [historyQuery, setHistoryQuery] = useState('')
   const [historyResults, setHistoryResults] = useState<AgentConversationEntry[]>()
@@ -137,6 +139,7 @@ function AgentPage({ agent, project, workspace, visible, onOpenCode }: { agent: 
   const activeConversation = conversations.find((item) => item.id === snapshot.productState.selectedConversationId) ?? conversations[0]
   const entries = snapshot.entries.filter((item) => item.conversationId === activeConversation?.id)
   const assigned = snapshot.delegations.filter((item) => item.ownerAgentId === agent.id || item.recipientAgentId === agent.id)
+  const approvals = useAgentModeStore((state) => state.approvals).filter((item) => item.agentId === agent.id)
   const moveConversationBefore = (targetId: string) => { if (!draggingConversation || draggingConversation === targetId) return; const ordered = conversations.map((item) => item.id).filter((id) => id !== draggingConversation); ordered.splice(ordered.indexOf(targetId), 0, draggingConversation); setDraggingConversation(undefined); void reorderConversations(agent.id, ordered) }
   const searchHistory = async (event: FormEvent) => { event.preventDefault(); const query = historyQuery.trim(); if (!query) { setHistoryResults(undefined); return } setHistoryResults(await native.searchAgentHistory(agent.id, query).catch(() => [])) }
 
@@ -176,6 +179,7 @@ function AgentPage({ agent, project, workspace, visible, onOpenCode }: { agent: 
       <span className={`agent-work-state is-${agent.workState}`}><i />{agent.workStateDetail ?? stateLabel(agent.workState)}</span>
       <form className="agent-history-search" onSubmit={(event) => void searchHistory(event)}><Search size={13} /><input value={historyQuery} onChange={(event) => { setHistoryQuery(event.target.value); if (!event.target.value) setHistoryResults(undefined) }} placeholder="Search history" aria-label={`Search ${agent.name}'s history`} /></form>
       <button type="button" className="agent-header-action" onClick={() => setDelegating(true)}>Delegate work</button>
+      <button type="button" className="agent-header-icon" aria-label={`${agent.name} settings`} title="Access, Skills and Routines" onClick={() => setSettingsOpen(true)}><MoreHorizontal size={15} /></button>
     </header>
     <nav className="agent-chat-tabs" aria-label={`${agent.name} conversations`}>{conversations.map((conversation) => <button type="button" draggable key={conversation.id} className={activeConversation?.id === conversation.id ? 'is-selected' : ''} onDragStart={() => setDraggingConversation(conversation.id)} onDragOver={(event) => event.preventDefault()} onDrop={() => moveConversationBefore(conversation.id)} onClick={() => selectConversation(conversation.id)}>{conversation.title}</button>)}<button type="button" className="agent-chat-new" aria-label="New conversation" title="New conversation" onClick={() => void createConversation(agent.id, `Conversation ${conversations.length + 1}`)}><Plus size={13} /></button></nav>
     <div className="agent-conversation">
@@ -206,15 +210,19 @@ function AgentPage({ agent, project, workspace, visible, onOpenCode }: { agent: 
                     {delegation.statusReason && <span className="agent-work-reason">{delegation.statusReason}</span>}
                   </article>
               })}
-              {/* Work with no delegation: assigned to this teammate directly. */}
+              {/* Work with no delegation: assigned to this teammate directly, or by a Routine. */}
               {snapshot.work.filter((item) => item.agentId === agent.id && !item.delegationId).map((work) =>
                 <WorkRow key={work.id} work={work} recipient={agent.name} onOpenCode={onOpenCode} />)}
+              {/* Anything this teammate's work has stopped in front of. Read from the backend, so
+                  a decision pending since before the last restart is still here. */}
+              {approvals.map((approval) => <ApprovalCard key={approval.id} approval={approval} />)}
             </>}
         </div>
       </div>
       {activeConversation && <Composer agent={agent} conversationId={activeConversation.id} conversationRuntime={activeConversation.runtimePreference} projectId={project.id} entries={entries} visible={visible} />}
     </div>
     {delegating && <DelegationPanel owner={agent} project={project} workspace={workspace} conversationId={activeConversation?.id} onClose={() => setDelegating(false)} />}
+    {settingsOpen && <AgentSettingsPanel agent={agent} project={project} onClose={() => setSettingsOpen(false)} />}
   </section>
 }
 
@@ -273,7 +281,8 @@ function WorkRow({ work, owner, recipient, onOpenCode }: { work: AgentWork; owne
       <p className="agent-event-detail">{work.objective}</p>
       {work.resultSummary && <p className="agent-work-result">{work.resultSummary}</p>}
       {work.statusReason && work.status !== 'working' && <p className="agent-work-reason">{work.statusReason}</p>}
-      {!work.authority.commit && work.status === 'completed' && <p className="agent-work-boundary">No commit or push was performed.</p>}
+      {work.status === 'completed' && !work.authority.commit && !work.authority.commitRequiresApproval && <p className="agent-work-boundary">No commit or push was performed.</p>}
+      {work.status === 'needs_approval' && <p className="agent-work-boundary">Finished and waiting on your decision below.</p>}
       {open && <ol className="agent-work-timeline">
         {events === undefined ? <li>Loading evidence…</li>
           : events.length === 0 ? <li>No steps were recorded.</li>

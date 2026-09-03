@@ -28,16 +28,17 @@ use crate::errors::{AppError, AppResult};
 use crate::models::context::ContextRequest;
 use crate::models::swarm::SwarmRuntimeKind;
 use crate::models::{
-    AgentConversationEntry, AgentProvider, AgentRuntimeOption, OrganizationalAgent,
-    SendAgentMessageInput,
+    AgentCapabilityDecision, AgentConversationEntry, AgentProvider, AgentRuntimeOption,
+    CreateAgentDelegationInput, OrganizationalAgent, SendAgentMessageInput, StartAgentWorkInput,
 };
+use crate::services::agent_actions::{self, AgentActionExecutor, RejectedAction, RequestedAction};
 use crate::services::provider_session::{self, ProviderOutcome};
 use crate::services::{AgentDetector, ContextCompiler, TerminalManager};
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 
@@ -64,6 +65,33 @@ const HISTORY_BUDGET: usize = 12_000;
 /// Providers that can answer a conversation turn. Shells are excluded because a shell is not an
 /// intelligence, and OpenCode is excluded because [`provider_arguments`] has no grammar for it.
 const CONVERSATIONAL_PROVIDERS: [AgentProvider; 2] = [AgentProvider::Claude, AgentProvider::Codex];
+
+/// Who a turn is answering. A synthesis is asked for by Paralith, not by the user, and saying so
+/// is what keeps the Agent from thanking a teammate who never spoke.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Speaker {
+    Teammate,
+    Paralith,
+}
+
+impl Speaker {
+    fn label(self) -> &'static str {
+        match self {
+            Speaker::Teammate => "Teammate",
+            Speaker::Paralith => "Paralith",
+        }
+    }
+}
+
+/// What an Agent is asked when everything it delegated has stopped.
+///
+/// It asks for an account, not a celebration: what was not done and what was not published are
+/// named explicitly, because the failure mode of a summary is a confident one that omits them.
+const SYNTHESIS_REQUEST: &str = "Every piece of work you delegated in this conversation has now stopped. \
+The results are in the conversation above. Give your teammate one short account of the whole thing: what was asked for, \
+what each teammate actually reported, anything that failed or was left unfinished, and whether anything was committed or pushed. \
+Do not repeat the individual reports line by line and do not claim anything they did not report. \
+End with what needs their decision, if anything. Do not delegate any new work.";
 
 #[derive(Debug, Clone)]
 pub struct ResolvedRuntime {
@@ -98,6 +126,10 @@ pub struct AgentConversationService {
     /// running, which is also how a restart is handled: the map starts empty and the database
     /// repair pass has already marked orphaned turns interrupted.
     active: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
+    /// Execution, bound once after both services exist. Shared through the `Arc` so every clone
+    /// of this service — including the one work itself holds — sees the same binding. A turn that
+    /// runs before it is bound simply cannot act, which is the correct answer during startup.
+    executor: Arc<OnceLock<Arc<dyn AgentActionExecutor>>>,
 }
 
 impl AgentConversationService {
@@ -115,7 +147,14 @@ impl AgentConversationService {
             context,
             app,
             active: Arc::new(Mutex::new(HashMap::new())),
+            executor: Arc::new(OnceLock::new()),
         }
+    }
+
+    /// Give conversations the ability to start and stop work. Called once during setup, after the
+    /// work service exists; calling it twice is a no-op rather than a panic.
+    pub fn bind_executor(&self, executor: Arc<dyn AgentActionExecutor>) {
+        let _ = self.executor.set(executor);
     }
 
     /// Every runtime the composer may offer, with the real reason an unavailable one cannot be
@@ -350,16 +389,69 @@ impl AgentConversationService {
             Some("Answering in conversation"),
         )?;
         self.emit_turn(&pending);
+        self.spawn_turn(
+            pending.id,
+            agent,
+            runtime,
+            input.conversation_id,
+            input.project_id,
+            input.body,
+            Speaker::Teammate,
+        )?;
+        Ok(user_entry)
+    }
 
+    /// Ask an Agent to account for the work it delegated, once all of it has stopped.
+    ///
+    /// This is what stops a multi-teammate delegation ending as a pile of separate result rows
+    /// the user has to read and reconcile themselves. It is one turn, fired once, and only when
+    /// there is nothing left running — a synthesis produced while a teammate is still working
+    /// would be a summary of an unfinished thing, which is exactly the kind of confident-sounding
+    /// wrongness this product must not produce.
+    pub fn synthesize(&self, conversation_id: &str, project_id: Option<String>) -> AppResult<()> {
+        let (agent, conversation_preference) =
+            self.database.agent_for_conversation(conversation_id)?;
+        let runtime = self.resolve_runtime(&agent, conversation_preference.as_deref(), None)?;
+        let pending = self.database.insert_agent_entry(NewAgentEntry {
+            conversation_id,
+            kind: "agent",
+            author_agent_id: Some(&agent.id),
+            body: "",
+            metadata: serde_json::json!({ "runtimeSource": runtime.source, "synthesis": true }),
+            state: "preparing",
+            runtime_provider: Some(&runtime.provider_id),
+            runtime_model: Some(&runtime.model_id),
+            runtime_account: None,
+            parent_entry_id: None,
+        })?;
+        self.emit_turn(&pending);
+        self.spawn_turn(
+            pending.id,
+            agent,
+            runtime,
+            conversation_id.to_string(),
+            project_id,
+            SYNTHESIS_REQUEST.to_string(),
+            Speaker::Paralith,
+        )
+    }
+
+    /// Run one turn on its own thread. Shared by an ordinary message and by a synthesis so both
+    /// stream, cancel, recover and record provenance identically.
+    #[allow(clippy::too_many_arguments)]
+    fn spawn_turn(
+        &self,
+        entry_id: String,
+        agent: OrganizationalAgent,
+        runtime: ResolvedRuntime,
+        conversation_id: String,
+        project_id: Option<String>,
+        question: String,
+        speaker: Speaker,
+    ) -> AppResult<()> {
         let cancel = Arc::new(AtomicBool::new(false));
-        self.active
-            .lock()
-            .insert(pending.id.clone(), cancel.clone());
+        self.active.lock().insert(entry_id.clone(), cancel.clone());
         let worker = self.clone();
-        let entry_id = pending.id.clone();
-        let conversation_id = input.conversation_id.clone();
-        let project_id = input.project_id.clone();
-        let question = input.body.clone();
         std::thread::Builder::new()
             .name(format!("paralith-agent-turn-{entry_id}"))
             .spawn(move || {
@@ -370,9 +462,17 @@ impl AgentConversationService {
                     &runtime,
                     project_id.as_deref(),
                     &question,
+                    speaker,
                     &cancel,
                 );
-                worker.finish_turn(&entry_id, &agent.id, outcome);
+                worker.finish_turn(
+                    &entry_id,
+                    &agent,
+                    &conversation_id,
+                    project_id.as_deref(),
+                    speaker,
+                    outcome,
+                );
             })
             .map_err(|error| {
                 AppError::new(
@@ -382,7 +482,7 @@ impl AgentConversationService {
                 )
                 .detail(error.to_string())
             })?;
-        Ok(user_entry)
+        Ok(())
     }
 
     /// Stop an in-flight turn. Whatever the runtime already produced is kept: a cancelled answer
@@ -417,6 +517,7 @@ impl AgentConversationService {
         runtime: &ResolvedRuntime,
         project_id: Option<&str>,
         question: &str,
+        speaker: Speaker,
         cancel: &AtomicBool,
     ) -> TurnOutcome {
         // A turn always runs inside a Project. Inventing a working directory would put a provider
@@ -429,7 +530,7 @@ impl AgentConversationService {
             );
         };
         let working_directory = project.root_path.clone();
-        let prompt = self.compile_prompt(conversation_id, agent, project_id, question);
+        let prompt = self.compile_prompt(conversation_id, agent, project_id, question, speaker);
         let invocation = AgentInvocation {
             provider: runtime.provider.clone(),
             model_id: runtime.model_id.clone(),
@@ -515,15 +616,39 @@ impl AgentConversationService {
         }
     }
 
-    fn finish_turn(&self, entry_id: &str, agent_id: &str, outcome: TurnOutcome) {
+    fn finish_turn(
+        &self,
+        entry_id: &str,
+        agent: &OrganizationalAgent,
+        conversation_id: &str,
+        project_id: Option<&str>,
+        speaker: Speaker,
+        outcome: TurnOutcome,
+    ) {
         self.active.lock().remove(entry_id);
-        let body = if outcome.body.trim().is_empty() {
-            outcome
-                .message
-                .clone()
-                .unwrap_or_else(|| "No answer was produced.".into())
+        // Only a completed reply can carry actions. A cancelled or failed turn may hold half an
+        // action block, and half a delegation is not an intention anyone expressed.
+        let parsed = if outcome.state == "complete" {
+            agent_actions::parse_turn(&outcome.body)
         } else {
-            outcome.body.clone()
+            agent_actions::ParsedTurn {
+                body: outcome.body.clone(),
+                ..Default::default()
+            }
+        };
+        let body = if parsed.body.trim().is_empty() {
+            // A turn whose entire reply was the action block still said something — what it did.
+            // Falling through to "No answer was produced." would be false.
+            if parsed.actions.is_empty() {
+                outcome
+                    .message
+                    .clone()
+                    .unwrap_or_else(|| "No answer was produced.".into())
+            } else {
+                String::new()
+            }
+        } else {
+            parsed.body.clone()
         };
         self.publish(
             entry_id,
@@ -531,16 +656,256 @@ impl AgentConversationService {
             outcome.state,
             outcome.error_code.as_deref(),
         );
+        // A synthesis accounts for work that has already happened. It is Paralith's own question,
+        // not the user's, and letting its answer start more work is how one delegation becomes an
+        // unattended loop. The prompt asks for restraint; this is what does not depend on it.
+        if speaker != Speaker::Paralith
+            && (!parsed.actions.is_empty() || !parsed.rejected.is_empty())
+        {
+            self.apply_actions(
+                agent,
+                conversation_id,
+                project_id,
+                parsed.actions,
+                parsed.rejected,
+            );
+        }
         let (work_state, detail) = match outcome.state {
             "blocked" => ("blocked", outcome.message.clone()),
             "failed" => ("idle", None),
             _ => ("idle", None),
         };
         let _ = self.database.set_organizational_agent_work_state(
-            agent_id,
+            &agent.id,
             work_state,
             detail.as_deref(),
         );
+    }
+
+    /// Turn the actions a completed turn requested into real organizational state.
+    ///
+    /// Every request is re-derived from durable data here. The teammate is resolved by name
+    /// against the live roster rather than by an id the model supplied, the delegation goes
+    /// through the same validation the Delegate Work panel uses, and execution goes through the
+    /// same work service that panel calls. A model cannot reach anything by naming it: it can
+    /// only ask for the one thing this function knows how to do.
+    ///
+    /// Failures are written into the conversation. A teammate who tried to hand work to somebody
+    /// who does not exist, or to a Project they have no grant for, should say so — quietly
+    /// dropping it would leave the user believing work had started.
+    fn apply_actions(
+        &self,
+        agent: &OrganizationalAgent,
+        conversation_id: &str,
+        project_id: Option<&str>,
+        actions: Vec<RequestedAction>,
+        mut rejected: Vec<RejectedAction>,
+    ) {
+        let roster = self
+            .database
+            .list_organizational_agents()
+            .unwrap_or_default();
+        let mut lines: Vec<String> = Vec::new();
+        for action in actions {
+            match action {
+                RequestedAction::DelegateWork {
+                    to,
+                    objective,
+                    context,
+                    constraints,
+                    expected_result,
+                    execute,
+                } => {
+                    let summary = format!("delegate to {to}");
+                    match self.delegate(
+                        agent,
+                        &roster,
+                        conversation_id,
+                        project_id,
+                        &to,
+                        &objective,
+                        &context,
+                        &constraints,
+                        &expected_result,
+                        execute,
+                    ) {
+                        Ok(recipient) => lines.push(format!(
+                            "{} → {}: {}{}",
+                            agent.name,
+                            recipient,
+                            tail_chars(objective.trim(), 160),
+                            if execute { "" } else { " · not started" }
+                        )),
+                        Err(reason) => rejected.push(RejectedAction { summary, reason }),
+                    }
+                }
+                RequestedAction::CancelWork { work_id } => {
+                    match self.cancel_owned_work(agent, &work_id) {
+                        Ok(objective) => lines.push(format!(
+                            "{} stopped: {}",
+                            agent.name,
+                            tail_chars(objective.trim(), 160)
+                        )),
+                        Err(reason) => rejected.push(RejectedAction {
+                            summary: "stop that work".into(),
+                            reason,
+                        }),
+                    }
+                }
+            }
+        }
+        for item in &rejected {
+            lines.push(format!("Could not {}. {}", item.summary, item.reason));
+        }
+        if lines.is_empty() {
+            return;
+        }
+        let _ = self.database.insert_agent_entry(NewAgentEntry {
+            conversation_id,
+            kind: "event",
+            author_agent_id: Some(&agent.id),
+            body: &lines.join("\n"),
+            metadata: serde_json::json!({
+                "source": "agent_action",
+                "rejected": rejected.len(),
+            }),
+            state: "complete",
+            runtime_provider: None,
+            runtime_model: None,
+            runtime_account: None,
+            parent_entry_id: None,
+        });
+    }
+
+    /// Whether this Agent may hand work to anyone at all.
+    ///
+    /// Both halves have to be true: the policy must permit it, and execution must be bound. A
+    /// teammate whose `delegate_work` is denied is not offered the vocabulary and would be
+    /// refused if it produced the block anyway — the prompt and the enforcement read the same
+    /// decision rather than drifting apart.
+    fn may_delegate(&self, agent: &OrganizationalAgent) -> bool {
+        self.executor.get().is_some()
+            && self
+                .database
+                .agent_capability(&agent.id, "delegate_work")
+                .map(|decision| decision == AgentCapabilityDecision::Allow)
+                .unwrap_or(false)
+    }
+
+    /// One `delegate_work` request, validated and executed. Returns the recipient's name, or the
+    /// reason a human should be shown.
+    #[allow(clippy::too_many_arguments)]
+    fn delegate(
+        &self,
+        agent: &OrganizationalAgent,
+        roster: &[OrganizationalAgent],
+        conversation_id: &str,
+        project_id: Option<&str>,
+        to: &str,
+        objective: &str,
+        context: &str,
+        constraints: &str,
+        expected_result: &str,
+        execute: bool,
+    ) -> Result<String, String> {
+        if !self.may_delegate(agent) {
+            return Err(format!("{} is not allowed to delegate work.", agent.name));
+        }
+        let recipient = resolve_teammate(roster, to)
+            .ok_or_else(|| format!("There is no teammate called {}.", to.trim()))?;
+        if recipient.id == agent.id {
+            return Err("A teammate cannot delegate work to themselves.".into());
+        }
+        if objective.trim().is_empty() {
+            return Err("The delegation had no objective.".into());
+        }
+        let Some(project_id) = project_id else {
+            return Err("This conversation is not attached to an open Project.".into());
+        };
+        let delegation = self
+            .database
+            .create_agent_delegation(CreateAgentDelegationInput {
+                owner_agent_id: agent.id.clone(),
+                recipient_agent_id: recipient.id.clone(),
+                objective: objective.trim().to_string(),
+                relevant_context: context.trim().to_string(),
+                constraints: constraints.trim().to_string(),
+                expected_result: expected_result.trim().to_string(),
+                authority_boundary: String::new(),
+                parent_delegation_id: None,
+                project_id: Some(project_id.to_string()),
+                workspace_id: None,
+                execute,
+                runtime_id: None,
+                origin_conversation_id: Some(conversation_id.to_string()),
+            })
+            .map_err(|error| error.message)?;
+        if !execute {
+            return Ok(recipient.name.clone());
+        }
+        let Some(executor) = self.executor.get() else {
+            let _ = self
+                .database
+                .mark_agent_delegation_blocked(&delegation.id, "Execution is not available yet.");
+            return Err("Paralith is still starting and cannot run work yet.".into());
+        };
+        match executor.start_work(StartAgentWorkInput {
+            agent_id: recipient.id.clone(),
+            delegation_id: Some(delegation.id.clone()),
+            parent_work_id: None,
+            objective: delegation.objective.clone(),
+            constraints: delegation.constraints.clone(),
+            expected_result: delegation.expected_result.clone(),
+            project_id: project_id.to_string(),
+            workspace_id: None,
+            origin_conversation_id: Some(conversation_id.to_string()),
+            runtime_id: None,
+        }) {
+            Ok(_) => Ok(recipient.name.clone()),
+            Err(error) => {
+                // The handoff is kept even though it could not run. Losing it would lose the
+                // user's intent along with the reason.
+                let _ = self
+                    .database
+                    .mark_agent_delegation_blocked(&delegation.id, &error.message);
+                Err(error.message)
+            }
+        }
+    }
+
+    /// One `cancel_work` request. An Agent may stop what it delegated and what it is doing
+    /// itself; naming somebody else's work reaches nothing.
+    fn cancel_owned_work(
+        &self,
+        agent: &OrganizationalAgent,
+        work_id: &str,
+    ) -> Result<String, String> {
+        let work = self
+            .database
+            .get_agent_work(work_id)
+            .map_err(|error| error.message)?
+            .ok_or_else(|| "That work no longer exists.".to_string())?;
+        let owns = work.agent_id == agent.id
+            || match work.delegation_id.as_deref() {
+                Some(delegation_id) => self
+                    .database
+                    .get_agent_delegation(delegation_id)
+                    .ok()
+                    .flatten()
+                    .is_some_and(|delegation| delegation.owner_agent_id == agent.id),
+                None => false,
+            };
+        if !owns {
+            return Err(format!("{} does not own that work.", agent.name));
+        }
+        let executor = self
+            .executor
+            .get()
+            .ok_or_else(|| "Paralith cannot reach that work right now.".to_string())?;
+        executor
+            .cancel_work(work_id)
+            .map(|()| work.objective.clone())
+            .map_err(|error| error.message)
     }
 
     fn publish(&self, entry_id: &str, body: &str, state: &str, error_code: Option<&str>) {
@@ -569,7 +934,9 @@ impl AgentConversationService {
         agent: &OrganizationalAgent,
         project_id: Option<&str>,
         question: &str,
+        speaker: Speaker,
     ) -> String {
+        let may_act = speaker != Speaker::Paralith && self.may_delegate(agent);
         let mut prompt = String::new();
         prompt.push_str(&format!(
             "You are {}, the {} on this team inside PARALITH, an agentic development environment.\n",
@@ -587,9 +954,53 @@ impl AgentConversationService {
         prompt.push_str(
             "\nYou are talking with your teammate in a persistent conversation. Answer directly and concisely as yourself. \
              Do not read, modify, or run anything in the repository for this turn: you have read-only tools and this is a conversation, not an execution. \
-             If the request needs engineering work, say what you would delegate and to whom instead of pretending to have done it. \
              Never invent repository state, test results, or completed work.\n",
         );
+        // The team and its live work, from the database rather than from anything the model
+        // remembers. This is what makes `inspect_team` and `inspect_active_work` unnecessary as
+        // round trips: the answers are small, they are needed on essentially every organizational
+        // turn, and fetching them here costs one query instead of a second provider invocation.
+        let roster = self
+            .database
+            .list_organizational_agents()
+            .unwrap_or_default();
+        let teammates: Vec<&OrganizationalAgent> =
+            roster.iter().filter(|item| item.id != agent.id).collect();
+        if !teammates.is_empty() {
+            prompt.push_str("\n## Your team\n");
+            for teammate in &teammates {
+                prompt.push_str(&format!(
+                    "- {} — {}{}\n",
+                    teammate.name,
+                    teammate.role,
+                    if teammate.work_state == "idle" {
+                        String::new()
+                    } else {
+                        format!(
+                            " (currently {})",
+                            teammate
+                                .work_state_detail
+                                .clone()
+                                .unwrap_or_else(|| teammate.work_state.replace('_', " "))
+                        )
+                    }
+                ));
+            }
+        }
+        let live = self.live_work(&roster);
+        if !live.is_empty() {
+            prompt.push_str("\n## Work running now\n");
+            for line in &live {
+                prompt.push_str(&format!("- {line}\n"));
+            }
+        }
+        prompt.push_str(&agent_actions::action_contract(
+            &teammates
+                .iter()
+                .map(|teammate| teammate.name.clone())
+                .collect::<Vec<_>>(),
+            may_act,
+        ));
         if let Some(project_id) = project_id {
             if let Some(knowledge) = self.project_context(project_id, question, agent) {
                 prompt.push_str("\n## What this Project knows\n");
@@ -614,11 +1025,48 @@ impl AgentConversationService {
             prompt.push_str(tail_chars(&transcript, HISTORY_BUDGET));
         }
         prompt.push_str(&format!(
-            "\n## The message to answer now\nTeammate: {}\n\nReply as {}.",
+            "\n## The message to answer now\n{}: {}\n\nReply as {}.",
+            speaker.label(),
             question.trim(),
             agent.name
         ));
         prompt
+    }
+
+    /// The work that is actually running, named the way an Agent would refer to it.
+    ///
+    /// Bounded on purpose: a long-lived Project accumulates hundreds of runs and a prompt is not
+    /// a work list. Only live work is useful for deciding what to delegate next, and finished
+    /// work already reported itself into the conversation.
+    fn live_work(&self, roster: &[OrganizationalAgent]) -> Vec<String> {
+        const LIVE: [&str; 6] = [
+            "queued",
+            "preparing",
+            "working",
+            "waiting_user",
+            "needs_approval",
+            "verifying",
+        ];
+        self.database
+            .list_agent_work()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|work| LIVE.contains(&work.status.as_str()))
+            .take(12)
+            .map(|work| {
+                let owner = roster
+                    .iter()
+                    .find(|item| item.id == work.agent_id)
+                    .map(|item| item.name.as_str())
+                    .unwrap_or("A teammate");
+                format!(
+                    "{owner} · {} · {} (workId {})",
+                    work.status.replace('_', " "),
+                    tail_chars(work.objective.trim(), 120),
+                    work.id
+                )
+            })
+            .collect()
     }
 
     /// Project knowledge for this turn, through the existing Context Fabric. A compilation
@@ -743,6 +1191,35 @@ fn is_automatic(value: &str) -> bool {
 
 /// Keep the newest `budget` characters, cutting at a line boundary so a truncated transcript does
 /// not begin mid-sentence.
+/// Match what a model wrote against the real roster.
+///
+/// Exact name first, then a containment check, because a runtime that writes
+/// "Forge (Engineering Lead)" or "@Mira" clearly meant a specific person and failing the
+/// delegation on punctuation would only cost a retry. Anything that still matches nobody — or
+/// matches more than one teammate — is refused rather than guessed at: silently handing work to
+/// the wrong person is worse than saying the name was not recognised.
+fn resolve_teammate<'a>(
+    roster: &'a [OrganizationalAgent],
+    wanted: &str,
+) -> Option<&'a OrganizationalAgent> {
+    let wanted = wanted.trim();
+    if wanted.is_empty() {
+        return None;
+    }
+    if let Some(exact) = roster
+        .iter()
+        .find(|item| item.name.eq_ignore_ascii_case(wanted))
+    {
+        return Some(exact);
+    }
+    let lowered = wanted.to_lowercase();
+    let mut matches = roster
+        .iter()
+        .filter(|item| !item.name.is_empty() && lowered.contains(&item.name.to_lowercase()));
+    let first = matches.next()?;
+    matches.next().is_none().then_some(first)
+}
+
 fn tail_chars(value: &str, budget: usize) -> &str {
     if value.chars().count() <= budget {
         return value;
@@ -757,6 +1234,69 @@ fn tail_chars(value: &str, budget: usize) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn teammate(name: &str, role: &str) -> OrganizationalAgent {
+        OrganizationalAgent {
+            id: format!("id-{name}"),
+            name: name.into(),
+            role: role.into(),
+            brief: String::new(),
+            responsibilities: Vec::new(),
+            avatar_seed: String::new(),
+            intelligence_preference: AUTOMATIC_RUNTIME.into(),
+            work_state: "idle".into(),
+            work_state_detail: None,
+            pinned: false,
+            position: 0,
+            created_at: String::new(),
+            updated_at: String::new(),
+        }
+    }
+
+    #[test]
+    fn a_teammate_is_resolved_by_name_however_the_runtime_wrote_it() {
+        let roster = vec![
+            teammate("Forge", "Engineering Lead"),
+            teammate("Mira", "PM"),
+        ];
+        assert_eq!(resolve_teammate(&roster, "Forge").unwrap().id, "id-Forge");
+        assert_eq!(
+            resolve_teammate(&roster, "  forge ").unwrap().id,
+            "id-Forge"
+        );
+        assert_eq!(
+            resolve_teammate(&roster, "Forge (Engineering Lead)")
+                .unwrap()
+                .id,
+            "id-Forge"
+        );
+        assert_eq!(resolve_teammate(&roster, "@Mira").unwrap().id, "id-Mira");
+    }
+
+    #[test]
+    fn an_invented_teammate_resolves_to_nobody() {
+        let roster = vec![teammate("Forge", "Engineering Lead")];
+        assert!(resolve_teammate(&roster, "Atlas").is_none());
+        assert!(resolve_teammate(&roster, "").is_none());
+        assert!(resolve_teammate(&roster, "   ").is_none());
+    }
+
+    #[test]
+    fn an_ambiguous_name_is_refused_rather_than_guessed_at() {
+        // "Ask Forge and Mira" names two people. Handing the work to whichever happened to sort
+        // first would give it to the wrong person half the time.
+        let roster = vec![
+            teammate("Forge", "Engineering Lead"),
+            teammate("Mira", "PM"),
+        ];
+        assert!(resolve_teammate(&roster, "Forge and Mira").is_none());
+    }
+
+    #[test]
+    fn a_synthesis_turn_is_attributed_to_paralith_not_to_the_user() {
+        assert_eq!(Speaker::Paralith.label(), "Paralith");
+        assert_eq!(Speaker::Teammate.label(), "Teammate");
+    }
 
     #[test]
     fn a_claude_answer_is_read_in_full_not_from_its_summary() {

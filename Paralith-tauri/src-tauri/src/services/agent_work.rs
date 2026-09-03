@@ -31,7 +31,9 @@ use crate::database::organization::NewAgentEntry;
 use crate::database::DatabaseService;
 use crate::errors::{AppError, AppResult};
 use crate::models::context::ContextRequest;
-use crate::models::{AgentWork, AgentWorkAuthority, OrganizationalAgent, StartAgentWorkInput};
+use crate::models::{
+    AgentApproval, AgentWork, AgentWorkAuthority, OrganizationalAgent, StartAgentWorkInput,
+};
 use crate::services::agent_conversation::AgentConversationService;
 use crate::services::provider_session::{self, ProviderOutcome};
 use crate::services::{ContextCompiler, RepositoryService, TerminalManager};
@@ -55,6 +57,11 @@ const WORK_TIMEOUT: Duration = Duration::from_secs(3_600);
 /// Reasoning effort for engineering work. Deliberately higher than a chat turn's.
 const WORK_EFFORT: &str = "high";
 
+/// How often the Routine scheduler looks for due work. A minute is far finer than the coarsest
+/// cadence Paralith offers, so nothing is ever late by more than one tick, and it is one indexed
+/// query — idle Paralith stays idle.
+const ROUTINE_TICK: Duration = Duration::from_secs(60);
+
 #[derive(Clone)]
 pub struct AgentWorkService {
     database: Arc<DatabaseService>,
@@ -67,6 +74,9 @@ pub struct AgentWorkService {
     /// which is also how a restart is handled: the map starts empty and the database repair pass
     /// has already marked orphaned work interrupted.
     active: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
+    /// Whether the Routine scheduler is already running. Shared across clones so a second call to
+    /// `start_routines` cannot produce a second thread firing every Routine twice.
+    routines_running: Arc<AtomicBool>,
 }
 
 impl AgentWorkService {
@@ -86,6 +96,7 @@ impl AgentWorkService {
             conversations,
             app,
             active: Arc::new(Mutex::new(HashMap::new())),
+            routines_running: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -229,6 +240,99 @@ impl AgentWorkService {
             self.publish(work_id);
         }
         Ok(())
+    }
+
+    /// Start the Routine scheduler.
+    ///
+    /// One thread for every Routine in the application, not one per Routine: a Routine is a row
+    /// with a due time, so checking is a single indexed query and firing is the ordinary
+    /// `start` path. There is no scheduler state to rebuild after a restart beyond what
+    /// `next_run_at` already says.
+    pub fn start_routines(&self) {
+        if self.routines_running.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let service = self.clone();
+        let _ = std::thread::Builder::new()
+            .name("paralith-agent-routines".into())
+            .spawn(move || loop {
+                std::thread::sleep(ROUTINE_TICK);
+                service.run_due_routines();
+            });
+    }
+
+    fn run_due_routines(&self) {
+        let due = match self.database.due_agent_routines() {
+            Ok(due) => due,
+            Err(error) => {
+                log::warn!("routine schedule unreadable: {}", error.code);
+                return;
+            }
+        };
+        for routine in due {
+            let Some(due_at) = routine.next_run_at.clone() else {
+                continue;
+            };
+            // Claiming moves the schedule forward before anything runs, so a slow launch cannot
+            // be picked up a second time by the next tick.
+            match self.database.claim_agent_routine(&routine.id, &due_at) {
+                Ok(true) => {}
+                Ok(false) => continue,
+                Err(error) => {
+                    log::warn!(
+                        "routine {} could not be claimed: {}",
+                        routine.id,
+                        error.code
+                    );
+                    continue;
+                }
+            }
+            if let Err(error) = self.execute_routine(&routine) {
+                log::warn!("routine {} did not start: {}", routine.id, error.code);
+            }
+        }
+    }
+
+    /// Run one Routine now, from the scheduler or from Run Now.
+    ///
+    /// Both paths land here so a manually triggered Routine produces exactly the run a scheduled
+    /// one does — same authority, same timeline, same evidence. A Run Now that took a shortcut
+    /// would be testing something other than the thing that fires at three in the morning.
+    pub fn execute_routine(&self, routine: &crate::models::AgentRoutine) -> AppResult<AgentWork> {
+        let started = self.start(StartAgentWorkInput {
+            agent_id: routine.agent_id.clone(),
+            delegation_id: None,
+            parent_work_id: None,
+            objective: routine.objective.clone(),
+            constraints: routine.constraints.clone(),
+            expected_result: String::new(),
+            project_id: routine.project_id.clone(),
+            workspace_id: None,
+            origin_conversation_id: None,
+            runtime_id: None,
+        });
+        match &started {
+            Ok(work) => {
+                let _ =
+                    self.database
+                        .record_agent_routine_run(&routine.id, Some(&work.id), "started");
+            }
+            Err(error) => {
+                // A Routine that could not start records the reason. Leaving `last_status`
+                // untouched would make a permanently broken Routine look like one that has simply
+                // not run yet.
+                let _ = self
+                    .database
+                    .record_agent_routine_run(&routine.id, None, &error.code);
+            }
+        }
+        started
+    }
+
+    /// Run a Routine immediately by id, without disturbing its schedule.
+    pub fn run_routine_now(&self, routine_id: &str) -> AppResult<AgentWork> {
+        let routine = self.database.get_agent_routine(routine_id)?;
+        self.execute_routine(&routine)
     }
 
     pub fn events(&self, work_id: &str) -> AppResult<Vec<crate::models::AgentWorkEvent>> {
@@ -431,14 +535,44 @@ impl AgentWorkService {
             .clone()
             .filter(|value| !value.trim().is_empty())
             .or_else(|| outcome.message.clone());
+        // Work that finished by asking for something consequential does not finish yet. It stops
+        // in front of a person, durably, and the parent is told nothing until they answer —
+        // reporting "completed" here and then pushing later would be two different stories about
+        // the same run.
+        //
+        // The result and the evidence are written either way. What the person is deciding about
+        // includes what the run produced, so parking it must not lose that.
+        let awaiting = (outcome.status == "completed")
+            .then(|| requested_approval(&work.authority, outcome.result.requests.as_deref()))
+            .flatten();
         let _ = self.database.finish_agent_work(
             &work.id,
-            outcome.status,
+            if awaiting.is_some() {
+                "needs_approval"
+            } else {
+                outcome.status
+            },
             summary.as_deref(),
             outcome.error_code.as_deref(),
             outcome.message.as_deref(),
             &outcome.evidence,
         );
+        if let Some(kind) = awaiting {
+            if self.request_approval(work, agent, kind, &outcome) {
+                return;
+            }
+            // The approval could not be recorded, so the run is not actually waiting for anybody.
+            // Fall through to the ordinary completion: the change stays in the working tree,
+            // unpublished, which is the safe end.
+            let _ = self.database.finish_agent_work(
+                &work.id,
+                outcome.status,
+                summary.as_deref(),
+                outcome.error_code.as_deref(),
+                outcome.message.as_deref(),
+                &outcome.evidence,
+            );
+        }
         let _ = self.database.append_agent_work_event(
             &work.id,
             outcome.status,
@@ -470,6 +604,246 @@ impl AgentWorkService {
             detail.as_deref(),
         );
         self.report_to_parent(work, agent, &outcome);
+        self.publish(&work.id);
+    }
+
+    /// Park a finished run in front of a person and record what they are deciding about.
+    ///
+    /// Everything in the approval's detail is either observed by Paralith (the branch, the head,
+    /// the files the working tree actually shows as changed) or clearly attributed to the runtime
+    /// (its own account of what it validated). That distinction is the point: a person approving
+    /// a push should be able to see which parts of the case are measured and which are claimed.
+    ///
+    /// Returns whether the run is now waiting. A failure to record the approval falls through to
+    /// the ordinary completion path rather than leaving the run in limbo — the change is still in
+    /// the working tree, unpublished, which is the safe outcome.
+    fn request_approval(
+        &self,
+        work: &AgentWork,
+        agent: &OrganizationalAgent,
+        kind: &'static str,
+        outcome: &WorkOutcome,
+    ) -> bool {
+        let repository = self.repository_state(&work.project_id);
+        let detail = json!({
+            "objective": work.objective,
+            "agentName": agent.name,
+            "branch": repository.as_ref().and_then(|state| state.branch.clone()),
+            "headSha": repository.as_ref().map(|state| state.head_sha.clone()),
+            "changedFiles": repository
+                .as_ref()
+                .map(|state| state.files.iter().map(|file| file.path.clone()).collect::<Vec<_>>())
+                .unwrap_or_default(),
+            // Reported, not observed. Labelled as such so the card can present it that way.
+            "reportedSummary": outcome.result.summary,
+            "reportedValidation": outcome.result.validation,
+            "reportedUnresolved": outcome.result.unresolved,
+            "runtime": work.provider_id,
+        });
+        let summary = format!(
+            "{} wants to {kind} · {}",
+            agent.name,
+            short(&work.objective, 60)
+        );
+        match self.database.create_agent_approval(
+            &work.id,
+            &work.project_id,
+            kind,
+            &summary,
+            &detail,
+        ) {
+            Ok(approval) => {
+                let _ = self.database.append_agent_work_event(
+                    &work.id,
+                    "approval_requested",
+                    &summary,
+                    "warn",
+                    json!({ "approvalId": approval.id, "kind": kind }),
+                );
+                self.transition(&work.id, "needs_approval", Some(&summary), agent);
+                true
+            }
+            Err(error) => {
+                log::warn!(
+                    "could not record an approval for {}: {}",
+                    work.id,
+                    error.code
+                );
+                false
+            }
+        }
+    }
+
+    /// Resolve one approval and, when it is granted, carry the action out.
+    ///
+    /// Paralith performs the Git action itself rather than restarting the runtime to do it. That
+    /// is what makes "approve once" true: the approved thing is a specific commit or push of a
+    /// specific tree, not another open-ended turn that might do something else. It also means the
+    /// action is deterministic and its result is a fact, not a report.
+    pub fn decide_approval(
+        &self,
+        approval_id: &str,
+        approved: bool,
+        note: Option<String>,
+    ) -> AppResult<AgentApproval> {
+        let approval = self.database.get_agent_approval(approval_id)?;
+        // The conditional update is the replay guard: a second window, or a decision replayed
+        // after a restart, does not move the row and therefore never reaches the execution below.
+        if !self
+            .database
+            .decide_agent_approval(approval_id, approved, note.as_deref())?
+        {
+            return Err(AppError::new(
+                "agent_approval_already_decided",
+                "That approval has already been answered.",
+                true,
+            )
+            .entity(approval_id)
+            .layer("authority"));
+        }
+        let work = self.require_work(&approval.work_id)?;
+        let agent = self.database.get_organizational_agent(&work.agent_id)?;
+        if !approved {
+            self.database.append_agent_work_event(
+                &work.id,
+                "approval_denied",
+                &format!("{} was not authorised to {}.", agent.name, approval.kind),
+                "warn",
+                json!({ "approvalId": approval.id, "note": note }),
+            )?;
+            self.settle_after_approval(&work, &agent, "completed", None);
+            return self.database.get_agent_approval(approval_id);
+        }
+        let outcome = self.perform_approved_action(&work, &approval);
+        match &outcome {
+            Ok(detail) => {
+                self.database.append_agent_work_event(
+                    &work.id,
+                    "approval_executed",
+                    &format!("{} completed on {}'s behalf.", approval.kind, agent.name),
+                    "info",
+                    detail.clone(),
+                )?;
+                let _ = self
+                    .database
+                    .mark_agent_approval_executed(approval_id, "executed");
+                self.settle_after_approval(&work, &agent, "completed", Some(approval.kind.clone()));
+            }
+            Err(error) => {
+                // The approval stays `approved` and the failure is on the run. Reopening it would
+                // invite a second attempt at something that has already half happened.
+                self.database.append_agent_work_event(
+                    &work.id,
+                    "approval_failed",
+                    &error.message,
+                    "error",
+                    json!({ "approvalId": approval.id, "code": error.code }),
+                )?;
+                self.settle_after_approval(&work, &agent, "failed", None);
+            }
+        }
+        self.database.get_agent_approval(approval_id)
+    }
+
+    /// Carry out exactly the action that was approved, through Git in the work's own directory.
+    fn perform_approved_action(
+        &self,
+        work: &AgentWork,
+        approval: &AgentApproval,
+    ) -> AppResult<serde_json::Value> {
+        let directory = work.working_directory.clone();
+        let message = format!(
+            "{}\n\nAuthorised by a Paralith user. Agent run {}.",
+            short(&work.objective, 72),
+            work.id
+        );
+        let directory = directory.as_deref();
+        match approval.kind.as_str() {
+            "commit" => {
+                let output =
+                    self.repository
+                        .commit_authorized(&work.project_id, directory, &message)?;
+                Ok(json!({ "action": "commit", "output": short(&output, 400) }))
+            }
+            "push" => {
+                // The runtime may have committed nothing, expecting the approval to cover both
+                // steps. Committing first is what makes "approve the push" mean the change the
+                // person just looked at, rather than whatever happened to be committed already.
+                let committed = self
+                    .repository
+                    .has_uncommitted_changes(&work.project_id, directory)
+                    .unwrap_or(false)
+                    .then(|| {
+                        self.repository
+                            .commit_authorized(&work.project_id, directory, &message)
+                    })
+                    .transpose()?
+                    .is_some();
+                let (branch, output) = self
+                    .repository
+                    .push_authorized(&work.project_id, directory)?;
+                Ok(json!({
+                    "action": "push",
+                    "branch": branch,
+                    "committed": committed,
+                    "output": short(&output, 400),
+                }))
+            }
+            other => Err(AppError::new(
+                "agent_approval_kind_unsupported",
+                format!("Paralith cannot carry out `{other}`."),
+                false,
+            )),
+        }
+    }
+
+    /// Move a run out of `needs_approval` once a person has answered, and tell the parent.
+    ///
+    /// The report is deliberately deferred to here rather than fired when the runtime stopped:
+    /// what the delegating Agent needs to know includes whether the work was published, and that
+    /// was not decided yet.
+    fn settle_after_approval(
+        &self,
+        work: &AgentWork,
+        agent: &OrganizationalAgent,
+        status: &'static str,
+        performed: Option<String>,
+    ) {
+        let _ = self
+            .database
+            .set_agent_work_status(work.id.as_str(), status, None);
+        let _ = self.database.set_organizational_agent_work_state(
+            &agent.id,
+            if status == "completed" {
+                "complete"
+            } else {
+                "failed"
+            },
+            Some(short(&work.objective, 48)).as_deref(),
+        );
+        let work = self
+            .database
+            .get_agent_work(&work.id)
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| work.clone());
+        self.report_to_parent(
+            &work,
+            agent,
+            &WorkOutcome {
+                status,
+                result: WorkResult {
+                    summary: work.result_summary.clone(),
+                    ..WorkResult::default()
+                },
+                error_code: None,
+                message: Some(match performed.as_deref() {
+                    Some(kind) => format!("Authorised: the work was {kind}ed."),
+                    None => "No commit or push was performed.".into(),
+                }),
+                evidence: json!({ "approved": performed.is_some() }),
+            },
+        );
         self.publish(&work.id);
     }
 
@@ -529,6 +903,51 @@ impl AgentWorkService {
             runtime_account: None,
             parent_entry_id: None,
         });
+        self.synthesize_if_last(work, conversation_id);
+    }
+
+    /// When the last thing this conversation was waiting on stops, ask the delegating Agent to
+    /// account for all of it.
+    ///
+    /// The check is on live work rather than on a count of expected children, because the honest
+    /// question is "is anything still running", and that is a fact the runs table already holds.
+    /// Anything the user starts afterwards produces its own synthesis when it in turn finishes.
+    ///
+    /// A synthesis costs a provider turn, so it fires once per completed batch and never for a
+    /// single directly-assigned run — one result needs no reconciling, it is already the answer.
+    fn synthesize_if_last(&self, finished: &AgentWork, conversation_id: &str) {
+        if finished.delegation_id.is_none() {
+            return;
+        }
+        let siblings: Vec<AgentWork> = self
+            .database
+            .list_agent_work()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|work| work.origin_conversation_id.as_deref() == Some(conversation_id))
+            .collect();
+        if siblings
+            .iter()
+            .any(|work| work.id != finished.id && LIVE_WORK.contains(&work.status.as_str()))
+        {
+            return;
+        }
+        // One result is its own report. A synthesis of a single delegation would be a second
+        // provider call that restates what the user already read.
+        if siblings
+            .iter()
+            .filter(|work| work.delegation_id.is_some())
+            .count()
+            < 2
+        {
+            return;
+        }
+        if let Err(error) = self
+            .conversations
+            .synthesize(conversation_id, Some(finished.project_id.clone()))
+        {
+            log::warn!("agent synthesis could not start: {}", error.code);
+        }
     }
 
     /// Compile the bounded execution package.
@@ -574,12 +993,43 @@ impl AgentWorkService {
             prompt.push_str("\n## What this Project already knows\n");
             prompt.push_str(&knowledge);
         }
+        prompt.push_str(&self.skill_clause(&agent.id));
         if let Some(continuation) = continuation {
             prompt.push_str("\n## Work already done on another runtime\n");
             prompt.push_str(continuation);
         }
         prompt.push_str(RESULT_CONTRACT);
         prompt
+    }
+
+    /// The procedures this Agent has been given, offered rather than imposed.
+    ///
+    /// Each Skill states when it applies and the runtime matches against its own task, which is
+    /// what stops an Agent with six Skills from pasting all six into unrelated work. A Skill is
+    /// content: it can describe a procedure and cannot grant authority, so a Skill that says
+    /// "then push" still meets the same gate as anything else.
+    fn skill_clause(&self, agent_id: &str) -> String {
+        let skills = self.database.skills_for_agent(agent_id).unwrap_or_default();
+        if skills.is_empty() {
+            return String::new();
+        }
+        let mut clause = String::from(
+            "\n## Procedures you know\nApply one only when it fits this task. Ignore the rest.\n",
+        );
+        for skill in &skills {
+            clause.push_str(&format!("\n### {}\n", skill.name));
+            if !skill.applies_when.trim().is_empty() {
+                clause.push_str(&format!("Use when: {}\n", skill.applies_when.trim()));
+            }
+            clause.push_str(&format!("Procedure: {}\n", skill.procedure.trim()));
+            if !skill.validation.trim().is_empty() {
+                clause.push_str(&format!("Verify with: {}\n", skill.validation.trim()));
+            }
+            if !skill.expected_result.trim().is_empty() {
+                clause.push_str(&format!("Done when: {}\n", skill.expected_result.trim()));
+            }
+        }
+        clause
     }
 
     fn project_knowledge(&self, work: &AgentWork, agent: &OrganizationalAgent) -> Option<String> {
@@ -712,6 +1162,32 @@ impl AgentWorkService {
     }
 }
 
+/// The narrow view a conversation gets of execution.
+///
+/// It is the same `start`/`cancel` the Delegate Work panel reaches through the command layer —
+/// deliberately, so a chat-native delegation and a hand-filled one cannot diverge in what they
+/// validate or how they spawn. The trait exists only to break the dependency cycle: work already
+/// owns the conversation service for runtime resolution, so the conversation cannot own work back.
+impl crate::services::AgentActionExecutor for AgentWorkService {
+    fn start_work(&self, input: crate::models::StartAgentWorkInput) -> AppResult<String> {
+        self.start(input).map(|work| work.id)
+    }
+
+    fn cancel_work(&self, work_id: &str) -> AppResult<()> {
+        self.cancel(work_id)
+    }
+}
+
+/// Work that has not stopped. One list, so "is anything still running" has a single answer.
+const LIVE_WORK: [&str; 6] = [
+    "queued",
+    "preparing",
+    "working",
+    "waiting_user",
+    "needs_approval",
+    "verifying",
+];
+
 /// Milestones worth showing a human, recognised from the provider's own narration.
 ///
 /// This is not a second state machine: the canonical status is what the Run says. It only decides
@@ -784,6 +1260,10 @@ pub(crate) struct WorkResult {
     pub(crate) commands: Option<String>,
     pub(crate) validation: Option<String>,
     pub(crate) unresolved: Option<String>,
+    /// The consequential action the runtime asked a person to authorise, if any. A request is
+    /// not permission and grants nothing on its own: it is read against the Agent's policy and
+    /// becomes a durable approval only where that policy said `ask`.
+    pub(crate) requests: Option<String>,
 }
 
 const RESULT_CONTRACT: &str = "\n## How to finish\n\
@@ -793,7 +1273,10 @@ SUMMARY: what you changed and why, in two sentences at most.\n\
 FILES: the files you changed, comma separated, or `none`.\n\
 COMMANDS: the commands you ran, comma separated, or `none`.\n\
 VALIDATION: what the validation actually reported, or `not run`. Never claim a result you did not observe.\n\
-UNRESOLVED: what remains blocked or uncertain, or `none`.\n";
+UNRESOLVED: what remains blocked or uncertain, or `none`.\n\
+REQUESTS: `commit`, `push`, or `none` — the consequential action you want a person to authorise. \
+Only ask when the work above is finished and verified, and only for something you were told needs approval. \
+Never attempt it yourself.\n";
 
 /// Read the labelled result out of the runtime's final message.
 ///
@@ -818,6 +1301,7 @@ pub(crate) fn parse_result(text: &str) -> WorkResult {
             "COMMANDS" => &mut result.commands,
             "VALIDATION" => &mut result.validation,
             "UNRESOLVED" => &mut result.unresolved,
+            "REQUESTS" => &mut result.requests,
             _ => continue,
         };
         labelled = true;
@@ -849,7 +1333,34 @@ fn authority_clause(authority: &AgentWorkAuthority) -> String {
     if !authority.commit {
         clause.push_str("- You must not run `git commit`, `git push`, `git merge`, or create tags or releases. Leave your work in the working tree for review.\n");
     }
+    // Naming the approval route matters: a runtime told only "you may not commit" will either
+    // finish silently or try anyway. Told that asking is the supported path, it finishes the work
+    // and asks, which is the behaviour the whole gate exists to produce.
+    if authority.push_requires_approval {
+        clause.push_str("- Publishing needs a person's approval. When the work is finished and verified, write `REQUESTS: push` and stop; Paralith will ask them and push for you if they agree.\n");
+    } else if authority.commit_requires_approval {
+        clause.push_str("- Committing needs a person's approval. When the work is finished and verified, write `REQUESTS: commit` and stop; Paralith will ask them and commit for you if they agree.\n");
+    }
     clause
+}
+
+/// The action a run asked for, once it has been checked against what that run was allowed to ask.
+///
+/// A runtime writing `REQUESTS: push` on work whose policy never offered approval is asking for
+/// something nobody granted, and the answer is nothing at all — not an approval card a user might
+/// reasonably click.
+fn requested_approval(
+    authority: &AgentWorkAuthority,
+    requests: Option<&str>,
+) -> Option<&'static str> {
+    let requested = requests?.trim().to_ascii_lowercase();
+    if requested.contains("push") && authority.push_requires_approval {
+        return Some("push");
+    }
+    if requested.contains("commit") && authority.commit_requires_approval {
+        return Some("commit");
+    }
+    None
 }
 
 fn short(value: &str, limit: usize) -> String {
@@ -898,8 +1409,7 @@ mod tests {
             read: true,
             write: false,
             run_commands: true,
-            commit: false,
-            push: false,
+            ..AgentWorkAuthority::default()
         });
         assert!(clause.contains("may not modify"));
         assert!(clause.contains("git commit"));
@@ -908,8 +1418,7 @@ mod tests {
             read: true,
             write: true,
             run_commands: true,
-            commit: false,
-            push: false,
+            ..AgentWorkAuthority::default()
         });
         assert!(writing.contains("may read and modify"));
         // Write authority is never publish authority.

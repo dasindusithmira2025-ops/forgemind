@@ -799,6 +799,88 @@ impl RepositoryService {
         }
     }
 
+    /// Publish an Agent's work after a person has explicitly authorised it.
+    ///
+    /// Two named actions rather than a general "run git for me", because the whole value of the
+    /// approval gate is that the approved thing is *specific*. Handing the work service an
+    /// arbitrary Git escape hatch would give back everything the gate took away.
+    ///
+    /// The directory is re-validated against the Project root on every call. The caller has
+    /// already checked authority, but a path that was inside the Project when the run started is
+    /// not proof it still is, and this is the boundary that must not be assumed.
+    pub fn commit_authorized(
+        &self,
+        project_id: &str,
+        directory: Option<&str>,
+        message: &str,
+    ) -> AppResult<String> {
+        let (project, repository) = self.authorized_target(project_id, directory)?;
+        let _ = project;
+        self.git_text(&repository, &["add", "-A"], None, None)?;
+        self.git_text(&repository, &["commit", "-m", message], None, None)
+    }
+
+    /// Push the checked-out branch to `origin`, after explicit authorisation.
+    ///
+    /// A detached HEAD is refused rather than resolved to something plausible: guessing which
+    /// branch a person meant to publish is exactly the class of decision that must stay theirs.
+    pub fn push_authorized(
+        &self,
+        project_id: &str,
+        directory: Option<&str>,
+    ) -> AppResult<(String, String)> {
+        let (project, repository) = self.authorized_target(project_id, directory)?;
+        let _ = project;
+        let branch = self
+            .git_text(
+                &repository,
+                &["rev-parse", "--abbrev-ref", "HEAD"],
+                None,
+                None,
+            )?
+            .trim()
+            .to_string();
+        if branch.is_empty() || branch == "HEAD" {
+            return Err(AppError::new(
+                "repository_detached_head",
+                "This work is not on a branch, so there is nothing to push.",
+                true,
+            )
+            .layer("repository_security"));
+        }
+        let output = self.git_text(
+            &repository,
+            &["push", "--set-upstream", "origin", &branch],
+            None,
+            None,
+        )?;
+        Ok((branch, output))
+    }
+
+    /// Whether the working tree has anything to commit. Used to tell "already committed" from
+    /// "nothing was done", which are different things to report back to a person.
+    pub fn has_uncommitted_changes(
+        &self,
+        project_id: &str,
+        directory: Option<&str>,
+    ) -> AppResult<bool> {
+        let (_, repository) = self.authorized_target(project_id, directory)?;
+        Ok(!self
+            .git_text(&repository, &["status", "--porcelain"], None, None)?
+            .trim()
+            .is_empty())
+    }
+
+    fn authorized_target(
+        &self,
+        project_id: &str,
+        directory: Option<&str>,
+    ) -> AppResult<(Project, PathBuf)> {
+        let project = self.database.get_project(project_id)?;
+        let repository = self.validate_repository_path(&project, directory)?;
+        Ok((project, repository))
+    }
+
     pub fn cancel(&self, project_id: &str, operation_id: &str) -> AppResult<bool> {
         let record = self.database.repository_operation(operation_id)?;
         if record.project_id != project_id {

@@ -13,7 +13,9 @@
 
 use super::DatabaseService;
 use crate::errors::{AppError, AppResult};
-use crate::models::{AgentWork, AgentWorkAuthority, AgentWorkEvent, CreateTerminalRequest};
+use crate::models::{
+    AgentCapabilityDecision, AgentWork, AgentWorkAuthority, AgentWorkEvent, CreateTerminalRequest,
+};
 use chrono::Utc;
 use rusqlite::{params, OptionalExtension, Row};
 use serde_json::json;
@@ -381,18 +383,48 @@ impl DatabaseService {
                 read: true,
                 write: true,
                 run_commands: true,
-                commit: false,
-                push: false,
+                ..AgentWorkAuthority::default()
             },
             Some("read") => AgentWorkAuthority {
                 read: true,
-                write: false,
                 run_commands: true,
-                commit: false,
-                push: false,
+                ..AgentWorkAuthority::default()
             },
             _ => AgentWorkAuthority::default(),
         };
+        // The workspace grant is the ceiling; the capability policy decides within it. Both have
+        // to agree, so revoking `workspace_write` on the Agent disables editing everywhere at
+        // once without touching a single Project grant.
+        if authority.write
+            && self.agent_capability(agent_id, "workspace_write")? != AgentCapabilityDecision::Allow
+        {
+            authority.write = false;
+        }
+        if authority.run_commands
+            && self.agent_capability(agent_id, "run_commands")? != AgentCapabilityDecision::Allow
+        {
+            authority.run_commands = false;
+        }
+        if authority.read {
+            // `commit` is never granted by a workspace grant. It is granted here or not at all,
+            // and `ask` grants nothing to the run itself — only the right to request it later.
+            match self.agent_capability(agent_id, "commit")? {
+                AgentCapabilityDecision::Allow => authority.commit = true,
+                AgentCapabilityDecision::Ask => authority.commit_requires_approval = true,
+                AgentCapabilityDecision::Deny => {}
+            }
+            match self.agent_capability(agent_id, "push")? {
+                AgentCapabilityDecision::Allow => authority.push = true,
+                AgentCapabilityDecision::Ask => authority.push_requires_approval = true,
+                AgentCapabilityDecision::Deny => {}
+            }
+        }
+        // Pushing without committing is not a thing. A policy that allows one and refuses the
+        // other resolves to the narrower of the two rather than to something incoherent.
+        if !authority.commit && !authority.commit_requires_approval {
+            authority.push = false;
+            authority.push_requires_approval = false;
+        }
         narrow_by_constraints(&mut authority, constraints);
         Ok(authority)
     }
@@ -532,8 +564,13 @@ fn narrow_by_constraints(authority: &mut AgentWorkAuthority, constraints: &str) 
         authority.run_commands = false;
     }
     if lower.contains("commit") || lower.contains("push") || lower.contains("merge") {
+        // A delegation that says "do not push" removes the request as well as the act. Leaving
+        // the approval path open would let the run come back and ask for the thing it was told
+        // not to do, which is not narrowing.
         authority.commit = false;
         authority.push = false;
+        authority.commit_requires_approval = false;
+        authority.push_requires_approval = false;
     }
 }
 
@@ -692,8 +729,7 @@ mod tests {
             read: true,
             write: true,
             run_commands: true,
-            commit: false,
-            push: false,
+            ..AgentWorkAuthority::default()
         };
         narrow_by_constraints(
             &mut granted,

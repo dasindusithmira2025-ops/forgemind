@@ -1,4 +1,7 @@
 mod activity;
+pub mod agent_authority;
+#[cfg(test)]
+mod agent_authority_tests;
 pub mod agent_work;
 pub mod backup;
 pub(crate) mod code;

@@ -4,16 +4,22 @@ import type { AgentConversationEntry, AgentRuntimeOption, AgentWork, AgentWorkSt
 import { useAgentModeStore } from './agentModeStore'
 import { AgentModeSurface } from './AgentModeSurface'
 
-const { sendAgentMessage, listAgentRuntimes, getAgentOrganization, cancelAgentWork, continueAgentWork, listAgentWorkEvents } = vi.hoisted(() => ({
+const { sendAgentMessage, listAgentRuntimes, getAgentOrganization, cancelAgentWork, continueAgentWork, listAgentWorkEvents, listAgentApprovals, decideAgentApproval, listAgentCapabilities, listAgentSkills, listAgentSkillAssignments, listAgentRoutines } = vi.hoisted(() => ({
   sendAgentMessage: vi.fn().mockResolvedValue(undefined),
   listAgentRuntimes: vi.fn().mockResolvedValue([]),
   getAgentOrganization: vi.fn(),
   cancelAgentWork: vi.fn().mockResolvedValue(undefined),
   continueAgentWork: vi.fn().mockResolvedValue(undefined),
   listAgentWorkEvents: vi.fn().mockResolvedValue([]),
+  listAgentApprovals: vi.fn().mockResolvedValue([]),
+  decideAgentApproval: vi.fn().mockResolvedValue(undefined),
+  listAgentCapabilities: vi.fn().mockResolvedValue([]),
+  listAgentSkills: vi.fn().mockResolvedValue([]),
+  listAgentSkillAssignments: vi.fn().mockResolvedValue([]),
+  listAgentRoutines: vi.fn().mockResolvedValue([]),
 }))
 vi.mock('../../native/commands', () => ({
-  native: { sendAgentMessage, listAgentRuntimes, getAgentOrganization, cancelAgentWork, continueAgentWork, listAgentWorkEvents },
+  native: { sendAgentMessage, listAgentRuntimes, getAgentOrganization, cancelAgentWork, continueAgentWork, listAgentWorkEvents, listAgentApprovals, decideAgentApproval, listAgentCapabilities, listAgentSkills, listAgentSkillAssignments, listAgentRoutines },
   asNativeError: (error: unknown) => ({ message: String(error) }),
 }))
 
@@ -38,7 +44,7 @@ const work = (over: Partial<AgentWork> = {}): AgentWork => ({
   projectId: 'project', status: 'working' as AgentWorkStatus,
   providerId: 'codex', modelId: 'gpt-5.5', runtimeSource: 'agent',
   terminalSessionId: 'session-1', executionWorkspaceId: 'agent-mode-work-project', executionPaneId: 'agent-work-work-1',
-  authority: { read: true, write: true, runCommands: true, commit: false, push: false },
+  authority: { read: true, write: true, runCommands: true, commit: false, push: false, commitRequiresApproval: false, pushRequiresApproval: false },
   originConversationId: 'chat',
   createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z', ...over,
 })
@@ -72,7 +78,51 @@ describe('AgentModeSurface', () => {
     // A send is followed by a snapshot refresh; return the seeded snapshot so the reload does
     // not blank the surface inside the test.
     getAgentOrganization.mockImplementation(async () => useAgentModeStore.getState().snapshot)
-    useAgentModeStore.setState({ mode: 'agent', hydrated: true, busy: false, error: undefined, runtimes: [], runtimesLoaded: true, messageRuntime: {} })
+    useAgentModeStore.setState({ mode: 'agent', hydrated: true, busy: false, error: undefined, runtimes: [], runtimesLoaded: true, messageRuntime: {}, approvals: [], capabilities: {}, skills: [], skillAssignments: {}, routines: [], organizationLoaded: false })
+  })
+
+  it('surfaces a pending approval in the thread beside the work that raised it', () => {
+    seedWork('needs_approval')
+    useAgentModeStore.setState({
+      snapshot: { ...useAgentModeStore.getState().snapshot, productState: { selectedMode: 'agent', selectedAgentId: 'forge', selectedConversationId: 'chat' } },
+      approvals: [{
+        id: 'approval-1', workId: 'work-1', agentId: 'forge', agentName: 'Forge', projectId: 'project',
+        kind: 'push', summary: 'Forge wants to push', status: 'open',
+        detail: { branch: 'feat/agent-mode', changedFiles: ['src/index.css'] },
+        createdAt: '2026-01-01T00:00:00Z',
+      }],
+    })
+    render(<AgentModeSurface visible project={project} workspace={workspace} onOpenCode={vi.fn()} />)
+    expect(screen.getByText('Forge wants to push')).toBeInTheDocument()
+    // The work row must not read as finished while a person still has to answer. The label
+    // appears on the run and again on the card, which is the point: one state, two places.
+    expect(screen.getAllByText('Needs approval').length).toBeGreaterThan(1)
+    expect(screen.getByText('Finished and waiting on your decision below.')).toBeInTheDocument()
+  })
+
+  it('does not claim nothing was published when publishing is still awaiting approval', () => {
+    seedWork('completed', { authority: { read: true, write: true, runCommands: true, commit: false, push: false, commitRequiresApproval: true, pushRequiresApproval: true } })
+    render(<AgentModeSurface visible project={project} workspace={workspace} onOpenCode={vi.fn()} />)
+    expect(screen.queryByText('No commit or push was performed.')).not.toBeInTheDocument()
+  })
+
+  it('states plainly that nothing was published when the teammate was refused outright', () => {
+    seedWork('completed')
+    render(<AgentModeSurface visible project={project} workspace={workspace} onOpenCode={vi.fn()} />)
+    expect(screen.getByText('No commit or push was performed.')).toBeInTheDocument()
+  })
+
+  it('keeps Access, Skills and Routines out of the team rail and behind the teammate header', () => {
+    seed([entry()])
+    render(<AgentModeSurface visible project={project} workspace={workspace} onOpenCode={vi.fn()} />)
+    const rail = screen.getByLabelText('Team roster')
+    for (const label of ['Skills', 'Routines', 'Access']) {
+      expect(rail.textContent).not.toContain(label)
+    }
+    fireEvent.click(screen.getByRole('button', { name: 'Atlas settings' }))
+    expect(screen.getByRole('button', { name: 'Access' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Skills' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Routines' })).toBeInTheDocument()
   })
 
   it('uses team-first onboarding instead of an empty dashboard', () => {
