@@ -1,7 +1,7 @@
 use crate::errors::{AppError, AppResult};
 use rusqlite::{params, Connection};
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 41;
+pub const CURRENT_SCHEMA_VERSION: i64 = 43;
 
 const MIGRATION_1: &str = r#"
 CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
@@ -1090,6 +1090,7 @@ pub fn apply(connection: &Connection) -> AppResult<()> {
         migrate_v26(connection)?;
     }
     if current < 27
+        || !column_exists(connection, "agent_conversation_entries", "state")?
         || !column_exists(connection, "agent_sessions", "recovery_status")?
         || !column_exists(connection, "agent_sessions", "worktree_path")?
     {
@@ -1153,6 +1154,12 @@ pub fn apply(connection: &Connection) -> AppResult<()> {
     }
     if current < 41 || !table_exists(connection, "activity_threads")? {
         migrate_v41(connection)?;
+    }
+    if current < 42 || !table_exists(connection, "organizational_agents")? {
+        migrate_v42(connection)?;
+    }
+    if current < 43 || !column_exists(connection, "agent_conversation_entries", "state")? {
+        migrate_v43(connection)?;
     }
     Ok(())
 }
@@ -1250,7 +1257,13 @@ pub fn requires_migration(connection: &Connection) -> AppResult<bool> {
         || !table_exists(connection, "mission_preflight")?
         || !table_exists(connection, "mission_task_outputs")?
         || !column_exists(connection, "runs", "mission_id")?
-        || !column_exists(connection, "runs", "mission_task_id")?)
+        || !column_exists(connection, "runs", "mission_task_id")?
+        || !table_exists(connection, "organizational_agents")?
+        || !table_exists(connection, "agent_conversations")?
+        || !table_exists(connection, "agent_conversation_entries")?
+        || !table_exists(connection, "agent_delegations")?
+        || !table_exists(connection, "agent_workspace_authorities")?
+        || !table_exists(connection, "agent_product_state")?)
 }
 
 fn migrate_v24(connection: &Connection) -> AppResult<()> {
@@ -2662,6 +2675,157 @@ fn migrate_v41(connection: &Connection) -> AppResult<()> {
         record_migration(connection, 41)
     })();
     finish_migration_transaction(connection, result, 41)
+}
+
+/// Persistent organizational identities above the existing execution systems. These rows own
+/// teammate identity, conversation continuity, bounded delegation and explicit Project access;
+/// actual execution remains in `runs`, terminals, Swarms and the Orchestration Kernel.
+fn migrate_v42(connection: &Connection) -> AppResult<()> {
+    connection
+        .execute_batch("BEGIN IMMEDIATE;")
+        .map_err(AppError::database)?;
+    let result = (|| {
+        connection
+            .execute_batch(
+                r#"
+CREATE TABLE IF NOT EXISTS organizational_agents(
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  role TEXT NOT NULL,
+  brief TEXT NOT NULL,
+  responsibilities_json TEXT NOT NULL DEFAULT '[]',
+  avatar_seed TEXT NOT NULL,
+  intelligence_preference TEXT NOT NULL DEFAULT 'automatic',
+  work_state TEXT NOT NULL DEFAULT 'idle',
+  work_state_detail TEXT,
+  pinned INTEGER NOT NULL DEFAULT 0,
+  position INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_organizational_agents_order
+  ON organizational_agents(pinned DESC,position,id);
+
+CREATE TABLE IF NOT EXISTS agent_conversations(
+  id TEXT PRIMARY KEY,
+  agent_id TEXT NOT NULL REFERENCES organizational_agents(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  position INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_agent_conversations_agent
+  ON agent_conversations(agent_id,position,id);
+
+CREATE TABLE IF NOT EXISTS agent_conversation_entries(
+  id TEXT PRIMARY KEY,
+  conversation_id TEXT NOT NULL REFERENCES agent_conversations(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL,
+  author_agent_id TEXT REFERENCES organizational_agents(id) ON DELETE SET NULL,
+  body TEXT NOT NULL,
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_agent_entries_conversation
+  ON agent_conversation_entries(conversation_id,created_at,id);
+
+CREATE TABLE IF NOT EXISTS agent_delegations(
+  id TEXT PRIMARY KEY,
+  owner_agent_id TEXT NOT NULL REFERENCES organizational_agents(id) ON DELETE RESTRICT,
+  recipient_agent_id TEXT NOT NULL REFERENCES organizational_agents(id) ON DELETE RESTRICT,
+  objective TEXT NOT NULL,
+  relevant_context TEXT NOT NULL DEFAULT '',
+  constraints TEXT NOT NULL DEFAULT '',
+  expected_result TEXT NOT NULL DEFAULT '',
+  authority_boundary TEXT NOT NULL DEFAULT '',
+  parent_delegation_id TEXT REFERENCES agent_delegations(id) ON DELETE SET NULL,
+  project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
+  workspace_id TEXT REFERENCES workspaces(id) ON DELETE SET NULL,
+  run_id TEXT REFERENCES runs(id) ON DELETE SET NULL,
+  status TEXT NOT NULL DEFAULT 'ready',
+  status_reason TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  CHECK(owner_agent_id <> recipient_agent_id)
+);
+CREATE INDEX IF NOT EXISTS idx_agent_delegations_owner
+  ON agent_delegations(owner_agent_id,created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_delegations_recipient
+  ON agent_delegations(recipient_agent_id,status,created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_delegations_workspace
+  ON agent_delegations(workspace_id,created_at DESC) WHERE workspace_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS agent_workspace_authorities(
+  agent_id TEXT NOT NULL REFERENCES organizational_agents(id) ON DELETE CASCADE,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  workspace_id TEXT REFERENCES workspaces(id) ON DELETE CASCADE,
+  access TEXT NOT NULL CHECK(access IN ('read','read_write')),
+  granted_at TEXT NOT NULL,
+  PRIMARY KEY(agent_id,project_id,workspace_id)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_workspace_authority_scope
+  ON agent_workspace_authorities(agent_id,project_id,coalesce(workspace_id,''));
+
+CREATE TABLE IF NOT EXISTS agent_product_state(
+  singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+  selected_mode TEXT NOT NULL DEFAULT 'code' CHECK(selected_mode IN ('code','agent')),
+  selected_agent_id TEXT REFERENCES organizational_agents(id) ON DELETE SET NULL,
+  selected_conversation_id TEXT REFERENCES agent_conversations(id) ON DELETE SET NULL,
+  updated_at TEXT NOT NULL
+);
+INSERT OR IGNORE INTO agent_product_state(singleton,selected_mode,updated_at)
+  VALUES(1,'code',datetime('now'));
+"#,
+            )
+            .map_err(AppError::database)?;
+        record_migration(connection, 42)
+    })();
+    finish_migration_transaction(connection, result, 42)
+}
+
+/// Turn execution state and runtime provenance for Agent Mode conversations. Before this the
+/// conversation was a durable text record with no notion of *who answered, on which runtime, and
+/// whether the turn actually finished* — so an interrupted turn was indistinguishable from a
+/// completed one after a restart. Every column is additive and nullable or defaulted, so existing
+/// rows upgrade to `complete` without rewriting user data.
+fn migrate_v43(connection: &Connection) -> AppResult<()> {
+    connection
+        .execute_batch("BEGIN IMMEDIATE;")
+        .map_err(AppError::database)?;
+    let result = (|| {
+        // Conversation-level runtime preference. NULL means "inherit the Agent's preference",
+        // which is what keeps Agent identity and intelligence separate.
+        add_column_if_missing(
+            connection,
+            "agent_conversations",
+            "runtime_preference",
+            "TEXT",
+        )?;
+        for (column, definition) in [
+            ("state", "TEXT NOT NULL DEFAULT 'complete'"),
+            ("runtime_provider", "TEXT"),
+            ("runtime_model", "TEXT"),
+            ("runtime_account", "TEXT"),
+            ("parent_entry_id", "TEXT"),
+            ("terminal_session_id", "TEXT"),
+            ("error_code", "TEXT"),
+            ("updated_at", "TEXT"),
+        ] {
+            add_column_if_missing(connection, "agent_conversation_entries", column, definition)?;
+        }
+        connection
+            .execute_batch(
+                r#"
+UPDATE agent_conversation_entries SET updated_at=created_at WHERE updated_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_agent_entries_active
+  ON agent_conversation_entries(state,conversation_id)
+  WHERE state IN ('preparing','streaming');
+"#,
+            )
+            .map_err(AppError::database)?;
+        record_migration(connection, 43)
+    })();
+    finish_migration_transaction(connection, result, 43)
 }
 
 fn index_exists(connection: &Connection, index: &str) -> AppResult<bool> {
@@ -6114,6 +6278,56 @@ PRAGMA user_version=26;
                 .unwrap(),
             1
         );
+    }
+
+    #[test]
+    fn v43_adds_turn_state_without_rewriting_existing_conversation_rows() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
+                 CREATE TABLE agent_conversations(id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, title TEXT NOT NULL, position INTEGER NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+                 CREATE TABLE agent_conversation_entries(id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, kind TEXT NOT NULL, author_agent_id TEXT, body TEXT NOT NULL, metadata_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL);
+                 CREATE TABLE organizational_agents(id TEXT PRIMARY KEY);
+                 INSERT INTO agent_conversations VALUES('chat','atlas','General',0,'2026-01-01','2026-01-01');
+                 INSERT INTO agent_conversation_entries VALUES('entry','chat','user',NULL,'Existing message','{}','2026-01-01');
+                 PRAGMA user_version=42;",
+            )
+            .unwrap();
+
+        migrate_v43(&connection).unwrap();
+
+        assert!(column_exists(&connection, "agent_conversations", "runtime_preference").unwrap());
+        for column in [
+            "state",
+            "runtime_provider",
+            "runtime_model",
+            "parent_entry_id",
+        ] {
+            assert!(
+                column_exists(&connection, "agent_conversation_entries", column).unwrap(),
+                "{column} is missing"
+            );
+        }
+        // An existing message is a finished one, and its text is never rewritten.
+        let (body, state, updated): (String, String, String) = connection
+            .query_row(
+                "SELECT body,state,updated_at FROM agent_conversation_entries WHERE id='entry'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(body, "Existing message");
+        assert_eq!(state, "complete");
+        assert_eq!(updated, "2026-01-01");
+        assert_eq!(
+            connection
+                .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            43
+        );
+        // Repeating a partially applied upgrade must not fail.
+        migrate_v43(&connection).unwrap();
     }
 
     #[test]

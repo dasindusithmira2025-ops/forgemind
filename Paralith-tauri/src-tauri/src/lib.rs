@@ -75,6 +75,10 @@ pub struct AppState {
     /// needs a human, fed by the agent runtime and by a GitHub watcher. Shares `database` and the
     /// authenticated `repository` provider path; it owns no credentials of its own.
     activity: ActivityService,
+    /// Execution for Agent Mode conversations: runtime discovery, runtime resolution, and the
+    /// streamed turn itself. Composes the detector, the shared provider invocation grammar, the
+    /// terminal service and the Context Fabric; it owns no second execution stack.
+    agent_conversations: services::AgentConversationService,
 }
 
 pub(crate) fn require_main_window(window: &tauri::Window) -> errors::AppResult<()> {
@@ -546,6 +550,24 @@ pub fn run() {
             let activity =
                 ActivityService::new(database.clone(), repository.clone(), app.handle().clone());
             terminals.set_activity(activity.clone());
+            // Agent Mode conversation execution. Composed from services that already exist so a
+            // turn runs through the same detector, provider grammar, PTY and Context Fabric the
+            // rest of Paralith uses.
+            let agent_conversations = services::AgentConversationService::new(
+                database.clone(),
+                detector.clone(),
+                terminals.clone(),
+                context.clone(),
+                app.handle().clone(),
+            );
+            // A turn's provider process does not survive the application. Any turn still marked
+            // live belongs to a previous run and is recorded as interrupted rather than rendered
+            // as though it were still streaming.
+            match agent_conversations.recover_after_restart() {
+                Ok(0) => {}
+                Ok(count) => log::info!("marked {count} interrupted Agent turn(s) after restart"),
+                Err(error) => log::warn!("Agent turn recovery skipped: {}", error.message),
+            }
             if !recovery_mode {
                 activity.start();
             }
@@ -579,6 +601,7 @@ pub fn run() {
                 updates: updates.clone(),
                 usage,
                 usage_telemetry,
+                agent_conversations,
             });
             if let Some(state) = app.try_state::<AppState>() {
                 spawn_runtime_health_logger(state.inner().clone());
@@ -771,6 +794,21 @@ pub fn run() {
             commands::resync_activity,
             commands::review_activity_deployment,
             commands::dismiss_activity_thread,
+            commands::get_agent_organization,
+            commands::create_organizational_agent,
+            commands::create_agent_conversation,
+            commands::add_agent_conversation_entry,
+            commands::search_agent_history,
+            commands::create_agent_delegation,
+            commands::save_agent_product_state,
+            commands::set_organizational_agent_pinned,
+            commands::reorder_organizational_agents,
+            commands::reorder_agent_conversations,
+            commands::list_agent_runtimes,
+            commands::send_agent_message,
+            commands::cancel_agent_message,
+            commands::set_agent_conversation_runtime,
+            commands::set_agent_intelligence_preference,
             commands::get_settings,
             commands::get_ai_usage_snapshots,
             commands::get_ai_usage_history,

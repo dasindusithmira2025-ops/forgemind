@@ -1,6 +1,6 @@
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import type { KnowledgeUpdatedEvent } from '../features/memory/memoryTypes'
-import type { ActivityChangedEvent, AgentStateEvent, BrowserEvent, ProjectFileChangeBatch, ProviderUsageSnapshot, RemoteProjection, RepositoryApprovalRequest, RepositoryOperationEvent, RepositoryOperationRecord, RestorationProgress, SidebarPreferences, SwarmChangedEvent, TerminalExitEvent, TerminalOutputEvent, TerminalStatusEvent } from './types'
+import type { ActivityChangedEvent, AgentConversationEntry, AgentStateEvent, BrowserEvent, ProjectFileChangeBatch, ProviderUsageSnapshot, RemoteProjection, RepositoryApprovalRequest, RepositoryOperationEvent, RepositoryOperationRecord, RestorationProgress, SidebarPreferences, SwarmChangedEvent, TerminalExitEvent, TerminalOutputEvent, TerminalStatusEvent } from './types'
 
 type TerminalOutputWireEvent = Omit<TerminalOutputEvent, 'data'> & { data: string }
 
@@ -22,6 +22,13 @@ export const onAgentState = (handler: (event: AgentStateEvent) => void): Promise
  */
 export const onActivityChanged = (handler: (event: ActivityChangedEvent) => void): Promise<UnlistenFn> =>
   listen<ActivityChangedEvent>('activity-changed', (event) => handler(event.payload))
+
+/**
+ * One Agent turn's current state. The renderer never polls for a streaming answer: the runtime
+ * publishes each observed change here and the store patches the single row it names.
+ */
+export const onAgentConversationTurn = (handler: (entry: AgentConversationEntry) => void): Promise<UnlistenFn> =>
+  listen<AgentConversationEntry>('agent-conversation-turn', (event) => handler(event.payload))
 
 export const onRestorationProgress = (handler: (event: RestorationProgress) => void): Promise<UnlistenFn> =>
   listen<RestorationProgress>('restoration-progress', (event) => handler(event.payload))

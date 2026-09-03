@@ -1231,10 +1231,13 @@ fn consume_cursor_position_queries(pending: &mut Vec<u8>, input: &[u8]) -> (Vec<
 /// Such a session gets an extremely wide, tall PTY. That is not cosmetic: a provider's
 /// structured records are single lines of many kilobytes, and at human geometry ConPTY wraps
 /// and re-renders them, which destroys the record and can stall the stream entirely. The Run
-/// Engine's sessions (`run-engine-<project>`) are launched with `--output-format stream-json`
-/// exactly like the Swarm engine's, so they belong to the same class.
+/// Engine's sessions (`run-engine-<project>`) and Agent Mode conversation turns
+/// (`agent-mode-<agent>`) are launched with the same structured output as the Swarm engine's,
+/// so they belong to the same class.
 fn is_machine_protocol_workspace(workspace_id: &str) -> bool {
-    workspace_id.starts_with("swarm-runtime-") || workspace_id.starts_with("run-engine-")
+    workspace_id.starts_with("swarm-runtime-")
+        || workspace_id.starts_with("run-engine-")
+        || workspace_id.starts_with("agent-mode-")
 }
 
 /// Bulk/duplicate termination must be idempotent: a session another path already reaped is a
@@ -1809,6 +1812,8 @@ mod tests {
         // Regression: a Run Engine session streams the same JSON-lines protocol. At human
         // terminal geometry its records were wrapped and the Run hung in `running` forever.
         assert!(is_machine_protocol_workspace("run-engine-project-id"));
+        // An Agent Mode turn reads the same provider JSONL; wrapping it loses the answer.
+        assert!(is_machine_protocol_workspace("agent-mode-atlas-id"));
         assert!(!is_machine_protocol_workspace("normal-workspace"));
         let protocol_columns = MACHINE_PROTOCOL_COLS;
         assert!(protocol_columns > 1_000);
