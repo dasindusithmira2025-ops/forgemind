@@ -658,6 +658,7 @@ pub fn run() {
                     // Keep restored detached windows visible so their WebView2 renderer
                     // initializes and can reclaim the persisted Workspace lease.
                     .visible(true)
+                    .background_color(tauri::window::Color(11, 15, 21, 255))
                     .build()
                 {
                     // Paint the native frame before the window is on screen, so a restored
@@ -690,7 +691,11 @@ pub fn run() {
                     )
                 });
             let main_window = WebviewWindowBuilder::from_config(app.handle(), &main_window_config)
-                .and_then(|builder| builder.build())
+                .and_then(|builder| {
+                    builder
+                        .background_color(tauri::window::Color(11, 15, 21, 255))
+                        .build()
+                })
                 .unwrap_or_else(|error| {
                     fatal_startup(
                         app.handle(),

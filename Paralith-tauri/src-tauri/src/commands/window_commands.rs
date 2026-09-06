@@ -187,6 +187,7 @@ pub async fn detach_workspace(
         // immediately guarantees the detached renderer can load and complete its handoff.
         // Until then, Rust still keeps the main window's lease and terminal ownership intact.
         .visible(true)
+        .background_color(tauri::window::Color(11, 15, 21, 255))
         .build();
 
     match built {

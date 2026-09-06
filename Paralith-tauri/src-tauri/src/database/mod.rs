@@ -8,6 +8,8 @@ pub(crate) mod code;
 pub(crate) mod database_studio;
 pub(crate) mod embeddings;
 pub(crate) mod graph;
+#[cfg(test)]
+mod health_tests;
 pub(crate) mod intelligence;
 pub(crate) mod knowledge_jobs;
 pub mod legacy_migration;
@@ -161,13 +163,38 @@ impl DatabaseService {
     }
 
     pub fn health_report(&self) -> AppResult<crate::models::HealthReport> {
+        // WAL readers can inspect a consistent snapshot without holding the connection used by
+        // project hydration and terminal persistence for the duration of a full integrity scan.
+        if let Some(path) = self.path() {
+            let mut connection =
+                Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+            connection.busy_timeout(std::time::Duration::from_secs(5))?;
+            let snapshot = connection.transaction()?;
+            return Self::health_report_from_connection(&snapshot);
+        }
         let connection = self.connection.lock();
+        Self::health_report_from_connection(&connection)
+    }
+
+    pub fn schema_version(&self) -> AppResult<i64> {
+        Ok(self
+            .connection
+            .lock()
+            .query_row("PRAGMA user_version", [], |row| row.get(0))?)
+    }
+
+    fn health_report_from_connection(
+        connection: &Connection,
+    ) -> AppResult<crate::models::HealthReport> {
         let schema_version = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
         let integrity_check =
             connection.query_row("PRAGMA integrity_check", [], |row| row.get::<_, String>(0))?;
         let foreign_key_violations = {
             let mut statement = connection.prepare("PRAGMA foreign_key_check")?;
-            let count = statement.query_map([], |_| Ok(()))?.count() as u64;
+            let count = statement
+                .query_map([], |_| Ok(()))?
+                .collect::<Result<Vec<_>, _>>()?
+                .len() as u64;
             count
         };
         let stale_live_sessions = connection.query_row(
