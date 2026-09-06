@@ -11,6 +11,7 @@ import { Button } from '../components/ui/Button'
 import { Modal } from '../components/ui/Modal'
 import { ErrorNotice } from '../components/ui/ErrorNotice'
 import { TerminalPane } from '../components/terminal/TerminalPane'
+import { PaneBranchStatus } from '../components/terminal/PaneBranchChip'
 import { PaneMenu, type PaneMenuState } from '../components/terminal/PaneMenu'
 import { dispatchTerminalAction, type TerminalAction } from '../components/terminal/terminalActions'
 import { TextPromptDialog } from '../components/ui/TextPromptDialog'
@@ -215,10 +216,10 @@ export function DetachedWorkspaceWindow({ workspaceId }: { workspaceId: string }
 
   const renderPane = useCallback((paneId: string, ctx: RenderPaneContext) => {
     const assignment = workspace?.panes.find((pane) => pane.id === paneId)
-    if (!assignment) return <div className="terminal-failure"><ErrorNotice message="This layout pane has no saved assignment." /></div>
+    if (!assignment || !workspace) return <div className="terminal-failure"><ErrorNotice message="This layout pane has no saved assignment." /></div>
     const session = sessions.find((item) => item.paneId === paneId)
     return <>
-      <TerminalPane assignment={assignment} session={session} active={ctx.active} maximized={ctx.maximized} settings={settings}
+      <TerminalPane assignment={assignment} projectId={workspace.projectId} session={session} active={ctx.active} maximized={ctx.maximized} settings={settings}
         onFocus={() => setActivePane(paneId)}
         onMaximize={() => useCanvasStore.getState().toggleMaximize(paneId)}
         onClose={() => void stopPane(paneId)}
@@ -245,7 +246,7 @@ export function DetachedWorkspaceWindow({ workspaceId }: { workspaceId: string }
     </>}
     canvas={<>{error && <div className="workspace-error"><ErrorNotice message={error} /></div>}<section className="terminal-canvas"><WorkspaceCanvas reducedMotion={reducedMotion} persist={persistCanvas} onFocusPane={setActivePane} renderPane={renderPane} /></section></>}
     statusBar={<>
-      <span>{project.gitBranch || 'No branch'}</span>
+      <PaneBranchStatus projectId={workspace.projectId} directory={activePane?.workingDirectory} />
       <span className="status-path" title={project.rootPath}>{project.name}</span>
       <span>{running}/{workspace.panes.length} running</span>
       <span>{activePane?.title || 'No active pane'}</span>

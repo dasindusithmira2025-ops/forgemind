@@ -5,6 +5,7 @@ import { SearchAddon } from '@xterm/addon-search'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { ChevronDown, Maximize2, Minimize2, MoreHorizontal, RotateCw, Search, X } from 'lucide-react'
 import { Button } from '../ui/Button'
+import { PaneBranchChip } from './PaneBranchChip'
 import { native } from '../../native/commands'
 import type { AgentActivityState, AppSettings, PaneAssignment, TerminalSession } from '../../native/types'
 import { providerLabel } from '../../shared/layout'
@@ -19,6 +20,8 @@ const MAX_RENDER_BATCH_BYTES = 256 * 1024
 
 interface TerminalPaneProps {
   assignment: PaneAssignment
+  /** Owning Project, so the pane can read and switch the branch of its own working directory. */
+  projectId: string
   session?: TerminalSession
   deferred?: boolean
   active: boolean
@@ -34,7 +37,7 @@ interface TerminalPaneProps {
   onHeaderPointerDown?: (event: ReactPointerEvent) => void
 }
 
-export function TerminalPane({ assignment, session, deferred = false, active, maximized, settings, onFocus, onMaximize, onClose, onRestart, onMenu, onHeaderPointerDown }: TerminalPaneProps) {
+export function TerminalPane({ assignment, projectId, session, deferred = false, active, maximized, settings, onFocus, onMaximize, onClose, onRestart, onMenu, onHeaderPointerDown }: TerminalPaneProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const paneRef = useRef<HTMLElement>(null)
   const terminalRef = useRef<Terminal | undefined>(undefined)
@@ -321,6 +324,7 @@ export function TerminalPane({ assignment, session, deferred = false, active, ma
           <em className={`terminal-state-word state-${stateKey}`}>{stateLabel}</em>
         </span>
       </div>
+      <PaneBranchChip projectId={projectId} directory={assignment.workingDirectory} active={active} />
       {agentState?.attentionSince && <span className="agent-attention-badge" title={`${agentState.source}: ${agentState.reason}`}>Needs review</span>}
       <div className="terminal-inspect" role="note" aria-hidden>
         <dl>
