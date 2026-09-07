@@ -28,7 +28,7 @@ pub async fn check_for_updates(
     state: State<'_, AppState>,
 ) -> AppResult<UpdateStatus> {
     crate::require_main_window(&window)?;
-    let schema = state.database.health_report()?.schema_version;
+    let schema = state.database.schema_version()?;
     state.updates.check(app, schema).await
 }
 

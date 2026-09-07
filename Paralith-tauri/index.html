@@ -5,6 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/png" href="/favicon.png" />
     <title>PARALITH</title>
+    <style>
+      /* Paint before the module graph and bundled styles arrive. React replaces the status. */
+      html, body, #root { margin: 0; width: 100%; height: 100%; background: var(--bg, #0b0f15); color: var(--text, #d6d7d9); }
+      #boot-status { height: 100%; display: grid; place-items: center; font: 13px "Segoe UI", sans-serif; }
+    </style>
     <script>
       // Theme bootstrap — runs before the stylesheet applies and before React mounts, in every
       // window (main + detached), so the saved theme paints with no flash. It only reads the
@@ -38,7 +43,7 @@
     </script>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root"><div id="boot-status" role="status">Starting PARALITH…</div></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
