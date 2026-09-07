@@ -1,20 +1,27 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
-  ChevronDown, FileDiff, GitCommitHorizontal, GitMerge, Loader2, RefreshCw, Search, ShieldCheck,
+  ChevronDown, ChevronRight, FileDiff, GitMerge, Loader2, RefreshCw, Search, ShieldCheck,
   ShieldQuestion, X,
 } from 'lucide-react'
-import { Button } from '../../../components/ui/Button'
 import { ErrorNotice } from '../../../components/ui/ErrorNotice'
 import type { RepositoryCommitFile, RepositoryCommitSummary } from '../../../native/types'
 import { useRepositoryStore } from '../repositoryStore'
 import { relativeTime } from '../repositorySelectors'
-import { StatusBadge, type BadgeTone } from './StatusBadge'
+import {
+  buildCommitGraph, groupByDirectory, groupRefs, laneColumn, refDisplayName, refRemoteSuffix,
+  splitPath, type GraphRow, type RefGroup,
+} from '../commitGraph'
+import type { BadgeTone } from './StatusBadge'
 
 /**
  * Commit history and the Commit Inspector — the repository's read surface for what already
  * happened. The listing is a bounded, paged `git log` walk; the Inspector reads one commit's
  * identity, message and changed files. Everything shown comes from Git: an absent value (an
  * unsigned commit, a binary file's line count) is rendered as absent rather than filled in.
+ *
+ * Layout contract: the graph rail, the commit column and the SHA are three fixed roles in a row —
+ * the rail can never collide with the subject, the subject ellipsizes rather than wrapping, and
+ * secondary metadata is dropped at narrow widths before the subject is damaged.
  */
 export function HistorySection() {
   const commits = useRepositoryStore((state) => state.historyCommits)
@@ -45,40 +52,50 @@ export function HistorySection() {
     () => commits.find((commit) => commit.sha === selected) ?? commits[0],
     [commits, selected],
   )
+  const graph = useMemo(() => buildCommitGraph(commits), [commits])
 
   return (
-    <div className="repo-history">
-      <div className="repo-history-list" aria-label="Commit history">
-        <div className="repo-history-toolbar">
-          <form className="repo-history-search" onSubmit={applySearch} role="search">
-            <Search size={13} aria-hidden />
+    <div className="repo-graph">
+      <div className="repo-graph-pane" aria-label="Commit history">
+        <div className="repo-graph-toolbar">
+          <form className="repo-graph-search" onSubmit={applySearch} role="search">
+            <Search size={12} aria-hidden />
             <input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="Filter by message"
+              placeholder="Filter commits"
               aria-label="Filter commits by message"
               spellCheck={false}
             />
             {search && (
               <button type="button" className="repo-icon-btn" aria-label="Clear message filter" onClick={() => { setSearch(''); void loadHistory({ ...scope, search: undefined }) }}>
-                <X size={12} />
+                <X size={11} />
               </button>
             )}
           </form>
-          <Button variant="ghost" icon={loading ? <Loader2 size={14} className="is-spinning" /> : <RefreshCw size={14} />} aria-label="Refresh history" disabled={loading} onClick={() => void loadHistory()} />
+          <button
+            type="button"
+            className="repo-icon-btn"
+            aria-label="Refresh history"
+            title="Refresh history"
+            disabled={loading}
+            onClick={() => void loadHistory()}
+          >
+            {loading ? <Loader2 size={13} className="is-spinning" /> : <RefreshCw size={13} />}
+          </button>
         </div>
 
         {scope.path && (
-          <div className="repo-history-scope">
-            <FileDiff size={12} aria-hidden />
+          <div className="repo-graph-scope">
+            <FileDiff size={11} aria-hidden />
             <code title={scope.path}>{scope.path}</code>
-            <button type="button" className="repo-icon-btn" aria-label="Show all commits" onClick={clearPath}><X size={12} /></button>
+            <button type="button" className="repo-icon-btn" aria-label="Show all commits" onClick={clearPath}><X size={11} /></button>
           </div>
         )}
 
-        {error && <div className="repo-history-error"><ErrorNotice message={error} onRetry={() => void loadHistory()} /></div>}
+        {error && <div className="repo-graph-notice"><ErrorNotice message={error} onRetry={() => void loadHistory()} /></div>}
 
-        {loading && commits.length === 0 && <p className="repo-empty"><Loader2 size={14} className="is-spinning" /> Reading commit history…</p>}
+        {loading && commits.length === 0 && <p className="repo-empty"><Loader2 size={13} className="is-spinning" /> Reading commit history…</p>}
         {!loading && !error && commits.length === 0 && (
           <p className="repo-empty">
             {scope.path || scope.search
@@ -87,45 +104,152 @@ export function HistorySection() {
           </p>
         )}
 
-        <ul>
-          {commits.map((commit) => (
-            <li key={commit.sha}>
-              <button
-                className={current?.sha === commit.sha ? 'active' : ''}
-                aria-current={current?.sha === commit.sha ? 'true' : undefined}
-                onClick={() => selectCommit(commit.sha)}
-              >
-                <span className="repo-history-row-top">
-                  {commit.parents.length > 1
-                    ? <GitMerge size={13} className="repo-history-merge" aria-label="Merge commit" />
-                    : <GitCommitHorizontal size={13} aria-hidden />}
-                  <span className="repo-history-subject">{commit.subject || '(no subject)'}</span>
-                </span>
-                <span className="repo-history-row-meta">
-                  <code>{shortSha(commit.sha)}</code>
-                  <span className="repo-muted">{commit.authorName} · {relativeTime(commit.authoredAt)}</span>
-                  {commit.refs.map((ref) => <span key={ref} className="repo-tag">{ref}</span>)}
-                </span>
-              </button>
-            </li>
+        <ul className="repo-graph-rows" style={{ '--graph-rail': `${railWidth(graph.lanes)}px` } as React.CSSProperties}>
+          {commits.map((commit, index) => (
+            <CommitRow
+              key={commit.sha}
+              commit={commit}
+              row={graph.rows[index]}
+              lanes={graph.lanes}
+              active={current?.sha === commit.sha}
+              onSelect={selectCommit}
+            />
           ))}
         </ul>
 
         {hasMore && (
-          <div className="repo-history-more">
-            <Button variant="secondary" icon={paging ? <Loader2 size={14} className="is-spinning" /> : <ChevronDown size={14} />} disabled={paging} onClick={() => void loadMoreHistory()}>
+          <div className="repo-graph-more">
+            <button type="button" className="repo-graph-more-btn" disabled={paging} onClick={() => void loadMoreHistory()}>
+              {paging ? <Loader2 size={13} className="is-spinning" /> : <ChevronDown size={13} />}
               {paging ? 'Loading…' : 'Load more commits'}
-            </Button>
+            </button>
           </div>
         )}
       </div>
 
       {current
         ? <CommitInspector commit={current} />
-        : <div className="repo-empty">Select a commit to inspect it.</div>}
+        : <div className="repo-graph-detail repo-empty">Select a commit to inspect it.</div>}
     </div>
   )
 }
+
+// ---- Graph rail ------------------------------------------------------------------------------
+
+/** Lane pitch and edge padding, in px. The rail is sized from these so text starts after it. */
+const LANE_PITCH = 13
+const RAIL_EDGE = 9
+
+function railWidth(lanes: number): number {
+  return RAIL_EDGE * 2 + (Math.max(lanes, 1) - 1) * LANE_PITCH
+}
+function laneX(lane: number): number {
+  return RAIL_EDGE + laneColumn(lane) * LANE_PITCH
+}
+
+/**
+ * The graph cell for one row. Lines are drawn in a stretched viewBox (y 0 = row top, 50 = the node
+ * line, 100 = row bottom) so the rail follows the row height at any `--ui-scale` without the
+ * component having to know what that height resolved to. The node itself is a DOM element rather
+ * than an SVG circle, so it stays perfectly round under that vertical stretch.
+ */
+function GraphCell({ row, lanes }: { row: GraphRow | undefined; lanes: number }) {
+  if (!row) return <span className="repo-graph-cell" aria-hidden />
+  const width = railWidth(lanes)
+  const path = (from: number, to: number, top: boolean): string => {
+    const [y0, y1] = top ? [0, 50] : [50, 100]
+    const x0 = laneX(from)
+    const x1 = laneX(to)
+    if (x0 === x1) return `M${x0} ${y0}V${y1}`
+    const mid = (y0 + y1) / 2
+    return `M${x0} ${y0}C${x0} ${mid},${x1} ${mid},${x1} ${y1}`
+  }
+  return (
+    <span className="repo-graph-cell" aria-hidden>
+      <svg viewBox={`0 0 ${width} 100`} preserveAspectRatio="none" focusable="false">
+        {row.top.map((edge, index) => (
+          <path key={`t${index}`} d={path(edge.from, edge.to, true)} stroke={laneColor(edge.color)} vectorEffect="non-scaling-stroke" />
+        ))}
+        {row.bottom.map((edge, index) => (
+          <path key={`b${index}`} d={path(edge.from, edge.to, false)} stroke={laneColor(edge.color)} vectorEffect="non-scaling-stroke" />
+        ))}
+      </svg>
+      <span
+        className={`repo-graph-node${row.merge ? ' is-merge' : ''}`}
+        style={{ left: `${laneX(row.lane)}px`, color: laneColor(row.color) }}
+      />
+    </span>
+  )
+}
+
+function laneColor(index: number): string {
+  return `var(--graph-lane-${index + 1})`
+}
+
+function CommitRow({ commit, row, lanes, active, onSelect }: {
+  commit: RepositoryCommitSummary
+  row: GraphRow | undefined
+  lanes: number
+  active: boolean
+  onSelect: (sha: string) => void
+}) {
+  const refs = useMemo(() => groupRefs(commit.refs), [commit.refs])
+  return (
+    <li>
+      <button
+        type="button"
+        className={active ? 'repo-graph-row is-active' : 'repo-graph-row'}
+        aria-current={active ? 'true' : undefined}
+        onClick={() => onSelect(commit.sha)}
+      >
+        <GraphCell row={row} lanes={lanes} />
+        <span className="repo-graph-main">
+          <span className="repo-graph-line">
+            <span className="repo-graph-subject" title={commit.subject}>{commit.subject || '(no subject)'}</span>
+            {refs.length > 0 && <RefTrail refs={refs} />}
+          </span>
+          <span className="repo-graph-meta">
+            <span className="repo-graph-author">{commit.authorName}</span>
+            <span className="repo-graph-dot" aria-hidden>·</span>
+            <span>{relativeTime(commit.authoredAt)}</span>
+          </span>
+        </span>
+        <code className="repo-graph-sha">{shortSha(commit.sha)}</code>
+      </button>
+    </li>
+  )
+}
+
+/** Grouped decorations, capped at two so a heavily-tagged commit cannot push out the subject. */
+function RefTrail({ refs }: { refs: RefGroup[] }) {
+  const shown = refs.slice(0, 2)
+  const extra = refs.length - shown.length
+  return (
+    <span className="repo-graph-refs">
+      {shown.map((group) => {
+        const remotes = refRemoteSuffix(group)
+        return (
+          <span
+            key={`${group.kind}:${group.label}`}
+            className={`repo-ref${group.head ? ' is-head' : ''}${group.kind === 'tag' ? ' is-tag' : ''}`}
+            title={remotes ? `${refDisplayName(group)} · ${remotes}` : refDisplayName(group)}
+          >
+            {refDisplayName(group)}
+            {remotes && <span className="repo-ref-remote">{remotes}</span>}
+          </span>
+        )
+      })}
+      {extra > 0 && <span className="repo-ref is-more" title={refs.slice(2).map(refDisplayName).join(', ')}>+{extra}</span>}
+    </span>
+  )
+}
+
+// ---- Commit inspector ------------------------------------------------------------------------
+
+/** Above this many files the inspector offers a filter and groups rows under their directory. */
+const GROUPING_THRESHOLD = 12
+/** Above this many files the directory groups start collapsed, so a huge commit opens instantly. */
+const COLLAPSE_THRESHOLD = 60
 
 /**
  * The Commit Inspector. Identity, signature status, message body and the changed-file list are
@@ -145,84 +269,194 @@ function CommitInspector({ commit }: { commit: RepositoryCommitSummary }) {
   useEffect(() => { void loadCommitDetail(commit.sha) }, [commit.sha, loadCommitDetail])
 
   const signature = signatureLabel(commit.signature)
+  const refs = useMemo(() => groupRefs(commit.refs), [commit.refs])
 
   return (
-    <div className="repo-history-detail">
-      <div className="repo-history-detail-head">
-        <div>
-          <h3>{commit.subject || '(no subject)'}</h3>
-          <p className="repo-history-identity">
-            <strong>{commit.authorName}</strong> <span className="repo-muted">{commit.authorEmail}</span>
-            <span className="repo-muted"> authored {relativeTime(commit.authoredAt)}</span>
-          </p>
-          {commit.committerEmail !== commit.authorEmail && (
-            <p className="repo-history-identity repo-muted">
-              Committed by {commit.committerName} {relativeTime(commit.committedAt)}
-            </p>
+    <div className="repo-graph-detail">
+      <header className="repo-commit-head">
+        <h3 className="repo-commit-subject">{commit.subject || '(no subject)'}</h3>
+        <p className="repo-commit-byline">
+          <span className="repo-commit-author" title={commit.authorEmail}>{commit.authorName}</span>
+          <span className="repo-graph-dot" aria-hidden>·</span>
+          <span>{relativeTime(commit.authoredAt)}</span>
+          <button
+            type="button"
+            className="repo-commit-sha"
+            title={`Copy ${commit.sha}`}
+            aria-label={`Copy commit SHA ${commit.sha}`}
+            onClick={() => void navigator.clipboard?.writeText(commit.sha).catch(() => undefined)}
+          >
+            {shortSha(commit.sha)}
+          </button>
+          {detail?.merge && <span className="repo-commit-flag"><GitMerge size={11} aria-hidden />merge</span>}
+          {signature && (
+            <span className={`repo-commit-flag tone-${signature.tone}`} title={`git %G? = ${commit.signature}`}>
+              {signature.trusted ? <ShieldCheck size={11} aria-hidden /> : <ShieldQuestion size={11} aria-hidden />}
+              {signature.label}
+            </span>
           )}
+        </p>
+        {commit.committerEmail !== commit.authorEmail && (
+          <p className="repo-commit-subline">Committed by {commit.committerName} {relativeTime(commit.committedAt)}</p>
+        )}
+
+        <div className="repo-commit-context">
+          {refs.length > 0 && (
+            <span className="repo-graph-refs">
+              {refs.map((group) => (
+                <span
+                  key={`${group.kind}:${group.label}`}
+                  className={`repo-ref${group.head ? ' is-head' : ''}${group.kind === 'tag' ? ' is-tag' : ''}`}
+                >
+                  {refDisplayName(group)}
+                  {refRemoteSuffix(group) && <span className="repo-ref-remote">{refRemoteSuffix(group)}</span>}
+                </span>
+              ))}
+            </span>
+          )}
+          <span className="repo-commit-parents">
+            <span className="repo-commit-label">{commit.parents.length === 0 ? 'Root commit' : commit.parents.length > 1 ? 'Parents' : 'Parent'}</span>
+            {commit.parents.map((parent) => {
+              const known = commits.some((item) => item.sha === parent)
+              return known
+                ? <button key={parent} type="button" className="repo-commit-parent" onClick={() => selectCommit(parent)}>{shortSha(parent)}</button>
+                : <code key={parent} className="repo-commit-parent is-flat" title={`${parent} is outside the loaded page`}>{shortSha(parent)}</code>
+            })}
+          </span>
         </div>
-        <div className="repo-history-detail-badges">
-          <StatusBadge tone="neutral" title={commit.sha}>{shortSha(commit.sha)}</StatusBadge>
-          {detail?.merge && <StatusBadge tone="accent" icon={<GitMerge size={11} />}>merge</StatusBadge>}
-          {signature && <StatusBadge tone={signature.tone} icon={signature.trusted ? <ShieldCheck size={11} /> : <ShieldQuestion size={11} />} title={`git %G? = ${commit.signature}`}>{signature.label}</StatusBadge>}
-        </div>
-      </div>
+      </header>
 
-      {commit.refs.length > 0 && (
-        <div className="repo-history-refs">{commit.refs.map((ref) => <span key={ref} className="repo-tag">{ref}</span>)}</div>
-      )}
-
-      <div className="repo-history-parents">
-        <span className="repo-muted">{commit.parents.length === 0 ? 'Root commit' : commit.parents.length > 1 ? 'Parents' : 'Parent'}</span>
-        {commit.parents.map((parent) => {
-          const known = commits.some((item) => item.sha === parent)
-          return known
-            ? <button key={parent} type="button" className="repo-history-parent" onClick={() => selectCommit(parent)}>{shortSha(parent)}</button>
-            : <code key={parent} className="repo-history-parent-flat" title={`${parent} is outside the loaded page`}>{shortSha(parent)}</code>
-        })}
-      </div>
-
-      {detail?.body && <pre className="repo-history-body">{detail.body}</pre>}
+      {detail?.body && <pre className="repo-commit-body">{detail.body}</pre>}
 
       {error && <ErrorNotice message={error} onRetry={() => void loadCommitDetail(commit.sha)} />}
-      {loading && !detail && <p className="repo-empty"><Loader2 size={14} className="is-spinning" /> Reading commit…</p>}
+      {loading && !detail && <p className="repo-empty"><Loader2 size={13} className="is-spinning" /> Reading commit…</p>}
 
       {detail && (
-        <>
-          <div className="repo-section-subhead">
-            <span>Changed files</span>
-            <span className="repo-count">{detail.files.length}</span>
-            <span className="repo-muted">+{detail.additions} −{detail.deletions}</span>
-            {detail.merge && <span className="repo-muted">against first parent</span>}
-          </div>
-          {detail.filesTruncated && (
-            <p className="repo-inline-warning">Only the first {detail.files.length} files are listed for this commit.</p>
-          )}
-          {detail.files.length === 0 && <p className="repo-empty">This commit changes no files.</p>}
-          <ul className="repo-history-files">
-            {detail.files.map((file) => (
-              <li key={file.path}>
-                <span className={`repo-history-status status-${statusKey(file.status)}`} title={statusTitle(file.status)}>{file.status || '?'}</span>
-                <span className="repo-history-file-path" title={file.previousPath ? `${file.previousPath} → ${file.path}` : file.path}>
-                  {file.previousPath && <span className="repo-muted">{file.previousPath} → </span>}
-                  {file.path}
-                </span>
-                <span className="repo-history-counts">{lineCounts(file)}</span>
-                <button
-                  type="button"
-                  className="repo-icon-btn"
-                  aria-label={`Show history for ${file.path}`}
-                  title="Show history for this file"
-                  onClick={() => void loadHistory({ ...scope, path: file.path })}
-                >
-                  <FileDiff size={12} />
-                </button>
-              </li>
-            ))}
-          </ul>
-        </>
+        <ChangedFiles
+          files={detail.files}
+          additions={detail.additions}
+          deletions={detail.deletions}
+          truncated={detail.filesTruncated}
+          merge={detail.merge}
+          onShowFileHistory={(path) => void loadHistory({ ...scope, path })}
+        />
       )}
     </div>
+  )
+}
+
+/**
+ * The changed-file explorer. Small commits stay a flat list; once a commit is large enough that
+ * a flat list stops being scannable it gains a filter and folds into collapsible directory
+ * groups, so a 100-file commit browses like repository structure instead of a spreadsheet.
+ */
+function ChangedFiles({ files, additions, deletions, truncated, merge, onShowFileHistory }: {
+  files: RepositoryCommitFile[]
+  additions: number
+  deletions: number
+  truncated: boolean
+  merge: boolean
+  onShowFileHistory: (path: string) => void
+}) {
+  const [query, setQuery] = useState('')
+  const [openDirs, setOpenDirs] = useState<Record<string, boolean>>({})
+
+  const matched = useMemo(() => {
+    const needle = query.trim().toLowerCase()
+    return needle ? files.filter((file) => file.path.toLowerCase().includes(needle)) : files
+  }, [files, query])
+  const grouped = useMemo(
+    () => (files.length >= GROUPING_THRESHOLD ? groupByDirectory(matched) : undefined),
+    [files.length, matched],
+  )
+  const openByDefault = files.length <= COLLAPSE_THRESHOLD || query.trim().length > 0
+
+  return (
+    <section className="repo-commit-files">
+      <div className="repo-commit-stat">
+        <span className="repo-commit-stat-count">{files.length} file{files.length === 1 ? '' : 's'} changed</span>
+        <span className="repo-commit-add">+{additions}</span>
+        <span className="repo-commit-del">−{deletions}</span>
+        {merge && <span className="repo-commit-label">against first parent</span>}
+        {files.length >= GROUPING_THRESHOLD && (
+          <label className="repo-commit-filter">
+            <Search size={11} aria-hidden />
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Filter files"
+              aria-label="Filter changed files"
+              spellCheck={false}
+            />
+          </label>
+        )}
+      </div>
+
+      {truncated && <p className="repo-inline-warning">Only the first {files.length} files are listed for this commit.</p>}
+      {files.length === 0 && <p className="repo-empty">This commit changes no files.</p>}
+      {files.length > 0 && matched.length === 0 && <p className="repo-empty">No changed file matches this filter.</p>}
+
+      {grouped
+        ? grouped.map((group) => {
+          const open = openDirs[group.dir] ?? openByDefault
+          return (
+            <div className="repo-file-dir" key={group.dir || '/'}>
+              <button
+                type="button"
+                className="repo-file-dir-head"
+                aria-expanded={open}
+                onClick={() => setOpenDirs((current) => ({ ...current, [group.dir]: !open }))}
+              >
+                {open ? <ChevronDown size={12} aria-hidden /> : <ChevronRight size={12} aria-hidden />}
+                <span className="repo-file-dir-name">{group.dir || 'repository root'}</span>
+                <span className="repo-count">{group.files.length}</span>
+              </button>
+              {open && (
+                <ul className="repo-file-list">
+                  {group.files.map((file) => (
+                    <FileRow key={file.path} file={file} showDir={false} onShowFileHistory={onShowFileHistory} />
+                  ))}
+                </ul>
+              )}
+            </div>
+          )
+        })
+        : (
+          <ul className="repo-file-list">
+            {matched.map((file) => (
+              <FileRow key={file.path} file={file} showDir onShowFileHistory={onShowFileHistory} />
+            ))}
+          </ul>
+        )}
+    </section>
+  )
+}
+
+function FileRow({ file, showDir, onShowFileHistory }: {
+  file: RepositoryCommitFile
+  showDir: boolean
+  onShowFileHistory: (path: string) => void
+}) {
+  const { dir, name } = splitPath(file.path)
+  return (
+    <li>
+      <span className={`repo-file-status status-${statusKey(file.status)}`} title={statusTitle(file.status)}>{file.status || '?'}</span>
+      <span className="repo-file-name" title={file.previousPath ? `${file.previousPath} → ${file.path}` : file.path}>
+        {file.previousPath && <span className="repo-file-dir-part">{file.previousPath} → </span>}
+        {showDir && dir && <span className="repo-file-dir-part">{dir}</span>}
+        {name}
+      </span>
+      <LineCounts file={file} />
+      <button
+        type="button"
+        className="repo-icon-btn"
+        aria-label={`Show history for ${file.path}`}
+        title="Show history for this file"
+        onClick={() => onShowFileHistory(file.path)}
+      >
+        <FileDiff size={12} />
+      </button>
+    </li>
   )
 }
 
@@ -231,9 +465,16 @@ function shortSha(sha: string): string {
 }
 
 /** Binary files carry no line count, so they read as "binary" instead of a misleading `+0 −0`. */
-function lineCounts(file: RepositoryCommitFile): string {
-  if (file.binary || file.additions === null || file.deletions === null) return 'binary'
-  return `+${file.additions} −${file.deletions}`
+function LineCounts({ file }: { file: RepositoryCommitFile }) {
+  if (file.binary || file.additions === null || file.deletions === null) {
+    return <span className="repo-file-counts is-binary">binary</span>
+  }
+  return (
+    <span className="repo-file-counts">
+      <span className="repo-commit-add">+{file.additions}</span>{' '}
+      <span className="repo-commit-del">−{file.deletions}</span>
+    </span>
+  )
 }
 
 function statusKey(status: string): string {

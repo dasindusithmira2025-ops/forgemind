@@ -176,28 +176,89 @@
 .surface-empty-card-label { font-size: var(--font-sm); font-weight: 600; color: var(--text-strong); }
 .surface-empty-card-desc { font-size: var(--font-xs); color: var(--faint); }
 
-/* Source Control surface: fills the body, scrolls its own content. */
-.diff-surface { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: auto; }
+/* Source Control surface. The body never scrolls: each view owns its own scroll regions, so a
+ * long file list or a wide diff can never produce a horizontal scrollbar on the surface itself.
+ * The surface is the size container its views query, since a query cannot restyle its own
+ * container. */
+.diff-surface {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  container-type: inline-size;
+  container-name: sourcecontrol;
+}
+.diff-surface > .repo-changes,
+.diff-surface > .repo-graph,
+.diff-surface > .repo-pr,
+.diff-surface > .repo-clean-changes {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* One chrome band: repository state on the left, views on the right. Together with the surface
+ * tab bar above it this reads as a single header instead of a stack of toolbars, which is why the
+ * tabs are plain text with a hairline indicator rather than another row of boxed buttons. */
+.source-control-bar {
+  flex: 0 0 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 0 var(--space-2) 0 var(--space-3);
+  min-height: var(--toolbar-h);
+  border-bottom: 1px solid var(--border);
+}
+.source-control-state {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  overflow: hidden;
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-size: var(--font-xs);
+}
+.source-control-state > svg { flex: 0 0 auto; color: var(--text-faint); }
+.sc-branch { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text); font: var(--font-xs) / 1 var(--font-mono); }
+.sc-dirty { flex: 0 0 auto; color: var(--git-modified); }
+.sc-clean { flex: 0 0 auto; color: var(--text-faint); }
+.sc-sync { flex: 0 0 auto; color: var(--text-faint); }
+
 .source-control-tabs {
   flex: 0 0 auto;
   display: flex;
-  gap: 2px;
-  padding: var(--space-2);
-  border-bottom: 1px solid var(--border);
+  align-items: stretch;
+  gap: var(--space-1);
+  align-self: stretch;
 }
 .source-control-tabs button {
-  border: 1px solid transparent;
-  background: transparent;
-  color: var(--muted);
-  border-radius: var(--radius-sm);
-  padding: 4px 10px;
+  position: relative;
+  padding: 0 var(--space-2);
+  border: 0;
+  background: none;
+  color: var(--text-muted);
   font-size: var(--font-xs);
-  font-weight: 650;
+  font-weight: 500;
   cursor: pointer;
 }
-.source-control-tabs button:hover { color: var(--text); background: var(--surface-hover); }
-.source-control-tabs button.active { color: var(--text-strong); background: var(--surface-2); border-color: var(--border); }
-.source-control-tabs button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.source-control-tabs button:hover { color: var(--text); }
+.source-control-tabs button.active { color: var(--text-strong); }
+.source-control-tabs button.active::after {
+  content: '';
+  position: absolute;
+  inset: auto var(--space-2) -1px;
+  height: 1px;
+  background: var(--accent-edge);
+}
+.source-control-tabs button:focus-visible { outline: 1px solid var(--focus-ring); outline-offset: -2px; border-radius: var(--radius-xs); }
+
+@container sourcecontrol (max-width: 420px) {
+  .sc-sync { display: none; }
+}
 
 /* Agents surface: live agent activity per terminal Pane. */
 .agents-surface { flex: 1 1 auto; min-width: 0; min-height: 0; overflow: auto; padding: var(--space-2); display: flex; flex-direction: column; gap: 2px; }
