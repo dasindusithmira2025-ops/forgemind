@@ -5,10 +5,11 @@ import { SearchAddon } from '@xterm/addon-search'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { ChevronDown, Maximize2, Minimize2, MoreHorizontal, RotateCw, Search, X } from 'lucide-react'
 import { Button } from '../ui/Button'
+import { PaneBranchChip } from './PaneBranchChip'
 import { native } from '../../native/commands'
 import type { AgentActivityState, AppSettings, PaneAssignment, TerminalSession } from '../../native/types'
 import { providerLabel } from '../../shared/layout'
-import type { TerminalAction } from './terminalActions'
+import { isMultilinePaste, isTerminalPasteShortcut, multilinePastePrompt, type TerminalAction } from './terminalActions'
 import { terminalRuntime, useTerminalRuntime } from '../../features/terminals/runtimeStore'
 import { extensionForMime, registerTerminalDropTarget, typePathsIntoSession } from '../../features/terminals/terminalImageInput'
 import { useThemeStore } from '../../theme/themeStore'
@@ -19,6 +20,8 @@ const MAX_RENDER_BATCH_BYTES = 256 * 1024
 
 interface TerminalPaneProps {
   assignment: PaneAssignment
+  /** Owning Project, so the pane can read and switch the branch of its own working directory. */
+  projectId: string
   session?: TerminalSession
   deferred?: boolean
   active: boolean
@@ -34,7 +37,7 @@ interface TerminalPaneProps {
   onHeaderPointerDown?: (event: ReactPointerEvent) => void
 }
 
-export function TerminalPane({ assignment, session, deferred = false, active, maximized, settings, onFocus, onMaximize, onClose, onRestart, onMenu, onHeaderPointerDown }: TerminalPaneProps) {
+export function TerminalPane({ assignment, projectId, session, deferred = false, active, maximized, settings, onFocus, onMaximize, onClose, onRestart, onMenu, onHeaderPointerDown }: TerminalPaneProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const paneRef = useRef<HTMLElement>(null)
   const terminalRef = useRef<Terminal | undefined>(undefined)
@@ -81,6 +84,10 @@ export function TerminalPane({ assignment, session, deferred = false, active, ma
     })
     terminal.loadAddon(fit); terminal.loadAddon(search); terminal.loadAddon(new WebLinksAddon())
     terminal.open(containerRef.current)
+    // Hand Ctrl/Cmd+V back to the webview instead of letting xterm encode it as ^V and cancel the
+    // key. The native paste that follows fires the `paste` handler below, so clipboard text,
+    // clipboard images, and dictation tools that simulate Ctrl+V all reach the shell.
+    terminal.attachCustomKeyEventHandler((event) => !isTerminalPasteShortcut(event))
     terminalRef.current = terminal; fitRef.current = fit; searchRef.current = search
     const input = terminal.onData((data) => {
       const id = sessionRef.current
@@ -254,31 +261,42 @@ export function TerminalPane({ assignment, session, deferred = false, active, ma
     return () => window.removeEventListener('forgemind:terminal-action', handle)
   }, [assignment.id, settings.confirmMultilinePaste])
 
-  // Ctrl/Cmd+V of an image: xterm can only paste text, so intercept image clipboard items before it
-  // sees them, write the bytes to a temp file, and type that path into the shell instead.
+  // Every paste into this pane — Ctrl+V, dictation tools that simulate it, the pane menu's own
+  // handler — lands here first, and this handler owns it outright. xterm's built-in paste listener
+  // stops propagation but never calls preventDefault, so letting it run would also leave the pasted
+  // text sitting in its hidden helper textarea. Images become a temp file whose path is typed into
+  // the shell (xterm can only paste text); text is written to the PTY after the multiline
+  // confirmation the setting promises.
   useEffect(() => {
     const container = containerRef.current
     if (!container) return
     const onPaste = (event: ClipboardEvent) => {
-      const item = Array.from(event.clipboardData?.items ?? []).find(
+      const clipboard = event.clipboardData
+      if (!clipboard) return
+      event.preventDefault()
+      event.stopPropagation()
+      const item = Array.from(clipboard.items).find(
         (candidate) => candidate.kind === 'file' && candidate.type.startsWith('image/'),
       )
       const file = item?.getAsFile()
-      if (!file) return
-      // Stop xterm's own paste handler on the inner textarea from also acting on this event.
-      event.preventDefault()
-      event.stopPropagation()
-      void (async () => {
-        try {
-          const bytes = new Uint8Array(await file.arrayBuffer())
-          const path = await native.saveDroppedImage(Array.from(bytes), extensionForMime(file.type))
-          typePathsIntoSession(sessionRef.current, [path])
-        } catch { /* A failed clipboard image save simply leaves the terminal untouched. */ }
-      })()
+      if (file) {
+        void (async () => {
+          try {
+            const bytes = new Uint8Array(await file.arrayBuffer())
+            const path = await native.saveDroppedImage(Array.from(bytes), extensionForMime(file.type))
+            typePathsIntoSession(sessionRef.current, [path])
+          } catch { /* A failed clipboard image save simply leaves the terminal untouched. */ }
+        })()
+        return
+      }
+      const text = clipboard.getData('text/plain')
+      if (!text) return
+      if (settings.confirmMultilinePaste && isMultilinePaste(text) && !window.confirm(multilinePastePrompt(text))) return
+      terminalRef.current?.paste(text)
     }
     container.addEventListener('paste', onPaste, true)
     return () => container.removeEventListener('paste', onPaste, true)
-  }, [])
+  }, [settings.confirmMultilinePaste])
 
   // Drag an image file from the OS onto this pane: route the drop (via the shared webview listener)
   // to this session and type the dropped file path(s) into the shell.
@@ -306,6 +324,7 @@ export function TerminalPane({ assignment, session, deferred = false, active, ma
           <em className={`terminal-state-word state-${stateKey}`}>{stateLabel}</em>
         </span>
       </div>
+      <PaneBranchChip projectId={projectId} directory={assignment.workingDirectory} active={active} />
       {agentState?.attentionSince && <span className="agent-attention-badge" title={`${agentState.source}: ${agentState.reason}`}>Needs review</span>}
       <div className="terminal-inspect" role="note" aria-hidden>
         <dl>
@@ -362,7 +381,7 @@ function xtermTheme(theme: ThemeDefinition): ITheme {
 
 async function pasteIntoTerminal(terminal: Terminal, confirmMultiline: boolean) {
   const text = await navigator.clipboard.readText()
-  if (text.includes('\n') && confirmMultiline && !window.confirm(`Paste ${text.split(/\r?\n/).length} lines into this terminal?`)) return
+  if (confirmMultiline && isMultilinePaste(text) && !window.confirm(multilinePastePrompt(text))) return
   terminal.paste(text)
 }
 
