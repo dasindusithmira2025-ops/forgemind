@@ -25,6 +25,7 @@ interface UpdateControllerState {
   check: () => Promise<UpdateStatus | undefined>
   download: () => Promise<UpdateStatus | undefined>
   updateNow: (client: SafeRestartClientState, confirmSoftBlockers: ConfirmSoftBlockers) => Promise<void>
+  autoInstall: (client: SafeRestartClientState) => Promise<void>
   installOnExit: (client: SafeRestartClientState, confirmSoftBlockers: ConfirmSoftBlockers) => Promise<void>
   retry: () => Promise<UpdateStatus | undefined>
 }
@@ -138,6 +139,44 @@ export const useUpdateController = create<UpdateControllerState>((set, get) => {
         const gate = await assessAndConfirm(client, confirmSoftBlockers)
         if (!gate.confirmed) return
         await native.installDownloadedUpdate(client, !gate.assessment.safe)
+      } catch (caught) {
+        set({ error: errorMessage(caught) })
+      } finally {
+        set({ operation: undefined })
+      }
+    },
+    autoInstall: async (client) => {
+      if (get().operation) return
+      set({ error: undefined, deferred: false, assessment: undefined })
+      let status = get().status
+      if (!status || ['idle', 'no_update', 'failed'].includes(status.journal.phase)) {
+        status = status?.journal.phase === 'failed' ? await get().retry() : await get().check()
+      }
+      if (!status?.journal.available) return
+      if (status.journal.phase === 'available') status = await get().download()
+      if (!status || status.journal.phase !== 'downloaded' || !status.journal.signatureVerified) {
+        if (status?.journal.phase === 'failed') {
+          set({ error: status.journal.error || 'The signed update could not be downloaded or verified.' })
+        }
+        return
+      }
+
+      try {
+        const assessment = await native.assessSafeRestart(client)
+        set({ assessment })
+        if (assessment.hardBlocked) {
+          set({ deferred: true })
+          return
+        }
+        if (assessment.safe) {
+          set({ operation: 'installing' })
+          await native.installDownloadedUpdate(client, false)
+        } else {
+          // Soft blockers are acknowledged for the mandatory signed Stable path, but the Rust
+          // exit hook re-checks them and will defer rather than interrupt active work.
+          set({ operation: 'scheduling' })
+          get().setStatus(await native.installUpdateOnExit(client, true))
+        }
       } catch (caught) {
         set({ error: errorMessage(caught) })
       } finally {

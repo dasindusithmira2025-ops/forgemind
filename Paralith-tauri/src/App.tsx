@@ -5,21 +5,25 @@ import { native } from './native/commands'
 import { useAppStore } from './stores/appStore'
 import { terminalRuntime } from './features/terminals/runtimeStore'
 import { detachedWorkspaceId } from './native/windowContext'
-import type { HandoffTicket, StartupStatus, UpdateStatus } from './native/types'
+import type { HandoffTicket, SafeRestartClientState, StartupStatus, UpdateStatus } from './native/types'
 import { RecoveryScreen } from './screens/RecoveryScreen'
 import { OrchestratorLauncher } from './features/orchestrator/OrchestratorLauncher'
 import { initThemeRuntime } from './theme/themeStore'
 import { UpdateNotification } from './features/updates/UpdateNotification'
-import { startUpdateController, stopUpdateController } from './features/updates/updateController'
+import { startUpdateController, stopUpdateController, useUpdateController } from './features/updates/updateController'
 import { AgentResumeCenter } from './features/agent-resume/AgentResumeCenter'
 import { ActivityAlerts } from './features/activity/ActivityAlerts'
 import { startActivity } from './features/activity/activityStore'
 
-// Periodic background update poll while the app is running (in addition to the one-shot check after
-// safe startup and the manual Settings → Updates check). The Rust coordinator owns actual check
+// Periodic background update poll while the app is running. The Rust coordinator owns actual check
 // state and rejects overlapping checks, so this only nudges it on a calm cadence — never per render,
 // route change, or window creation.
 const UPDATE_POLL_INTERVAL_MS = 45 * 60 * 1000
+const AUTOMATIC_UPDATE_CLIENT_STATE: SafeRestartClientState = {
+  unsavedEditorState: false,
+  unsavedSettings: false,
+  unsavedBrowserState: false,
+}
 
 const ProjectLauncher = lazy(() => import('./screens/ProjectLauncher').then((module) => ({ default: module.ProjectLauncher })))
 const WorkspaceSetup = lazy(() => import('./screens/WorkspaceSetup').then((module) => ({ default: module.WorkspaceSetup })))
@@ -66,7 +70,7 @@ export default function App() {
   const setSettings = useAppStore((state) => state.setSettings)
   const uiScale = useAppStore((state) => state.settings.uiScale)
   const uiDensity = useAppStore((state) => state.settings.uiDensity)
-  const automaticUpdateChecks = useAppStore((state) => state.settings.automaticUpdateChecks)
+  const autoInstall = useUpdateController((state) => state.autoInstall)
   const [startup, setStartup] = useState<StartupStatus | null>()
   const [whatsNew, setWhatsNew] = useState<UpdateStatus>()
 
@@ -116,19 +120,19 @@ export default function App() {
       if (!active) return
       const confirmed = await native.confirmHealthyStartup()
       if (confirmed.journal.phase === 'healthy_startup_confirmed' && confirmed.journal.targetVersion === confirmed.build.version) setWhatsNew(confirmed)
-      if (settings.automaticUpdateChecks) void native.checkForUpdates().catch(() => undefined)
+      void autoInstall(AUTOMATIC_UPDATE_CLIENT_STATE).catch(() => undefined)
     })().catch(() => { if (active) void native.getStartupStatus().then(setStartup).catch(() => setStartup(null)) })
     return () => { active = false; terminalRuntime.stop() }
-  }, [setSettings])
+  }, [autoInstall, setSettings])
 
-  // Periodic re-check while running. Primary window only (detached windows can't drive updates and
-  // the Rust command rejects them anyway), gated on the automatic-checks setting and on a healthy,
-  // non-recovery startup. One timer per app; failures are swallowed so a flaky poll is a no-op.
+  // Periodic automatic update/install retry while running. Primary window only (detached windows
+  // cannot drive updates and the Rust command rejects them anyway), gated on a healthy, non-recovery
+  // startup. One timer per app; failures are swallowed so a flaky poll is a no-op.
   useEffect(() => {
-    if (detachedWorkspaceId || !automaticUpdateChecks || startup === undefined || startup?.recoveryMode) return
-    const timer = setInterval(() => { void native.checkForUpdates().catch(() => undefined) }, UPDATE_POLL_INTERVAL_MS)
+    if (detachedWorkspaceId || startup === undefined || startup?.recoveryMode) return
+    const timer = setInterval(() => { void autoInstall(AUTOMATIC_UPDATE_CLIENT_STATE).catch(() => undefined) }, UPDATE_POLL_INTERVAL_MS)
     return () => clearInterval(timer)
-  }, [automaticUpdateChecks, startup])
+  }, [autoInstall, startup])
 
   useEffect(() => {
     document.documentElement.style.setProperty('--ui-scale', String(uiScale))

@@ -79,8 +79,12 @@ describe('commit history and inspector', () => {
     // Arriving on the section must never show a blank inspector.
     expect(useRepositoryStore.getState().selectedCommit).toBe('sha1')
     await waitFor(() => expect(screen.getByText('Explains why.')).toBeInTheDocument())
-    const row = screen.getByText('src/app.ts').closest('li') as HTMLElement
-    expect(within(row).getByText('+4 −2')).toBeInTheDocument()
+    // The row prints the directory dimmed and the file name strong, so the full path is carried
+    // by the title rather than by one text node.
+    const row = screen.getByTitle('src/app.ts').closest('li') as HTMLElement
+    // Additions and deletions are separately toned, so they are separate nodes.
+    expect(within(row).getByText('+4')).toBeInTheDocument()
+    expect(within(row).getByText('−2')).toBeInTheDocument()
   })
 
   it('pages by commit count against the resolved revision and drops duplicates', async () => {
@@ -105,7 +109,7 @@ describe('commit history and inspector', () => {
     mockNative.getRepositoryHistory.mockResolvedValue(page([commit('sha1', 'feat: add history')]))
     render(<HistorySection />)
     await useRepositoryStore.getState().loadHistory()
-    await waitFor(() => expect(screen.getByText('src/app.ts')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByTitle('src/app.ts')).toBeInTheDocument())
 
     fireEvent.click(screen.getByRole('button', { name: 'Show history for src/app.ts' }))
     await waitFor(() => expect(useRepositoryStore.getState().historyScope.path).toBe('src/app.ts'))
@@ -128,7 +132,7 @@ describe('commit history and inspector', () => {
     await waitFor(() => expect(screen.getByText('logo.png')).toBeInTheDocument())
     const row = screen.getByText('logo.png').closest('li') as HTMLElement
     expect(within(row).getByText('binary')).toBeInTheDocument()
-    expect(within(row).queryByText('+0 −0')).not.toBeInTheDocument()
+    expect(within(row).queryByText('+0')).not.toBeInTheDocument()
   })
 
   it('says a merge is diffed against its first parent instead of showing an empty change set', async () => {
@@ -161,6 +165,47 @@ describe('commit history and inspector', () => {
 
     expect(await screen.findByText('git log failed')).toBeInTheDocument()
     expect(screen.queryByText('This repository has no commits yet.')).not.toBeInTheDocument()
+  })
+
+  it('folds a large commit into collapsed directory groups with a filter', async () => {
+    // 120 files across 4 directories: a flat, always-expanded list is unbrowsable at this size, so
+    // the explorer groups by directory, starts collapsed and offers a filter.
+    const dirs = ['src-tauri/src/database/', 'src/features/repository/', 'src/components/ui/', 'docs/']
+    const many = Array.from({ length: 120 }, (_, index) => ({
+      path: `${dirs[index % dirs.length]}file-${index}.ts`,
+      previousPath: undefined,
+      status: 'M',
+      additions: 1,
+      deletions: 1,
+      binary: false,
+    }))
+    mockNative.getRepositoryHistory.mockResolvedValue(page([commit('sha1', 'feat: wide change')]))
+    mockNative.getRepositoryCommitDetail.mockResolvedValue(detail({ files: many, additions: 120, deletions: 120 }))
+    render(<HistorySection />)
+    await useRepositoryStore.getState().loadHistory()
+
+    const group = await screen.findByRole('button', { name: /src-tauri\/src\/database\// })
+    expect(group).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.getByText('120 files changed')).toBeInTheDocument()
+
+    fireEvent.click(group)
+    expect(group).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByTitle('src-tauri/src/database/file-0.ts')).toBeInTheDocument()
+
+    // Filtering narrows to the matching files and opens the groups that still have any.
+    fireEvent.change(screen.getByLabelText('Filter changed files'), { target: { value: 'file-7.' } })
+    expect(screen.getByTitle('docs/file-7.ts')).toBeInTheDocument()
+    expect(screen.queryByTitle('src-tauri/src/database/file-0.ts')).not.toBeInTheDocument()
+  })
+
+  it('keeps a small commit as a flat list with no filter and no directory groups', async () => {
+    mockNative.getRepositoryHistory.mockResolvedValue(page([commit('sha1', 'fix: one file')]))
+    render(<HistorySection />)
+    await useRepositoryStore.getState().loadHistory()
+
+    expect(await screen.findByTitle('src/app.ts')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Filter changed files')).not.toBeInTheDocument()
+    expect(screen.getByText('1 file changed')).toBeInTheDocument()
   })
 
   it('caches an immutable commit detail rather than re-reading it on reselect', async () => {
