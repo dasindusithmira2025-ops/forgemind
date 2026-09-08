@@ -114,6 +114,52 @@ describe('shared update controller', () => {
     expect(nativeMock.installDownloadedUpdate).toHaveBeenCalledWith(client, false)
   })
 
+  it('automatically installs a verified update when the application is idle', async () => {
+    useUpdateController.getState().setStatus(status('downloaded'))
+    nativeMock.assessSafeRestart.mockResolvedValue(safe)
+    nativeMock.installDownloadedUpdate.mockResolvedValue(undefined)
+
+    await useUpdateController.getState().autoInstall(client)
+
+    expect(nativeMock.assessSafeRestart).toHaveBeenCalledWith(client)
+    expect(nativeMock.installDownloadedUpdate).toHaveBeenCalledWith(client, false)
+    expect(nativeMock.installUpdateOnExit).not.toHaveBeenCalled()
+  })
+
+  it('schedules automatically around soft blockers without asking the user', async () => {
+    useUpdateController.getState().setStatus(status('downloaded'))
+    nativeMock.assessSafeRestart.mockResolvedValue({
+      ...safe,
+      safe: false,
+      runningTerminals: 1,
+      blockers: ['1 terminal is running.'],
+    })
+    nativeMock.installUpdateOnExit.mockResolvedValue(status('restart_requested'))
+
+    await useUpdateController.getState().autoInstall(client)
+
+    expect(nativeMock.installDownloadedUpdate).not.toHaveBeenCalled()
+    expect(nativeMock.installUpdateOnExit).toHaveBeenCalledWith(client, true)
+  })
+
+  it('leaves a mandatory update pending during an active Git mutation', async () => {
+    useUpdateController.getState().setStatus(status('downloaded'))
+    nativeMock.assessSafeRestart.mockResolvedValue({
+      ...safe,
+      safe: false,
+      installable: false,
+      hardBlocked: true,
+      gitMutationActive: true,
+      hardBlockers: ['A Git operation is in progress.'],
+    })
+
+    await useUpdateController.getState().autoInstall(client)
+
+    expect(nativeMock.installDownloadedUpdate).not.toHaveBeenCalled()
+    expect(nativeMock.installUpdateOnExit).not.toHaveBeenCalled()
+    expect(useUpdateController.getState().deferred).toBe(true)
+  })
+
   it('defers soft blockers without dismissing the available update', async () => {
     useUpdateController.getState().setStatus(status('downloaded'))
     nativeMock.assessSafeRestart.mockResolvedValue({

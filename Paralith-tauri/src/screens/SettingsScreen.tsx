@@ -235,9 +235,9 @@ export function SettingsScreen() {
           <SettingRow label="Inactive Workspace processes"><select aria-label="Inactive Workspace processes" value={settings.inactiveWorkspaceProcesses} onChange={(event) => update('inactiveWorkspaceProcesses', event.target.value as AppSettings['inactiveWorkspaceProcesses'])}><option value="keep_running">Keep running</option><option value="ask">Ask</option><option value="stop">Stop</option></select></SettingRow>
         </SettingsSection>}
 
-        {section === 'updates' && <SettingsSection title="Updates" description="Cryptographically signed releases for this PARALITH channel.">
+        {section === 'updates' && <SettingsSection title="Updates" description="Cryptographically signed releases for this PARALITH channel. Stable releases install in the background when it is safe.">
           {updateStatus && <div className={`health-banner ${updateStatus.journal.phase === 'failed' || updateStatus.recoveryMode ? 'attention' : 'healthy'}`}><ShieldCheck size={18} /><div><strong>{updateStatus.build.product} {updateStatus.build.edition === 'stable' ? 'Stable' : 'Preview'} {updateStatus.build.version}</strong><span>{updateStatus.endpointStatus} · {updateStatus.journal.phase.replaceAll('_', ' ')}</span></div></div>}
-          <Toggle label="Check automatically after safe startup" checked={settings.automaticUpdateChecks} onChange={(value) => update('automaticUpdateChecks', value)} />
+          <div className="update-notes"><strong>Automatic Stable updates enabled</strong><p>PARALITH downloads and verifies signed Stable updates without a button click. If active work is running, installation is deferred until the application is safe to restart.</p></div>
           <InfoGrid>
             <InfoRow label="Last check" value={updateStatus?.journal.lastCheckAt || 'Never'} />
             <InfoRow label="Available version" value={updateStatus?.journal.available?.version || 'None'} />
