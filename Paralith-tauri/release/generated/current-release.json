@@ -1,11 +1,13 @@
 {
   "version": "0.4.23",
   "channel": "stable",
-  "date": "2026-09-08",
+  "date": "2026-09-11",
   "highlights": [
+    "Packaged Stable terminals render ANSI colours, truecolour, and the configured monospace font correctly",
     "Claude Code and Codex CLI panes now always receive a true-colour interactive terminal contract"
   ],
   "fixes": [
+    "Packaged content security policy permits xterm's generated colour and font styles while retaining script protections",
     "Terminal panes remove inherited and provider-level colour suppression before launch, preventing monochrome agent TUIs",
     "Interactive panes explicitly advertise xterm-256color and truecolour after provider launch overrides are applied"
   ],
