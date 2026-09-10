@@ -50,6 +50,9 @@ const COLOUR_SUPPRESSION_VARS: &[(&str, Option<&[&str]>)] = &[
     // `supports-color` (chalk/Ink, so Claude Code) reads these; only the falsy values disable.
     ("FORCE_COLOR", Some(&["0", "false", "none"])),
     ("CLICOLOR", Some(&["0"])),
+    ("CLICOLOR_FORCE", Some(&["0", "false", "none"])),
+    // Rust terminal libraries commonly use this as an unconditional opt-out.
+    ("ANSI_COLORS_DISABLED", None),
 ];
 
 /// Strip inherited colour-suppression variables so each pane gets its provider's default palette.
@@ -79,6 +82,19 @@ fn clear_inherited_colour_suppression(command: &mut CommandBuilder) {
             command.env_remove(name);
         }
     }
+}
+
+/// A terminal pane is always backed by a colour-capable xterm surface. Apply this after the
+/// provider launch spec so an inherited or provider-level non-interactive setting cannot reduce a
+/// Claude/Codex TUI to monochrome box drawing.
+fn configure_interactive_terminal_colours(command: &mut CommandBuilder) {
+    clear_inherited_colour_suppression(command);
+    command.env("TERM", "xterm-256color");
+    command.env("COLORTERM", "truecolor");
+    // Node CLIs use FORCE_COLOR while Rust and POSIX CLIs commonly use CLICOLOR. Both are safe
+    // here because output is rendered by xterm rather than captured for a machine protocol.
+    command.env("FORCE_COLOR", "3");
+    command.env("CLICOLOR", "1");
 }
 
 struct TerminalLog {
@@ -285,12 +301,10 @@ impl TerminalManager {
         let mut command = CommandBuilder::new(&spec.executable);
         command.args(spec.arguments.clone());
         command.cwd(&spec.working_directory);
-        command.env("TERM", "xterm-256color");
-        command.env("COLORTERM", "truecolor");
-        clear_inherited_colour_suppression(&mut command);
         for (key, value) in spec.environment_overrides {
             command.env(key, value);
         }
+        configure_interactive_terminal_colours(&mut command);
         let child = pair.slave.spawn_command(command).map_err(|error| {
             AppError::new(
                 "process_launch_failed",
@@ -1623,10 +1637,36 @@ mod tests {
         command.env("NO_COLOR", "1");
         command.env("FORCE_COLOR", "0");
         command.env("CLICOLOR", "0");
+        command.env("CLICOLOR_FORCE", "false");
+        command.env("ANSI_COLORS_DISABLED", "1");
         clear_inherited_colour_suppression(&mut command);
         assert!(command.get_env("NO_COLOR").is_none());
         assert!(command.get_env("FORCE_COLOR").is_none());
         assert!(command.get_env("CLICOLOR").is_none());
+        assert!(command.get_env("CLICOLOR_FORCE").is_none());
+        assert!(command.get_env("ANSI_COLORS_DISABLED").is_none());
+    }
+
+    #[test]
+    fn interactive_panes_force_colour_after_provider_overrides() {
+        let mut command = CommandBuilder::new("echo");
+        command.env("NO_COLOR", "1");
+        command.env("FORCE_COLOR", "0");
+        command.env("CLICOLOR", "0");
+        command.env("CLICOLOR_FORCE", "false");
+        command.env("ANSI_COLORS_DISABLED", "1");
+        command.env("TERM", "dumb");
+        command.env("COLORTERM", "false");
+
+        configure_interactive_terminal_colours(&mut command);
+
+        assert!(command.get_env("NO_COLOR").is_none());
+        assert!(command.get_env("CLICOLOR_FORCE").is_none());
+        assert!(command.get_env("ANSI_COLORS_DISABLED").is_none());
+        assert_eq!(command.get_env("FORCE_COLOR").unwrap(), "3");
+        assert_eq!(command.get_env("CLICOLOR").unwrap(), "1");
+        assert_eq!(command.get_env("TERM").unwrap(), "xterm-256color");
+        assert_eq!(command.get_env("COLORTERM").unwrap(), "truecolor");
     }
 
     #[test]
