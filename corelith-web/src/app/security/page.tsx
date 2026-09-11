@@ -127,10 +127,10 @@ export default function SecurityPage() {
 
           <div className="col-span-12 lg:col-span-4 lg:col-start-9">
             <div className="panel p-7">
-              <p className="stamp text-ember-ink">Security contact</p>
+              <p className="stamp text-core-ink">Security contact</p>
               <a
                 href={`mailto:${siteConfig.securityEmail}`}
-                className="text-ink hover:text-ember-ink mt-4 block font-mono text-sm break-all underline decoration-1 underline-offset-4 transition-colors"
+                className="text-ink hover:text-core-ink mt-4 block font-mono text-sm break-all underline decoration-1 underline-offset-4 transition-colors"
               >
                 {siteConfig.securityEmail}
               </a>

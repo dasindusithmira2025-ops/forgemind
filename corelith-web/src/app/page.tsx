@@ -48,7 +48,7 @@ export default function HomePage() {
               <span aria-hidden="true" className="text-ink-faint">
                 /
               </span>
-              <span className="text-ember-ink">Paralith v0.9.4 preview</span>
+              <span className="text-core-ink">Paralith v0.9.4 preview</span>
             </span>
           </div>
 
@@ -142,9 +142,9 @@ export default function HomePage() {
       </Band>
 
       {/* ── 04 · Directive ───────────────────────────────────────────────── */}
-      <Band tone="ember" divider>
+      <Band tone="core" divider>
         <div className="grid grid-cols-12 gap-x-8 gap-y-8">
-          <p className="stamp text-ember-ink col-span-12 lg:col-span-2">Directive</p>
+          <p className="stamp text-core-ink col-span-12 lg:col-span-2">Directive</p>
 
           <blockquote className="col-span-12 lg:col-span-9">
             <p className="font-display text-xl leading-[1.2] font-semibold tracking-tight text-balance sm:text-2xl lg:text-3xl">

@@ -48,7 +48,7 @@ export function Header() {
             Paralith v0.9.4 preview is available
             <Link
               href="/products/paralith#release-notes"
-              className="text-ember-ink hover:text-ink ml-3 underline decoration-1 underline-offset-4 transition-colors"
+              className="text-core-ink hover:text-ink ml-3 underline decoration-1 underline-offset-4 transition-colors"
             >
               Read the changelog →
             </Link>
@@ -141,7 +141,7 @@ export function Header() {
                       active ? 'bg-[rgba(245,237,224,0.09)]' : ''
                     }`}
                   >
-                    <span className="stamp text-ember-ink w-6 shrink-0">
+                    <span className="stamp text-core-ink w-6 shrink-0">
                       {String(i + 1).padStart(2, '0')}
                     </span>
                     <span>

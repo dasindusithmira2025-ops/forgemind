@@ -123,7 +123,7 @@ export default function ParalithPage() {
 
         <div className="mt-14 grid grid-cols-12 gap-x-8 gap-y-12">
           <div className="col-span-12 lg:col-span-5">
-            <h3 className="stamp text-ember-ink border-b border-[var(--hair-strong)] pb-3">
+            <h3 className="stamp text-core-ink border-b border-[var(--hair-strong)] pb-3">
               Built for
             </h3>
             <ul>
@@ -142,7 +142,7 @@ export default function ParalithPage() {
           </div>
 
           <div className="col-span-12 lg:col-span-6 lg:col-start-7">
-            <h3 className="stamp text-ember-ink border-b border-[var(--hair-strong)] pb-3">
+            <h3 className="stamp text-core-ink border-b border-[var(--hair-strong)] pb-3">
               Supported targets
             </h3>
             <ul>
@@ -175,7 +175,7 @@ export default function ParalithPage() {
               key={group.heading}
               className={`col-span-12 lg:col-span-5 ${i === 1 ? 'lg:col-start-8' : ''}`}
             >
-              <h3 className="stamp text-ember-ink border-b border-[var(--hair-strong)] pb-3">
+              <h3 className="stamp text-core-ink border-b border-[var(--hair-strong)] pb-3">
                 {group.heading}
               </h3>
               <ul>

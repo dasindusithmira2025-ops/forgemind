@@ -107,7 +107,7 @@ export function DownloadSelector({ productName, downloads }: DownloadSelectorPro
               <button
                 type="button"
                 onClick={() => copyChecksum(current.checksumSha256)}
-                className="stamp text-ember-ink hover:text-ink transition-colors"
+                className="stamp text-core-ink hover:text-ink transition-colors"
               >
                 {copied ? 'Copied ✓' : 'Copy'}
               </button>
@@ -153,7 +153,7 @@ export function DownloadSelector({ productName, downloads }: DownloadSelectorPro
           {current.releaseNotesUrl && (
             <a
               href={current.releaseNotesUrl}
-              className="stamp text-ember-ink hover:text-ink self-start transition-colors"
+              className="stamp text-core-ink hover:text-ink self-start transition-colors"
             >
               Read release notes →
             </a>

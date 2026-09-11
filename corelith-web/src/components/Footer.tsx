@@ -53,7 +53,7 @@ export function Footer() {
                     >
                       {link.label}
                       {link.badge && (
-                        <span className="stamp text-ember-ink ml-2 whitespace-nowrap">
+                        <span className="stamp text-core-ink ml-2 whitespace-nowrap">
                           [{link.badge}]
                         </span>
                       )}
@@ -89,7 +89,7 @@ export function Footer() {
           </p>
           <p className="flex flex-wrap items-center gap-3">
             <span>{siteConfig.domain.replace('https://www.', '')}</span>
-            <span aria-hidden="true" className="text-ember">
+            <span aria-hidden="true" className="text-core">
               ◆
             </span>
             <span>{siteConfig.legal.jurisdiction}</span>

@@ -1,69 +1,79 @@
 @import "tailwindcss";
 
 /* ============================================================================
-   CORELITH — IMPECCABLE, PRINTED ON BLACK STOCK
+   CORELITH — IMPECCABLE, PRINTED ON THE MARK'S OWN BLACK
 
-   An editorial-poster system rendered as screen-print on dark paper rather than
-   as a dark user interface. The distinction drives every value below:
+   An editorial-poster system rendered as screen-print on dark stock rather than
+   as a dark user interface. Every colour below is taken from, or measured
+   against, the Corelith company mark — the white hexagonal C with a single blue
+   facet. Three properties of that mark drive the whole palette:
 
-   - The stock is warm near-black (brown-shifted, never blue-black and never
-     #000), so it reads as paper that happens to be dark rather than as an
-     absence of light.
-   - Colour is laid down as opaque, flat ink. Nothing glows, nothing gradients.
-     A backlit accent is the thing that makes a dark page look like a dashboard.
-   - Every band carries a halftone screen, which is what makes a surface read as
-     printed instead of filled.
+   - The stock IS the logo's background: #070707, sampled from the master
+     artwork. Neutral, effectively black, and not a colour anyone mixed for a
+     UI — which is exactly why the page and the mark sit on one surface with no
+     visible seam behind the logo.
+   - The ink is the mark's white: #f2f2f4, very slightly cool. Not #fff — the
+     mark itself never reaches paper white, and matching it keeps the wordmark
+     from looking dimmer than the copy set beside it.
+   - Blue is rationed the way the mark rations it. The symbol is overwhelmingly
+     white with exactly one blue facet, so blue here is an accent and a block
+     colour, never a body tone. A page that is mostly blue does not look like
+     this logo; a page that is mostly white ink with one blue strike does.
 
-   The vocabulary is print's, and it is load-bearing rather than decorative:
-   this is a product about holding work in proof until it has been checked, so
-   the page is built as a press proof of it.
+   Colour is laid down as opaque, flat ink. Nothing glows, nothing gradients —
+   the brand guidelines reserve gradient for inside the symbol itself, and a
+   backlit accent is the thing that makes a dark page look like a dashboard.
+   Every band carries a halftone screen, which is what makes a surface read as
+   printed instead of filled.
 
    Every value here is a token. Components must not hardcode colour, radius, or
    type size — they read foreground roles from the band they sit in, which is
-   what lets one component stay legible on stock and on the ember block.
+   what lets one component stay legible on stock and on the core block.
    ========================================================================== */
 
 @theme {
   /* --- Stock --------------------------------------------------------------
-     Three weights of the same warm black sheet. The brown shift is the point:
-     against a blue-black these read as paper, and it is the single cheapest
-     thing separating this from every other dark product site. */
-  --color-paper: #171310;
-  --color-paper-2: #1f1a15;
-  --color-surface: #2a231c;
+     Three weights of one black sheet. `paper` is sampled straight from the logo
+     master and is never adjusted. The two raised weights shift very slightly
+     toward the brand's Deep Slate (#0f172a) rather than going neutral grey:
+     that cool drift is what separates a card from the stock without lightening
+     it enough to read as a different material. Separation is deliberately
+     small — 1.05 and 1.12 against the stock. */
+  --color-paper: #070707;
+  --color-paper-2: #0d0f13;
+  --color-surface: #14171e;
 
   /* --- Ink ----------------------------------------------------------------
-     Warm cream, not white — printed ink on dark stock never reaches paper
-     white. ink is body and headings (15.9:1 on stock), ink-soft is secondary
-     copy (8.0:1), ink-faint is for mono micro-labels only (5.0:1 — it was
-     mixed a shade darker first and measured 4.45:1, which fails AA for the
-     12px stamps it exists to set). */
-  --color-ink: #f5ede0;
-  --color-ink-soft: #b8a894;
-  --color-ink-faint: #92836e;
+     The mark's white and two muted weights below it. ink is body and headings
+     (18.0:1 on stock), ink-soft is secondary copy (9.0:1), ink-faint is for
+     mono micro-labels only. ink-faint is the constrained one: it has to clear
+     4.5:1 on the *lightest* surface, not the stock, and at #14171e it measures
+     4.71:1 — any greyer and the 12px stamps it exists to set fail AA. */
+  --color-ink: #f2f2f4;
+  --color-ink-soft: #a7adbb;
+  --color-ink-faint: #7b8394;
 
-  /* --- Ember --------------------------------------------------------------
-     Burnt orange, lifted off the brand value because #c55221 sinks into a dark
-     stock. At 5.5:1 it carries text here, which it could not do on cream.
-     ember-band is the block colour, and it is deeper than the brand value by
-     necessity rather than taste: the secondary and micro copy printed on it are
-     alpha-blended cream, and at the brand's own depth those land at 4.25:1 and
-     3.80:1. Taking the block to #853212 carries all three ink weights (7.3 /
-     5.9 / 5.1) without giving up the burnt-orange character. */
-  --color-ember: #e2673a;
-  --color-ember-ink: #e2673a;
-  --color-ember-band: #853212;
+  /* --- Core ---------------------------------------------------------------
+     The blue facet of the mark, #4166e4, sampled from the master. It is the
+     identity colour and the fill colour, and it is *not* a text colour: on the
+     stock it measures 4.07:1, which carries a 7px marker or a rule (3:1) but
+     fails AA for words.
 
-  /* --- Amber --------------------------------------------------------------
-     The brand accent and the brighter of the two inks. On this stock it clears
-     9:1, so unlike the light setting it is free to carry words as well as
-     fills — it is the page's loudest voice and is rationed accordingly. */
-  --color-amber: #f0a81e;
-  --color-amber-ink: #f0a81e;
+     So the role splits. `core` fills — blocks, markers, borders, the primary
+     button. `core-ink` is the same blue lifted until it can carry 12px type
+     (8.7:1 on stock), and it is what every kicker, link, and accent word uses.
+     `core-band` is the loud block: deepened well past the mark's own blue so
+     the alpha-blended ink weights printed on it hold up (10.9 / 8.5 / 7.3). */
+  --color-core: #4166e4;
+  --color-core-ink: #8ca6ff;
+  --color-core-band: #1b2e7a;
 
-  --color-success: #5bc47f;
-  --color-warning: #f0a81e;
-  --color-danger: #f2705f;
+  /* Functional status only — these are never brand voice. Success borrows the
+     brand's System Teal, lifted for this stock; warning stays warm precisely so
+     it cannot be mistaken for the blue accent. */
+  --color-success: #2dd4a6;
+  --color-warning: #f5b93b;
+  --color-danger: #ff7a6b;
 
   /* --- Type ---------------------------------------------------------------
      Chakra Petch sets everything with a voice — headlines, copy, labels. Its
@@ -111,26 +121,26 @@
     color-scheme: dark;
 
     /* Hairlines. Every rule, grid line, and card border comes from one of these
-       two. Both are the cream ink at low alpha rather than a grey, so they stay
-       warm against the stock instead of turning the page silver. */
-    --hair: rgba(245, 237, 224, 0.11);
-    --hair-strong: rgba(245, 237, 224, 0.24);
+       two. Both are the mark's white at low alpha rather than a mixed grey, so
+       a rule is always the ink thinned down and never a fourth colour. */
+    --hair: rgba(242, 242, 244, 0.11);
+    --hair-strong: rgba(242, 242, 244, 0.24);
 
     /* Depth. On dark stock a raised sheet needs a shadow wider than it is tall,
        plus a lit top edge — without the edge the card dissolves into the page. */
-    --lift-1: inset 0 1px 0 rgba(245, 237, 224, 0.06), 0 1px 2px rgba(0, 0, 0, 0.5);
+    --lift-1: inset 0 1px 0 rgba(242, 242, 244, 0.06), 0 1px 2px rgba(0, 0, 0, 0.5);
     --lift-2:
-      inset 0 1px 0 rgba(245, 237, 224, 0.07), 0 20px 50px -28px rgba(0, 0, 0, 0.9);
-    --lift-ember: 0 20px 54px -30px rgba(226, 103, 58, 0.55);
+      inset 0 1px 0 rgba(242, 242, 244, 0.07), 0 20px 50px -28px rgba(0, 0, 0, 0.9);
+    --lift-core: 0 20px 54px -30px rgba(65, 102, 228, 0.55);
 
     /* The halftone screen. A 4px dot grid at very low alpha — invisible as a
        pattern, decisive as a texture. This is what makes a band read as an
        inked surface rather than a filled rectangle. */
-    --screen: radial-gradient(rgba(245, 237, 224, 0.055) 0.5px, transparent 0.5px);
+    --screen: radial-gradient(rgba(242, 242, 244, 0.055) 0.5px, transparent 0.5px);
     --screen-size: 4px 4px;
 
-    /* Crop marks, in the amber plate colour. */
-    --mark: rgba(240, 168, 30, 0.55);
+    /* Crop marks, in the blue plate colour. */
+    --mark: rgba(140, 166, 255, 0.55);
 
     --band: clamp(72px, 9vw, 136px);
     --measure: 84rem;
@@ -165,12 +175,12 @@
   }
 
   ::selection {
-    background-color: var(--color-amber);
-    color: #171310;
+    background-color: var(--color-core);
+    color: #ffffff;
   }
 
   *:focus-visible {
-    outline: 2px solid var(--color-amber);
+    outline: 2px solid var(--color-core-ink);
     outline-offset: 3px;
     border-radius: var(--radius-sm);
   }
@@ -183,19 +193,19 @@
     background: var(--color-paper);
   }
   ::-webkit-scrollbar-thumb {
-    background: #3a3128;
+    background: #23262f;
     border: 3px solid var(--color-paper);
     border-radius: 99px;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: #4d4136;
+    background: #2f333e;
   }
 }
 
 /* ============================================================================
    BAND TONES
    The page is a stack of printed bands: two weights of the stock, and — at most
-   once or twice per page — the ember block. Each band declares a tone; children
+   once or twice per page — the core block. Each band declares a tone; children
    read `--fg`, `--fg-soft`, and `--kicker` from it rather than hardcoding a
    colour. Every tone carries the halftone screen.
    ========================================================================== */
@@ -203,7 +213,7 @@
 .tone-paper {
   --fg: var(--color-ink);
   --fg-soft: var(--color-ink-soft);
-  --kicker: var(--color-amber);
+  --kicker: var(--color-core-ink);
   background-color: var(--color-paper);
   background-image: var(--screen);
   background-size: var(--screen-size);
@@ -214,34 +224,35 @@
 .tone-paper-2 {
   --fg: var(--color-ink);
   --fg-soft: var(--color-ink-soft);
-  --kicker: var(--color-amber);
+  --kicker: var(--color-core-ink);
   background-color: var(--color-paper-2);
   background-image: var(--screen);
   background-size: var(--screen-size);
   color: var(--color-ink);
 }
 
-/* The loud band: a solid block of ember ink. Because the block is lighter than
-   the stock, the cream ink printed on it stays cream — only the rules and the
+/* The loud band: a solid block of core blue. Because the block is lighter than
+   the stock, the white ink printed on it stays white — only the rules and the
    raised surfaces need re-weighting.
 
-   Both accent roles collapse to the cream here, and that is not a shortcut:
-   measured on this block, amber reaches only 2.96:1 and the ember tint 1.79:1,
-   so neither can carry a word on top of it. The mono-uppercase treatment is
-   what keeps a kicker distinct from body copy on this band, not its colour. */
-.tone-ember {
+   The accent collapses to the ink here. `core-ink` would technically pass on
+   this block (5.25:1), but a pale blue kicker on a deep blue field is a
+   difference of value with almost no difference of hue, and it reads as faded
+   rather than accented. The mono-uppercase treatment is what keeps a kicker
+   distinct from body copy on this band, not its colour. */
+.tone-core {
   --fg: var(--color-ink);
-  --fg-soft: rgba(245, 237, 224, 0.86);
+  --fg-soft: rgba(242, 242, 244, 0.86);
   --kicker: var(--color-ink);
-  --color-ink-soft: rgba(245, 237, 224, 0.86);
-  --color-ink-faint: rgba(245, 237, 224, 0.78);
-  --color-ember-ink: var(--color-ink);
-  --color-surface: rgba(23, 19, 16, 0.28);
-  --hair: rgba(245, 237, 224, 0.2);
-  --hair-strong: rgba(245, 237, 224, 0.4);
-  --mark: rgba(245, 237, 224, 0.55);
+  --color-ink-soft: rgba(242, 242, 244, 0.86);
+  --color-ink-faint: rgba(242, 242, 244, 0.78);
+  --color-core-ink: var(--color-ink);
+  --color-surface: rgba(7, 7, 7, 0.28);
+  --hair: rgba(242, 242, 244, 0.2);
+  --hair-strong: rgba(242, 242, 244, 0.4);
+  --mark: rgba(242, 242, 244, 0.55);
 
-  background-color: var(--color-ember-band);
+  background-color: var(--color-core-band);
   background-image: var(--screen);
   background-size: var(--screen-size);
   color: var(--color-ink);
@@ -283,16 +294,17 @@
   }
 }
 
-/* Emphasis for one run of words in a headline: the word is printed in the
-   second ink and underscored with a struck amber rule. A flat rule rather than
-   a glow — on stock, ink does not emit light. */
+/* Emphasis for one run of words in a headline: the word is printed in the blue
+   ink and underscored with a struck blue rule. A flat rule rather than a glow —
+   on stock, ink does not emit light. This is the page's equivalent of the
+   mark's single blue facet, so it is used once per headline at most. */
 .flare {
-  color: var(--color-amber);
-  box-shadow: inset 0 -0.09em 0 0 color-mix(in srgb, var(--color-amber) 45%, transparent);
+  color: var(--color-core-ink);
+  box-shadow: inset 0 -0.09em 0 0 color-mix(in srgb, var(--color-core-ink) 45%, transparent);
   padding-inline: 0.04em;
 }
 
-.tone-ember .flare {
+.tone-core .flare {
   color: var(--color-ink);
   box-shadow: inset 0 -0.09em 0 0 color-mix(in srgb, var(--color-ink) 45%, transparent);
 }
@@ -353,8 +365,8 @@
 
 .panel-hover:hover {
   transform: translateY(-2px);
-  border-color: color-mix(in srgb, var(--color-ember) 60%, transparent);
-  box-shadow: var(--lift-2), var(--lift-ember);
+  border-color: color-mix(in srgb, var(--color-core) 60%, transparent);
+  box-shadow: var(--lift-2), var(--lift-core);
 }
 
 /* Inset well — for versions, checksums, and anything quoting a machine. */
@@ -377,16 +389,18 @@
   );
 }
 
-/* Solid marker at the head of every section index. Flat ink, no glow. */
+/* Solid marker at the head of every section index. Flat ink, no glow. This is
+   a fill rather than type, so it can use the mark's own blue at 4.07:1 — well
+   past the 3:1 a non-text indicator needs. */
 .node {
   display: inline-block;
   width: 7px;
   height: 7px;
   border-radius: 99px;
-  background-color: var(--color-amber);
+  background-color: var(--color-core);
 }
 
-.tone-ember .node {
+.tone-core .node {
   background-color: var(--color-ink);
 }
 
@@ -432,17 +446,27 @@
   box-shadow: none;
 }
 
-/* The single strongest action on a page: a flat block of amber with the stock
-   knocked out of it. Solid ink, no gradient — 9:1 and unmistakable. */
+/* The single strongest action on a page: a flat block of the mark's blue with a
+   white label. Solid ink, no gradient.
+
+   The label is pure #fff rather than `--color-ink`, and that is measured, not
+   stylistic: on this blue the mark's own white lands at 4.42:1 and fails AA,
+   while #fff clears it at 4.95:1. This is the one place in the system allowed
+   to leave the ink token.
+
+   Hover *deepens* the block instead of brightening it, inverting the usual dark
+   -theme reflex. Brightening blue costs the white label its contrast (#4b70ee
+   drops it to 4.33:1); deepening to #3355d8 lifts it to 6.12:1, so the button
+   gets more legible under the cursor rather than less. */
 .btn-primary {
-  background-color: var(--color-amber);
-  color: #171310;
+  background-color: var(--color-core);
+  color: #ffffff;
   box-shadow: var(--lift-1);
 }
 
 .btn-primary:hover:not(:disabled) {
-  background-color: #ffbe3d;
-  box-shadow: var(--lift-2);
+  background-color: #3355d8;
+  box-shadow: var(--lift-2), var(--lift-core);
 }
 
 /* Secondary weight, same footprint: ruled outline on the stock. */
@@ -453,8 +477,8 @@
 }
 
 .btn-secondary:hover:not(:disabled) {
-  border-color: var(--color-amber);
-  color: var(--color-amber);
+  border-color: var(--color-core-ink);
+  color: var(--color-core-ink);
 }
 
 /* Quietest weight — inline actions that must not compete. */
@@ -464,29 +488,29 @@
 }
 
 .btn-ghost:hover:not(:disabled) {
-  background-color: rgba(245, 237, 224, 0.07);
+  background-color: rgba(242, 242, 244, 0.07);
   color: var(--color-ink);
 }
 
-/* On the ember block, amber-on-orange has nowhere to go, so the primary flips
-   to the cream ink and the block itself becomes the contrast. */
-.tone-ember .btn-primary {
+/* On the core block, blue-on-blue has nowhere to go, so the primary flips to
+   the white ink and the block itself becomes the contrast (10.9:1). */
+.tone-core .btn-primary {
   background-color: var(--color-ink);
-  color: var(--color-ember-band);
+  color: var(--color-core-band);
 }
 
-.tone-ember .btn-primary:hover:not(:disabled) {
+.tone-core .btn-primary:hover:not(:disabled) {
   background-color: #ffffff;
 }
 
-.tone-ember .btn-secondary:hover:not(:disabled) {
+.tone-core .btn-secondary:hover:not(:disabled) {
   border-color: var(--color-ink);
   color: var(--color-ink);
 }
 
 /* --- Fields --------------------------------------------------------------
    Inset wells on the stock, so an input reads as a place to write rather than
-   a raised card. The hairline lights to amber on focus. */
+   a raised card. The hairline lights to blue on focus. */
 .field {
   width: 100%;
   padding: 11px 14px;
@@ -509,13 +533,13 @@
 
 .field:focus {
   outline: none;
-  border-color: var(--color-amber);
-  box-shadow: 0 0 0 3px rgba(240, 168, 30, 0.2);
+  border-color: var(--color-core-ink);
+  box-shadow: 0 0 0 3px rgba(65, 102, 228, 0.28);
 }
 
 .field[aria-invalid='true'] {
   border-color: var(--color-danger);
-  box-shadow: 0 0 0 3px rgba(242, 112, 95, 0.18);
+  box-shadow: 0 0 0 3px rgba(255, 122, 107, 0.18);
 }
 
 select.field {
@@ -532,7 +556,7 @@ select.field {
   padding: 6px 12px;
   border: 1px solid var(--hair-strong);
   border-radius: 99px;
-  background-color: rgba(245, 237, 224, 0.04);
+  background-color: rgba(242, 242, 244, 0.04);
 }
 
 /* --- Ticker -------------------------------------------------------------- */
