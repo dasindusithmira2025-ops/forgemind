@@ -209,6 +209,20 @@ describe('shared update controller', () => {
     expect(useUpdateController.getState().status?.journal.phase).toBe('available')
   })
 
+  it('refreshes a healthy-startup journal before installing a newly published update', async () => {
+    useUpdateController.getState().setStatus(status('healthy_startup_confirmed'))
+    nativeMock.checkForUpdates.mockResolvedValue(status('available'))
+    nativeMock.downloadUpdate.mockResolvedValue(status('downloaded'))
+    nativeMock.assessSafeRestart.mockResolvedValue(safe)
+    nativeMock.installDownloadedUpdate.mockResolvedValue(undefined)
+
+    await useUpdateController.getState().autoInstall(client)
+
+    expect(nativeMock.checkForUpdates).toHaveBeenCalledOnce()
+    expect(nativeMock.downloadUpdate).toHaveBeenCalledOnce()
+    expect(nativeMock.installDownloadedUpdate).toHaveBeenCalledWith(client, false)
+  })
+
   it('keeps real progress in the shared status consumed by notification and Settings', () => {
     useUpdateController.getState().setStatus(status('available'))
     useUpdateController.getState().setProgress({ received: 25, total: 100 })

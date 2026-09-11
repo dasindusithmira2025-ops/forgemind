@@ -149,7 +149,10 @@ export const useUpdateController = create<UpdateControllerState>((set, get) => {
       if (get().operation) return
       set({ error: undefined, deferred: false, assessment: undefined })
       let status = get().status
-      if (!status || ['idle', 'no_update', 'failed'].includes(status.journal.phase)) {
+      // A healthy startup is a completed lifecycle transition, not a fresh update check. The
+      // status journal can legitimately retain the previous release's available metadata here;
+      // refresh the manifest before deciding whether there is anything to install.
+      if (!status || ['idle', 'no_update', 'healthy_startup_confirmed', 'failed'].includes(status.journal.phase)) {
         status = status?.journal.phase === 'failed' ? await get().retry() : await get().check()
       }
       if (!status?.journal.available) return
